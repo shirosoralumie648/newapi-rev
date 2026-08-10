@@ -2599,6 +2599,24 @@
     "关闭后将不再显示此提示（仅对当前浏览器生效）。确定要关闭吗？": "Après fermeture, cet avertissement ne sera plus affiché (uniquement pour ce navigateur). Voulez-vous vraiment le fermer ?",
     "关闭提示": "Fermer l’avertissement",
     "说明：本页测试为非流式请求；若渠道仅支持流式返回，可能出现测试失败，请以实际使用为准。": "Remarque : les tests sur cette page utilisent des requêtes non-streaming. Si un canal ne prend en charge que les réponses en streaming, les tests peuvent échouer. Veuillez vous référer à l’usage réel.",
-    "提示：端点映射仅用于模型广场展示，不会影响模型真实调用。如需配置真实调用，请前往「渠道管理」。": "Remarque : la correspondance des endpoints sert uniquement à l’affichage dans la place de marché des modèles et n’affecte pas l’invocation réelle. Pour configurer l’invocation réelle, veuillez aller dans « Gestion des canaux »."
+    "提示：端点映射仅用于模型广场展示，不会影响模型真实调用。如需配置真实调用，请前往「渠道管理」。": "Remarque : la correspondance des endpoints sert uniquement à l’affichage dans la place de marché des modèles et n’affecte pas l’invocation réelle. Pour configurer l’invocation réelle, veuillez aller dans « Gestion des canaux ».",
+    "测试收件人": "Destinataire de test",
+    "测试邮件类型": "Type d'e-mail de test",
+    "SMTP 连接测试": "Test de connexion SMTP",
+    "邮箱验证码模板": "Modèle d'e-mail de vérification",
+    "密码重置模板": "Modèle de réinitialisation du mot de passe",
+    "发送测试邮件": "Envoyer l'e-mail de test",
+    "测试邮件发送成功": "E-mail de test envoyé",
+    "测试邮件发送失败": "Échec de l'envoi de l'e-mail de test",
+    "请输入有效的测试收件人": "Saisissez un destinataire de test valide",
+    "邮件模板": "Modèles d'e-mail",
+    "可用占位符": "Variables disponibles",
+    "验证码邮件主题": "Objet de l'e-mail de vérification",
+    "验证码邮件正文": "Corps de l'e-mail de vérification",
+    "密码重置邮件主题": "Objet de l'e-mail de réinitialisation",
+    "密码重置邮件正文": "Corps de l'e-mail de réinitialisation",
+    "保存邮件模板": "Enregistrer les modèles d'e-mail",
+    "恢复默认模板": "Restaurer les modèles par défaut",
+    "模板已恢复为默认值，请保存后生效": "Les modèles par défaut ont été restaurés. Enregistrez pour appliquer les modifications."
   }
 }

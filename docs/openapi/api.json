@@ -4868,6 +4868,125 @@
         ]
       }
     },
+    "/api/option/email_templates": {
+      "put": {
+        "summary": "批量保存邮件模板",
+        "deprecated": false,
+        "description": "👑 需要超级管理员权限（Root）；两组模板校验通过后原子保存",
+        "tags": [
+          "系统设置"
+        ],
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email_verification_subject",
+                  "email_verification_content",
+                  "password_reset_subject",
+                  "password_reset_content"
+                ],
+                "properties": {
+                  "email_verification_subject": {
+                    "type": "string"
+                  },
+                  "email_verification_content": {
+                    "type": "string",
+                    "description": "HTML 正文，必须包含 {{code}}"
+                  },
+                  "password_reset_subject": {
+                    "type": "string"
+                  },
+                  "password_reset_content": {
+                    "type": "string",
+                    "description": "HTML 正文，必须包含 {{reset_link}}"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {}
+          }
+        },
+        "security": [
+          {
+            "Combination343": []
+          },
+          {
+            "Combination1243": []
+          }
+        ]
+      }
+    },
+    "/api/option/smtp_test": {
+      "post": {
+        "summary": "发送 SMTP 测试邮件",
+        "deprecated": false,
+        "description": "👑 需要超级管理员权限（Root）",
+        "tags": [
+          "系统设置"
+        ],
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email",
+                    "description": "测试邮件收件人"
+                  },
+                  "template_type": {
+                    "type": "string",
+                    "enum": [
+                      "smtp_test",
+                      "verification",
+                      "password_reset"
+                    ],
+                    "default": "smtp_test"
+                  },
+                  "subject": {
+                    "type": "string",
+                    "description": "可选的模板草稿主题"
+                  },
+                  "content": {
+                    "type": "string",
+                    "description": "可选的模板草稿 HTML 正文"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {}
+          }
+        },
+        "security": [
+          {
+            "Combination343": []
+          },
+          {
+            "Combination1243": []
+          }
+        ]
+      }
+    },
     "/api/option/migrate_console_setting": {
       "post": {
         "summary": "迁移控制台设置",

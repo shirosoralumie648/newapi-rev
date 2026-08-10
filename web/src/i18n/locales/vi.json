@@ -3162,6 +3162,24 @@
     "关闭后将不再显示此提示（仅对当前浏览器生效）。确定要关闭吗？": "Sau khi đóng, thông báo này sẽ không còn hiển thị nữa (chỉ với trình duyệt này). Bạn có chắc muốn đóng không?",
     "关闭提示": "Đóng thông báo",
     "说明：本页测试为非流式请求；若渠道仅支持流式返回，可能出现测试失败，请以实际使用为准。": "Lưu ý: Bài kiểm tra trên trang này sử dụng yêu cầu không streaming. Nếu kênh chỉ hỗ trợ phản hồi streaming, bài kiểm tra có thể thất bại. Vui lòng dựa vào sử dụng thực tế.",
-    "提示：端点映射仅用于模型广场展示，不会影响模型真实调用。如需配置真实调用，请前往「渠道管理」。": "Lưu ý: Ánh xạ endpoint chỉ dùng để hiển thị trong \"Chợ mô hình\" và không ảnh hưởng đến việc gọi thực tế. Để cấu hình gọi thực tế, vui lòng vào \"Quản lý kênh\"."
+    "提示：端点映射仅用于模型广场展示，不会影响模型真实调用。如需配置真实调用，请前往「渠道管理」。": "Lưu ý: Ánh xạ endpoint chỉ dùng để hiển thị trong \"Chợ mô hình\" và không ảnh hưởng đến việc gọi thực tế. Để cấu hình gọi thực tế, vui lòng vào \"Quản lý kênh\".",
+    "测试收件人": "Người nhận thử nghiệm",
+    "测试邮件类型": "Loại email thử nghiệm",
+    "SMTP 连接测试": "Kiểm tra kết nối SMTP",
+    "邮箱验证码模板": "Mẫu email mã xác minh",
+    "密码重置模板": "Mẫu đặt lại mật khẩu",
+    "发送测试邮件": "Gửi email thử nghiệm",
+    "测试邮件发送成功": "Đã gửi email thử nghiệm",
+    "测试邮件发送失败": "Không thể gửi email thử nghiệm",
+    "请输入有效的测试收件人": "Nhập người nhận thử nghiệm hợp lệ",
+    "邮件模板": "Mẫu email",
+    "可用占位符": "Biến có sẵn",
+    "验证码邮件主题": "Tiêu đề email mã xác minh",
+    "验证码邮件正文": "Nội dung email mã xác minh",
+    "密码重置邮件主题": "Tiêu đề email đặt lại mật khẩu",
+    "密码重置邮件正文": "Nội dung email đặt lại mật khẩu",
+    "保存邮件模板": "Lưu mẫu email",
+    "恢复默认模板": "Khôi phục mẫu mặc định",
+    "模板已恢复为默认值，请保存后生效": "Đã khôi phục mẫu mặc định. Hãy lưu để áp dụng thay đổi."
   }
 }

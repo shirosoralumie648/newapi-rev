@@ -30,9 +30,11 @@ import {
   Spin,
   Card,
   Radio,
-  Select,
+  Tabs,
+  TabPane,
 } from '@douyinfe/semi-ui';
 const { Text } = Typography;
+import { IconRefresh, IconSave, IconSend } from '@douyinfe/semi-icons';
 import {
   API,
   removeTrailingSlash,
@@ -42,6 +44,20 @@ import {
 } from '../../helpers';
 import axios from 'axios';
 import { useTranslation } from 'react-i18next';
+
+const DEFAULT_EMAIL_TEMPLATES = {
+  EmailVerificationSubject: '{{system_name}}邮箱验证邮件',
+  EmailVerificationContent:
+    '<p>您好，你正在进行{{system_name}}邮箱验证。</p>' +
+    '<p>您的验证码为: <strong>{{code}}</strong></p>' +
+    '<p>验证码 {{valid_minutes}} 分钟内有效，如果不是本人操作，请忽略。</p>',
+  PasswordResetSubject: '{{system_name}}密码重置',
+  PasswordResetContent:
+    '<p>您好，你正在进行{{system_name}}密码重置。</p>' +
+    '<p>点击 <a href="{{reset_link}}">此处</a> 进行密码重置。</p>' +
+    '<p>如果链接无法点击，请尝试点击下面的链接或将其复制到浏览器中打开：<br>{{reset_link}}</p>' +
+    '<p>重置链接 {{valid_minutes}} 分钟内有效，如果不是本人操作，请忽略。</p>',
+};
 
 const SystemSetting = () => {
   const { t } = useTranslation();
@@ -68,6 +84,12 @@ const SystemSetting = () => {
     SMTPAccount: '',
     SMTPFrom: '',
     SMTPToken: '',
+    EmailVerificationSubject: '',
+    EmailVerificationContent: '',
+    PasswordResetSubject: '',
+    PasswordResetContent: '',
+    SMTPTestEmail: '',
+    SMTPTestTemplate: 'smtp_test',
     WorkerUrl: '',
     WorkerValidKey: '',
     WorkerAllowHttpImageRequestEnabled: '',
@@ -124,13 +146,17 @@ const SystemSetting = () => {
   const [domainList, setDomainList] = useState([]);
   const [ipList, setIpList] = useState([]);
   const [allowedPorts, setAllowedPorts] = useState([]);
+  const [smtpTesting, setSMTPTesting] = useState(false);
 
   const getOptions = async () => {
     setLoading(true);
     const res = await API.get('/api/option/');
     const { success, message, data } = res.data;
     if (success) {
-      let newInputs = {};
+      let newInputs = {
+        SMTPTestEmail: inputs.SMTPTestEmail || '',
+        SMTPTestTemplate: inputs.SMTPTestTemplate || 'smtp_test',
+      };
       data.forEach((item) => {
         switch (item.key) {
           case 'TopupGroupRatio':
@@ -256,7 +282,7 @@ const SystemSetting = () => {
         });
         if (!res.data.success) {
           showError(res.data.message);
-          return;
+          return false;
         }
       }
 
@@ -277,19 +303,34 @@ const SystemSetting = () => {
         errorResults.forEach((res) => {
           showError(res.data.message);
         });
+        if (errorResults.length > 0) {
+          return false;
+        }
       }
 
       showSuccess(t('更新成功'));
       // 更新本地状态
-      const newInputs = { ...inputs };
-      options.forEach((opt) => {
-        newInputs[opt.key] = opt.value;
+      setInputs((previous) => {
+        const next = { ...previous };
+        options.forEach((opt) => {
+          next[opt.key] = opt.value;
+        });
+        return next;
       });
-      setInputs(newInputs);
+      setOriginInputs((previous) => {
+        const next = { ...previous };
+        options.forEach((opt) => {
+          next[opt.key] = opt.value;
+        });
+        return next;
+      });
+      return true;
     } catch (error) {
       showError(t('更新失败'));
+      return false;
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleFormChange = (values) => {
@@ -340,9 +381,106 @@ const SystemSetting = () => {
     ) {
       options.push({ key: 'SMTPToken', value: inputs.SMTPToken });
     }
+    if (originInputs['SMTPSSLEnabled'] !== inputs.SMTPSSLEnabled) {
+      options.push({
+        key: 'SMTPSSLEnabled',
+        value: inputs.SMTPSSLEnabled,
+      });
+    }
 
-    if (options.length > 0) {
-      await updateOptions(options);
+    const saved = await updateOptions(options);
+    if (saved && options.some((option) => option.key === 'SMTPToken')) {
+      formApiRef.current?.setValue('SMTPToken', '');
+      setInputs((previous) => ({ ...previous, SMTPToken: '' }));
+      setOriginInputs((previous) => ({ ...previous, SMTPToken: '' }));
+    }
+    return saved;
+  };
+
+  const submitEmailTemplates = async () => {
+    const templateKeys = [
+      'EmailVerificationSubject',
+      'EmailVerificationContent',
+      'PasswordResetSubject',
+      'PasswordResetContent',
+    ];
+    if (templateKeys.every((key) => originInputs[key] === inputs[key])) {
+      showSuccess(t('更新成功'));
+      return true;
+    }
+
+    setLoading(true);
+    try {
+      const response = await API.put('/api/option/email_templates', {
+        email_verification_subject: inputs.EmailVerificationSubject || '',
+        email_verification_content: inputs.EmailVerificationContent || '',
+        password_reset_subject: inputs.PasswordResetSubject || '',
+        password_reset_content: inputs.PasswordResetContent || '',
+      });
+      if (!response.data.success) {
+        showError(response.data.message);
+        return false;
+      }
+
+      setOriginInputs((previous) => {
+        const next = { ...previous };
+        templateKeys.forEach((key) => {
+          next[key] = inputs[key];
+        });
+        return next;
+      });
+      showSuccess(t('更新成功'));
+      return true;
+    } catch (error) {
+      showError(error.response?.data?.message || t('更新失败'));
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resetEmailTemplates = () => {
+    Object.entries(DEFAULT_EMAIL_TEMPLATES).forEach(([key, value]) => {
+      formApiRef.current?.setValue(key, value);
+    });
+    setInputs((previous) => ({
+      ...previous,
+      ...DEFAULT_EMAIL_TEMPLATES,
+    }));
+    showSuccess(t('模板已恢复为默认值，请保存后生效'));
+  };
+
+  const sendSMTPTest = async () => {
+    const email = (inputs.SMTPTestEmail || '').trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      showError(t('请输入有效的测试收件人'));
+      return;
+    }
+
+    const request = {
+      email,
+      template_type: inputs.SMTPTestTemplate || 'smtp_test',
+    };
+    if (request.template_type === 'verification') {
+      request.subject = inputs.EmailVerificationSubject;
+      request.content = inputs.EmailVerificationContent;
+    } else if (request.template_type === 'password_reset') {
+      request.subject = inputs.PasswordResetSubject;
+      request.content = inputs.PasswordResetContent;
+    }
+
+    setSMTPTesting(true);
+    try {
+      const response = await API.post('/api/option/smtp_test', request);
+      if (response.data.success) {
+        showSuccess(response.data.message || t('测试邮件发送成功'));
+      } else {
+        showError(response.data.message || t('测试邮件发送失败'));
+      }
+    } catch (error) {
+      showError(error.response?.data?.message || t('测试邮件发送失败'));
+    } finally {
+      setSMTPTesting(false);
     }
   };
 
@@ -481,10 +619,14 @@ const SystemSetting = () => {
     const options = [];
 
     if (originInputs['discord.client_id'] !== inputs['discord.client_id']) {
-      options.push({ key: 'discord.client_id', value: inputs['discord.client_id'] });
+      options.push({
+        key: 'discord.client_id',
+        value: inputs['discord.client_id'],
+      });
     }
     if (
-      originInputs['discord.client_secret'] !== inputs['discord.client_secret'] &&
+      originInputs['discord.client_secret'] !==
+        inputs['discord.client_secret'] &&
       inputs['discord.client_secret'] !== ''
     ) {
       options.push({
@@ -745,8 +887,8 @@ const SystemSetting = () => {
                       rel='noreferrer'
                     >
                       new-api-worker
-                    </a>
-                    {' '}{t('或其兼容new-api-worker格式的其他版本')}
+                    </a>{' '}
+                    {t('或其兼容new-api-worker格式的其他版本')}
                   </Text>
                   <Row
                     gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
@@ -1332,7 +1474,133 @@ const SystemSetting = () => {
                       </Form.Checkbox>
                     </Col>
                   </Row>
-                  <Button onClick={submitSMTP}>{t('保存 SMTP 设置')}</Button>
+                  <Button
+                    icon={<IconSave />}
+                    loading={loading}
+                    onClick={submitSMTP}
+                  >
+                    {t('保存 SMTP 设置')}
+                  </Button>
+                  <Row
+                    gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
+                    style={{ marginTop: 16 }}
+                  >
+                    <Col xs={24} sm={24} md={10} lg={10} xl={10}>
+                      <Form.Input
+                        field='SMTPTestEmail'
+                        label={t('测试收件人')}
+                        placeholder='name@example.com'
+                      />
+                    </Col>
+                    <Col xs={24} sm={24} md={8} lg={8} xl={8}>
+                      <Form.Select
+                        field='SMTPTestTemplate'
+                        label={t('测试邮件类型')}
+                        optionList={[
+                          {
+                            label: t('SMTP 连接测试'),
+                            value: 'smtp_test',
+                          },
+                          {
+                            label: t('邮箱验证码模板'),
+                            value: 'verification',
+                          },
+                          {
+                            label: t('密码重置模板'),
+                            value: 'password_reset',
+                          },
+                        ]}
+                      />
+                    </Col>
+                    <Col xs={24} sm={24} md={6} lg={6} xl={6}>
+                      <Button
+                        type='primary'
+                        icon={<IconSend />}
+                        loading={smtpTesting}
+                        onClick={sendSMTPTest}
+                        style={{ width: '100%', marginTop: 29 }}
+                      >
+                        {t('发送测试邮件')}
+                      </Button>
+                    </Col>
+                  </Row>
+                </Form.Section>
+
+                <Form.Section text={t('邮件模板')}>
+                  <Tabs type='line' defaultActiveKey='verification'>
+                    <TabPane tab={t('邮箱验证码模板')} itemKey='verification'>
+                      <Form.Input
+                        field='EmailVerificationSubject'
+                        label={t('验证码邮件主题')}
+                        extraText={
+                          <span>
+                            {t('可用占位符')}：<code>{'{{system_name}}'}</code>
+                            、<code>{'{{email}}'}</code>
+                          </span>
+                        }
+                      />
+                      <Form.TextArea
+                        field='EmailVerificationContent'
+                        label={t('验证码邮件正文')}
+                        autosize={{ minRows: 6, maxRows: 12 }}
+                        extraText={
+                          <span>
+                            {t('可用占位符')}：<code>{'{{system_name}}'}</code>
+                            、<code>{'{{email}}'}</code>、
+                            <code>{'{{code}}'}</code>、
+                            <code>{'{{valid_minutes}}'}</code>
+                          </span>
+                        }
+                      />
+                    </TabPane>
+                    <TabPane tab={t('密码重置模板')} itemKey='password_reset'>
+                      <Form.Input
+                        field='PasswordResetSubject'
+                        label={t('密码重置邮件主题')}
+                        extraText={
+                          <span>
+                            {t('可用占位符')}：<code>{'{{system_name}}'}</code>
+                            、<code>{'{{email}}'}</code>
+                          </span>
+                        }
+                      />
+                      <Form.TextArea
+                        field='PasswordResetContent'
+                        label={t('密码重置邮件正文')}
+                        autosize={{ minRows: 6, maxRows: 12 }}
+                        extraText={
+                          <span>
+                            {t('可用占位符')}：<code>{'{{system_name}}'}</code>
+                            、<code>{'{{email}}'}</code>、
+                            <code>{'{{reset_link}}'}</code>、
+                            <code>{'{{valid_minutes}}'}</code>
+                          </span>
+                        }
+                      />
+                    </TabPane>
+                  </Tabs>
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: 8,
+                      marginTop: 12,
+                    }}
+                  >
+                    <Button
+                      icon={<IconSave />}
+                      loading={loading}
+                      onClick={submitEmailTemplates}
+                    >
+                      {t('保存邮件模板')}
+                    </Button>
+                    <Button
+                      icon={<IconRefresh />}
+                      onClick={resetEmailTemplates}
+                    >
+                      {t('恢复默认模板')}
+                    </Button>
+                  </div>
                 </Form.Section>
               </Card>
               <Card>

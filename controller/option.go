@@ -213,6 +213,21 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "SMTPPort", "SMTPFrom":
+		err = common.ValidateSMTPOption(option.Key, option.Value.(string))
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	case common.EmailVerificationSubjectOption,
+		common.EmailVerificationContentOption,
+		common.PasswordResetSubjectOption,
+		common.PasswordResetContentOption:
+		err = common.ValidateEmailTemplateOption(option.Key, option.Value.(string))
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
 	}
 	err = model.UpdateOption(option.Key, option.Value.(string))
 	if err != nil {

@@ -2588,6 +2588,24 @@
     "关闭后将不再显示此提示（仅对当前浏览器生效）。确定要关闭吗？": "After closing, this notice will no longer be shown (only for this browser). Are you sure you want to close it?",
     "关闭提示": "Close notice",
     "说明：本页测试为非流式请求；若渠道仅支持流式返回，可能出现测试失败，请以实际使用为准。": "Note: Tests on this page use non-streaming requests. If a channel only supports streaming responses, tests may fail. Please rely on actual usage.",
-    "提示：端点映射仅用于模型广场展示，不会影响模型真实调用。如需配置真实调用，请前往「渠道管理」。": "Notice: Endpoint mapping is for Model Marketplace display only and does not affect real model invocation. To configure real invocation, please go to Channel Management."
+    "提示：端点映射仅用于模型广场展示，不会影响模型真实调用。如需配置真实调用，请前往「渠道管理」。": "Notice: Endpoint mapping is for Model Marketplace display only and does not affect real model invocation. To configure real invocation, please go to Channel Management.",
+    "测试收件人": "Test recipient",
+    "测试邮件类型": "Test email type",
+    "SMTP 连接测试": "SMTP connection test",
+    "邮箱验证码模板": "Email verification template",
+    "密码重置模板": "Password reset template",
+    "发送测试邮件": "Send test email",
+    "测试邮件发送成功": "Test email sent successfully",
+    "测试邮件发送失败": "Failed to send test email",
+    "请输入有效的测试收件人": "Enter a valid test recipient",
+    "邮件模板": "Email templates",
+    "可用占位符": "Available placeholders",
+    "验证码邮件主题": "Verification email subject",
+    "验证码邮件正文": "Verification email body",
+    "密码重置邮件主题": "Password reset email subject",
+    "密码重置邮件正文": "Password reset email body",
+    "保存邮件模板": "Save email templates",
+    "恢复默认模板": "Restore default templates",
+    "模板已恢复为默认值，请保存后生效": "Templates restored to defaults. Save to apply the changes."
   }
 }

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"gorm.io/gorm"
 )
 
 type Option struct {
@@ -61,6 +63,10 @@ func InitOptionMap() {
 	common.OptionMap["SMTPAccount"] = ""
 	common.OptionMap["SMTPToken"] = ""
 	common.OptionMap["SMTPSSLEnabled"] = strconv.FormatBool(common.SMTPSSLEnabled)
+	common.OptionMap[common.EmailVerificationSubjectOption] = common.EmailVerificationSubject
+	common.OptionMap[common.EmailVerificationContentOption] = common.EmailVerificationContent
+	common.OptionMap[common.PasswordResetSubjectOption] = common.PasswordResetSubject
+	common.OptionMap[common.PasswordResetContentOption] = common.PasswordResetContent
 	common.OptionMap["Notice"] = ""
 	common.OptionMap["About"] = ""
 	common.OptionMap["HomePageContent"] = ""
@@ -189,6 +195,45 @@ func UpdateOption(key string, value string) error {
 	return updateOptionMap(key, value)
 }
 
+func UpdateEmailTemplates(values map[string]string) error {
+	keys := []string{
+		common.EmailVerificationSubjectOption,
+		common.EmailVerificationContentOption,
+		common.PasswordResetSubjectOption,
+		common.PasswordResetContentOption,
+	}
+	options := make([]Option, 0, len(keys))
+	for _, key := range keys {
+		value, ok := values[key]
+		if !ok {
+			return fmt.Errorf("邮件模板配置缺少 %s", key)
+		}
+		options = append(options, Option{Key: key, Value: value})
+	}
+
+	if err := DB.Transaction(func(tx *gorm.DB) error {
+		for index := range options {
+			if err := tx.Save(&options[index]).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	common.OptionMapRWMutex.Lock()
+	defer common.OptionMapRWMutex.Unlock()
+	for _, option := range options {
+		common.OptionMap[option.Key] = option.Value
+	}
+	common.EmailVerificationSubject = values[common.EmailVerificationSubjectOption]
+	common.EmailVerificationContent = values[common.EmailVerificationContentOption]
+	common.PasswordResetSubject = values[common.PasswordResetSubjectOption]
+	common.PasswordResetContent = values[common.PasswordResetContentOption]
+	return nil
+}
+
 func updateOptionMap(key string, value string) (err error) {
 	common.OptionMapRWMutex.Lock()
 	defer common.OptionMapRWMutex.Unlock()
@@ -310,6 +355,14 @@ func updateOptionMap(key string, value string) (err error) {
 		common.SMTPFrom = value
 	case "SMTPToken":
 		common.SMTPToken = value
+	case common.EmailVerificationSubjectOption:
+		common.EmailVerificationSubject = value
+	case common.EmailVerificationContentOption:
+		common.EmailVerificationContent = value
+	case common.PasswordResetSubjectOption:
+		common.PasswordResetSubject = value
+	case common.PasswordResetContentOption:
+		common.PasswordResetContent = value
 	case "ServerAddress":
 		system_setting.ServerAddress = value
 	case "WorkerUrl":
