@@ -20,7 +20,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { nanoid } from 'nanoid'
 import { useEffect, useRef, useState } from 'react'
 
-import { getServerErrorStatus } from '@/lib/server-error-message'
+import {
+  getServerErrorStatus,
+  isServerErrorCancelled,
+} from '@/lib/server-error-message'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { deletePlaygroundSession, getPlaygroundSessions } from '../api'
@@ -61,6 +64,9 @@ export function usePlaygroundServer(
   const owner = useAuthStore((state) => state.auth.user?.id ?? null)
   const queryClient = useQueryClient()
   const [ready, setReady] = useState(false)
+  // A canceled mutation can settle without an observable isPending change, so
+  // count settlements to re-evaluate pending work after every write.
+  const [settleCount, setSettleCount] = useState(0)
   const [deleted, setDeleted] = useState(() => readPendingDeletions(owner))
   const [cacheError, setCacheError] = useState(false)
   const latest = useRef(local)
@@ -74,7 +80,7 @@ export function usePlaygroundServer(
     enabled: owner !== null,
     retry: false,
     staleTime: Infinity,
-    meta: { errorToast: false },
+    meta: { errorToast: false, keepPageOnInternalServerError: true },
   })
 
   useEffect(() => {
@@ -170,6 +176,7 @@ export function usePlaygroundServer(
     retry: false,
     onSettled: () => {
       inFlight.current = false
+      if (mounted.current) setSettleCount((count) => count + 1)
     },
     onSuccess: (sessions, operation) => {
       if (
@@ -202,8 +209,27 @@ export function usePlaygroundServer(
     },
   })
   const mutate = mutation.mutate
-  const error = mutation.error ?? query.error
+  const refetchSessions = query.refetch
+  // A deliberate cancellation (unmount, owner change, superseded write) is not a
+  // sync failure: keep the workspace state clean so the effects retry it.
+  const surfacedError = (value: Error | null) =>
+    value && !isServerErrorCancelled(value) ? value : null
+  const error = surfacedError(mutation.error) ?? surfacedError(query.error)
   const isLoading = owner !== null && !ready && !error
+
+  // React Query aborts a fetch whose signal the query function consumed when
+  // the last observer unmounts (React StrictMode does that once after mount)
+  // and does not retry the canceled request itself, so restart the list load.
+  useEffect(() => {
+    if (
+      owner !== null &&
+      query.data === undefined &&
+      query.error &&
+      isServerErrorCancelled(query.error)
+    ) {
+      void refetchSessions()
+    }
+  }, [owner, query.data, query.error, refetchSessions])
 
   useEffect(() => {
     if (
@@ -226,6 +252,7 @@ export function usePlaygroundServer(
     query.data,
     mutation.isPending,
     error,
+    settleCount,
     mutate,
   ])
 
@@ -248,6 +275,7 @@ export function usePlaygroundServer(
     isGenerating,
     mutation.isPending,
     error,
+    settleCount,
     deleted,
     local.sessions,
     mutate,

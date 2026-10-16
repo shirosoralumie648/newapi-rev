@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
+import { CanceledError } from 'axios'
 import type { PropsWithChildren } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
@@ -266,6 +267,57 @@ test('edits made while a save is pending remain dirty for the next serialized wr
   )
   expect(hook.result.current.local.sessions[0].title).toBe('Second edit')
   expect(hook.result.current.local.sessions[0].syncPending).toBe(true)
+})
+
+test('a canceled conversation load is restarted without a sync failure', async () => {
+  const get = mockServer()
+  get.mockRejectedValueOnce(new CanceledError('canceled'))
+  const hook = mount()
+  await waitFor(() =>
+    expect(hook.result.current.local.activeSessionId).toBe(remote.id)
+  )
+  expect(hook.result.current.sync.error).toBeFalsy()
+  const listCalls = get.mock.calls.filter(([url]) =>
+    String(url).endsWith('/playground/sessions')
+  )
+  expect(listCalls.length).toBe(2)
+})
+
+test('a canceled write is retried without surfacing a sync failure', async () => {
+  mockServer()
+  const patch = vi
+    .spyOn(api, 'patch')
+    .mockRejectedValueOnce(new CanceledError('canceled'))
+    .mockResolvedValueOnce({
+      data: {
+        success: true,
+        data: { ...remote, title: 'Edited', revision: 1 },
+      },
+    })
+  vi.spyOn(api, 'put').mockImplementation(async (_url, body) => ({
+    data: {
+      success: true,
+      data: {
+        revision: 1,
+        messages: (body as { messages: unknown[] }).messages,
+      },
+    },
+  }))
+  const hook = mount()
+  await waitFor(() =>
+    expect(hook.result.current.local.activeSessionId).toBe(remote.id)
+  )
+  act(() => hook.result.current.local.renameSession(remote.id, 'Edited'))
+  await waitFor(() => expect(patch).toHaveBeenCalledTimes(1))
+  await waitFor(() => expect(patch).toHaveBeenCalledTimes(2), {
+    timeout: 3000,
+  })
+  await waitFor(
+    () => expect(hook.result.current.local.sessions[0].syncPending).toBe(false),
+    { timeout: 3000 }
+  )
+  expect(hook.result.current.sync.error).toBeFalsy()
+  expect(patch).toHaveBeenCalledTimes(2)
 })
 
 test('a version conflict pauses saving and preserves unsynced local content', async () => {

@@ -180,6 +180,33 @@ it('only reports a query failure after retries are exhausted and stays silent wh
   client.clear()
 })
 
+it('routes 500 responses to the global error page unless the caller keeps the page', async () => {
+  const onInternalServerError = vi.fn()
+  const client = createAppQueryClient(onInternalServerError)
+  const failure = Object.assign(new Error('Internal failure'), {
+    response: { status: 500 },
+  })
+  const run = (queryKey: string, meta?: Record<string, unknown>) =>
+    client
+      .fetchQuery({
+        queryKey: [queryKey],
+        queryFn: async () => {
+          throw failure
+        },
+        retry: false,
+        meta,
+      })
+      .catch(() => undefined)
+  await run('kept page', {
+    errorToast: false,
+    keepPageOnInternalServerError: true,
+  })
+  expect(onInternalServerError).not.toHaveBeenCalled()
+  await run('global error page')
+  expect(onInternalServerError).toHaveBeenCalledTimes(1)
+  client.clear()
+})
+
 it('lets a local handler own notifications when automatic error toasts are disabled', async () => {
   const client = createAppQueryClient()
   const notify = vi.spyOn(toast, 'error').mockReturnValue('error')

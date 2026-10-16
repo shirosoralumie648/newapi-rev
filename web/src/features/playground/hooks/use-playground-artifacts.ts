@@ -303,7 +303,7 @@ export function usePlaygroundArtifacts(
       listPlaygroundArtifacts(requireSessionId(), 1, signal),
     enabled,
     retry: false,
-    meta: { errorToast: false },
+    meta: { errorToast: false, keepPageOnInternalServerError: true },
   })
   const detailQuery = useQuery({
     queryKey: playgroundQueryKeys.artifactDetail(
@@ -328,7 +328,7 @@ export function usePlaygroundArtifacts(
       state.selectedArtifactId !== null &&
       state.selectedVersionId === null,
     retry: false,
-    meta: { errorToast: false },
+    meta: { errorToast: false, keepPageOnInternalServerError: true },
   })
   const versionsQuery = useQuery({
     queryKey: playgroundQueryKeys.artifactVersions(
@@ -359,7 +359,7 @@ export function usePlaygroundArtifacts(
     },
     enabled: enabled && state.selectedArtifactId !== null,
     retry: false,
-    meta: { errorToast: false },
+    meta: { errorToast: false, keepPageOnInternalServerError: true },
   })
   const historicalQuery = useQuery({
     queryKey: playgroundQueryKeys.artifactVersion(
@@ -386,7 +386,7 @@ export function usePlaygroundArtifacts(
       state.selectedArtifactId !== null &&
       state.selectedVersionId !== null,
     retry: false,
-    meta: { errorToast: false },
+    meta: { errorToast: false, keepPageOnInternalServerError: true },
   })
 
   const listMutation = useMutation({
