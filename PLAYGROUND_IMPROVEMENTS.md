@@ -116,7 +116,7 @@ Playground
 - [x] 新增文案接入七种前端语言；
 - [x] 保留现有流式消息、reasoning、编辑、删除和重新生成能力；
 - [x] 明确右侧 Inspector/Artifact 面板与全局导航侧栏的边界（Artifact 面板属于 Playground 工作区内部，由聊天头部按钮切换，不占用全局导航侧栏；移动端为右侧 Sheet）；
-- [ ] 完善桌面、移动、窄屏、暗色模式和嵌套滚动的真实浏览器验收。
+- [x] 完善桌面、移动、窄屏、暗色模式和嵌套滚动的真实浏览器验收（Playwright E2E：桌面与移动视口、暗色模式跨刷新持久化、会话列表嵌套滚动不带动页面）。
 
 ### Phase 2：服务端会话和消息同步 — 进行中
 
@@ -227,7 +227,7 @@ Playground
 - [ ] 新用户可以创建、切换、重命名、删除和清空会话；
 - [ ] 账号 A 无法读取账号 B 的 session、消息、附件、Artifact 或画布；
 - [ ] 切换或删除会话后，旧请求的迟到 chunk 不会写入新会话；
-- [ ] 浏览器刷新、重新登录和跨设备加载不会产生错误归属；
+- [x] 浏览器刷新、重新登录和跨设备加载不会产生错误归属（E2E：重命名后刷新以及全新浏览器上下文重新登录都从服务端加载正确会话，且不出现同步错误提示）；
 - [ ] 损坏、过大和旧版本数据可以安全迁移或降级。
 
 ### 聊天、附件和 Artifact
@@ -255,7 +255,7 @@ Playground
 - [x] 前端生产构建通过（`rsbuild build`）；
 - [x] 后端相关测试通过（`go test ./model/ -run TestPlayground`）；
 - [x] SQLite、MySQL、PostgreSQL 新库和升级库迁移均通过（SQLite 3.50.4 / MySQL 8.0.46 / PostgreSQL 16.15，新库 ×2 + v1.0.0-rc.43 升级库 ×2；MySQL 5.7.44 最低版本验证通过）；
-- [ ] 真实浏览器覆盖桌面、移动端、暗色模式、键盘操作和失败路径；
+- [x] 真实浏览器覆盖桌面、移动端、暗色模式、键盘操作和失败路径（Playwright + Chromium 7 个用例：桌面/移动工作区、会话 Sheet 键盘操作与 Escape、暗色持久化、失败列表重试恢复、刷新/重登录同步；冷启动与复用实例两种运行方式均通过）；
 - [x] 最终 diff 不包含无关生成文件、密钥、直接上游调用或许可证遗漏（`.claude-flow/`、`.swarm/`、`graphify-out/` 已加入 `.gitignore`；新增 Go/TS 文件无密钥、无直连上游调用、许可证头齐全，提交前复查）。
 
 ## 7. 当前待办优先级
@@ -268,7 +268,7 @@ Playground
 4. ~~清理或明确 `.claude-flow/`、`.swarm/`、`graphify-out/` 等生成目录是否进入提交范围；~~ 已完成（已加入 `.gitignore`）；
 5. ~~补齐端到端的账号隔离、迟到请求和删除回退测试。~~ 已完成（`model/playground_test.go` 跨用户/并发/真实 router 鉴权 + 前端同步层测试）。
 
-剩余待办：真实浏览器验收（桌面/移动/暗色/键盘/失败路径），统一资源配额（Phase 3 容量限制、P1 的附件与生命周期），Inspector/Canvas 面板边界。
+剩余待办：统一资源配额（P1 的附件与生命周期），Inspector/Canvas 面板边界。
 
 ### P1：聊天工作区稳定后实施
 
@@ -291,3 +291,4 @@ Playground
 | 2026-10-15 | 将历史聊天中的 Playground 目标、阶段路线、架构边界、资源配额和验收标准固化为本文件。 |
 | 2026-10-16 | 完成 P0 全部五项：同步契约评估、三数据库迁移矩阵（含 rc.43 升级与 MySQL 5.7）、Artifact 失败恢复/冲突/草稿保护与测试、生成目录加入 `.gitignore`、账号隔离与迟到请求测试；Playground 测试 49/49、typecheck、lint、格式、生产构建通过。 |
 | 2026-10-16 | 复核 Phase 3：Artifact 容量限制（数量/版本/单版本/会话容量）与桌面并排面板、移动 Sheet、草稿保护均已实现；补充 `workspace-layout.test.tsx`（桌面/移动布局与关闭回调，4 个用例），Playground 测试 53/53、lint 通过；完成 diff 安全扫描（无密钥、无直连上游、许可证头齐全）。 |
+| 2026-10-16 | 引入 Playwright E2E 真实浏览器验收（`web/e2e/`：globalSetup 初始化实例、每用例 UI 登录规避一次性刷新令牌、后端 harness 关闭登录限频、桌面/移动双 project；`bun run test:e2e`，7 用例全通过，冷启动与复用实例各跑一遍）。E2E 暴露并修复两处同步缺陷：主动取消的读写不再污染同步错误态，并通过 settle 计数与取消过滤自动重试（`server-sync.test.tsx` 新增两个用例）；自行处理失败的 Playground 查询通过 `keepPageOnInternalServerError` meta 保留页面错误态，不再触发全局 500 跳转（`server-error-notifications.test.ts` 覆盖）。全量前端测试 2260/2260、typecheck、oxlint 通过。 |
