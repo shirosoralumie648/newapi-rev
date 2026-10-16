@@ -58,6 +58,23 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/verify/methods":             accessTokenAnyRule,
 	"POST /api/verify":                    accessTokenAnyRule,
 
+	// router/api-router.go: /api/playground
+	"GET /api/playground/sessions":                                               accessTokenSessionRule,
+	"POST /api/playground/sessions":                                              accessTokenSessionRule,
+	"GET /api/playground/sessions/:id":                                           accessTokenSessionRule,
+	"PATCH /api/playground/sessions/:id":                                         accessTokenSessionRule,
+	"DELETE /api/playground/sessions/:id":                                        accessTokenSessionRule,
+	"GET /api/playground/sessions/:id/messages":                                  accessTokenSessionRule,
+	"PUT /api/playground/sessions/:id/messages":                                  accessTokenSessionRule,
+	"GET /api/playground/sessions/:id/artifacts":                                 accessTokenSessionRule,
+	"POST /api/playground/sessions/:id/artifacts":                                accessTokenSessionRule,
+	"GET /api/playground/sessions/:id/artifacts/:artifactId":                     accessTokenSessionRule,
+	"GET /api/playground/sessions/:id/artifacts/:artifactId/versions":            accessTokenSessionRule,
+	"GET /api/playground/sessions/:id/artifacts/:artifactId/versions/:versionId": accessTokenSessionRule,
+	"POST /api/playground/sessions/:id/artifacts/:artifactId/versions":           accessTokenSessionRule,
+	"POST /api/playground/sessions/:id/artifacts/:artifactId/restore":            accessTokenSessionRule,
+	"DELETE /api/playground/sessions/:id/artifacts/:artifactId":                  accessTokenSessionRule,
+
 	// router/api-router.go: /api/user (self)
 	"GET /api/user/sessions":                       accessTokenSessionRule,
 	"DELETE /api/user/sessions/:sid":               accessTokenSessionRule,

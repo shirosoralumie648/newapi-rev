@@ -376,6 +376,10 @@ func migrateDB() error {
 		&CasbinRule{},
 		&AuthzRole{},
 		&UserAccessToken{},
+		&PlaygroundSession{},
+		&PlaygroundMessage{},
+		&PlaygroundArtifact{},
+		&PlaygroundArtifactVersion{},
 	)
 	if err != nil {
 		return err

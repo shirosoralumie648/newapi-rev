@@ -72,6 +72,26 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/verify/methods", middleware.UserAuth(), middleware.DisableCache(), controller.GetVerificationMethods)
 		apiRouter.POST("/verify", middleware.UserAuth(), middleware.CriticalRateLimit(), middleware.UserCriticalRateLimit("security-verification"), middleware.DisableCache(), controller.UniversalVerify)
 
+		playgroundRoute := apiRouter.Group("/playground")
+		playgroundRoute.Use(middleware.DisableCache(), middleware.UserAuth())
+		{
+			playgroundRoute.GET("/sessions", controller.ListPlaygroundSessions)
+			playgroundRoute.POST("/sessions", controller.CreatePlaygroundSession)
+			playgroundRoute.GET("/sessions/:id", controller.GetPlaygroundSession)
+			playgroundRoute.PATCH("/sessions/:id", controller.UpdatePlaygroundSession)
+			playgroundRoute.DELETE("/sessions/:id", controller.DeletePlaygroundSession)
+			playgroundRoute.GET("/sessions/:id/messages", controller.ListPlaygroundMessages)
+			playgroundRoute.PUT("/sessions/:id/messages", controller.ReplacePlaygroundMessages)
+			playgroundRoute.GET("/sessions/:id/artifacts", controller.ListPlaygroundArtifacts)
+			playgroundRoute.POST("/sessions/:id/artifacts", controller.CreatePlaygroundArtifact)
+			playgroundRoute.GET("/sessions/:id/artifacts/:artifactId", controller.GetPlaygroundArtifact)
+			playgroundRoute.GET("/sessions/:id/artifacts/:artifactId/versions", controller.ListPlaygroundArtifactVersions)
+			playgroundRoute.GET("/sessions/:id/artifacts/:artifactId/versions/:versionId", controller.GetPlaygroundArtifact)
+			playgroundRoute.POST("/sessions/:id/artifacts/:artifactId/versions", controller.SavePlaygroundArtifactVersion)
+			playgroundRoute.POST("/sessions/:id/artifacts/:artifactId/restore", controller.RestorePlaygroundArtifactVersion)
+			playgroundRoute.DELETE("/sessions/:id/artifacts/:artifactId", controller.DeletePlaygroundArtifact)
+		}
+
 		userRoute := apiRouter.Group("/user")
 		{
 			userRoute.POST("/auth/refresh", middleware.SessionCookieOriginGuard(), middleware.CriticalRateLimit(), middleware.DisableCache(), controller.RefreshAuth)
@@ -91,6 +111,7 @@ func SetApiRouter(router *gin.Engine) {
 			userRoute.GET("/groups", controller.GetUserGroups)
 
 			selfRoute := userRoute.Group("/")
+
 			selfRoute.Use(middleware.DisableCache(), middleware.UserAuth())
 			{
 				selfRoute.GET("/sessions", middleware.DisableCache(), controller.GetLoginSessions)
