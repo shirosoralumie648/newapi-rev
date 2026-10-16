@@ -18,21 +18,22 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { z } from 'zod'
 
-export const STORAGE_VERSION = 1
+export const STORAGE_VERSION = 2
 export const MAX_STORED_MESSAGES = 100
 export const MAX_STORED_MESSAGES_BYTES = 1024 * 1024
+export const MAX_STORED_SESSIONS_BYTES = 4 * MAX_STORED_MESSAGES_BYTES
 export const MAX_LOADED_MESSAGES_CHARS = 120_000
 export const MAX_LOADED_MESSAGE_CHARS = 40_000
 
 export const playgroundConfigSchema = z.object({
   model: z.string().optional(),
   group: z.string().optional(),
-  temperature: z.number().optional(),
-  top_p: z.number().optional(),
-  max_tokens: z.number().optional(),
-  frequency_penalty: z.number().optional(),
-  presence_penalty: z.number().optional(),
-  seed: z.number().nullable().optional(),
+  temperature: z.number().finite().optional(),
+  top_p: z.number().finite().optional(),
+  max_tokens: z.number().finite().optional(),
+  frequency_penalty: z.number().finite().optional(),
+  presence_penalty: z.number().finite().optional(),
+  seed: z.number().finite().nullable().optional(),
   stream: z.boolean().optional(),
 })
 
@@ -53,39 +54,73 @@ const messageStatusSchema = z.enum([
   'error',
 ])
 
+const messageAttachmentSchema = z.object({
+  id: z.string().min(1).max(200),
+  url: z.string().max(4096),
+  mediaType: z.string().max(200),
+  filename: z.string().max(255).optional(),
+})
+
 const messageVersionSchema = z.object({
-  id: z.string(),
+  id: z.string().min(1).max(200),
   content: z.string(),
+  attachments: z.array(messageAttachmentSchema).optional(),
 })
 
 const sourceSchema = z.object({
-  href: z.string(),
-  title: z.string(),
+  href: z.string().max(4096),
+  title: z.string().max(500),
 })
 
 const reasoningSchema = z.object({
   content: z.string(),
-  duration: z.number(),
-  startedAt: z.number().optional(),
-  completedAt: z.number().optional(),
-  durationMs: z.number().optional(),
+  duration: z.number().finite(),
+  startedAt: z.number().finite().optional(),
+  completedAt: z.number().finite().optional(),
+  durationMs: z.number().finite().optional(),
 })
 
 const messageSchema = z.object({
-  key: z.string(),
+  key: z.string().min(1).max(200),
   from: messageRoleSchema,
   versions: z.array(messageVersionSchema).min(1),
-  createdAt: z.number().optional(),
-  startedAt: z.number().optional(),
-  completedAt: z.number().optional(),
-  durationMs: z.number().optional(),
+  createdAt: z.number().finite().optional(),
+  startedAt: z.number().finite().optional(),
+  completedAt: z.number().finite().optional(),
+  durationMs: z.number().finite().optional(),
   sources: z.array(sourceSchema).optional(),
   reasoning: reasoningSchema.optional(),
   isReasoningStreaming: z.boolean().optional(),
   isReasoningComplete: z.boolean().optional(),
   isContentComplete: z.boolean().optional(),
   status: messageStatusSchema.optional(),
-  errorCode: z.string().nullable().optional(),
+  errorCode: z.string().max(500).nullable().optional(),
 })
 
 export const messagesSchema = z.array(messageSchema)
+
+const storedConfigSchema = playgroundConfigSchema.required()
+const storedParameterEnabledSchema = parameterEnabledSchema.required()
+
+export const playgroundSessionSchema = z.object({
+  id: z.string().min(1).max(128),
+  title: z.string().trim().min(1).max(200),
+  createdAt: z.number().finite(),
+  updatedAt: z.number().finite(),
+  config: storedConfigSchema,
+  parameterEnabled: storedParameterEnabledSchema,
+  messages: messagesSchema,
+  server: z
+    .object({
+      id: z.string().min(1).max(128),
+      revision: z.number().int().nonnegative(),
+      messageRevision: z.number().int().nonnegative(),
+    })
+    .optional(),
+  syncPending: z.boolean().optional(),
+})
+
+export const playgroundSessionsStateSchema = z.object({
+  activeSessionId: z.string().min(1).max(128),
+  sessions: z.array(playgroundSessionSchema),
+})

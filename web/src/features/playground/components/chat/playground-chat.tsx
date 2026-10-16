@@ -52,6 +52,7 @@ interface PlaygroundChatProps {
   onRegenerateMessage?: (message: MessageType) => void
   onEditMessage?: (message: MessageType) => void
   onDeleteMessage?: (message: MessageType) => void
+  onCreateArtifact?: (message: MessageType) => void
   onSelectPrompt?: (prompt: string) => void
   isGenerating?: boolean
   isLoadingMessages?: boolean
@@ -68,6 +69,7 @@ export function PlaygroundChat({
   onRegenerateMessage,
   onEditMessage,
   onDeleteMessage,
+  onCreateArtifact,
   onSelectPrompt,
   isGenerating = false,
   isLoadingMessages = false,
@@ -155,6 +157,7 @@ export function PlaygroundChat({
                   onToggleSource={handleToggleMessageSource}
                   onEdit={onEditMessage}
                   onDelete={onDeleteMessage}
+                  onCreateArtifact={onCreateArtifact}
                   isSourceVisible={isSourceVisible}
                   isGenerating={isGenerating}
                   alwaysVisible={alwaysShowActions}

@@ -40,6 +40,7 @@ import { useTranslation } from 'react-i18next'
 
 import { handleServerError } from '@/lib/handle-server-error'
 import { requireServerSuccess } from '@/lib/server-error-message'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { getUserGroups, getUserModels } from '../api'
 import {
@@ -69,6 +70,7 @@ export function usePlaygroundOptions({
   updateConfig,
 }: UsePlaygroundOptionsParams) {
   const { t } = useTranslation()
+  const userId = useAuthStore((state) => state.auth.user?.id ?? null)
 
   const {
     data: modelsData,
@@ -76,7 +78,7 @@ export function usePlaygroundOptions({
     isError: isModelsError,
     isLoading: isLoadingModels,
   } = useQuery({
-    queryKey: ['playground-models', currentGroup],
+    queryKey: ['playground-models', userId, currentGroup],
     queryFn: async () =>
       requireServerSuccess(await getUserModels(currentGroup)),
     enabled: currentGroup !== '',
@@ -87,7 +89,7 @@ export function usePlaygroundOptions({
     error: groupsError,
     isError: isGroupsError,
   } = useQuery({
-    queryKey: ['playground-groups'],
+    queryKey: ['playground-groups', userId],
     queryFn: async () => requireServerSuccess(await getUserGroups()),
   })
 

@@ -41,7 +41,11 @@ import { useStreamRequest } from './use-stream-request'
 interface UseChatHandlerOptions {
   config: PlaygroundConfig
   parameterEnabled: ParameterEnabled
-  onMessageUpdate: (updater: (prev: Message[]) => Message[]) => void
+  onMessageUpdate: (
+    updater: (prev: Message[]) => Message[],
+    sessionId?: string | null
+  ) => void
+  sessionId: string | null
 }
 
 const KNOWN_ERROR_MESSAGES = new Set<string>(Object.values(ERROR_MESSAGES))
@@ -71,6 +75,7 @@ export function useChatHandler({
   config,
   parameterEnabled,
   onMessageUpdate,
+  sessionId,
 }: UseChatHandlerOptions) {
   const { t } = useTranslation()
   const { sendStreamRequest, stopStream, isStreaming } = useStreamRequest()
@@ -83,6 +88,7 @@ export function useChatHandler({
     reasoning: '',
   })
   const streamFlushTimerRef = useRef<number | null>(null)
+  const requestSessionIdRef = useRef<string | null>(sessionId)
 
   const discardPendingStreamUpdates = useCallback((generation: number) => {
     if (streamFlushTimerRef.current !== null) {
@@ -138,7 +144,7 @@ export function useChatHandler({
 
           return updatedMessage
         })
-      })
+      }, requestSessionIdRef.current)
     },
     [onMessageUpdate]
   )
@@ -214,7 +220,7 @@ export function useChatHandler({
             ? message
             : completeAssistantMessage(message)
         )
-      })
+      }, requestSessionIdRef.current)
     },
     [flushStreamUpdates, onMessageUpdate]
   )
@@ -236,7 +242,7 @@ export function useChatHandler({
           errorCode,
           errorTitle
         )
-      })
+      }, requestSessionIdRef.current)
     },
     [flushStreamUpdates, getDisplayError, onMessageUpdate, t]
   )
@@ -246,6 +252,7 @@ export function useChatHandler({
     (messages: Message[]) => {
       const generation = requestGenerationRef.current + 1
       requestGenerationRef.current = generation
+      requestSessionIdRef.current = sessionId
       abortControllerRef.current?.abort()
       abortControllerRef.current = null
       discardPendingStreamUpdates(generation)
@@ -270,6 +277,7 @@ export function useChatHandler({
       handleStreamUpdate,
       handleStreamComplete,
       handleStreamError,
+      sessionId,
     ]
   )
 
@@ -285,6 +293,7 @@ export function useChatHandler({
       const abortController = new AbortController()
 
       requestGenerationRef.current = generation
+      requestSessionIdRef.current = sessionId
       stopStream()
       discardPendingStreamUpdates(generation)
       abortControllerRef.current?.abort()
@@ -318,7 +327,7 @@ export function useChatHandler({
 
             return updatedMessage ?? message
           })
-        })
+        }, requestSessionIdRef.current)
       } catch (error: unknown) {
         if (
           abortController.signal.aborted ||
@@ -343,6 +352,7 @@ export function useChatHandler({
       discardPendingStreamUpdates,
       onMessageUpdate,
       handleStreamError,
+      sessionId,
     ]
   )
 
@@ -376,7 +386,7 @@ export function useChatHandler({
           ? completeAssistantMessage(message)
           : message
       )
-    })
+    }, requestSessionIdRef.current)
   }, [
     stopStream,
     flushStreamUpdates,

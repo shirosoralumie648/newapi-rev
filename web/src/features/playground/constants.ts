@@ -37,6 +37,7 @@ export const API_ENDPOINTS = {
   CHAT_COMPLETIONS: '/pg/chat/completions',
   USER_MODELS: '/api/user/models',
   USER_GROUPS: '/api/user/self/groups',
+  PLAYGROUND_SESSIONS: '/api/playground/sessions',
 } as const
 
 // Default group — uses 'default' as the safe fallback; auto-group is
@@ -70,7 +71,11 @@ export const STORAGE_KEYS = {
   CONFIG: 'playground_config',
   MESSAGES: 'playground_messages',
   PARAMETER_ENABLED: 'playground_parameter_enabled',
+  SESSIONS: 'playground_sessions',
 } as const
+
+export const DEFAULT_SESSION_TITLE = 'New conversation'
+export const MAX_STORED_SESSIONS = 20
 
 // Error messages
 export const ERROR_MESSAGES = {

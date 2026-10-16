@@ -19,6 +19,28 @@ For commercial licensing, please contact support@quantumnous.com
 // Static translation keys that don't get picked up by the t('...') regex.
 // These cover dynamic labels (e.g. constants, configs) that are passed into t at runtime.
 export const STATIC_I18N_KEYS = [
+  'Playground changed on another device. Reload before saving.',
+  'Secure browser cryptography is required to create an artifact.',
+  'Invalid Playground artifact request.',
+  'Playground artifact storage limit exceeded.',
+  'Playground source message changed. Reload before creating an artifact.',
+  'Playground request ID was already used for a different operation.',
+  'Unable to load or save Playground artifacts.',
+  'Playground artifact or conversation not found.',
+
+  'Authentication required.',
+  'Invalid Playground configuration.',
+  'Invalid Playground message.',
+  'Invalid Playground pagination.',
+  'Invalid Playground request.',
+  'Playground conversation name must contain 1 to 200 characters.',
+  'Playground conversation not found.',
+  'Playground conversations support at most 100 messages.',
+  'Playground messages exceed the storage limit.',
+  'Playground request is too large.',
+  'Playground changed on another device. Reload before saving.',
+
+  'New conversation',
   'Task usage metadata is unavailable. Pricing details cannot be displayed.',
   'This expression cannot be expanded into a price table. View the original expression below.',
   'This operation is only supported for vLLM or SGLang channels',

@@ -23,9 +23,17 @@ export type MessageStatus = 'loading' | 'streaming' | 'complete' | 'error'
 
 export type PlaygroundMessageLayoutMode = 'alternating' | 'left'
 
+export interface MessageAttachment {
+  id: string
+  url: string
+  mediaType: string
+  filename?: string
+}
+
 export interface MessageVersion {
   id: string
   content: string
+  attachments?: MessageAttachment[]
 }
 
 export interface Message {
@@ -51,7 +59,40 @@ export interface Message {
   errorCode?: string | null
 }
 
+export interface PlaygroundSession {
+  id: string
+  title: string
+  createdAt: number
+  updatedAt: number
+  config: PlaygroundConfig
+  parameterEnabled: ParameterEnabled
+  messages: Message[]
+  server?: { id: string; revision: number; messageRevision: number }
+  syncPending?: boolean
+}
+
+export interface PlaygroundSessionsState {
+  activeSessionId: string
+  sessions: PlaygroundSession[]
+}
+
+export interface PlaygroundServerSession extends Omit<
+  PlaygroundSession,
+  'messages'
+> {
+  clientId?: string
+  revision: number
+  messageRevision: number
+}
+
 // API payload types
+export type PlaygroundInputAttachment = MessageAttachment
+
+export interface PlaygroundInputMessage {
+  text?: string
+  files?: PlaygroundInputAttachment[]
+}
+
 export interface ChatCompletionMessage {
   role: MessageRole
   content: string | ContentPart[]

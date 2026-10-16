@@ -48,17 +48,52 @@ const MIN_PREFIX_COLLAPSE_LENGTH = 2000
 const MIN_REPEATED_SECTION_COUNT = 3
 const SECTION_HEADING_LINE_PATTERN = /^#{2,6}\s+\d+\.\s+.+$/gm
 
-function getUserStorageKey(key: string): string | null {
-  // Legacy data has no owner; never assign it to the next signed-in account.
-  for (const legacyKey of Object.values(STORAGE_KEYS)) {
-    localStorage.removeItem(legacyKey)
+const LEGACY_STORAGE_KEYS = [
+  STORAGE_KEYS.CONFIG,
+  STORAGE_KEYS.MESSAGES,
+  STORAGE_KEYS.PARAMETER_ENABLED,
+] as const
+
+let cleanedLegacyStorage: Storage | null = null
+
+function removeLegacyStorageKeys(
+  userId: number | null = getCurrentUserId()
+): void {
+  if (typeof window === 'undefined' || userId == null) return
+
+  try {
+    const storage = window.localStorage
+    const hasLegacyData = LEGACY_STORAGE_KEYS.some(
+      (legacyKey) => storage.getItem(legacyKey) !== null
+    )
+    if (cleanedLegacyStorage === storage && !hasLegacyData) return
+
+    // Legacy data has no owner; never assign it to the next signed-in account.
+    for (const legacyKey of LEGACY_STORAGE_KEYS) {
+      storage.removeItem(legacyKey)
+    }
+    cleanedLegacyStorage = storage
+  } catch {
+    // Storage can be blocked by browser privacy settings; callers use defaults.
   }
-  const userId = useAuthStore.getState().auth.user?.id
+}
+
+function getCurrentUserId(): number | null {
+  return useAuthStore.getState().auth.user?.id ?? null
+}
+
+function getUserStorageKey(
+  key: string,
+  userId: number | null = getCurrentUserId()
+): string | null {
   return userId == null ? null : `${key}:${userId}`
 }
 
-function readStoredValue(baseKey: string): unknown | null {
-  const key = getUserStorageKey(baseKey)
+function readStoredValue(
+  baseKey: string,
+  userId: number | null = getCurrentUserId()
+): unknown | null {
+  const key = getUserStorageKey(baseKey, userId)
   if (!key) return null
   const saved = localStorage.getItem(key)
   if (!saved) return null
@@ -66,8 +101,10 @@ function readStoredValue(baseKey: string): unknown | null {
   return JSON.parse(saved) as unknown
 }
 
-function readStoredMessagesValue(): unknown | null {
-  const key = getUserStorageKey(STORAGE_KEYS.MESSAGES)
+function readStoredMessagesValue(
+  userId: number | null = getCurrentUserId()
+): unknown | null {
+  const key = getUserStorageKey(STORAGE_KEYS.MESSAGES, userId)
   if (!key) return null
   const saved = localStorage.getItem(key)
   if (!saved) return null
@@ -112,10 +149,17 @@ function trimMessages(messages: Message[]): Message[] {
 }
 
 function getMessageSize(message: Message): number {
-  const versionsSize = message.versions.reduce(
-    (total, version) => total + version.content.length,
-    0
-  )
+  const versionsSize = message.versions.reduce((total, version) => {
+    const attachmentsSize = (version.attachments ?? []).reduce(
+      (attachmentTotal, attachment) =>
+        attachmentTotal +
+        attachment.url.length +
+        attachment.mediaType.length +
+        (attachment.filename?.length ?? 0),
+      0
+    )
+    return total + version.content.length + attachmentsSize
+  }, 0)
   const reasoningSize = message.reasoning?.content.length ?? 0
 
   return versionsSize + reasoningSize
@@ -292,10 +336,84 @@ function trimMessagesByContentSize(messages: Message[]): Message[] {
   return result.reverse()
 }
 
+function trimMessagesToStorageBytes(messages: Message[]): Message[] {
+  const result = [...messages]
+
+  while (result.length > 0) {
+    const serialized = JSON.stringify(result)
+    const serializedBytes = new TextEncoder().encode(serialized).byteLength
+    if (serializedBytes <= MAX_STORED_MESSAGES_BYTES) {
+      return result
+    }
+    result.shift()
+  }
+
+  return result
+}
+
+export function normalizeMessagesForStorage(messages: Message[]): Message[] {
+  try {
+    const parsed = messagesSchema.parse(messages) as Message[]
+    const normalized = parsed.map(normalizeStoredMessageForLoad)
+    const trimmed = trimMessages(normalized)
+    const sizeTrimmed = trimMessagesByContentSize(trimmed)
+    const sanitized = sanitizeMessagesOnLoad(sizeTrimmed)
+    return trimMessagesToStorageBytes(sanitized)
+  } catch {
+    return []
+  }
+}
+
+export type LegacyPlaygroundState = {
+  config: Partial<PlaygroundConfig>
+  parameterEnabled: Partial<ParameterEnabled>
+  messages: Message[] | null
+}
+
+export function loadLegacyPlaygroundState(
+  userId: number | null
+): LegacyPlaygroundState {
+  if (typeof window === 'undefined' || userId == null) {
+    return { config: {}, parameterEnabled: {}, messages: null }
+  }
+
+  try {
+    const configValue = readStoredValue(STORAGE_KEYS.CONFIG, userId)
+    const parameterValue = readStoredValue(
+      STORAGE_KEYS.PARAMETER_ENABLED,
+      userId
+    )
+    const messagesValue = readStoredMessagesValue(userId)
+
+    let config: Partial<PlaygroundConfig> = {}
+    let parameterEnabled: Partial<ParameterEnabled> = {}
+    let messages: Message[] | null = null
+
+    if (configValue) {
+      config = playgroundConfigSchema.parse(unwrapStoredValue(configValue))
+    }
+    if (parameterValue) {
+      parameterEnabled = parameterEnabledSchema.parse(
+        unwrapStoredValue(parameterValue)
+      )
+    }
+    if (messagesValue) {
+      messages = normalizeMessagesForStorage(
+        messagesSchema.parse(unwrapStoredValue(messagesValue)) as Message[]
+      )
+    }
+
+    return { config, parameterEnabled, messages }
+  } catch {
+    return { config: {}, parameterEnabled: {}, messages: null }
+  }
+}
+
 /**
  * Load playground config from localStorage
  */
 export function loadConfig(): Partial<PlaygroundConfig> {
+  removeLegacyStorageKeys()
   try {
     const saved = readStoredValue(STORAGE_KEYS.CONFIG)
     if (!saved) return {}
@@ -325,6 +443,7 @@ export function saveConfig(config: Partial<PlaygroundConfig>): void {
  * Load parameter enabled state from localStorage
  */
 export function loadParameterEnabled(): Partial<ParameterEnabled> {
+  removeLegacyStorageKeys()
   try {
     const saved = readStoredValue(STORAGE_KEYS.PARAMETER_ENABLED)
     if (!saved) return {}
@@ -356,27 +475,13 @@ export function saveParameterEnabled(
  * Load messages from localStorage
  */
 export function loadMessages(): Message[] | null {
+  removeLegacyStorageKeys()
   try {
     const saved = readStoredMessagesValue()
     if (!saved) return null
 
     const parsed = messagesSchema.parse(unwrapStoredValue(saved)) as Message[]
-    const normalized = parsed.map(normalizeStoredMessageForLoad)
-    const normalizedChanged = normalized.some(
-      (message, index) => message !== parsed[index]
-    )
-    const trimmed = trimMessages(normalized)
-    const sizeTrimmed = trimMessagesByContentSize(trimmed)
-    const sanitized = sanitizeMessagesOnLoad(sizeTrimmed)
-
-    if (
-      normalizedChanged ||
-      trimmed !== normalized ||
-      sizeTrimmed !== trimmed ||
-      sanitized !== sizeTrimmed
-    ) {
-      saveMessages(sanitized)
-    }
+    const sanitized = normalizeMessagesForStorage(parsed)
 
     return sanitized
   } catch (error) {
@@ -391,9 +496,10 @@ export function loadMessages(): Message[] | null {
  */
 export function saveMessages(messages: Message[]): void {
   try {
-    const trimmed = trimMessages(messages)
-    const parsed = messagesSchema.parse(trimmed) as Message[]
-    writeStoredValue(STORAGE_KEYS.MESSAGES, parsed)
+    writeStoredValue(
+      STORAGE_KEYS.MESSAGES,
+      normalizeMessagesForStorage(messages)
+    )
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to save messages:', error)
@@ -403,6 +509,21 @@ export function saveMessages(messages: Message[]): void {
 /**
  * Clear the signed-in user's playground data
  */
+export function clearLegacyPlaygroundData(
+  userId: number | null = getCurrentUserId()
+): void {
+  if (userId == null) return
+  try {
+    for (const baseKey of LEGACY_STORAGE_KEYS) {
+      const key = getUserStorageKey(baseKey, userId)
+      if (key) localStorage.removeItem(key)
+    }
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('Failed to clear legacy playground data:', error)
+  }
+}
+
 export function clearPlaygroundData(): void {
   try {
     for (const baseKey of Object.values(STORAGE_KEYS)) {

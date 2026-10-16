@@ -21,6 +21,7 @@ import {
   Copy,
   Edit,
   FileCode2,
+  FileText,
   MoreHorizontal,
   RefreshCw,
   Trash2,
@@ -56,6 +57,7 @@ interface MessageActionsProps {
   onToggleSource?: (message: Message) => void
   onEdit?: (message: Message) => void
   onDelete?: (message: Message) => void
+  onCreateArtifact?: (message: Message) => void
   isSourceVisible?: boolean
   isGenerating?: boolean
   alwaysVisible?: boolean
@@ -78,6 +80,7 @@ export function MessageActions({
   onToggleSource,
   onEdit,
   onDelete,
+  onCreateArtifact,
   isSourceVisible = false,
   isGenerating = false,
   alwaysVisible = false,
@@ -116,6 +119,22 @@ export function MessageActions({
         ? MESSAGE_ACTION_LABELS.COPIED
         : MESSAGE_ACTION_LABELS.COPY,
       onClick: handleCopy,
+    })
+  }
+
+  if (
+    isAssistant &&
+    hasContent &&
+    !isLoading &&
+    message.status !== 'error' &&
+    message.isContentComplete !== false &&
+    onCreateArtifact
+  ) {
+    actions.push({
+      disabled: isGenerating,
+      icon: FileText,
+      label: 'Create an artifact',
+      onClick: guardAction(() => onCreateArtifact(message)),
     })
   }
 
