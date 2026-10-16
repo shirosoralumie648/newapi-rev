@@ -75,27 +75,8 @@ func decodePlaygroundArtifactRequest(c *gin.Context, target any) bool {
 }
 
 func playgroundArtifactPage(c *gin.Context) *common.PageInfo {
-	// Inspect the raw aliases too: GetPageQuery clamps to 100 and silently
-	// defaults malformed input, but artifact limits must reject, not truncate.
-	for _, key := range []string{"p", "page_size", "ps", "size"} {
-		if values, ok := c.GetQueryArray(key); ok {
-			if len(values) != 1 {
-				writePlaygroundArtifactError(c, model.ErrPlaygroundArtifactInvalid)
-				return nil
-			}
-			value, err := strconv.Atoi(values[0])
-			limit := 50
-			if key == "p" {
-				limit = 1000000
-			}
-			if err != nil || value < 1 || value > limit {
-				writePlaygroundArtifactError(c, model.ErrPlaygroundArtifactInvalid)
-				return nil
-			}
-		}
-	}
-	page := common.GetPageQuery(c)
-	if page.PageSize < 1 || page.PageSize > 50 {
+	page, ok := playgroundStrictPage(c)
+	if !ok {
 		writePlaygroundArtifactError(c, model.ErrPlaygroundArtifactInvalid)
 		return nil
 	}

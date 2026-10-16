@@ -21,6 +21,7 @@ package model_test
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -80,14 +81,14 @@ func playgroundTestDB(t *testing.T, dialect string) *gorm.DB {
 	common.SetDatabaseTypes(common.DatabaseType(dialect), previousLog)
 	model.DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundMessage{}, &model.PlaygroundSession{}))
+		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundMessage{}, &model.PlaygroundSession{}, &model.User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
 		model.DB = previous
 		common.SetDatabaseTypes(previousMain, previousLog)
 	})
-	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}))
+	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.User{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -95,6 +96,11 @@ func playgroundTestDB(t *testing.T, dialect string) *gorm.DB {
 	}
 	require.NoError(t, db.Raw(versionQuery).Scan(&version).Error)
 	t.Logf("Database version: %s", version)
+	// Attachment uploads lock the owner row for the per-account byte budget.
+	for _, userID := range []int{7, 8, 9} {
+		user := model.User{Id: userID, Username: fmt.Sprintf("playground-%d", userID), AffCode: fmt.Sprintf("pg-aff-%d", userID), Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1}
+		require.NoError(t, db.Create(&user).Error)
+	}
 	return db
 }
 
@@ -118,6 +124,7 @@ func playgroundRequest(t *testing.T, user int, method, path string, body any, ha
 	}
 	if len(parts) > 6 {
 		c.Params = append(c.Params, gin.Param{Key: "artifactId", Value: parts[6]})
+		c.Params = append(c.Params, gin.Param{Key: "attachmentId", Value: parts[6]})
 	}
 	if len(parts) > 8 {
 		c.Params = append(c.Params, gin.Param{Key: "versionId", Value: parts[8]})
@@ -150,8 +157,8 @@ func TestPlaygroundPersistenceMatrix(t *testing.T) {
 			id := session["id"].(string)
 			assert.Equal(t, id, createPlayground(t, 7, "local-session")["id"])
 			assert.NotEqual(t, id, createPlayground(t, 8, "local-session")["id"])
-			require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}))
-			require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}))
+			require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.User{}))
+			require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.User{}))
 			reloaded, err := model.GetPlaygroundSession(7, id)
 			require.NoError(t, err)
 			assert.Equal(t, "Conversation", reloaded.Title)
@@ -221,7 +228,7 @@ func TestPlaygroundRejectsInvalidSnapshotsWithoutReplacingHistory(t *testing.T) 
 	playgroundTestDB(t, "sqlite")
 	session := createPlayground(t, 9, "validation")
 	path := "/api/playground/sessions/" + session["id"].(string) + "/messages"
-	_, err := model.ReplacePlaygroundMessages(9, session["id"].(string), 0, []model.PlaygroundMessage{{ClientKey: "kept", Payload: `{"key":"kept","from":"user","versions":[{"id":"v","content":"Keep this history"}]}`}})
+	_, err := model.ReplacePlaygroundMessages(9, session["id"].(string), 0, []model.PlaygroundMessage{{ClientKey: "kept", Payload: `{"key":"kept","from":"user","versions":[{"id":"v","content":"Keep this history"}]}`}}, nil)
 	require.NoError(t, err)
 	tests := []struct {
 		name string
@@ -276,8 +283,8 @@ func TestPlaygroundMigrationCreateIsAtomicAndReplayDoesNotOverwriteMessages(t *t
 	require.Len(t, messages, 1)
 	assert.Contains(t, string(messages[0].Payload), "Imported history")
 	// Repeated startup migrations retain populated payloads and the owner/client uniqueness guarantee.
-	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}))
-	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}))
+	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.User{}))
 	messages, _, err = model.ListPlaygroundMessages(7, first.Data.ID)
 	require.NoError(t, err)
 	require.Len(t, messages, 1)
@@ -689,6 +696,225 @@ func TestPlaygroundArtifactCapacity(t *testing.T) {
 	})
 }
 
+func playgroundPNGFixture(size int) []byte {
+	data := []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a}
+	for len(data) < size {
+		data = append(data, byte(len(data)%251))
+	}
+	return data
+}
+
+func playgroundUploadAttachment(t *testing.T, user int, sessionID, clientKey, mediaType string, data []byte) map[string]any {
+	t.Helper()
+	response := playgroundRequest(t, user, http.MethodPost, "/api/playground/sessions/"+sessionID+"/attachments", map[string]any{
+		"client_key": clientKey, "media_type": mediaType, "filename": "image.png",
+		"data": base64.StdEncoding.EncodeToString(data),
+	}, controller.CreatePlaygroundAttachment)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var envelope struct {
+		Success bool
+		Data    map[string]any
+	}
+	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &envelope))
+	require.True(t, envelope.Success, response.Body.String())
+	return envelope.Data
+}
+
+func TestPlaygroundAttachmentPersistenceMatrix(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			previousMax, previousUserMax := model.PlaygroundAttachmentMaxBytes, model.PlaygroundUserAttachmentMaxBytes
+			model.PlaygroundAttachmentMaxBytes, model.PlaygroundUserAttachmentMaxBytes = 4096, 8192
+			t.Cleanup(func() {
+				model.PlaygroundAttachmentMaxBytes, model.PlaygroundUserAttachmentMaxBytes = previousMax, previousUserMax
+			})
+			session := createPlayground(t, 7, "attachments")
+			id := session["id"].(string)
+			png := playgroundPNGFixture(64)
+			uploaded := playgroundUploadAttachment(t, 7, id, "file-1", "image/png", png)
+			attachmentID, _ := uploaded["id"].(string)
+			require.NotEmpty(t, attachmentID)
+			assert.Equal(t, true, uploaded["created"])
+			assert.EqualValues(t, len(png), uploaded["byte_size"])
+			assert.Equal(t, "image/png", uploaded["media_type"])
+
+			// Idempotent replay acknowledges the stored attachment; different
+			// bytes under the same client key are a conflict.
+			replay := playgroundUploadAttachment(t, 7, id, "file-1", "image/png", png)
+			assert.Equal(t, attachmentID, replay["id"])
+			assert.NotEqual(t, true, replay["created"])
+			conflict := playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions/"+id+"/attachments", map[string]any{
+				"client_key": "file-1", "media_type": "image/png",
+				"data": base64.StdEncoding.EncodeToString(playgroundPNGFixture(65)),
+			}, controller.CreatePlaygroundAttachment)
+			assert.Equal(t, http.StatusConflict, conflict.Code, conflict.Body.String())
+
+			// Metadata is listable without exposing stored bytes.
+			listed := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+id+"/attachments?page_size=50", nil, controller.ListPlaygroundAttachments)
+			require.Equal(t, http.StatusOK, listed.Code, listed.Body.String())
+			assert.Contains(t, listed.Body.String(), `"total":1`)
+			assert.Contains(t, listed.Body.String(), attachmentID)
+			assert.NotContains(t, listed.Body.String(), base64.StdEncoding.EncodeToString(png))
+			invalidPage := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+id+"/attachments?page_size=100", nil, controller.ListPlaygroundAttachments)
+			assert.Equal(t, http.StatusBadRequest, invalidPage.Code)
+
+			// Content is served byte-exact with the stored type and hardening headers.
+			content := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+id+"/attachments/"+attachmentID+"/content", nil, controller.GetPlaygroundAttachmentContent)
+			require.Equal(t, http.StatusOK, content.Code)
+			assert.Equal(t, png, content.Body.Bytes())
+			assert.Equal(t, "image/png", content.Header().Get("Content-Type"))
+			assert.Equal(t, "nosniff", content.Header().Get("X-Content-Type-Options"))
+			assert.Contains(t, content.Header().Get("Content-Disposition"), "inline")
+
+			// Another user or session never sees the attachment.
+			for _, foreign := range []gin.HandlerFunc{controller.GetPlaygroundAttachment, controller.GetPlaygroundAttachmentContent} {
+				foreignGet := playgroundRequest(t, 8, http.MethodGet, "/api/playground/sessions/"+id+"/attachments/"+attachmentID, nil, foreign)
+				assert.Equal(t, http.StatusNotFound, foreignGet.Code)
+			}
+			other := createPlayground(t, 7, "attachments-other")
+			otherID := other["id"].(string)
+			crossSession := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+otherID+"/attachments/"+attachmentID, nil, controller.GetPlaygroundAttachment)
+			assert.Equal(t, http.StatusNotFound, crossSession.Code)
+
+			// Deleting the conversation cascades into its attachments.
+			require.NoError(t, model.DeletePlaygroundSession(7, id))
+			var count int64
+			require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("session_id = ?", id).Count(&count).Error)
+			assert.Zero(t, count)
+		})
+	}
+}
+
+func TestPlaygroundAttachmentValidationLimits(t *testing.T) {
+	playgroundTestDB(t, "sqlite")
+	previousMax, previousUserMax := model.PlaygroundAttachmentMaxBytes, model.PlaygroundUserAttachmentMaxBytes
+	model.PlaygroundAttachmentMaxBytes, model.PlaygroundUserAttachmentMaxBytes = 4096, 8192
+	t.Cleanup(func() {
+		model.PlaygroundAttachmentMaxBytes, model.PlaygroundUserAttachmentMaxBytes = previousMax, previousUserMax
+	})
+	session := createPlayground(t, 7, "attachment-limits")
+	id := session["id"].(string)
+	path := "/api/playground/sessions/" + id + "/attachments"
+	reject := func(name string, body map[string]any, status int) {
+		t.Helper()
+		t.Run(name, func(t *testing.T) {
+			response := playgroundRequest(t, 7, http.MethodPost, path, body, controller.CreatePlaygroundAttachment)
+			assert.Equal(t, status, response.Code, response.Body.String())
+		})
+	}
+	png := playgroundPNGFixture(64)
+	encoded := base64.StdEncoding.EncodeToString(png)
+	reject("unsupported media type", map[string]any{"client_key": "a", "media_type": "text/plain", "data": encoded}, http.StatusBadRequest)
+	reject("mismatched media type", map[string]any{"client_key": "b", "media_type": "image/webp", "data": encoded}, http.StatusBadRequest)
+	reject("invalid base64", map[string]any{"client_key": "c", "media_type": "image/png", "data": "not-base64!!"}, http.StatusBadRequest)
+	reject("empty client key", map[string]any{"client_key": " ", "media_type": "image/png", "data": encoded}, http.StatusBadRequest)
+	reject("oversized attachment", map[string]any{"client_key": "d", "media_type": "image/png", "data": base64.StdEncoding.EncodeToString(playgroundPNGFixture(4097))}, http.StatusUnprocessableEntity)
+
+	// The per-account budget counts every stored byte, including replays of one file.
+	playgroundUploadAttachment(t, 7, id, "budget-a", "image/png", playgroundPNGFixture(4096))
+	playgroundUploadAttachment(t, 7, id, "budget-b", "image/png", playgroundPNGFixture(4096))
+	reject("per-user byte budget", map[string]any{"client_key": "budget-c", "media_type": "image/png", "data": base64.StdEncoding.EncodeToString(playgroundPNGFixture(64))}, http.StatusUnprocessableEntity)
+}
+
+func TestPlaygroundAttachmentMessageReferences(t *testing.T) {
+	db := playgroundTestDB(t, "sqlite")
+	session := createPlayground(t, 7, "attachment-references")
+	id := session["id"].(string)
+	path := "/api/playground/sessions/" + id + "/messages"
+	png := playgroundPNGFixture(64)
+	first := playgroundUploadAttachment(t, 7, id, "ref-a", "image/png", png)
+	second := playgroundUploadAttachment(t, 7, id, "ref-b", "image/png", png)
+	firstID, secondID := first["id"].(string), second["id"].(string)
+
+	message := func(key string, from string, attachments []map[string]any) map[string]any {
+		version := map[string]any{"id": key + "-v1", "content": "look at this"}
+		if attachments != nil {
+			version["attachments"] = attachments
+		}
+		return map[string]any{"client_key": key, "payload": map[string]any{"key": key, "from": from, "versions": []any{version}}}
+	}
+
+	// Referencing an owned attachment stores the normalized metadata.
+	response := playgroundRequest(t, 7, http.MethodPut, path, map[string]any{
+		"revision": 0, "messages": []any{message("u1", "user", []map[string]any{{"id": firstID, "media_type": "text/plain", "filename": "spoofed"}})},
+	}, controller.ReplacePlaygroundMessages)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), firstID)
+	assert.Contains(t, response.Body.String(), `"media_type":"image/png"`)
+	assert.Contains(t, response.Body.String(), `"filename":"image.png"`)
+	assert.NotContains(t, response.Body.String(), "spoofed")
+
+	// A referenced attachment cannot be deleted; an unrelated one still can.
+	inUse := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+id+"/attachments/"+firstID, nil, controller.DeletePlaygroundAttachment)
+	assert.Equal(t, http.StatusConflict, inUse.Code, inUse.Body.String())
+	unused := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+id+"/attachments/"+secondID, nil, controller.DeletePlaygroundAttachment)
+	assert.Equal(t, http.StatusOK, unused.Code, unused.Body.String())
+	missing := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+id+"/attachments/"+secondID, nil, controller.DeletePlaygroundAttachment)
+	assert.Equal(t, http.StatusNotFound, missing.Code)
+
+	// Dropping the reference releases the attachment for deletion.
+	response = playgroundRequest(t, 7, http.MethodPut, path, map[string]any{"revision": 1, "messages": []any{}}, controller.ReplacePlaygroundMessages)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	released := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+id+"/attachments/"+firstID, nil, controller.DeletePlaygroundAttachment)
+	assert.Equal(t, http.StatusOK, released.Code, released.Body.String())
+
+	// Invalid references never replace the stored history.
+	kept := playgroundRequest(t, 7, http.MethodPut, path, map[string]any{"revision": 2, "messages": []any{message("u2", "user", []map[string]any{{"id": firstID}})}}, controller.ReplacePlaygroundMessages)
+	assert.Equal(t, http.StatusBadRequest, kept.Code, kept.Body.String())
+	unknown := playgroundRequest(t, 7, http.MethodPut, path, map[string]any{"revision": 2, "messages": []any{message("u3", "user", []map[string]any{{"id": "pgf_missing"}})}}, controller.ReplacePlaygroundMessages)
+	assert.Equal(t, http.StatusBadRequest, unknown.Code)
+	assistant := playgroundUploadAttachment(t, 7, id, "ref-c", "image/png", png)
+	assistantID := assistant["id"].(string)
+	roleRejected := playgroundRequest(t, 7, http.MethodPut, path, map[string]any{"revision": 2, "messages": []any{message("a1", "assistant", []map[string]any{{"id": assistantID}})}}, controller.ReplacePlaygroundMessages)
+	assert.Equal(t, http.StatusBadRequest, roleRejected.Code)
+	many := make([]map[string]any, 0, model.PlaygroundAttachmentMaxCount+1)
+	for index := range model.PlaygroundAttachmentMaxCount + 1 {
+		many = append(many, map[string]any{"id": fmt.Sprintf("pgf_%d", index)})
+	}
+	tooMany := playgroundRequest(t, 7, http.MethodPut, path, map[string]any{"revision": 2, "messages": []any{message("u4", "user", many)}}, controller.ReplacePlaygroundMessages)
+	assert.Equal(t, http.StatusBadRequest, tooMany.Code)
+	// A brand-new session cannot reference attachments that only exist in another one.
+	create := playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions", map[string]any{
+		"client_id": "attachment-create", "messages": []any{message("u5", "user", []map[string]any{{"id": assistantID}})},
+	}, controller.CreatePlaygroundSession)
+	assert.Equal(t, http.StatusBadRequest, create.Code, create.Body.String())
+
+	// The failed replacements never touched the stored snapshot.
+	var stored int64
+	require.NoError(t, db.Model(&model.PlaygroundMessage{}).Where("session_id = ?", id).Count(&stored).Error)
+	assert.Zero(t, stored)
+}
+
+func TestPlaygroundAttachmentOrphanCleanup(t *testing.T) {
+	db := playgroundTestDB(t, "sqlite")
+	session := createPlayground(t, 7, "attachment-cleanup")
+	id := session["id"].(string)
+	png := playgroundPNGFixture(64)
+	orphan := playgroundUploadAttachment(t, 7, id, "cleanup-a", "image/png", png)
+	referenced := playgroundUploadAttachment(t, 7, id, "cleanup-b", "image/png", png)
+	orphanID, referencedID := orphan["id"].(string), referenced["id"].(string)
+	response := playgroundRequest(t, 7, http.MethodPut, "/api/playground/sessions/"+id+"/messages", map[string]any{
+		"revision": 0, "messages": []any{map[string]any{"client_key": "u1", "payload": map[string]any{
+			"key": "u1", "from": "user", "versions": []any{map[string]any{"id": "v1", "content": "keep", "attachments": []any{map[string]any{"id": referencedID}}}},
+		}}},
+	}, controller.ReplacePlaygroundMessages)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+
+	// Age both rows: only the unreferenced one may be collected.
+	now := common.GetTimestamp()
+	require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("session_id = ?", id).Update("updated_at", now-100000).Error)
+	deleted, err := model.DeleteOrphanedPlaygroundAttachments(now-3600, 100)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, deleted)
+	var remaining []model.PlaygroundAttachment
+	require.NoError(t, db.Where("session_id = ?", id).Find(&remaining).Error)
+	require.Len(t, remaining, 1)
+	assert.Equal(t, referencedID, remaining[0].ID)
+	_, err = model.GetPlaygroundAttachment(7, id, orphanID)
+	assert.ErrorIs(t, err, model.ErrPlaygroundAttachmentNotFound)
+}
+
 func playgroundAuthenticatedRequest(t *testing.T, engine *gin.Engine, token, method, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	encoded, err := common.Marshal(body)
@@ -703,7 +929,7 @@ func playgroundAuthenticatedRequest(t *testing.T, engine *gin.Engine, token, met
 	return response
 }
 
-func TestPlaygroundArtifactRealRouterAuthentication(t *testing.T) {
+func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	db := playgroundTestDB(t, "sqlite")
 	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.UserAccessToken{}, &model.AuditLog{}, &model.Option{}))
 	oldLog, oldRedis, oldSecret, oldLimit := model.LOG_DB, common.RedisEnabled, common.SessionSecret, common.GlobalApiRateLimitEnable
@@ -728,6 +954,20 @@ func TestPlaygroundArtifactRealRouterAuthentication(t *testing.T) {
 	engine := gin.New()
 	router.SetApiRouter(engine)
 	sessionID, input := playgroundArtifactSourceFixture(t, user.Id, "authenticated")
+	attachmentBase := "/api/playground/sessions/" + sessionID + "/attachments"
+	for _, route := range []struct{ method, path string }{
+		{http.MethodGet, attachmentBase}, {http.MethodPost, attachmentBase},
+		{http.MethodGet, attachmentBase + "/missing"}, {http.MethodGet, attachmentBase + "/missing/content"},
+		{http.MethodDelete, attachmentBase + "/missing"},
+	} {
+		response := playgroundAuthenticatedRequest(t, engine, "", route.method, route.path, input)
+		assert.Equal(t, 401, response.Code, response.Body.String())
+		assert.Contains(t, response.Header().Get("Cache-Control"), "no-store")
+		response = playgroundAuthenticatedRequest(t, engine, patRaw, route.method, route.path, input)
+		assert.Equal(t, 403, response.Code, response.Body.String())
+		assert.Contains(t, response.Body.String(), "AUTH_SESSION_REQUIRED")
+	}
+
 	base := "/api/playground/sessions/" + sessionID + "/artifacts"
 	for _, route := range []struct{ method, path string }{
 		{http.MethodGet, base}, {http.MethodPost, base}, {http.MethodGet, base + "/missing"},
@@ -760,6 +1000,21 @@ func TestPlaygroundArtifactRealRouterAuthentication(t *testing.T) {
 	response := playgroundAuthenticatedRequest(t, engine, token, http.MethodDelete, path+"?expected_revision=3", nil)
 	require.Equal(t, 200, response.Code, response.Body.String())
 	assert.Equal(t, 404, playgroundAuthenticatedRequest(t, engine, token, http.MethodPost, base, input).Code)
+	// An authenticated session uploads an attachment and reads its bytes back.
+	png := playgroundPNGFixture(48)
+	upload := playgroundAuthenticatedRequest(t, engine, token, http.MethodPost, attachmentBase, map[string]any{
+		"client_key": "router-file", "media_type": "image/png",
+		"data": base64.StdEncoding.EncodeToString(png),
+	})
+	require.Equal(t, 200, upload.Code, upload.Body.String())
+	var uploaded struct {
+		Data struct{ ID string }
+	}
+	require.NoError(t, common.Unmarshal(upload.Body.Bytes(), &uploaded))
+	require.NotEmpty(t, uploaded.Data.ID)
+	content := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, attachmentBase+"/"+uploaded.Data.ID+"/content", nil)
+	require.Equal(t, 200, content.Code)
+	assert.Equal(t, png, content.Body.Bytes())
 	// Ambient cookies are not accepted as authorization by these bearer APIs.
 	cookieOnly := httptest.NewRequest(http.MethodGet, base, nil)
 	cookieOnly.AddCookie(&http.Cookie{Name: "refresh_token", Value: "not-authority"})

@@ -25,6 +25,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -71,9 +73,9 @@ type playgroundMessagePayload struct {
 	Key      string `json:"key"`
 	From     string `json:"from"`
 	Versions []struct {
-		ID          string            `json:"id"`
-		Content     string            `json:"content"`
-		Attachments []json.RawMessage `json:"attachments,omitempty"`
+		ID          string                        `json:"id"`
+		Content     string                        `json:"content"`
+		Attachments []playgroundMessageAttachment `json:"attachments,omitempty"`
 	} `json:"versions"`
 	CreatedAt   *float64 `json:"createdAt,omitempty"`
 	StartedAt   *float64 `json:"startedAt,omitempty"`
@@ -100,6 +102,41 @@ type playgroundMessagePayload struct {
 type playgroundMessageResponse struct {
 	ClientKey string          `json:"client_key"`
 	Payload   json.RawMessage `json:"payload"`
+}
+
+// playgroundMessageAttachment is the stored reference to an attachment. Only
+// the ID is read from clients; the remaining fields are always rewritten from
+// the owned attachment row during validation.
+type playgroundMessageAttachment struct {
+	ID        string `json:"id"`
+	MediaType string `json:"media_type,omitempty"`
+	Filename  string `json:"filename,omitempty"`
+	ByteSize  int64  `json:"byte_size,omitempty"`
+}
+
+// playgroundStrictPage parses the p/page_size aliases without clamping: a
+// malformed or out-of-range value is rejected instead of silently truncated.
+func playgroundStrictPage(c *gin.Context) (*common.PageInfo, bool) {
+	for _, key := range []string{"p", "page_size", "ps", "size"} {
+		if values, ok := c.GetQueryArray(key); ok {
+			if len(values) != 1 {
+				return nil, false
+			}
+			value, err := strconv.Atoi(values[0])
+			limit := 50
+			if key == "p" {
+				limit = 1000000
+			}
+			if err != nil || value < 1 || value > limit {
+				return nil, false
+			}
+		}
+	}
+	page := common.GetPageQuery(c)
+	if page.PageSize < 1 || page.PageSize > 50 {
+		return nil, false
+	}
+	return page, true
 }
 
 func writePlaygroundError(c *gin.Context, err error) {
@@ -208,61 +245,120 @@ func encodePlaygroundSettings(request playgroundSessionRequest) (map[string]any,
 	return updates, nil
 }
 
-func validatePlaygroundMessages(inputs []playgroundMessageInput) ([]model.PlaygroundMessage, error) {
+// validatePlaygroundMessages normalizes stored payloads and resolves attachment
+// references against the session's owned attachments. The returned IDs are the
+// attachments the stored snapshot references, ordered for a deterministic
+// reference update. Create-time snapshots cannot reference attachments yet, so
+// allowAttachments is false there.
+func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroundMessageInput, allowAttachments bool) ([]model.PlaygroundMessage, []string, error) {
 	if len(inputs) > model.PlaygroundMessageMaxCount {
-		return nil, common.NewMessage("Playground conversations support at most 100 messages.")
+		return nil, nil, common.NewMessage("Playground conversations support at most 100 messages.")
 	}
-	messages := make([]model.PlaygroundMessage, 0, len(inputs))
+	payloads := make([]playgroundMessagePayload, 0, len(inputs))
 	keys := make(map[string]bool, len(inputs))
-	total := 0
+	attachmentIDs := make(map[string]bool)
 	for _, input := range inputs {
 		var payload playgroundMessagePayload
 		if err := common.Unmarshal(input.Payload, &payload); err != nil {
-			return nil, common.NewMessage("Invalid Playground message.")
+			return nil, nil, common.NewMessage("Invalid Playground message.")
 		}
 		if input.ClientKey == "" || len(input.ClientKey) > 200 || keys[input.ClientKey] || payload.Key != input.ClientKey || len(payload.Versions) == 0 || len(payload.Versions) > 100 {
-			return nil, common.NewMessage("Invalid Playground message.")
+			return nil, nil, common.NewMessage("Invalid Playground message.")
 		}
 		keys[input.ClientKey] = true
 		if payload.ErrorCode != nil && len(*payload.ErrorCode) > 500 {
-			return nil, common.NewMessage("Invalid Playground message.")
+			return nil, nil, common.NewMessage("Invalid Playground message.")
 		}
 		switch payload.From {
 		case "user", "assistant", "system":
 		default:
-			return nil, common.NewMessage("Invalid Playground message.")
+			return nil, nil, common.NewMessage("Invalid Playground message.")
 		}
 		switch payload.Status {
 		case "", "loading", "streaming", "complete", "error":
 		default:
-			return nil, common.NewMessage("Invalid Playground message.")
+			return nil, nil, common.NewMessage("Invalid Playground message.")
 		}
-		for _, version := range payload.Versions {
-			if version.ID == "" || len(version.ID) > 200 || len(version.Attachments) > 0 {
-				return nil, common.NewMessage("Invalid Playground message.")
+		for versionIndex := range payload.Versions {
+			version := &payload.Versions[versionIndex]
+			if version.ID == "" || len(version.ID) > 200 {
+				return nil, nil, common.NewMessage("Invalid Playground message.")
+			}
+			if len(version.Attachments) == 0 {
+				continue
+			}
+			if !allowAttachments || payload.From != "user" || len(version.Attachments) > model.PlaygroundAttachmentMaxCount {
+				return nil, nil, common.NewMessage("Invalid Playground message.")
+			}
+			seen := make(map[string]bool, len(version.Attachments))
+			for _, attachment := range version.Attachments {
+				if attachment.ID == "" || len(attachment.ID) > 200 || seen[attachment.ID] {
+					return nil, nil, common.NewMessage("Invalid Playground message.")
+				}
+				seen[attachment.ID] = true
+				attachmentIDs[attachment.ID] = true
 			}
 		}
 		if len(payload.Sources) > 100 {
-			return nil, common.NewMessage("Invalid Playground message.")
+			return nil, nil, common.NewMessage("Invalid Playground message.")
 		}
 		for _, source := range payload.Sources {
 			parsed, err := url.Parse(source.Href)
 			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || len(source.Href) > 4096 || len(source.Title) > 500 {
-				return nil, common.NewMessage("Invalid Playground message.")
+				return nil, nil, common.NewMessage("Invalid Playground message.")
+			}
+		}
+		payloads = append(payloads, payload)
+	}
+
+	resolved := map[string]model.PlaygroundAttachment{}
+	if len(attachmentIDs) > 0 {
+		ids := make([]string, 0, len(attachmentIDs))
+		for id := range attachmentIDs {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		var err error
+		resolved, err = model.GetPlaygroundAttachmentsByIDs(userID, sessionID, ids)
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(resolved) != len(ids) {
+			return nil, nil, common.NewMessage("Playground attachment not found.")
+		}
+	}
+	referenced := make([]string, 0, len(resolved))
+	for id := range resolved {
+		referenced = append(referenced, id)
+	}
+	sort.Strings(referenced)
+
+	messages := make([]model.PlaygroundMessage, 0, len(payloads))
+	total := 0
+	for index := range payloads {
+		payload := &payloads[index]
+		for versionIndex := range payload.Versions {
+			version := &payload.Versions[versionIndex]
+			for attachmentIndex := range version.Attachments {
+				attachment := &version.Attachments[attachmentIndex]
+				stored := resolved[attachment.ID]
+				attachment.MediaType = stored.MediaType
+				attachment.Filename = stored.Filename
+				attachment.ByteSize = stored.ByteSize
 			}
 		}
 		// Only the message contract is persisted; unknown credential/provider fields are discarded.
 		encoded, err := common.Marshal(payload)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		total += len(encoded)
 		if total > playgroundSnapshotMaxBytes {
-			return nil, common.NewMessage("Playground messages exceed the storage limit.")
+			return nil, nil, common.NewMessage("Playground messages exceed the storage limit.")
 		}
-		messages = append(messages, model.PlaygroundMessage{ClientKey: input.ClientKey, Payload: model.LongText(encoded)})
+		messages = append(messages, model.PlaygroundMessage{ClientKey: payload.Key, Payload: model.LongText(encoded)})
 	}
-	return messages, nil
+	return messages, referenced, nil
 }
 
 func ListPlaygroundSessions(c *gin.Context) {
@@ -304,7 +400,7 @@ func CreatePlaygroundSession(c *gin.Context) {
 		writePlaygroundError(c, err)
 		return
 	}
-	messages, err := validatePlaygroundMessages(request.Messages)
+	messages, _, err := validatePlaygroundMessages(c.GetInt("id"), "", request.Messages, false)
 	if err != nil {
 		writePlaygroundError(c, err)
 		return
@@ -405,12 +501,12 @@ func ReplacePlaygroundMessages(c *gin.Context) {
 		writePlaygroundError(c, common.NewMessage("Invalid Playground request."))
 		return
 	}
-	messages, err := validatePlaygroundMessages(*request.Messages)
+	messages, attachmentIDs, err := validatePlaygroundMessages(c.GetInt("id"), c.Param("id"), *request.Messages, true)
 	if err != nil {
 		writePlaygroundError(c, err)
 		return
 	}
-	revision, err := model.ReplacePlaygroundMessages(c.GetInt("id"), c.Param("id"), *request.Revision, messages)
+	revision, err := model.ReplacePlaygroundMessages(c.GetInt("id"), c.Param("id"), *request.Revision, messages, attachmentIDs)
 	if err != nil {
 		writePlaygroundError(c, err)
 		return

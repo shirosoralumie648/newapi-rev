@@ -380,6 +380,7 @@ func migrateDB() error {
 		&PlaygroundMessage{},
 		&PlaygroundArtifact{},
 		&PlaygroundArtifactVersion{},
+		&PlaygroundAttachment{},
 	)
 	if err != nil {
 		return err

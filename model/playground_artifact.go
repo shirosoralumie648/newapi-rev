@@ -184,17 +184,7 @@ func normalizePlaygroundArtifactSnapshot(kind string, title, language *string, c
 // Every artifact transaction acquires its parent first, matching message snapshot
 // writes and session deletion. This serializes capacity checks as well as CAS.
 func lockPlaygroundArtifactSession(tx *gorm.DB, userID int, sessionID string) (*PlaygroundSession, error) {
-	if userID <= 0 {
-		return nil, gorm.ErrRecordNotFound
-	}
-	var session PlaygroundSession
-	if err := lockForUpdate(tx).Where("id = ? AND user_id = ?", sessionID, userID).First(&session).Error; err != nil {
-		return nil, err
-	}
-	if session.ID != sessionID {
-		return nil, gorm.ErrRecordNotFound
-	}
-	return &session, nil
+	return lockPlaygroundSession(tx, userID, sessionID)
 }
 
 func lockPlaygroundArtifact(tx *gorm.DB, userID int, sessionID, artifactID string) (*PlaygroundArtifact, error) {

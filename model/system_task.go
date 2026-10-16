@@ -21,6 +21,8 @@ const (
 	SystemTaskTypeModelUpdate    = "model_update"
 	SystemTaskTypeMidjourneyPoll = "midjourney_poll"
 	SystemTaskTypeAsyncTaskPoll  = "async_task_poll"
+	// SystemTaskTypePlaygroundAttachmentCleanup deletes long-orphaned Playground attachments.
+	SystemTaskTypePlaygroundAttachmentCleanup = "playground_attachment_cleanup"
 )
 
 var ErrSystemTaskLockLost = errors.New("system task lock lost")

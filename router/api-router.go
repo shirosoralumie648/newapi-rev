@@ -90,6 +90,11 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.POST("/sessions/:id/artifacts/:artifactId/versions", controller.SavePlaygroundArtifactVersion)
 			playgroundRoute.POST("/sessions/:id/artifacts/:artifactId/restore", controller.RestorePlaygroundArtifactVersion)
 			playgroundRoute.DELETE("/sessions/:id/artifacts/:artifactId", controller.DeletePlaygroundArtifact)
+			playgroundRoute.GET("/sessions/:id/attachments", controller.ListPlaygroundAttachments)
+			playgroundRoute.POST("/sessions/:id/attachments", controller.CreatePlaygroundAttachment)
+			playgroundRoute.GET("/sessions/:id/attachments/:attachmentId", controller.GetPlaygroundAttachment)
+			playgroundRoute.GET("/sessions/:id/attachments/:attachmentId/content", controller.GetPlaygroundAttachmentContent)
+			playgroundRoute.DELETE("/sessions/:id/attachments/:attachmentId", controller.DeletePlaygroundAttachment)
 		}
 
 		userRoute := apiRouter.Group("/user")

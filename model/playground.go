@@ -111,6 +111,23 @@ func GetPlaygroundSession(userID int, id string) (*PlaygroundSession, error) {
 	return &session, nil
 }
 
+// Every Playground child resource (messages, artifacts, attachments) acquires
+// its parent session first. This serializes capacity checks, CAS writes and
+// session deletion against each other.
+func lockPlaygroundSession(tx *gorm.DB, userID int, sessionID string) (*PlaygroundSession, error) {
+	if userID <= 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	var session PlaygroundSession
+	if err := lockForUpdate(tx).Where("id = ? AND user_id = ?", sessionID, userID).First(&session).Error; err != nil {
+		return nil, err
+	}
+	if session.ID != sessionID {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return &session, nil
+}
+
 func FindPlaygroundSessionByClientID(userID int, clientID string) (*PlaygroundSession, error) {
 	if strings.TrimSpace(clientID) == "" {
 		return nil, ErrPlaygroundSessionNotFound
@@ -171,6 +188,9 @@ func DeletePlaygroundSession(userID int, id string) error {
 		if err := tx.Where("session_id = ? AND user_id = ?", id, userID).Delete(&PlaygroundArtifact{}).Error; err != nil {
 			return err
 		}
+		if err := tx.Where("session_id = ? AND user_id = ?", id, userID).Delete(&PlaygroundAttachment{}).Error; err != nil {
+			return err
+		}
 		if err := tx.Where("session_id = ? AND user_id = ?", id, userID).Delete(&PlaygroundMessage{}).Error; err != nil {
 			return err
 		}
@@ -194,7 +214,9 @@ func insertPlaygroundMessages(tx *gorm.DB, userID int, sessionID string, message
 	return tx.CreateInBatches(messages, 25).Error
 }
 
-func ReplacePlaygroundMessages(userID int, sessionID string, revision int64, messages []PlaygroundMessage) (int64, error) {
+// referencedAttachmentIDs are the attachment IDs the stored snapshot still
+// references; the same transaction recomputes attachment reference state.
+func ReplacePlaygroundMessages(userID int, sessionID string, revision int64, messages []PlaygroundMessage, referencedAttachmentIDs []string) (int64, error) {
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var session PlaygroundSession
 		if err := lockForUpdate(tx).Where("id = ? AND user_id = ?", sessionID, userID).First(&session).Error; err != nil {
@@ -214,7 +236,10 @@ func ReplacePlaygroundMessages(userID int, sessionID string, revision int64, mes
 		if err := tx.Where("session_id = ? AND user_id = ?", sessionID, userID).Delete(&PlaygroundMessage{}).Error; err != nil {
 			return err
 		}
-		return insertPlaygroundMessages(tx, userID, sessionID, messages)
+		if err := insertPlaygroundMessages(tx, userID, sessionID, messages); err != nil {
+			return err
+		}
+		return syncPlaygroundAttachmentReferences(tx, userID, sessionID, referencedAttachmentIDs)
 	})
 	return revision + 1, err
 }
