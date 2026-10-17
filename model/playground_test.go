@@ -40,6 +40,7 @@ import (
 	"github.com/QuantumNous/new-api/router"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/objectstore"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/playground_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
@@ -964,7 +965,7 @@ func TestPlaygroundAttachmentPersistenceMatrix(t *testing.T) {
 			var count int64
 			require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("session_id = ?", id).Count(&count).Error)
 			assert.Zero(t, count)
-			_, _, objectErr = objectStore.Head(context.Background(), stored.ObjectKey)
+			_, objectErr = objectStore.Head(context.Background(), stored.ObjectKey)
 			assert.ErrorIs(t, objectErr, objectstore.ErrObjectNotFound)
 		})
 	}
@@ -1036,11 +1037,11 @@ func TestPlaygroundAttachmentMessageReferences(t *testing.T) {
 	// and deleting it removes its stored object.
 	inUse := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+id+"/attachments/"+firstID, nil, controller.DeletePlaygroundAttachment)
 	assert.Equal(t, http.StatusConflict, inUse.Code, inUse.Body.String())
-	_, _, objectErr := objectStore.Head(context.Background(), firstRow.ObjectKey)
+	_, objectErr := objectStore.Head(context.Background(), firstRow.ObjectKey)
 	require.NoError(t, objectErr, "a referenced attachment keeps its object")
 	unused := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+id+"/attachments/"+secondID, nil, controller.DeletePlaygroundAttachment)
 	assert.Equal(t, http.StatusOK, unused.Code, unused.Body.String())
-	_, _, objectErr = objectStore.Head(context.Background(), secondRow.ObjectKey)
+	_, objectErr = objectStore.Head(context.Background(), secondRow.ObjectKey)
 	assert.ErrorIs(t, objectErr, objectstore.ErrObjectNotFound)
 	missing := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+id+"/attachments/"+secondID, nil, controller.DeletePlaygroundAttachment)
 	assert.Equal(t, http.StatusNotFound, missing.Code)
@@ -1050,7 +1051,7 @@ func TestPlaygroundAttachmentMessageReferences(t *testing.T) {
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	released := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+id+"/attachments/"+firstID, nil, controller.DeletePlaygroundAttachment)
 	assert.Equal(t, http.StatusOK, released.Code, released.Body.String())
-	_, _, objectErr = objectStore.Head(context.Background(), firstRow.ObjectKey)
+	_, objectErr = objectStore.Head(context.Background(), firstRow.ObjectKey)
 	assert.ErrorIs(t, objectErr, objectstore.ErrObjectNotFound)
 
 	// Invalid references never replace the stored history.
@@ -1114,9 +1115,9 @@ func TestPlaygroundAttachmentOrphanCleanup(t *testing.T) {
 	assert.ErrorIs(t, err, model.ErrPlaygroundAttachmentNotFound)
 	objectStore := objectstore.DefaultStore()
 	require.NotNil(t, objectStore)
-	_, _, objectErr := objectStore.Head(context.Background(), orphanRow.ObjectKey)
+	_, objectErr := objectStore.Head(context.Background(), orphanRow.ObjectKey)
 	assert.ErrorIs(t, objectErr, objectstore.ErrObjectNotFound)
-	_, _, objectErr = objectStore.Head(context.Background(), referencedRow.ObjectKey)
+	_, objectErr = objectStore.Head(context.Background(), referencedRow.ObjectKey)
 	require.NoError(t, objectErr)
 }
 
@@ -1243,7 +1244,7 @@ func TestPlaygroundAttachmentObjectStoreMigration(t *testing.T) {
 	assert.True(t, brokenRow.StoredInDatabase())
 	require.NotNil(t, brokenRow.Data)
 	assert.Equal(t, base64.StdEncoding.EncodeToString(brokenData), string(*brokenRow.Data))
-	_, _, headErr := store.Head(context.Background(), row.ObjectKey)
+	_, headErr := store.Head(context.Background(), row.ObjectKey)
 	require.NoError(t, headErr)
 
 	// Migrated content is still served byte-exact.
@@ -1268,7 +1269,7 @@ func TestPlaygroundAttachmentObjectStoreMigration(t *testing.T) {
 	assert.True(t, restored.StoredInDatabase())
 	require.NotNil(t, restored.Data)
 	assert.Equal(t, base64.StdEncoding.EncodeToString(png), string(*restored.Data))
-	_, _, headErr = store.Head(context.Background(), row.ObjectKey)
+	_, headErr = store.Head(context.Background(), row.ObjectKey)
 	assert.ErrorIs(t, headErr, objectstore.ErrObjectNotFound)
 	content = playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+id+"/attachments/"+legacy.ID+"/content", nil, controller.GetPlaygroundAttachmentContent)
 	require.Equal(t, http.StatusOK, content.Code, content.Body.String())
@@ -2263,7 +2264,12 @@ func TestPlaygroundWalletDebtGatesNewWork(t *testing.T) {
 	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
 		t.Run(dialect, func(t *testing.T) {
 			db := playgroundTestDB(t, dialect)
-			useWalletOverdraftLimit(t, 0, nil)
+			// The recharge below can only collect the debt from money above the
+			// account's overdraft credit line, so pin that line to zero.
+			previousQuotaSetting := *operation_setting.GetQuotaSetting()
+			operation_setting.GetQuotaSetting().OverdraftLimitUSD = 0
+			operation_setting.GetQuotaSetting().OverdraftGroupOverrides = nil
+			t.Cleanup(func() { *operation_setting.GetQuotaSetting() = previousQuotaSetting })
 			require.NoError(t, db.Create(&model.WalletDebt{UserId: 9, Amount: 2_500}).Error)
 
 			generation := playgroundRequest(t, 9, http.MethodPost, "/v1/videos", map[string]any{"model": "kling-v1", "prompt": "fox"}, controller.PlaygroundVideoTask)
