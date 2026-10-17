@@ -445,8 +445,11 @@ func UpdateToken(c *gin.Context) {
 			return
 		}
 	}
+	var quotaChange *model.TokenQuotaChange
 	if statusOnly != "" {
 		cleanToken.Status = token.Status
+		// 状态单独更新不得顺带写回额度快照，否则会覆盖并发扣费。
+		err = cleanToken.Update()
 	} else {
 		// If you add more fields, please also update token.Update()
 		cleanToken.Name = token.Name
@@ -469,8 +472,9 @@ func UpdateToken(c *gin.Context) {
 				return
 			}
 		}
+		// 差额更新额度：快照读取之后发生的并发扣费不能被旧快照覆盖。
+		quotaChange, err = cleanToken.UpdateWithQuotaTarget(previous.RemainQuota)
 	}
-	err = cleanToken.Update()
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -486,7 +490,8 @@ func UpdateToken(c *gin.Context) {
 		}{
 			{"name", previous.Name != cleanToken.Name},
 			{"expired_time", previous.ExpiredTime != cleanToken.ExpiredTime},
-			{"remain_quota", previous.RemainQuota != cleanToken.RemainQuota},
+			// 按请求意图判断；并发扣费导致的余额变化由 from/to 记录。
+			{"remain_quota", previous.RemainQuota != token.RemainQuota},
 			{"unlimited_quota", previous.UnlimitedQuota != cleanToken.UnlimitedQuota},
 			{"model_limits_enabled", previous.ModelLimitsEnabled != cleanToken.ModelLimitsEnabled},
 			{"model_limits", previous.ModelLimits != cleanToken.ModelLimits},
@@ -502,6 +507,10 @@ func UpdateToken(c *gin.Context) {
 			}
 		}
 		params["changed_fields"] = changedFields
+		// 管理日志记录已提交的额度变化（from/to 为提交后的前后值）。
+		if quotaChange != nil {
+			params["from"], params["to"] = quotaChange.Before, quotaChange.After
+		}
 	}
 	common.SetContextKey(c, constant.ContextKeyTokenAuditSucceeded, true)
 	c.JSON(http.StatusOK, gin.H{

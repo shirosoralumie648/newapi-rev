@@ -272,9 +272,10 @@ func TestTokenCacheInitPreservesLiveQuotaAndFenceBlocksStaleSnapshot(t *testing.
 	assert.Equal(t, 100, cached.RemainQuota)
 }
 
-// batchFlushTestDB opens an isolated database for the shutdown flush matrix and
-// swaps it into model.DB for the duration of the test.
-func batchFlushTestDB(t *testing.T, dialect string) *gorm.DB {
+// isolatedAccountingTestDB opens an isolated database for accounting tests
+// (shutdown flush matrix, token quota adjustment matrix) and swaps it into
+// model.DB for the duration of the test.
+func isolatedAccountingTestDB(t *testing.T, dialect string) *gorm.DB {
 	t.Helper()
 	var driver gorm.Dialector
 	switch dialect {
@@ -291,9 +292,9 @@ func batchFlushTestDB(t *testing.T, dialect string) *gorm.DB {
 		}
 		driver = postgres.Open(dsn)
 	default:
-		driver = sqlite.Open(filepath.Join(t.TempDir(), "batch_flush.db"))
+		driver = sqlite.Open(filepath.Join(t.TempDir(), "accounting.db"))
 	}
-	prefix := fmt.Sprintf("wl02flush_%d_", os.Getpid())
+	prefix := fmt.Sprintf("accounting_%d_", os.Getpid())
 	db, err := gorm.Open(driver, &gorm.Config{
 		NamingStrategy: schema.NamingStrategy{TablePrefix: prefix},
 		Logger:         gormlogger.Default.LogMode(gormlogger.Silent),
@@ -330,7 +331,7 @@ func batchFlushTestDB(t *testing.T, dialect string) *gorm.DB {
 func TestBatchUpdateShutdownFlushMatrix(t *testing.T) {
 	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
 		t.Run(dialect, func(t *testing.T) {
-			batchFlushTestDB(t, dialect)
+			isolatedAccountingTestDB(t, dialect)
 			resetBatchUpdateTestState(t)
 			common.BatchUpdateEnabled = true
 
@@ -420,4 +421,52 @@ func TestFlushBatchUpdateTimeoutLogsAndRetainsDeltas(t *testing.T) {
 	require.NoError(t, DB.First(&reloadedUser, user.Id).Error)
 	assert.Equal(t, 900, reloadedUser.Quota)
 	assert.Equal(t, 100, reloadedUser.UsedQuota)
+}
+
+func TestTokenQuotaUpdatePreservesConcurrentDeductions(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			isolatedAccountingTestDB(t, dialect)
+			resetBatchUpdateTestState(t)
+
+			for _, tc := range []struct {
+				name            string
+				target          int
+				wantRemain      int
+				wantQuotaChange bool
+			}{
+				{name: "unchanged target keeps the deduction", target: 100, wantRemain: 70},
+				{name: "raised target applies only the difference", target: 200, wantRemain: 170, wantQuotaChange: true},
+				{name: "lowered target applies only the difference", target: 40, wantRemain: 10, wantQuotaChange: true},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					token := createReserveTestToken(t, 100)
+					snapshot := token.RemainQuota
+
+					// A relay deduction commits after the operator's snapshot.
+					reserved, err := TryReserveTokenQuota(token.Id, token.Key, 30, false)
+					require.NoError(t, err)
+					require.True(t, reserved)
+					require.Equal(t, 70, getTokenFromDB(t, token.Id).RemainQuota)
+
+					token.RemainQuota = tc.target
+					token.Name = "renamed-" + dialect
+					change, err := token.UpdateWithQuotaTarget(snapshot)
+					require.NoError(t, err)
+
+					saved := getTokenFromDB(t, token.Id)
+					assert.Equal(t, "renamed-"+dialect, saved.Name)
+					assert.Equal(t, 30, saved.UsedQuota, "the concurrent deduction must stay recorded as usage")
+					assert.Equal(t, tc.wantRemain, saved.RemainQuota)
+					if !tc.wantQuotaChange {
+						assert.Nil(t, change)
+						return
+					}
+					require.NotNil(t, change)
+					assert.Equal(t, 70, change.Before)
+					assert.Equal(t, tc.wantRemain, change.After)
+				})
+			}
+		})
+	}
 }

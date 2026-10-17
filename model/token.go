@@ -308,15 +308,70 @@ func (token *Token) Insert() error {
 	return err
 }
 
+// tokenConfigFields are the metadata columns a token configuration update
+// writes. remain_quota is intentionally absent; quota changes go through
+// UpdateWithQuotaTarget so concurrent relay deductions survive.
+var tokenConfigFields = []string{"name", "status", "expired_time", "unlimited_quota",
+	"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry", "auto_groups",
+	"allow_user_quota_query"}
+
 // Update Make sure your token's fields is completed, because this will update non-zero values
 func (token *Token) Update() (err error) {
 	// 写库前失效缓存并设置 fence，防止并发读者把过期快照重新写回缓存。
 	if cacheErr := invalidateTokenCacheForMutation(token.Key); cacheErr != nil {
 		common.SysLog(common.LogText("failed to invalidate token cache before update: %s", cacheErr.Error()))
 	}
-	return DB.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
-		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry", "auto_groups",
-		"allow_user_quota_query").Updates(token).Error
+	return DB.Model(token).Select(tokenConfigFields).Updates(token).Error
+}
+
+// TokenQuotaChange is the committed before/after snapshot of a token's
+// remaining quota after a manual configuration update.
+type TokenQuotaChange struct {
+	Before int
+	After  int
+}
+
+// UpdateWithQuotaTarget commits the token's configuration. The remaining quota
+// moves by (token.RemainQuota - quotaSnapshot), where quotaSnapshot is the
+// committed balance the request was based on, so a relay deduction that landed
+// between the snapshot and this write is preserved instead of being overwritten
+// by the stale snapshot. The row stays locked for the whole update so the
+// returned transition matches the committed row. A nil change means the
+// requested balance equals the snapshot, so no balance write was needed.
+func (token *Token) UpdateWithQuotaTarget(quotaSnapshot int) (*TokenQuotaChange, error) {
+	// 写库前失效缓存并设置 fence，防止并发读者把过期快照重新写回缓存。
+	if cacheErr := invalidateTokenCacheForMutation(token.Key); cacheErr != nil {
+		common.SysLog(common.LogText("failed to invalidate token cache before update: %s", cacheErr.Error()))
+	}
+	delta := int64(token.RemainQuota) - int64(quotaSnapshot)
+	var change *TokenQuotaChange
+	committedRemainQuota := quotaSnapshot
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var committed Token
+		if err := lockForUpdate(tx).Where("id = ? AND user_id = ?", token.Id, token.UserId).First(&committed).Error; err != nil {
+			return err
+		}
+		committedRemainQuota = committed.RemainQuota
+		if err := tx.Model(token).Select(tokenConfigFields).Updates(token).Error; err != nil {
+			return err
+		}
+		if delta == 0 {
+			return nil
+		}
+		result := tx.Model(&Token{}).Where("id = ?", token.Id).
+			Update("remain_quota", gorm.Expr("remain_quota + ?", delta))
+		if result.Error != nil {
+			return result.Error
+		}
+		change = &TokenQuotaChange{Before: committed.RemainQuota, After: committed.RemainQuota + int(delta)}
+		committedRemainQuota = change.After
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	token.RemainQuota = committedRemainQuota
+	return change, nil
 }
 
 func (token *Token) SelectUpdate() (err error) {

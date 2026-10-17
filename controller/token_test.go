@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
@@ -555,6 +556,90 @@ func TestUpdateTokenMasksKeyInResponse(t *testing.T) {
 	}
 }
 
+func TestUpdateTokenQuotaAdjustmentPreservesConcurrentDeductions(t *testing.T) {
+	const deduction = 30
+	for _, tc := range []struct {
+		name         string
+		target       int
+		statusOnly   bool
+		wantRemain   int
+		wantQuotaLog bool
+	}{
+		{name: "unchanged balance keeps the deduction", target: 100, wantRemain: 70},
+		{name: "raised balance applies only the difference", target: 200, wantRemain: 170, wantQuotaLog: true},
+		{name: "lowered balance applies only the difference", target: 40, wantRemain: 10, wantQuotaLog: true},
+		{name: "status only update never rewrites the balance", statusOnly: true, wantRemain: 70},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupTokenControllerTestDB(t)
+			token := seedToken(t, db, 1, "quota-race", "quota-race-token-key")
+
+			// Simulate a relay deduction that commits after the handler read its
+			// snapshot but before the configuration update executes.
+			deducted := false
+			const callback = "token-quota-race"
+			require.NoError(t, db.Callback().Query().After("gorm:query").Register(callback, func(tx *gorm.DB) {
+				if deducted || tx.Statement.Table != "tokens" {
+					return
+				}
+				deducted = true
+				require.NoError(t, model.DB.Model(&model.Token{}).Where("id = ?", token.Id).Updates(map[string]any{
+					"remain_quota": gorm.Expr("remain_quota - ?", deduction),
+					"used_quota":   gorm.Expr("used_quota + ?", deduction),
+				}).Error)
+			}))
+			t.Cleanup(func() { require.NoError(t, db.Callback().Query().Remove(callback)) })
+
+			target := "/api/token/"
+			body := map[string]any{
+				"id": token.Id, "name": "quota-race", "expired_time": -1,
+				"remain_quota": tc.target, "unlimited_quota": true, "status": common.TokenStatusEnabled,
+			}
+			if tc.statusOnly {
+				target = "/api/token/?status_only=true"
+				body = map[string]any{"id": token.Id, "status": common.TokenStatusDisabled}
+			}
+			ctx, recorder := newAuthenticatedContext(t, http.MethodPut, target, body, 1)
+			UpdateToken(ctx)
+
+			response := decodeAPIResponse(t, recorder)
+			require.True(t, response.Success, response.Message)
+			require.True(t, deducted, "the concurrent deduction must land before the token update")
+
+			var saved model.Token
+			require.NoError(t, db.First(&saved, token.Id).Error)
+			assert.Equal(t, tc.wantRemain, saved.RemainQuota)
+			assert.Equal(t, deduction, saved.UsedQuota, "the deduction must stay recorded as usage")
+			if !tc.statusOnly {
+				// The response reports the committed balance, not the request body.
+				var returned struct {
+					RemainQuota int `json:"remain_quota"`
+				}
+				require.NoError(t, common.Unmarshal(response.Data, &returned))
+				assert.Equal(t, tc.wantRemain, returned.RemainQuota)
+			}
+
+			params, ok := common.GetContextKeyType[model.AuditFields](ctx, constant.ContextKeyTokenAuditParams)
+			require.True(t, ok)
+			if tc.statusOnly {
+				assert.Equal(t, common.TokenStatusEnabled, params["from"])
+				assert.Equal(t, common.TokenStatusDisabled, params["to"])
+				return
+			}
+			if !tc.wantQuotaLog {
+				assert.NotContains(t, params, "from")
+				assert.NotContains(t, params, "to")
+				assert.NotContains(t, params["changed_fields"], "remain_quota")
+				return
+			}
+			// The log reports the committed transition, not the requested value.
+			assert.Equal(t, 70, params["from"])
+			assert.Equal(t, tc.wantRemain, params["to"])
+			assert.Contains(t, params["changed_fields"], "remain_quota")
+		})
+	}
+}
+
 func TestGetTokenKeyRequiresOwnershipAndReturnsFullKey(t *testing.T) {
 	db := setupTokenControllerTestDB(t)
 	token := seedToken(t, db, 1, "owned-token", "owner1234token5678")
@@ -805,7 +890,7 @@ func verifyAPITokenAudit(t *testing.T) {
 		{name: "malformed body", method: "POST", path: "/", body: `{"key":"raw-body-secret"`, action: "token.create", params: `{}`},
 		{name: "validation error exceeds audit buffer", method: "POST", path: "/", body: `{"remain_quota":` + strings.Repeat("9", 64*1024) + `}`, action: "token.create", params: `{}`},
 		{name: "create storage failure", method: "POST", path: "/", body: `{"name":"attempt","unlimited_quota":true}`, action: "token.create", params: `{"name":"attempt"}`, failWrite: true},
-		{name: "normalized update", method: "PUT", path: "/", body: `{"id":$id,"name":"renamed","expired_time":-1,"remain_quota":200,"unlimited_quota":true,"group":"default","cross_group_retry":true,"allow_ips":""}`, action: "token.update", success: true, params: `{"id":$id,"name":"renamed","changed_fields":["name","remain_quota","group","cross_group_retry","auto_groups"]}`},
+		{name: "normalized update", method: "PUT", path: "/", body: `{"id":$id,"name":"renamed","expired_time":-1,"remain_quota":200,"unlimited_quota":true,"group":"default","cross_group_retry":true,"allow_ips":""}`, action: "token.update", success: true, params: `{"id":$id,"name":"renamed","from":100,"to":200,"changed_fields":["name","remain_quota","group","cross_group_retry","auto_groups"]}`},
 		{name: "configuration values stay private", method: "PUT", path: "/", body: `{"id":$id,"name":"owned","expired_time":42,"remain_quota":100,"unlimited_quota":false,"model_limits_enabled":true,"model_limits":"private-model-configuration","allow_ips":"203.0.113.57","group":"auto","cross_group_retry":true}`, action: "token.update", success: true, params: `{"id":$id,"name":"owned","changed_fields":["expired_time","unlimited_quota","model_limits_enabled","model_limits","allow_ips"]}`},
 		{name: "unchanged update", method: "PUT", path: "/", body: `{"id":$id,"name":"owned","expired_time":-1,"remain_quota":100,"unlimited_quota":true,"group":"auto","cross_group_retry":true,"allow_ips":""}`, action: "token.update", success: true, params: `{"id":$id,"name":"owned","changed_fields":[]}`},
 		{name: "user quota query update", method: "PUT", path: "/", body: `{"id":$id,"name":"owned","expired_time":-1,"remain_quota":100,"unlimited_quota":true,"group":"auto","cross_group_retry":true,"allow_ips":"","allow_user_quota_query":true}`, action: "token.update", success: true, params: `{"id":$id,"name":"owned","changed_fields":["allow_user_quota_query"]}`},
