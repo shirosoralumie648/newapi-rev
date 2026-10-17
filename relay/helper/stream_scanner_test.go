@@ -772,8 +772,9 @@ func TestStreamScannerHandler_FirstTokenTimeoutSuppressesEarlyPing(t *testing.T)
 	waitForStreamEnd(t, done)
 
 	body := recorder.Body.String()
-	assert.Contains(t, body, "{\"id\":1}")
-	assert.NotContains(t, body, ": PING",
+	firstData := strings.Index(body, "{\"id\":1}")
+	require.GreaterOrEqual(t, firstData, 0)
+	assert.NotContains(t, body[:firstData], ": PING",
 		"a ping must not commit the response while a first-token fallback is still possible")
 	assert.Equal(t, relaycommon.StreamEndReasonDone, info.StreamStatus.EndReason)
 	assert.Nil(t, FirstTokenTimeoutError(info))
