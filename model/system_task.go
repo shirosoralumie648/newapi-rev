@@ -25,6 +25,9 @@ const (
 	SystemTaskTypePlaygroundAttachmentCleanup = "playground_attachment_cleanup"
 	// SystemTaskTypePlaygroundTaskCleanup deletes expired terminal Playground task rows.
 	SystemTaskTypePlaygroundTaskCleanup = "playground_task_cleanup"
+	// SystemTaskTypeWalletReconcile compares every wallet balance with the sum
+	// of its append-only ledger and alerts on deviation without changing balances.
+	SystemTaskTypeWalletReconcile = "wallet_reconcile"
 )
 
 var ErrSystemTaskLockLost = errors.New("system task lock lost")

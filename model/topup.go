@@ -3,7 +3,6 @@ package model
 import (
 	"errors"
 	"fmt"
-	"maps"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -84,37 +83,32 @@ func ValidateTopUpQuotaCapacity(userId int, creditedQuota int) error {
 	return nil
 }
 
-// creditTopUpQuota atomically enforces the wallet ceiling while adding quota.
-// Keeping the predicate and increment in one UPDATE prevents two
-// concurrent callbacks from both passing a separate read/check.
-func creditTopUpQuota(tx *gorm.DB, userId int, creditedQuota int, updates map[string]any) error {
-	maxCurrentQuota, err := topUpQuotaMaxCurrent(creditedQuota)
-	if err != nil {
+// creditTopUpQuota credits top-up quota through the wallet ledger so the
+// balance change and its ledger row commit together, and replays of the same
+// reference never credit a second time. The wallet ceiling is enforced on the
+// locked balance inside ApplyWalletLedgerDelta.
+func creditTopUpQuota(tx *gorm.DB, userId int, creditedQuota int, kind string, refType string, refId string, updates map[string]any) error {
+	if _, err := topUpQuotaMaxCurrent(creditedQuota); err != nil {
 		return err
 	}
 
-	updateFields := make(map[string]any, len(updates)+1)
-	maps.Copy(updateFields, updates)
-	updateFields["quota"] = gorm.Expr("quota + ?", creditedQuota)
-
-	result := tx.Model(&User{}).
-		Where("id = ? AND quota <= ?", userId, maxCurrentQuota).
-		Updates(updateFields)
-	if result.Error != nil {
-		return result.Error
+	applied, err := ApplyWalletLedgerDelta(tx, userId, kind, int64(creditedQuota), refType, refId, "")
+	if err != nil {
+		if errors.Is(err, ErrWalletQuotaLimitExceeded) {
+			return ErrTopUpQuotaLimitExceeded
+		}
+		return err
 	}
-	if result.RowsAffected == 1 {
+	if !applied {
+		// The reference was already credited; nothing to apply.
 		return nil
 	}
-
-	var count int64
-	if err := tx.Model(&User{}).Where("id = ?", userId).Count(&count).Error; err != nil {
-		return err
+	if len(updates) > 0 {
+		if err := tx.Model(&User{}).Where("id = ?", userId).Updates(updates).Error; err != nil {
+			return err
+		}
 	}
-	if count == 0 {
-		return gorm.ErrRecordNotFound
-	}
-	return ErrTopUpQuotaLimitExceeded
+	return nil
 }
 
 func (topUp *TopUp) Update() error {
@@ -215,7 +209,7 @@ func RechargeEpay(tradeNo string, actualPaymentMethod string, callerIp string) (
 		if err := tx.Save(topUp).Error; err != nil {
 			return err
 		}
-		return creditTopUpQuota(tx, topUp.UserId, quotaToAdd, nil)
+		return creditTopUpQuota(tx, topUp.UserId, quotaToAdd, WalletLedgerKindTopUp, WalletLedgerRefTopUp, topUp.TradeNo, nil)
 	})
 	if err != nil {
 		if !errors.Is(err, ErrTopUpNotFound) && !errors.Is(err, ErrPaymentMethodMismatch) && !errors.Is(err, ErrTopUpStatusInvalid) {
@@ -273,7 +267,7 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 		if err != nil || quota <= 0 {
 			return ErrInvalidTopUpQuota
 		}
-		return creditTopUpQuota(tx, topUp.UserId, quota, map[string]any{
+		return creditTopUpQuota(tx, topUp.UserId, quota, WalletLedgerKindTopUp, WalletLedgerRefTopUp, topUp.TradeNo, map[string]any{
 			"stripe_customer": customerId,
 		})
 	})
@@ -503,7 +497,7 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 		}
 
 		// 增加用户额度（立即写库，保持一致性）
-		if err := creditTopUpQuota(tx, topUp.UserId, quotaToAdd, nil); err != nil {
+		if err := creditTopUpQuota(tx, topUp.UserId, quotaToAdd, WalletLedgerKindTopUp, WalletLedgerRefTopUp, topUp.TradeNo, nil); err != nil {
 			return err
 		}
 
@@ -580,7 +574,7 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 			}
 		}
 
-		return creditTopUpQuota(tx, topUp.UserId, quota, updateFields)
+		return creditTopUpQuota(tx, topUp.UserId, quota, WalletLedgerKindTopUp, WalletLedgerRefTopUp, topUp.TradeNo, updateFields)
 	})
 
 	if err != nil {
@@ -638,7 +632,7 @@ func RechargeWaffo(tradeNo string, callerIp string) (err error) {
 			return err
 		}
 
-		return creditTopUpQuota(tx, topUp.UserId, quotaToAdd, nil)
+		return creditTopUpQuota(tx, topUp.UserId, quotaToAdd, WalletLedgerKindTopUp, WalletLedgerRefTopUp, topUp.TradeNo, nil)
 	})
 
 	if err != nil {
@@ -698,7 +692,7 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 			return err
 		}
 
-		return creditTopUpQuota(tx, topUp.UserId, quotaToAdd, nil)
+		return creditTopUpQuota(tx, topUp.UserId, quotaToAdd, WalletLedgerKindTopUp, WalletLedgerRefTopUp, topUp.TradeNo, nil)
 	})
 
 	if err != nil {

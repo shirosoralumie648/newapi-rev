@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/shopspring/decimal"
@@ -65,6 +66,23 @@ func AdjustUserQuota(userID, operatorRole int, mode string, value int) (*UserQuo
 			}
 			if result.RowsAffected != 1 {
 				return gorm.ErrRecordNotFound
+			}
+			delta := int64(after) - int64(user.Quota)
+			refId := fmt.Sprintf("%d-%d-%s", userID, common.GetTimestamp(), common.GetRandomString(8))
+			applied, err := AppendWalletLedgerTx(tx, &WalletLedgerEntry{
+				UserId:       userID,
+				Kind:         WalletLedgerKindAdminAdjust,
+				Amount:       delta,
+				BalanceAfter: int64(after),
+				RefType:      WalletLedgerRefAdminAdjust,
+				RefId:        refId,
+				CreatedAt:    common.GetTimestamp(),
+			})
+			if err != nil {
+				return err
+			}
+			if !applied {
+				return errors.New("wallet ledger reference conflict")
 			}
 		}
 		adjustment = UserQuotaAdjustment{UserID: user.Id, Username: user.Username, Before: user.Quota, After: after}

@@ -822,6 +822,26 @@ func PurchaseSubscriptionWithBalance(userId int, planId int) error {
 			return err
 		}
 
+		// Balance-funded subscription payment is a wallet fund event: the
+		// ledger row and the balance deduction commit together.
+		if requiredQuota > 0 {
+			applied, err := AppendWalletLedgerTx(tx, &WalletLedgerEntry{
+				UserId:       userId,
+				Kind:         WalletLedgerKindSubscriptionPayment,
+				Amount:       -int64(requiredQuota),
+				BalanceAfter: int64(user.Quota - requiredQuota),
+				RefType:      WalletLedgerRefSubscription,
+				RefId:        tradeNo,
+				CreatedAt:    common.GetTimestamp(),
+			})
+			if err != nil {
+				return err
+			}
+			if !applied {
+				return errors.New("wallet ledger reference conflict")
+			}
+		}
+
 		logPlanTitle = plan.Title
 		logMoney = plan.PriceAmount
 		chargedQuota = requiredQuota

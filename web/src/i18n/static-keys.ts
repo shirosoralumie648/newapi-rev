@@ -974,4 +974,16 @@ export const STATIC_I18N_KEYS = [
   'Channel priorities changed. Refresh and try again.',
   'Invalid channel priority move',
   'Channel priority is outside the sortable range',
+  // Wallet ledger entries: kind labels are rendered from
+  // WALLET_LEDGER_KIND_LABELS via t(label), so the literal scan cannot see them.
+  'Opening Balance',
+  'Top-up',
+  'Admin Adjust',
+  'Subscription Payment',
+  'Check-in',
+  'Affiliate Transfer',
+  'System Grant',
+  'Hourly Consumption',
+  'Chargeback',
+  'Storage Fee',
 ] as const

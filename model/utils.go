@@ -86,6 +86,20 @@ func addNewRecord(type_ int, id int, value int) {
 // batchUpdate drains pending accounting deltas outside of shutdown. A failed
 // pass keeps its deltas queued for the next pass instead of dropping them.
 func batchUpdate() {
+	// check if there's any data to update
+	hasData := walletConsumeLedgerPending()
+	for i := range BatchUpdateTypeCount {
+		batchUpdateLocks[i].Lock()
+		if len(batchUpdateStores[i]) > 0 {
+			hasData = true
+			batchUpdateLocks[i].Unlock()
+			break
+		}
+		batchUpdateLocks[i].Unlock()
+	}
+	if !hasData {
+		return
+	}
 	if err := flushBatchUpdateSnapshot(context.Background()); err != nil {
 		common.SysError(common.LogText("batch update failed; pending entries are kept for the next pass: %s", err.Error()))
 	}
@@ -108,6 +122,9 @@ func flushBatchUpdateSnapshot(ctx context.Context) error {
 		total += len(stores[i])
 	}
 	if total == 0 {
+		// Wallet consumption buckets can be the only pending data; flush them
+		// here so callers still observe a committed snapshot.
+		flushWalletConsumeLedgers()
 		return nil
 	}
 
@@ -157,6 +174,9 @@ func flushBatchUpdateSnapshot(ctx context.Context) error {
 		}
 		return err
 	}
+	// Consumption buckets are flushed after the wallet balances so each
+	// consume_hourly row records the balance the flushed consumption implies.
+	flushWalletConsumeLedgers()
 	common.SysLog(common.LogText("batch update finished"))
 	return nil
 }
@@ -200,6 +220,13 @@ func pendingBatchUpdateCount() int {
 		batchUpdateLocks[i].Unlock()
 	}
 	return pending
+}
+
+// FlushBatchUpdates applies every queued batch update immediately. Callers that
+// need a committed snapshot (wallet reconciliation, shutdown) use it instead of
+// waiting for the periodic batch updater.
+func FlushBatchUpdates() {
+	batchUpdate()
 }
 
 func RecordExist(err error) (bool, error) {

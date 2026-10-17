@@ -267,7 +267,13 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 	}
 
 	// 1. 退还资金来源（钱包或订阅）
-	if err := taskAdjustFunding(task, -quota); err != nil {
+	// 钱包退款以 task_id 为账本引用，重复退款调用是幂等的。
+	if taskIsSubscription(task) {
+		if err := taskAdjustFunding(task, -quota); err != nil {
+			logger.LogWarn(ctx, common.LogText("failed to refund the funding source, task %s: %s", task.TaskID, err.Error()))
+			return false
+		}
+	} else if err := model.RefundWalletQuota(task.UserId, quota, model.WalletLedgerRefTaskRefund, task.TaskID); err != nil {
 		logger.LogWarn(ctx, common.LogText("failed to refund the funding source, task %s: %s", task.TaskID, err.Error()))
 		return false
 	}
@@ -332,6 +338,9 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	if err := taskAdjustFunding(task, quotaDelta); err != nil {
 		logger.LogError(ctx, common.LogText("failed to adjust funding for the difference, task %s: %s", task.TaskID, err.Error()))
 		return
+	}
+	if !taskIsSubscription(task) {
+		model.RecordWalletConsumeDelta(task.UserId, -int64(quotaDelta))
 	}
 
 	// 调整令牌额度
