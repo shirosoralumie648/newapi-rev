@@ -26,6 +26,7 @@ import { ERROR_MESSAGES } from '../constants'
 import {
   applyStreamingChunk,
   buildChatCompletionPayload,
+  ensurePlaygroundMessageAttachments,
   updateAssistantMessageWithError,
   updateLastAssistantMessage,
   parseRequestErrorDetails,
@@ -356,14 +357,18 @@ export function useChatHandler({
     ]
   )
 
-  // Send chat request (stream or non-stream based on config)
+  // Send chat request (stream or non-stream based on config). Older messages
+  // may reference attachments whose bytes are not cached yet; load them before
+  // the payload is built so the request still carries the images.
   const sendChat = useCallback(
     (messages: Message[]) => {
-      if (config.stream) {
-        sendStreamingChat(messages)
-      } else {
-        sendNonStreamingChat(messages)
-      }
+      void ensurePlaygroundMessageAttachments(messages).then(() => {
+        if (config.stream) {
+          sendStreamingChat(messages)
+        } else {
+          void sendNonStreamingChat(messages)
+        }
+      })
     },
     [config.stream, sendStreamingChat, sendNonStreamingChat]
   )

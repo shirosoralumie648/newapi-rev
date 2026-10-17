@@ -1,3 +1,4 @@
+import type { FileUIPart } from 'ai'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -18,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import { ErrorState } from '@/components/error-state'
 import { Button } from '@/components/ui/button'
@@ -42,8 +44,10 @@ import {
   getCurrentVersion,
   getMessageContent,
   getMessageContentState,
+  PLAYGROUND_ATTACHMENT_ERRORS,
+  uploadPlaygroundAttachments,
 } from './lib'
-import type { Message } from './types'
+import type { Message, MessageAttachment } from './types'
 
 export function Playground() {
   const userId = useAuthStore((state) => state.auth.user?.id ?? null)
@@ -115,6 +119,39 @@ function PlaygroundContent() {
     updateMessages,
     sendChat,
   })
+
+  const handleInputSubmit = useCallback(
+    async (text: string, files: (FileUIPart & { id?: string })[] = []) => {
+      if (files.length === 0) {
+        handleSendMessage(text)
+        return
+      }
+      const session = activeSession
+      if (!session) {
+        throw new Error(PLAYGROUND_ATTACHMENT_ERRORS.UPLOAD_FAILED)
+      }
+      let attachments: MessageAttachment[]
+      try {
+        const bound = await sync.ensureServerSession(session.id)
+        if (!bound.server) {
+          throw new Error(PLAYGROUND_ATTACHMENT_ERRORS.UPLOAD_FAILED)
+        }
+        attachments = await uploadPlaygroundAttachments(bound.server.id, files)
+      } catch (error) {
+        const serverMessage = getServerMessage(error)
+        if (serverMessage) {
+          toast.error(t(serverMessage))
+        } else if (error instanceof Error && error.message) {
+          toast.error(t(error.message))
+        } else {
+          toast.error(t(PLAYGROUND_ATTACHMENT_ERRORS.UPLOAD_FAILED))
+        }
+        throw error
+      }
+      handleSendMessage(text, attachments)
+    },
+    [activeSession, handleSendMessage, sync, t]
+  )
 
   const stopBeforeSessionChange = useCallback(() => {
     if (isGenerating) stopGeneration()
@@ -383,7 +420,7 @@ function PlaygroundContent() {
               onModelChange={(value) => updateConfig('model', value)}
               onParameterEnabledChange={updateParameterEnabled}
               onStop={stopGeneration}
-              onSubmit={handleSendMessage}
+              onSubmit={handleInputSubmit}
               parameterEnabled={parameterEnabled}
               hasMessages={messages.length > 0}
             />

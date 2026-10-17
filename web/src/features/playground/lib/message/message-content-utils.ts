@@ -58,9 +58,10 @@ function shouldShowMessageContent(
   message: Message,
   versionContent: string
 ): boolean {
+  const hasAttachments = (message.versions[0]?.attachments?.length ?? 0) > 0
   return (
     (message.from === MESSAGE_ROLES.USER || !message.isReasoningStreaming) &&
-    versionContent.length > 0
+    (versionContent.length > 0 || hasAttachments)
   )
 }
 

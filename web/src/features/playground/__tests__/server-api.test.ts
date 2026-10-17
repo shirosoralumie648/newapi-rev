@@ -76,3 +76,47 @@ test('message snapshots retain their server revision and payload', async () => {
     messages: [message],
   })
 })
+
+test('message snapshots derive attachment urls from stored references', async () => {
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        revision: 3,
+        messages: [
+          {
+            client_key: 'm',
+            payload: {
+              key: 'm',
+              from: 'user',
+              versions: [
+                {
+                  id: 'v',
+                  content: 'look',
+                  attachments: [
+                    {
+                      id: 'pgf_1',
+                      media_type: 'image/png',
+                      filename: 'photo.png',
+                      byte_size: 8,
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+      },
+    },
+  })
+  const snapshot = await getPlaygroundMessages('pgs_one')
+  expect(snapshot.messages[0].versions[0].attachments).toEqual([
+    {
+      id: 'pgf_1',
+      url: '/api/playground/sessions/pgs_one/attachments/pgf_1/content',
+      mediaType: 'image/png',
+      filename: 'photo.png',
+      byteSize: 8,
+    },
+  ])
+})

@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 
 import {
   appendUserMessagePair,
@@ -24,7 +24,7 @@ import {
   createRegeneratedMessages,
   removeMessageByKey,
 } from '../lib'
-import type { Message } from '../types'
+import type { Message, MessageAttachment } from '../types'
 
 type UsePlaygroundConversationOptions = {
   messages: Message[]
@@ -42,14 +42,22 @@ export function usePlaygroundConversation({
   const [editingMessageKey, setEditingMessageKey] = useState<string | null>(
     null
   )
+  // Sends may upload attachments first; the ref keeps the append based on the
+  // newest history even when the callback started a few awaits ago.
+  const messagesRef = useRef(messages)
+  messagesRef.current = messages
 
   const handleSendMessage = useCallback(
-    (text: string) => {
-      const nextMessages = appendUserMessagePair(messages, text)
+    (text: string, attachments?: MessageAttachment[]) => {
+      const nextMessages = appendUserMessagePair(
+        messagesRef.current,
+        text,
+        attachments
+      )
       updateMessages(nextMessages)
       sendChat(nextMessages)
     },
-    [messages, updateMessages, sendChat]
+    [updateMessages, sendChat]
   )
 
   const handleRegenerateMessage = useCallback(

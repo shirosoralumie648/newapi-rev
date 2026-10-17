@@ -24,25 +24,16 @@ import { toast } from 'sonner'
 import {
   PromptInputButton,
   PromptInputTools,
+  usePromptInputAttachments,
 } from '@/components/ai-elements/prompt-input'
 import { ConfirmDialog } from '@/components/confirm-dialog'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 
-import {
-  ATTACHMENT_ACTIONS,
-  getAttachmentActionNotice,
-  getSearchActionNotice,
-} from '../../lib'
+import { getSearchActionNotice } from '../../lib'
 import type { ParameterEnabled, PlaygroundConfig } from '../../types'
 import { PlaygroundParameterPanel } from './playground-parameter-panel'
 
@@ -72,14 +63,8 @@ export function PlaygroundInputTools({
   parameterEnabled,
 }: PlaygroundInputToolsProps) {
   const { t } = useTranslation()
+  const attachments = usePromptInputAttachments()
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
-
-  const handleFileAction = (action: string) => {
-    const notice = getAttachmentActionNotice(action)
-    toast.info(t(notice.title), {
-      description: notice.description,
-    })
-  }
 
   const handleSearchAction = () => {
     const notice = getSearchActionNotice()
@@ -96,38 +81,22 @@ export function PlaygroundInputTools({
     <>
       <PromptInputTools className='bg-background/70 border-border/60 rounded-lg border p-1 shadow-xs'>
         <Tooltip>
-          <DropdownMenu>
-            <TooltipTrigger
-              render={
-                <DropdownMenuTrigger
-                  render={
-                    <PromptInputButton
-                      aria-label={t('Attach')}
-                      className='text-muted-foreground hover:text-foreground hover:bg-muted/70 font-medium'
-                      disabled={disabled}
-                      variant='ghost'
-                    />
-                  }
-                >
-                  <PaperclipIcon size={16} />
-                </DropdownMenuTrigger>
-              }
-            />
-            <TooltipContent>
-              <p>{t('Attach')}</p>
-            </TooltipContent>
-            <DropdownMenuContent align='start'>
-              {ATTACHMENT_ACTIONS.map(({ action, icon: Icon, label }) => (
-                <DropdownMenuItem
-                  key={action}
-                  onClick={() => handleFileAction(action)}
-                >
-                  <Icon className='mr-2' size={16} />
-                  {t(label)}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <TooltipTrigger
+            render={
+              <PromptInputButton
+                aria-label={t('Attach')}
+                className='text-muted-foreground hover:text-foreground hover:bg-muted/70 font-medium'
+                disabled={disabled}
+                onClick={() => attachments.openFileDialog()}
+                variant='ghost'
+              >
+                <PaperclipIcon size={16} />
+              </PromptInputButton>
+            }
+          />
+          <TooltipContent>
+            <p>{t('Attach')}</p>
+          </TooltipContent>
         </Tooltip>
 
         <Tooltip>

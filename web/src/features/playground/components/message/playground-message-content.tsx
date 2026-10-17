@@ -48,7 +48,9 @@ import {
   type MessageAlignment,
 } from '../../lib'
 import { getMessageContentStyles } from '../../lib/message/message-styles'
+import { getCurrentVersion } from '../../lib/message/message-utils'
 import type { Message } from '../../types'
+import { MessageAttachmentList } from './message-attachment-list'
 import { MessageError } from './message-error'
 import { MessageMetadata } from './message-metadata'
 
@@ -136,6 +138,9 @@ export function PlaygroundMessageContent({
 
       {!isError && showMessageContent && (
         <>
+          <MessageAttachmentList
+            attachments={getCurrentVersion(message).attachments ?? []}
+          />
           {isSourceVisible ? (
             <CodeBlock
               code={versionContent}

@@ -1,0 +1,104 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+import { ImageIcon } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+
+import {
+  getPlaygroundAttachmentDataUrl,
+  getPlaygroundAttachmentObjectUrl,
+  loadPlaygroundAttachment,
+} from '../../lib'
+import type { MessageAttachment } from '../../types'
+
+function useAttachmentPreviewUrl(
+  attachment: MessageAttachment
+): string | undefined {
+  const [url, setUrl] = useState<string | undefined>(
+    () =>
+      getPlaygroundAttachmentObjectUrl(attachment.id) ??
+      getPlaygroundAttachmentDataUrl(attachment.id)
+  )
+
+  useEffect(() => {
+    if (url || !attachment.url) return
+    let active = true
+    void loadPlaygroundAttachment(attachment.url, attachment.id)
+      .then((entry) => {
+        if (active) {
+          setUrl(entry.objectUrl ?? entry.dataUrl)
+        }
+      })
+      .catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [attachment.id, attachment.url, url])
+
+  return url
+}
+
+function MessageAttachmentCard({
+  attachment,
+}: {
+  attachment: MessageAttachment
+}) {
+  const { t } = useTranslation()
+  const previewUrl = useAttachmentPreviewUrl(attachment)
+  const isImage = attachment.mediaType.startsWith('image/')
+  const label = attachment.filename || t('Attachment')
+
+  return (
+    <figure
+      className='border-border/70 bg-muted/20 overflow-hidden rounded-lg border'
+      title={label}
+    >
+      {isImage &&
+        (previewUrl ? (
+          <img
+            alt={label}
+            className='max-h-48 w-40 object-cover'
+            src={previewUrl}
+          />
+        ) : (
+          <div className='text-muted-foreground flex h-24 w-40 items-center justify-center'>
+            <ImageIcon className='size-5' />
+          </div>
+        ))}
+      <figcaption className='text-muted-foreground w-40 truncate px-2 py-1 text-xs'>
+        {label}
+      </figcaption>
+    </figure>
+  )
+}
+
+export function MessageAttachmentList({
+  attachments,
+}: {
+  attachments: MessageAttachment[]
+}) {
+  if (attachments.length === 0) return null
+  return (
+    <div className='mb-2 flex flex-wrap gap-2'>
+      {attachments.map((attachment) => (
+        <MessageAttachmentCard key={attachment.id} attachment={attachment} />
+      ))}
+    </div>
+  )
+}

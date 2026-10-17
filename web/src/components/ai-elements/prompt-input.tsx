@@ -422,7 +422,7 @@ export const PromptInputActionAddAttachments = ({
 
 export type PromptInputMessage = {
   text?: string
-  files?: FileUIPart[]
+  files?: (FileUIPart & { id?: string })[]
 }
 
 export type PromptInputProps = Omit<
@@ -726,18 +726,20 @@ export const PromptInput = ({
       form.reset()
     }
 
-    // Convert blob URLs to data URLs asynchronously
+    // Convert blob URLs to data URLs asynchronously; keep the client-side id
+    // so callers can use a stable upload key for retries.
     Promise.all(
       files.map(async ({ id, ...item }) => {
         if (item.url && item.url.startsWith('blob:')) {
           return {
             ...item,
+            id,
             url: await convertBlobUrlToDataUrl(item.url),
           }
         }
-        return item
+        return { ...item, id }
       })
-    ).then((convertedFiles: FileUIPart[]) => {
+    ).then((convertedFiles: (FileUIPart & { id?: string })[]) => {
       try {
         const result = onSubmit({ text, files: convertedFiles }, event)
 
@@ -889,7 +891,10 @@ export const PromptInputTextarea = ({
 
   return (
     <InputGroupTextarea
-      className={cn('field-sizing-content max-h-48 min-h-16 break-all', className)}
+      className={cn(
+        'field-sizing-content max-h-48 min-h-16 break-all',
+        className
+      )}
       name='message'
       onCompositionEnd={() => setIsComposing(false)}
       onCompositionStart={() => setIsComposing(true)}

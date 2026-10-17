@@ -59,6 +59,7 @@ const messageAttachmentSchema = z.object({
   url: z.string().max(4096),
   mediaType: z.string().max(200),
   filename: z.string().max(255).optional(),
+  byteSize: z.number().int().nonnegative().optional(),
 })
 
 const messageVersionSchema = z.object({

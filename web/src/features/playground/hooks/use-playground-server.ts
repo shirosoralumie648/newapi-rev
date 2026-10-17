@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { nanoid } from 'nanoid'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import {
   getServerErrorStatus,
@@ -209,6 +209,7 @@ export function usePlaygroundServer(
     },
   })
   const mutate = mutation.mutate
+  const mutateAsync = mutation.mutateAsync
   const refetchSessions = query.refetch
   // A deliberate cancellation (unmount, owner change, superseded write) is not a
   // sync failure: keep the workspace state clean so the effects retry it.
@@ -316,6 +317,24 @@ export function usePlaygroundServer(
     }
     local.deleteSession(id)
   }
+  // Attachment uploads need the canonical server session, so a send that
+  // carries files creates the conversation first when it is still local-only.
+  const ensureServerSession = useCallback(
+    async (sessionId: string): Promise<PlaygroundSession> => {
+      const session = local.findSession(sessionId)
+      if (!session) {
+        throw new Error('Playground session is not available')
+      }
+      if (session.server) return session
+      await mutateAsync({ type: 'save', draft: session })
+      const bound = local.findSession(sessionId)
+      if (!bound?.server) {
+        throw new Error('Playground session is not available')
+      }
+      return bound
+    },
+    [local, mutateAsync]
+  )
   return {
     isLoading,
     isSaving: mutation.isPending,
@@ -325,5 +344,6 @@ export function usePlaygroundServer(
     conflict,
     saveAsNew,
     deleteSession,
+    ensureServerSession,
   }
 }

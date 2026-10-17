@@ -21,19 +21,28 @@ import { nanoid } from 'nanoid'
 import { MESSAGE_ROLES, MESSAGE_STATUS } from '../../constants'
 import type {
   Message,
+  MessageAttachment,
   MessageVersion,
   ChatCompletionMessage,
   ContentPart,
 } from '../../types'
+import { getPlaygroundAttachmentDataUrl } from '../attachment-store'
 
 /**
  * Create a new message version
  */
-export function createMessageVersion(content: string): MessageVersion {
-  return {
+export function createMessageVersion(
+  content: string,
+  attachments?: MessageAttachment[]
+): MessageVersion {
+  const version: MessageVersion = {
     id: nanoid(),
     content,
   }
+  if (attachments && attachments.length > 0) {
+    version.attachments = attachments
+  }
+  return version
 }
 
 /**
@@ -76,12 +85,13 @@ export function updateCurrentVersionContent(
  */
 export function createUserMessage(
   content: string,
-  createdAt: number = Date.now()
+  createdAt: number = Date.now(),
+  attachments?: MessageAttachment[]
 ): Message {
   return {
     key: nanoid(),
     from: MESSAGE_ROLES.USER,
-    versions: [createMessageVersion(content)],
+    versions: [createMessageVersion(content, attachments)],
     createdAt,
   }
 }
@@ -150,13 +160,19 @@ export function getTextContent(content: string | ContentPart[]): string {
 }
 
 /**
- * Format message for API request
+ * Format message for API request. Attachments contribute image parts from the
+ * attachment cache; prepare the cache with ensurePlaygroundMessageAttachments
+ * before building a payload for older messages.
  */
 export function formatMessageForAPI(message: Message): ChatCompletionMessage {
   const currentVersion = getCurrentVersion(message)
+  const imageUrls = (currentVersion.attachments ?? [])
+    .filter((attachment) => attachment.mediaType.startsWith('image/'))
+    .map((attachment) => getPlaygroundAttachmentDataUrl(attachment.id))
+    .filter((url): url is string => Boolean(url))
   return {
     role: message.from,
-    content: currentVersion.content,
+    content: buildMessageContent(currentVersion.content, imageUrls),
   }
 }
 

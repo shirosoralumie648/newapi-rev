@@ -349,6 +349,14 @@ export function usePlaygroundState() {
     }))
   }, [updateSession])
 
+  // Reads the newest session state without waiting for a render, so callers
+  // that await server work mid-flow observe acknowledgements immediately.
+  const findSession = useCallback(
+    (sessionId: string) =>
+      latestSessionsRef.current.find((session) => session.id === sessionId),
+    []
+  )
+
   return {
     config: activeSession?.config ?? DEFAULT_CONFIG,
     parameterEnabled:
@@ -369,6 +377,7 @@ export function usePlaygroundState() {
     resetConfig,
     hydrateSessions,
     reconcileSession,
+    findSession,
     createSession,
     renameSession,
     deleteSession,

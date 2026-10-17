@@ -1,3 +1,4 @@
+import type { FileUIPart } from 'ai'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -21,12 +22,18 @@ import { useTranslation } from 'react-i18next'
 
 import {
   PromptInput,
+  PromptInputAttachment,
+  PromptInputAttachments,
   PromptInputFooter,
   PromptInputTextarea,
   type PromptInputMessage,
 } from '@/components/ai-elements/prompt-input'
 
-import { getSubmittableInputText } from '../../lib'
+import {
+  PLAYGROUND_ATTACHMENT_ACCEPT,
+  PLAYGROUND_ATTACHMENT_MAX_BYTES,
+  PLAYGROUND_ATTACHMENT_MAX_COUNT,
+} from '../../constants'
 import type {
   ModelOption,
   GroupOption,
@@ -38,7 +45,10 @@ import { PlaygroundInputTools } from './playground-input-tools'
 
 interface PlaygroundInputProps {
   config: PlaygroundConfig
-  onSubmit: (text: string) => void
+  onSubmit: (
+    text: string,
+    files: (FileUIPart & { id?: string })[]
+  ) => Promise<void> | void
   onStop?: () => void
   disabled?: boolean
   isGenerating?: boolean
@@ -83,22 +93,41 @@ export function PlaygroundInput({
 }: PlaygroundInputProps) {
   const { t } = useTranslation()
   const [text, setText] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
-  const handleSubmit = (message: PromptInputMessage) => {
-    const submittableText = getSubmittableInputText(message, disabled)
+  const handleSubmit = async (message: PromptInputMessage) => {
+    if (disabled || submitting) return
+    const files = message.files ?? []
+    if (!message.text?.trim() && files.length === 0) return
 
-    if (!submittableText) return
-    onSubmit(submittableText)
-    setText('')
+    setSubmitting(true)
+    try {
+      // Clear only after the send (including any upload) succeeds so a failed
+      // message stays recoverable in the input.
+      await onSubmit(message.text ?? '', files)
+      setText('')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
     <div className='grid shrink-0 gap-4 px-1 md:pb-4'>
       <PromptInput
+        accept={PLAYGROUND_ATTACHMENT_ACCEPT}
         className='relative'
         groupClassName='bg-background/95 dark:bg-background/80 border-border/70 shadow-[0_18px_60px_-32px_rgba(0,0,0,0.65)] ring-1 ring-foreground/5 rounded-xl overflow-hidden transition-all duration-200 focus-within:border-primary/45 focus-within:ring-primary/15 focus-within:shadow-[0_22px_70px_-34px_rgba(0,0,0,0.75)]'
+        maxFiles={PLAYGROUND_ATTACHMENT_MAX_COUNT}
+        maxFileSize={PLAYGROUND_ATTACHMENT_MAX_BYTES}
+        multiple
         onSubmit={handleSubmit}
       >
+        <div className='flex flex-wrap gap-1.5 px-3 pt-3 empty:hidden'>
+          <PromptInputAttachments>
+            {(attachment) => <PromptInputAttachment data={attachment} />}
+          </PromptInputAttachments>
+        </div>
+
         <PromptInputTextarea
           autoComplete='off'
           autoCorrect='off'

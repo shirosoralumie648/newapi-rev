@@ -77,6 +77,12 @@ export const STORAGE_KEYS = {
 export const DEFAULT_SESSION_TITLE = 'New conversation'
 export const MAX_STORED_SESSIONS = 20
 
+// Conversation attachment limits; the server enforces the same budgets.
+export const PLAYGROUND_ATTACHMENT_ACCEPT =
+  'image/png,image/jpeg,image/webp,image/gif'
+export const PLAYGROUND_ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024
+export const PLAYGROUND_ATTACHMENT_MAX_COUNT = 8
+
 // Error messages
 export const ERROR_MESSAGES = {
   API_REQUEST_ERROR: 'Request error occurred',

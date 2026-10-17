@@ -28,6 +28,7 @@ export interface MessageAttachment {
   url: string
   mediaType: string
   filename?: string
+  byteSize?: number
 }
 
 export interface MessageVersion {

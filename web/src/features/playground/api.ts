@@ -129,6 +129,101 @@ export interface PlaygroundMessageSnapshot {
   messages: Message[]
 }
 
+const serverAttachmentSchema = z.object({
+  created: z.boolean().optional(),
+  id: z.string().min(1),
+  client_key: z.string().optional(),
+  session_id: z.string().min(1),
+  media_type: z.string().min(1),
+  filename: z.string(),
+  byte_size: z.number().int().nonnegative(),
+  created_at: z.number().int().nonnegative(),
+  updated_at: z.number().int().nonnegative(),
+})
+
+const serverMessageAttachmentSchema = z.object({
+  id: z.string().min(1),
+  media_type: z.string().min(1),
+  filename: z.string(),
+  byte_size: z.number().int().nonnegative(),
+})
+
+export interface PlaygroundServerAttachment {
+  id: string
+  clientKey?: string
+  sessionId: string
+  mediaType: string
+  filename: string
+  byteSize: number
+  createdAt: number
+  updatedAt: number
+}
+
+export interface PlaygroundAttachmentUploadInput {
+  clientKey: string
+  mediaType: string
+  /** Base64 payload without the data URL prefix. */
+  data: string
+  filename?: string
+}
+
+export function playgroundAttachmentContentUrl(
+  sessionId: string,
+  attachmentId: string
+): string {
+  return `${API_ENDPOINTS.PLAYGROUND_SESSIONS}/${encodeURIComponent(
+    sessionId
+  )}/attachments/${encodeURIComponent(attachmentId)}/content`
+}
+
+function mapServerAttachment(value: unknown): PlaygroundServerAttachment {
+  const attachment = serverAttachmentSchema.parse(value)
+  return {
+    id: attachment.id,
+    clientKey: attachment.client_key,
+    sessionId: attachment.session_id,
+    mediaType: attachment.media_type,
+    filename: attachment.filename,
+    byteSize: attachment.byte_size,
+    createdAt: attachment.created_at * 1000,
+    updatedAt: attachment.updated_at * 1000,
+  }
+}
+
+// The stored message snapshot keeps attachment references only; display and
+// request fields are derived from the owned attachment rows on read.
+function normalizeServerMessagePayload(
+  payload: unknown,
+  sessionId: string
+): unknown {
+  if (!payload || typeof payload !== 'object') return payload
+  const versions = (payload as { versions?: unknown }).versions
+  if (!Array.isArray(versions)) return payload
+  return {
+    ...(payload as Record<string, unknown>),
+    versions: versions.map((version) => {
+      if (!version || typeof version !== 'object') return version
+      const attachments = (version as { attachments?: unknown }).attachments
+      if (!Array.isArray(attachments) || attachments.length === 0)
+        return version
+      return {
+        ...(version as Record<string, unknown>),
+        attachments: attachments.map((attachment) => {
+          const stored = serverMessageAttachmentSchema.safeParse(attachment)
+          if (!stored.success) return attachment
+          return {
+            id: stored.data.id,
+            url: playgroundAttachmentContentUrl(sessionId, stored.data.id),
+            mediaType: stored.data.media_type,
+            filename: stored.data.filename,
+            byteSize: stored.data.byte_size,
+          }
+        }),
+      }
+    }),
+  }
+}
+
 function mapServerSession(value: unknown): PlaygroundServerSession {
   const session = serverSessionSchema.parse(value)
   return {
@@ -217,7 +312,10 @@ export async function deletePlaygroundSession(
   requireServerSuccess(response.data)
 }
 
-function mapMessageSnapshot(value: unknown): PlaygroundMessageSnapshot {
+function mapMessageSnapshot(
+  value: unknown,
+  sessionId: string
+): PlaygroundMessageSnapshot {
   const data = z
     .object({
       revision: z.number().int().nonnegative(),
@@ -229,7 +327,9 @@ function mapMessageSnapshot(value: unknown): PlaygroundMessageSnapshot {
   return {
     revision: data.revision,
     messages: messagesSchema.parse(
-      data.messages.map((message) => message.payload)
+      data.messages.map((message) =>
+        normalizeServerMessagePayload(message.payload, sessionId)
+      )
     ),
   }
 }
@@ -243,7 +343,7 @@ export async function getPlaygroundMessages(
     { signal }
   )
   requireServerSuccess(response.data)
-  return mapMessageSnapshot(response.data.data)
+  return mapMessageSnapshot(response.data.data, sessionId)
 }
 
 export async function replacePlaygroundMessages(
@@ -264,5 +364,50 @@ export async function replacePlaygroundMessages(
     { signal }
   )
   requireServerSuccess(response.data)
-  return mapMessageSnapshot(response.data.data)
+  return mapMessageSnapshot(response.data.data, sessionId)
+}
+
+export async function uploadPlaygroundAttachment(
+  sessionId: string,
+  input: PlaygroundAttachmentUploadInput,
+  signal?: AbortSignal
+): Promise<{ attachment: PlaygroundServerAttachment; created: boolean }> {
+  const response = await api.post(
+    `${API_ENDPOINTS.PLAYGROUND_SESSIONS}/${encodeURIComponent(sessionId)}/attachments`,
+    {
+      client_key: input.clientKey,
+      media_type: input.mediaType,
+      filename: input.filename,
+      data: input.data,
+    },
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  return {
+    attachment: mapServerAttachment(response.data.data),
+    created: response.data.data.created === true,
+  }
+}
+
+export async function deletePlaygroundAttachment(
+  sessionId: string,
+  attachmentId: string,
+  signal?: AbortSignal
+): Promise<void> {
+  const response = await api.delete(
+    `${API_ENDPOINTS.PLAYGROUND_SESSIONS}/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(attachmentId)}`,
+    { signal }
+  )
+  requireServerSuccess(response.data)
+}
+
+export async function getPlaygroundAttachmentContent(
+  contentUrl: string,
+  signal?: AbortSignal
+): Promise<Blob> {
+  const response = await api.get(contentUrl, {
+    responseType: 'blob',
+    signal,
+  } as Record<string, unknown>)
+  return response.data as Blob
 }

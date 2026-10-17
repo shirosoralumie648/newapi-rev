@@ -27,6 +27,17 @@ export const STATIC_I18N_KEYS = [
   'Playground request ID was already used for a different operation.',
   'Unable to load or save Playground artifacts.',
   'Playground artifact or conversation not found.',
+  // Playground attachment server messages and client upload feedback.
+  'Invalid Playground attachment.',
+  'Playground attachment not found.',
+  'Unable to load or save Playground attachments.',
+  'Playground attachment storage limit exceeded.',
+  'Playground attachment is still referenced by a conversation message.',
+  'Playground attachment request ID was already used for different content.',
+  'Too many attachments. Remove some before sending.',
+  'Attachment is too large.',
+  'Attachment data could not be read.',
+  'Attachment upload failed. Your message was not sent.',
 
   'Authentication required.',
   'Invalid Playground configuration.',
