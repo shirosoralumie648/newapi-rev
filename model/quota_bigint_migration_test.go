@@ -85,6 +85,24 @@ func quotaMigrationTableName(t *testing.T, db *gorm.DB, model any) string {
 	return statement.Table
 }
 
+// downgradeLegacyQuotaColumns rewrites every column a legacy model declares to
+// the 32-bit type that model carries. AutoMigrate is not usable for this step:
+// it decides against the existing schema, and a column whose declared default
+// already matches the existing one keeps its type, so the legacy fixture would
+// silently stay 64-bit and never exercise the widening path.
+func downgradeLegacyQuotaColumns(db *gorm.DB, table string, legacy any) error {
+	statement := &gorm.Statement{DB: db}
+	if err := statement.Parse(legacy); err != nil {
+		return err
+	}
+	for _, column := range statement.Schema.DBNames {
+		if err := db.Table(table).Migrator().AlterColumn(legacy, column); err != nil {
+			return fmt.Errorf("failed to downgrade %s.%s: %w", table, column, err)
+		}
+	}
+	return nil
+}
+
 // quotaColumnType returns the type the driver reports for one of a model's
 // quota columns, and fails the test when the column does not exist.
 func quotaColumnType(t *testing.T, db *gorm.DB, model any, column string) string {
@@ -218,7 +236,7 @@ func testQuotaBigintMigration(t *testing.T, db *gorm.DB, recorder *migrationSQLR
 		}
 		for _, fixture := range legacyFixtures {
 			table := quotaMigrationTableName(t, db, fixture.model)
-			require.NoError(t, db.Table(table).AutoMigrate(fixture.legacy))
+			require.NoError(t, downgradeLegacyQuotaColumns(db, table, fixture.legacy))
 		}
 		for _, group := range quotaColumnGroups {
 			for _, column := range group.columns {
