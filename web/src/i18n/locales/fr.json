@@ -1258,6 +1258,7 @@
     "Click to view full prompt": "Cliquez pour voir l'invite complète",
     "Click to view image": "Cliquer pour voir l’image",
     "Client": "Client",
+    "Client disconnected; retry stopped": "Client déconnecté ; nouvelle tentative arrêtée",
     "Client header value": "Valeur d'en-tête client",
     "Client headers override the gateway defaults and may cause upstream errors": "Les en-têtes du client remplacent ceux de la passerelle et peuvent provoquer des erreurs en amont",
     "Client ID": "ID client",

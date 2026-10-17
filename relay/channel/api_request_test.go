@@ -1,12 +1,17 @@
 package channel
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -23,6 +28,94 @@ func TestNewTaskAPIRequestInheritsClientCancellation(t *testing.T) {
 	cancel()
 
 	require.ErrorIs(t, upstream.Context().Err(), context.Canceled)
+}
+
+// stubRequestAdaptor implements just enough Adaptor for DoApiRequest and
+// DoFormRequest tests.
+type stubRequestAdaptor struct {
+	Adaptor
+	url string
+}
+
+func (s *stubRequestAdaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
+	return s.url, nil
+}
+
+func (s *stubRequestAdaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) error {
+	return nil
+}
+
+// TestDoRequestCancelsUpstreamWhenClientDisconnects verifies that the shared
+// request builders inherit the client request context: once the client request
+// is cancelled, the upstream handler observes the cancellation and the relay
+// call fails instead of reading a response the client no longer wants.
+func TestDoRequestCancelsUpstreamWhenClientDisconnects(t *testing.T) {
+	service.InitHttpClient()
+	gin.SetMode(gin.TestMode)
+
+	for _, tc := range []struct {
+		name string
+		do   func(Adaptor, *gin.Context, *relaycommon.RelayInfo, io.Reader) (*http.Response, error)
+	}{
+		{name: "DoApiRequest", do: DoApiRequest},
+		{name: "DoFormRequest", do: DoFormRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			started := make(chan struct{})
+			upstreamCanceled := make(chan struct{})
+			server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				// net/http starts watching for a client disconnect only after the
+				// request body has been read to EOF, so consume the body before
+				// blocking on the request context.
+				_, _ = io.Copy(io.Discard, r.Body)
+				close(started)
+				<-r.Context().Done()
+				close(upstreamCanceled)
+			}))
+			defer server.Close()
+
+			clientCtx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(clientCtx)
+
+			info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+			adaptor := &stubRequestAdaptor{url: server.URL + "/v1/chat/completions"}
+
+			resultCh := make(chan error, 1)
+			go func() {
+				resp, err := tc.do(adaptor, c, info, bytes.NewReader([]byte(`{"model":"test-model"}`)))
+				if resp != nil {
+					_ = resp.Body.Close()
+				}
+				resultCh <- err
+			}()
+
+			select {
+			case <-started:
+			case <-time.After(10 * time.Second):
+				t.Fatal("upstream handler did not receive the request")
+			}
+
+			cancel()
+
+			select {
+			case <-upstreamCanceled:
+			case <-time.After(10 * time.Second):
+				t.Fatal("upstream handler did not observe the client cancellation")
+			}
+
+			err := <-resultCh
+			require.Error(t, err)
+			// doRequest hides the upstream failure text on transport errors, so
+			// the failure is asserted through its stable error code; the
+			// upstreamCanceled check above proves it came from the cancellation.
+			var apiErr *types.NewAPIError
+			require.ErrorAs(t, err, &apiErr)
+			assert.Equal(t, types.ErrorCodeDoRequestFailed, apiErr.GetErrorCode())
+		})
+	}
 }
 
 func TestProcessHeaderOverride_ChannelTestSkipsPassthroughRules(t *testing.T) {

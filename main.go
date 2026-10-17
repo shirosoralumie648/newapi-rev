@@ -47,6 +47,15 @@ var buildFS embed.FS
 //go:embed web/dist/index.html
 var indexPage []byte
 
+const (
+	// accountingDrainTimeout bounds how long shutdown waits for in-flight task
+	// handlers and asynchronous refunds to finish their accounting writes.
+	accountingDrainTimeout = 15 * time.Second
+	// accountingFlushTimeout bounds the final drain of the batch update queue
+	// after every accounting producer has stopped.
+	accountingFlushTimeout = 30 * time.Second
+)
+
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "plugin" {
 		os.Exit(jsplugin.RunCLI(os.Args[2:], os.Stdout, os.Stderr))
@@ -158,10 +167,14 @@ func main() {
 	controller.RegisterScheduledSystemTasks()
 	service.StartSystemTaskRunner()
 
+	var stopBatchUpdater context.CancelFunc
+	var batchUpdaterDone <-chan struct{}
 	if os.Getenv("BATCH_UPDATE_ENABLED") == "true" {
 		common.BatchUpdateEnabled = true
 		common.SysLog(common.LogText("batch update enabled with interval %ss", strconv.Itoa(common.BatchUpdateInterval)))
-		model.InitBatchUpdater()
+		batchUpdaterCtx, cancelBatchUpdater := context.WithCancel(context.Background())
+		stopBatchUpdater = cancelBatchUpdater
+		batchUpdaterDone = model.InitBatchUpdater(batchUpdaterCtx)
 	}
 
 	if os.Getenv("ENABLE_PPROF") == "true" {
@@ -242,6 +255,43 @@ func main() {
 	if common.DataExportEnabled {
 		model.SaveQuotaDataCache()
 	}
+
+	// Bounded accounting drain (issue #7657): stop every producer of in-memory
+	// accounting deltas, then flush the batch update queue so a normal restart
+	// does not lose quota changes. Task handlers settle or refund task quota and
+	// refunds run asynchronously, so wait for them before flushing. The budget
+	// is independent of the HTTP/SSE shutdown timeout above; the container stop
+	// grace period must cover HTTP shutdown + accountingDrainTimeout +
+	// accountingFlushTimeout.
+	drainCtx, cancelDrain := context.WithTimeout(context.Background(), accountingDrainTimeout)
+	drainErrs := []error{
+		service.StopSystemTaskRunner(drainCtx),
+		service.WaitBillingRefunds(drainCtx),
+	}
+	if stopBatchUpdater != nil {
+		stopBatchUpdater()
+		select {
+		case <-batchUpdaterDone:
+		case <-drainCtx.Done():
+			drainErrs = append(drainErrs, fmt.Errorf("batch updater did not stop: %w", drainCtx.Err()))
+		}
+	}
+	cancelDrain()
+
+	if stopBatchUpdater != nil {
+		flushCtx, cancelFlush := context.WithTimeout(context.Background(), accountingFlushTimeout)
+		flushErr := model.FlushBatchUpdate(flushCtx)
+		cancelFlush()
+		if flushErr != nil {
+			drainErrs = append(drainErrs, fmt.Errorf("batch update flush: %w", flushErr))
+		}
+	}
+	if err := errors.Join(drainErrs...); err != nil {
+		common.SysError(common.LogText("server exited with incomplete accounting drain: %s", err.Error()))
+	} else {
+		common.SysLog(common.LogText("accounting drain complete"))
+	}
+
 	common.SysLog(common.LogText("server exited"))
 }
 

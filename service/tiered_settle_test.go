@@ -1,11 +1,13 @@
 package service
 
 import (
+	"context"
 	"math"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -17,6 +19,7 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 // Claude Sonnet-style tiered expression: standard vs long-context
@@ -516,6 +519,60 @@ func TestBillingSessionReserveWalletTopUpDecrementsBalance(t *testing.T) {
 	userQuota, err := model.GetUserQuota(userID, false)
 	require.NoError(t, err)
 	assert.Equal(t, 450_000, userQuota)
+}
+
+func TestWaitBillingRefundsWaitsForInFlightRefund(t *testing.T) {
+	truncate(t)
+
+	const userID = 703
+	const initialQuota, preConsumed = 10_000, 250
+	seedUser(t, userID, initialQuota)
+
+	session := &BillingSession{
+		relayInfo:        &relaycommon.RelayInfo{UserId: userID},
+		funding:          &WalletFunding{userId: userID, consumed: preConsumed},
+		preConsumedQuota: preConsumed,
+		tokenConsumed:    preConsumed,
+	}
+
+	// Block the refund's user-row update so the in-flight refund can be caught.
+	updateSeen := make(chan struct{}, 1)
+	releaseUpdate := make(chan struct{})
+	const callback = "wl02_block_refund_update"
+	require.NoError(t, model.DB.Callback().Update().Before("gorm:update").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Table != "users" {
+			return
+		}
+		select {
+		case updateSeen <- struct{}{}:
+		default:
+		}
+		<-releaseUpdate
+	}))
+	t.Cleanup(func() { _ = model.DB.Callback().Update().Remove(callback) })
+
+	ginCtx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ginCtx.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	session.Refund(ginCtx)
+
+	select {
+	case <-updateSeen:
+	case <-time.After(5 * time.Second):
+		t.Fatal("refund never reached the blocked database update")
+	}
+
+	// The refund is still in flight, so a short wait budget must expire.
+	timeoutCtx, cancelTimeout := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancelTimeout()
+	require.ErrorIs(t, WaitBillingRefunds(timeoutCtx), context.DeadlineExceeded)
+
+	// Releasing the update lets the refund finish; waiting again joins it and
+	// the wallet delta is visible in the database.
+	close(releaseUpdate)
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelWait()
+	require.NoError(t, WaitBillingRefunds(waitCtx))
+	assert.Equal(t, initialQuota+preConsumed, getUserQuota(t, userID))
 }
 
 func TestTryTieredSettleUsesFinalGroupAfterRetry(t *testing.T) {
