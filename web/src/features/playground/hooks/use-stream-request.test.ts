@@ -362,7 +362,10 @@ describe('latest-wins stream request coordination', () => {
       },
       createSource: () => {
         const source = new FakeStreamSource()
-        source.xhr = { getResponseHeader: () => `req-${sources.length + 1}` }
+        // The relay request id is fixed when the source is created; reading
+        // the list length later would label an earlier stream with a newer id.
+        const requestNumber = sources.length + 1
+        source.xhr = { getResponseHeader: () => `req-${requestNumber}` }
         sources.push(source)
         return source
       },
