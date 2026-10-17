@@ -30,8 +30,8 @@ function toolbarProps(runPhase: CanvasWorkflowRunPhase = 'idle') {
     disabled: false,
     group: 'default',
     groups: [
-      { label: 'default', value: 'default' },
-      { label: 'vip', value: 'vip' },
+      { label: 'default', value: 'default', ratio: 1 },
+      { label: 'vip', value: 'vip', ratio: 1 },
     ],
     onAddNode: vi.fn(),
     onCancelRun: vi.fn(),
