@@ -91,10 +91,12 @@ export function getArtifactFilename(
       .trim()
       .replaceAll(/[. ]+$/g, '')
       .slice(0, 120) || 'artifact'
-  const suffix =
-    kind === 'markdown'
-      ? 'md'
-      : language.toLowerCase().replaceAll(/[^a-z0-9+#._-]/g, '') || 'txt'
+  let suffix = 'md'
+  if (kind === 'code') {
+    const normalized = language.toLowerCase().replaceAll(/[^a-z0-9+#._-]/g, '')
+    // Mirror CodeBlock: an unlabeled fence has no real extension.
+    suffix = normalized === '' || normalized === 'plaintext' ? 'txt' : normalized
+  }
   return `${safe}.${suffix}`
 }
 
