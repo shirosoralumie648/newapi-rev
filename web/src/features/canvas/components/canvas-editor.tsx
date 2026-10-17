@@ -52,11 +52,14 @@ import { CanvasToolbar } from './canvas-toolbar'
 
 const canvasNodeTypes: NodeTypes = {
   text: CanvasFlowNodeView,
+  note: CanvasFlowNodeView,
   prompt: CanvasFlowNodeView,
   image: CanvasFlowNodeView,
+  attachment: CanvasFlowNodeView,
   artifact: CanvasFlowNodeView,
   message: CanvasFlowNodeView,
   task: CanvasFlowNodeView,
+  'task-result': CanvasFlowNodeView,
 }
 
 interface CanvasEditorProps {

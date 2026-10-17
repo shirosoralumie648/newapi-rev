@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { NodeProps } from '@xyflow/react'
-import { ImageIcon } from 'lucide-react'
+import { ImageIcon, Unlink } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -27,6 +27,7 @@ import {
   NodeHeader,
   NodeTitle,
 } from '@/components/ai-elements/node'
+import { Badge } from '@/components/ui/badge'
 import { playgroundAttachmentContentUrl } from '@/features/playground/api'
 import {
   getPlaygroundAttachmentObjectUrl,
@@ -84,12 +85,13 @@ export function CanvasFlowNodeView(props: NodeProps) {
   const kind: CanvasNodeKind = data.kind ?? 'text'
   const preview = readNodePreview(data)
   const reference = data.ref
+  const sourceDeleted = data.sourceDeleted === true
   const isAttachmentNode =
     (kind === 'attachment' || kind === 'image') &&
     Boolean(reference?.attachmentId)
   const attachmentUrl = useCanvasAttachmentUrl(
-    isAttachmentNode ? reference?.sessionId : undefined,
-    isAttachmentNode ? reference?.attachmentId : undefined
+    isAttachmentNode && !sourceDeleted ? reference?.sessionId : undefined,
+    isAttachmentNode && !sourceDeleted ? reference?.attachmentId : undefined
   )
 
   return (
@@ -100,10 +102,16 @@ export function CanvasFlowNodeView(props: NodeProps) {
       )}
       handles={{ target: true, source: true }}
     >
-      <NodeHeader className='p-2'>
+      <NodeHeader className='flex items-center justify-between gap-2 p-2'>
         <NodeTitle className='text-xs font-medium'>
           {t(CANVAS_NODE_KIND_LABELS[kind])}
         </NodeTitle>
+        {sourceDeleted ? (
+          <Badge variant='warning'>
+            <Unlink aria-hidden='true' />
+            {t('Source deleted')}
+          </Badge>
+        ) : null}
       </NodeHeader>
       <NodeContent className='grid gap-2 p-2'>
         {isAttachmentNode ? (
@@ -132,6 +140,11 @@ export function CanvasFlowNodeView(props: NodeProps) {
         {!isAttachmentNode && !preview ? (
           <p className='text-muted-foreground text-xs italic'>
             {t('Empty node')}
+          </p>
+        ) : null}
+        {sourceDeleted ? (
+          <p className='text-muted-foreground text-xs italic'>
+            {t('The original was deleted. A saved snapshot is shown instead.')}
           </p>
         ) : null}
       </NodeContent>

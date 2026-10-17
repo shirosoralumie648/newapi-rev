@@ -33,7 +33,10 @@ import {
   CANVAS_DEFAULT_TITLE,
   CANVAS_STORAGE_LAST_PROJECT,
 } from '../constants'
-import { createEmptyCanvasDocument } from '../lib/canvas-document'
+import {
+  applyCanvasReferenceStatus,
+  createEmptyCanvasDocument,
+} from '../lib/canvas-document'
 import type {
   CanvasProjectSummary,
   CanvasServerDocument,
@@ -128,7 +131,7 @@ export function useCanvasProject(userId: number | null) {
         if (!mounted.current || generation.current !== current) return
         pendingDocument.current = null
         setDirty(false)
-        setActiveProject(loaded)
+        setActiveProject(applyCanvasReferenceStatus(loaded))
         setStatus('ready')
       } catch (loadError) {
         if (!mounted.current || generation.current !== current) return
@@ -363,7 +366,7 @@ export function useCanvasProject(userId: number | null) {
     try {
       const reloaded = await getCanvasProject(active.id)
       if (!mounted.current) return
-      setActiveProject(reloaded)
+      setActiveProject(applyCanvasReferenceStatus(reloaded))
       setStatus('ready')
     } catch (loadError) {
       if (!mounted.current) return

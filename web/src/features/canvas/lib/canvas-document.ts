@@ -32,6 +32,7 @@ import type {
   CanvasNodeData,
   CanvasNodeKind,
   CanvasServerDocument,
+  CanvasServerProject,
   CanvasViewport,
 } from '../types'
 
@@ -91,6 +92,40 @@ export const canvasExportSchema = z.object({
 
 export function createEmptyCanvasDocument(): CanvasServerDocument {
   return { nodes: [], edges: [] }
+}
+
+/**
+ * Applies the server's reference report to a loaded project. A node whose
+ * referenced session/message/attachment/artifact is gone gets `sourceDeleted`
+ * set, so the editor shows the deleted-source state while the stored snapshot
+ * and label keep the content visible. Nodes that resolve again (or never had a
+ * flag) have the marker cleared.
+ */
+export function applyCanvasReferenceStatus(
+  project: CanvasServerProject
+): CanvasServerProject {
+  const unavailable = project.unavailableNodeIds ?? []
+  const hasStaleFlag = project.document.nodes.some(
+    (node) => node.data?.sourceDeleted === true
+  )
+  if (unavailable.length === 0 && !hasStaleFlag) {
+    return project
+  }
+  const unavailableIds = new Set(unavailable)
+  const nodes = project.document.nodes.map((node) => {
+    const sourceDeleted = unavailableIds.has(node.id)
+    if (!node.data && !sourceDeleted) {
+      return node
+    }
+    const data = { ...node.data }
+    if (sourceDeleted) {
+      data.sourceDeleted = true
+    } else {
+      delete data.sourceDeleted
+    }
+    return { ...node, data }
+  })
+  return { ...project, document: { ...project.document, nodes } }
 }
 
 export function createCanvasNode(

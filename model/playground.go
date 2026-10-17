@@ -193,6 +193,12 @@ func DeletePlaygroundSession(userID int, id string) error {
 		if err := tx.Where("session_id = ? AND user_id = ?", id, userID).Delete(&PlaygroundArtifact{}).Error; err != nil {
 			return err
 		}
+		// The pins of this conversation's attachments go with the attachments,
+		// so a later canvas read reports the node as "source deleted".
+		attachmentIDs := tx.Model(&PlaygroundAttachment{}).Select("id").Where("session_id = ? AND user_id = ?", id, userID)
+		if err := tx.Where("attachment_id IN (?)", attachmentIDs).Delete(&PlaygroundCanvasAsset{}).Error; err != nil {
+			return err
+		}
 		if err := tx.Where("session_id = ? AND user_id = ?", id, userID).Delete(&PlaygroundAttachment{}).Error; err != nil {
 			return err
 		}

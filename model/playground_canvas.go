@@ -61,67 +61,119 @@ type PlaygroundCanvasReference struct {
 	ArtifactID   string
 }
 
+// resolvePlaygroundCanvasReference classifies one reference for an account.
+//
+// A resource that no longer exists is not an ownership violation: the node
+// keeps its stored snapshot and is rendered as "source deleted". A resource
+// that exists under a different account is foreign, and the caller rejects the
+// document without ever reading the other account's content. Availability is
+// true only while every resource the reference names still resolves.
+//
+// An attachment is intentionally resolved by its own row: a canvas pin keeps
+// the bytes alive independently of the conversation, so the session row may
+// already be gone while the attachment is still served to its owner.
+func resolvePlaygroundCanvasReference(userID int, reference PlaygroundCanvasReference) (available bool, foreign bool, err error) {
+	if reference.MessageKey != "" && reference.SessionID == "" {
+		return false, true, nil
+	}
+	sessionOwned := false
+	if reference.SessionID != "" {
+		var session PlaygroundSession
+		if err := DB.Select("id, user_id").Where("id = ?", reference.SessionID).First(&session).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return false, false, err
+			}
+		} else if session.UserID != userID {
+			return false, true, nil
+		} else {
+			sessionOwned = true
+		}
+	}
+	// Session-scoped references require their session to resolve; an
+	// attachment-only reference is resolved by its own row below, because a
+	// canvas pin can outlive the conversation.
+	sessionRequired := reference.MessageKey != "" || reference.ArtifactID != "" || reference.AttachmentID == ""
+	available = !(reference.SessionID != "" && sessionRequired && !sessionOwned)
+	if reference.MessageKey != "" {
+		var message PlaygroundMessage
+		err := DB.Select("id").Where("user_id = ? AND session_id = ? AND client_key = ?", userID, reference.SessionID, reference.MessageKey).First(&message).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			available = false
+		} else if err != nil {
+			return false, false, err
+		}
+	}
+	if reference.AttachmentID != "" {
+		var attachment PlaygroundAttachment
+		err := DB.Select("id, user_id, session_id").Where("id = ?", reference.AttachmentID).First(&attachment).Error
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			available = false
+		case err != nil:
+			return false, false, err
+		case attachment.UserID != userID:
+			return false, true, nil
+		case reference.SessionID != "" && attachment.SessionID != reference.SessionID:
+			available = false
+		}
+	}
+	if reference.ArtifactID != "" {
+		var artifact PlaygroundArtifact
+		err := DB.Select("id, user_id, session_id, deleted_at").Where("id = ?", reference.ArtifactID).First(&artifact).Error
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			available = false
+		case err != nil:
+			return false, false, err
+		case artifact.UserID != userID:
+			return false, true, nil
+		case artifact.DeletedAt != 0:
+			available = false
+		case reference.SessionID != "" && artifact.SessionID != reference.SessionID:
+			available = false
+		}
+	}
+	return available, false, nil
+}
+
 // ValidatePlaygroundCanvasReferences rejects a document that references a
-// session, message, attachment or artifact owned by another account, or one
-// that no longer exists. It never reads attachment or artifact bodies; the
-// canvas stores references only, and the bytes stay behind the controlled
-// content endpoints.
+// session, message, attachment or artifact owned by another account. A
+// reference whose resource was deleted is accepted so the canvas stays
+// editable; the read path reports it as "source deleted". It never reads
+// attachment or artifact bodies; the canvas stores references only, and the
+// bytes stay behind the controlled content endpoints.
 func ValidatePlaygroundCanvasReferences(userID int, references []PlaygroundCanvasReference) error {
 	if userID <= 0 {
 		return ErrPlaygroundCanvasInvalid
 	}
 	for _, reference := range references {
-		if reference.SessionID != "" {
-			var count int64
-			if err := DB.Model(&PlaygroundSession{}).Where("id = ? AND user_id = ?", reference.SessionID, userID).Count(&count).Error; err != nil {
-				return err
-			}
-			if count == 0 {
-				return ErrPlaygroundCanvasReference
-			}
+		_, foreign, err := resolvePlaygroundCanvasReference(userID, reference)
+		if err != nil {
+			return err
 		}
-		if reference.MessageKey != "" {
-			if reference.SessionID == "" {
-				return ErrPlaygroundCanvasReference
-			}
-			var count int64
-			if err := DB.Model(&PlaygroundMessage{}).
-				Where("user_id = ? AND session_id = ? AND client_key = ?", userID, reference.SessionID, reference.MessageKey).
-				Count(&count).Error; err != nil {
-				return err
-			}
-			if count == 0 {
-				return ErrPlaygroundCanvasReference
-			}
-		}
-		if reference.AttachmentID != "" {
-			query := DB.Model(&PlaygroundAttachment{}).Where("id = ? AND user_id = ?", reference.AttachmentID, userID)
-			if reference.SessionID != "" {
-				query = query.Where("session_id = ?", reference.SessionID)
-			}
-			var count int64
-			if err := query.Count(&count).Error; err != nil {
-				return err
-			}
-			if count == 0 {
-				return ErrPlaygroundCanvasReference
-			}
-		}
-		if reference.ArtifactID != "" {
-			query := DB.Model(&PlaygroundArtifact{}).Where("id = ? AND user_id = ? AND deleted_at = 0", reference.ArtifactID, userID)
-			if reference.SessionID != "" {
-				query = query.Where("session_id = ?", reference.SessionID)
-			}
-			var count int64
-			if err := query.Count(&count).Error; err != nil {
-				return err
-			}
-			if count == 0 {
-				return ErrPlaygroundCanvasReference
-			}
+		if foreign {
+			return ErrPlaygroundCanvasReference
 		}
 	}
 	return nil
+}
+
+// PlaygroundCanvasReferenceAvailability reports, for each reference, whether it
+// still resolves for the account. The canvas read path uses it to mark nodes
+// whose source was deleted without rewriting the stored document.
+func PlaygroundCanvasReferenceAvailability(userID int, references []PlaygroundCanvasReference) ([]bool, error) {
+	available := make([]bool, len(references))
+	if userID <= 0 {
+		return available, ErrPlaygroundCanvasInvalid
+	}
+	for index, reference := range references {
+		found, foreign, err := resolvePlaygroundCanvasReference(userID, reference)
+		if err != nil {
+			return nil, err
+		}
+		available[index] = found && !foreign
+	}
+	return available, nil
 }
 
 // PlaygroundCanvasProject stores one canvas document (nodes, edges, viewport)
@@ -191,7 +243,10 @@ func FindPlaygroundCanvasProjectByClientID(userID int, clientID string) (*Playgr
 	return &project, nil
 }
 
-func CreatePlaygroundCanvasProject(userID int, project *PlaygroundCanvasProject) (*PlaygroundCanvasProject, bool, error) {
+// CreatePlaygroundCanvasProject stores a new canvas. attachmentIDs are the
+// attachments its nodes reference; they are pinned in the same transaction so
+// deleting the uploading message cannot orphan a canvas image.
+func CreatePlaygroundCanvasProject(userID int, project *PlaygroundCanvasProject, attachmentIDs []string) (*PlaygroundCanvasProject, bool, error) {
 	if userID <= 0 || project == nil {
 		return nil, false, ErrPlaygroundCanvasInvalid
 	}
@@ -239,6 +294,9 @@ func CreatePlaygroundCanvasProject(userID int, project *PlaygroundCanvasProject)
 			return ErrPlaygroundCanvasLimit
 		}
 		if err := tx.Create(project).Error; err != nil {
+			return err
+		}
+		if err := syncPlaygroundCanvasAssets(tx, userID, project.ID, attachmentIDs); err != nil {
 			return err
 		}
 		created = true
@@ -289,6 +347,9 @@ type UpdatePlaygroundCanvasInput struct {
 	// Counters describe the replacement document and are always required with it.
 	NodeCount int
 	EdgeCount int
+	// AttachmentIDs are the attachments the replacement document references.
+	// They replace the canvas pins only when a document is written.
+	AttachmentIDs []string
 }
 
 func UpdatePlaygroundCanvasProject(userID int, id string, revision int64, input UpdatePlaygroundCanvasInput) (*PlaygroundCanvasProject, error) {
@@ -335,6 +396,11 @@ func UpdatePlaygroundCanvasProject(userID int, id string, revision int64, input 
 		if result.RowsAffected != 1 {
 			return ErrPlaygroundConflict
 		}
+		if input.Document != nil {
+			if err := syncPlaygroundCanvasAssets(tx, userID, id, input.AttachmentIDs); err != nil {
+				return err
+			}
+		}
 		return tx.Where("id = ? AND user_id = ?", id, userID).First(&project).Error
 	})
 	if err != nil {
@@ -353,6 +419,46 @@ func DeletePlaygroundCanvasProject(userID int, id string) error {
 		if err != nil {
 			return err
 		}
+		// Deleting the canvas releases every attachment pin it held, so the
+		// orphan cleanup can collect images this board was the last user of.
+		if err := tx.Where("canvas_id = ? AND user_id = ?", id, userID).Delete(&PlaygroundCanvasAsset{}).Error; err != nil {
+			return err
+		}
 		return tx.Where("id = ? AND user_id = ?", id, userID).Delete(&PlaygroundCanvasProject{}).Error
 	})
+}
+
+// PlaygroundCanvasAsset pins one attachment while at least one canvas node
+// references it. Attachments have no ownership column for canvases, so this row
+// is what keeps a referenced image alive after the uploading message is
+// removed; deleting the canvas, or saving a document that no longer references
+// the attachment, returns the bytes to the orphan cleanup countdown.
+type PlaygroundCanvasAsset struct {
+	CanvasID     string `gorm:"size:32;primaryKey"`
+	AttachmentID string `gorm:"size:32;primaryKey"`
+	UserID       int    `gorm:"not null;index"`
+	CreatedAt    int64  `gorm:"not null"`
+}
+
+// syncPlaygroundCanvasAssets replaces the attachment pins of one canvas. It runs
+// inside the canvas write transaction so a concurrent save cannot leave a pin
+// for a document that was never stored.
+func syncPlaygroundCanvasAssets(tx *gorm.DB, userID int, canvasID string, attachmentIDs []string) error {
+	if err := tx.Where("canvas_id = ? AND user_id = ?", canvasID, userID).Delete(&PlaygroundCanvasAsset{}).Error; err != nil {
+		return err
+	}
+	seen := make(map[string]bool, len(attachmentIDs))
+	rows := make([]PlaygroundCanvasAsset, 0, len(attachmentIDs))
+	now := common.GetTimestamp()
+	for _, attachmentID := range attachmentIDs {
+		if attachmentID == "" || seen[attachmentID] {
+			continue
+		}
+		seen[attachmentID] = true
+		rows = append(rows, PlaygroundCanvasAsset{CanvasID: canvasID, AttachmentID: attachmentID, UserID: userID, CreatedAt: now})
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	return tx.Create(&rows).Error
 }

@@ -285,18 +285,29 @@ func TestPlaygroundCanvasReferenceOwnership(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, response.Code, "ref %d: %s", index, response.Body.String())
 	}
 
-	// Unknown ids, a message key without a session, and a mismatched session
-	// are rejected for the owner too.
-	for index, ref := range []map[string]any{
-		{"sessionId": "pgs_missing"},
-		{"messageKey": "m1"},
-		{"sessionId": sessionID, "messageKey": "missing"},
-		{"sessionId": sessionID, "attachmentId": "pgf_missing"},
-		{"sessionId": "pgs_other", "artifactId": artifact.Artifact.ID},
-	} {
-		response := create(7, []any{canvasRefNode("n1", "message", ref)})
-		assert.Equal(t, http.StatusBadRequest, response.Code, "ref %d: %s", index, response.Body.String())
+	// A message key without a session is structurally invalid.
+	assert.Equal(t, http.StatusBadRequest, create(7, []any{canvasRefNode("n1", "message", map[string]any{"messageKey": "m1"})}).Code)
+
+	// References whose resource no longer exists are accepted for the owner so
+	// the board stays editable; the read path reports them as "source deleted".
+	detached := create(7, []any{
+		canvasRefNode("d1", "message", map[string]any{"sessionId": "pgs_missing"}),
+		canvasRefNode("d2", "message", map[string]any{"sessionId": sessionID, "messageKey": "missing"}),
+		canvasRefNode("d3", "attachment", map[string]any{"sessionId": sessionID, "attachmentId": "pgf_missing"}),
+		canvasRefNode("d4", "artifact", map[string]any{"sessionId": artifactSession, "artifactId": "pga_missing"}),
+	})
+	require.Equal(t, http.StatusOK, detached.Code, detached.Body.String())
+	detachedID := canvasEnvelope(t, detached.Body.Bytes())["id"].(string)
+	detail := playgroundRequest(t, 7, http.MethodGet, "/api/playground/canvases/"+detachedID, nil, controller.GetPlaygroundCanvasProject)
+	var detailEnvelope struct {
+		Success bool
+		Data    struct {
+			UnavailableNodeIDs []string `json:"unavailable_node_ids"`
+		}
 	}
+	require.NoError(t, common.Unmarshal(detail.Body.Bytes(), &detailEnvelope))
+	require.True(t, detailEnvelope.Success, detail.Body.String())
+	assert.ElementsMatch(t, []string{"d1", "d2", "d3", "d4"}, detailEnvelope.Data.UnavailableNodeIDs)
 
 	// The same validation runs on update, so an existing canvas cannot be
 	// edited into a reference owned by another account.
@@ -347,4 +358,189 @@ func TestPlaygroundCanvasLimits(t *testing.T) {
 		"title": "Spare", "document": bloated(2000),
 	}, controller.CreatePlaygroundCanvasProject)
 	assert.Equal(t, http.StatusUnprocessableEntity, doubleUpdate.Code, doubleUpdate.Body.String())
+}
+
+// A canvas node that references an attachment pins the bytes: removing the
+// message that uploaded it must not let orphan cleanup collect the image, and
+// deleting the canvas must release it again.
+func TestPlaygroundCanvasAttachmentPins(t *testing.T) {
+	db := playgroundTestDB(t, "sqlite")
+	session := createPlayground(t, 7, "canvas-pins")
+	sessionID := session["id"].(string)
+	attachment := playgroundUploadAttachment(t, 7, sessionID, "pin-a", "image/png", playgroundPNGFixture(64))
+	attachmentID := attachment["id"].(string)
+	require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodPut, "/api/playground/sessions/"+sessionID+"/messages", map[string]any{
+		"revision": 0, "messages": []any{map[string]any{"client_key": "m1", "payload": map[string]any{
+			"key": "m1", "from": "user", "versions": []any{map[string]any{"id": "v1", "content": "see image", "attachments": []any{map[string]any{"id": attachmentID}}}},
+		}}},
+	}, controller.ReplacePlaygroundMessages).Code)
+
+	created := canvasEnvelope(t, playgroundRequest(t, 7, http.MethodPost, "/api/playground/canvases", map[string]any{
+		"title": "Pins",
+		"document": canvasDocument([]any{
+			canvasRefNode("a1", "attachment", map[string]any{"sessionId": sessionID, "attachmentId": attachmentID}),
+		}, nil),
+	}, controller.CreatePlaygroundCanvasProject).Body.Bytes())
+	canvasID := created["id"].(string)
+	var pins int64
+	require.NoError(t, db.Model(&model.PlaygroundCanvasAsset{}).Where("canvas_id = ?", canvasID).Count(&pins).Error)
+	assert.EqualValues(t, 1, pins)
+
+	// Dropping the message reference clears referenced_at, but the canvas pin
+	// still protects the bytes from the orphan cleanup.
+	require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodPut, "/api/playground/sessions/"+sessionID+"/messages", map[string]any{
+		"revision": 1, "messages": []any{},
+	}, controller.ReplacePlaygroundMessages).Code)
+	now := common.GetTimestamp()
+	require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("id = ?", attachmentID).Update("updated_at", now-100000).Error)
+	deleted, err := model.DeleteOrphanedPlaygroundAttachments(now-3600, 100)
+	require.NoError(t, err)
+	assert.Zero(t, deleted)
+	_, err = model.GetPlaygroundAttachment(7, sessionID, attachmentID)
+	require.NoError(t, err)
+
+	// A pinned attachment cannot be deleted directly.
+	inUse := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+sessionID+"/attachments/"+attachmentID, nil, controller.DeletePlaygroundAttachment)
+	assert.Equal(t, http.StatusConflict, inUse.Code, inUse.Body.String())
+
+	// Deleting the canvas releases the pin, after which the cleanup collects it.
+	require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodDelete, "/api/playground/canvases/"+canvasID, nil, controller.DeletePlaygroundCanvasProject).Code)
+	require.NoError(t, db.Model(&model.PlaygroundCanvasAsset{}).Where("canvas_id = ?", canvasID).Count(&pins).Error)
+	assert.Zero(t, pins)
+	require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("id = ?", attachmentID).Update("updated_at", now-100000).Error)
+	deleted, err = model.DeleteOrphanedPlaygroundAttachments(now-3600, 100)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, deleted)
+}
+
+// Saving a document that no longer references an attachment releases its pin,
+// so the bytes return to the orphan cleanup countdown.
+func TestPlaygroundCanvasAttachmentDereference(t *testing.T) {
+	db := playgroundTestDB(t, "sqlite")
+	session := createPlayground(t, 7, "canvas-deref")
+	sessionID := session["id"].(string)
+	attachment := playgroundUploadAttachment(t, 7, sessionID, "deref-a", "image/png", playgroundPNGFixture(64))
+	attachmentID := attachment["id"].(string)
+	created := canvasEnvelope(t, playgroundRequest(t, 7, http.MethodPost, "/api/playground/canvases", map[string]any{
+		"title": "Deref",
+		"document": canvasDocument([]any{
+			canvasRefNode("a1", "attachment", map[string]any{"sessionId": sessionID, "attachmentId": attachmentID}),
+		}, nil),
+	}, controller.CreatePlaygroundCanvasProject).Body.Bytes())
+	canvasID := created["id"].(string)
+	var pins int64
+	require.NoError(t, db.Model(&model.PlaygroundCanvasAsset{}).Where("canvas_id = ?", canvasID).Count(&pins).Error)
+	require.EqualValues(t, 1, pins)
+
+	require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodPatch, "/api/playground/canvases/"+canvasID, map[string]any{
+		"revision": 0, "document": canvasDocument(nil, nil),
+	}, controller.UpdatePlaygroundCanvasProject).Code)
+	pins = 0
+	require.NoError(t, db.Model(&model.PlaygroundCanvasAsset{}).Where("canvas_id = ?", canvasID).Count(&pins).Error)
+	assert.Zero(t, pins)
+
+	now := common.GetTimestamp()
+	require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("id = ?", attachmentID).Update("updated_at", now-100000).Error)
+	deleted, err := model.DeleteOrphanedPlaygroundAttachments(now-3600, 100)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, deleted)
+}
+
+// Deleting a conversation still cascades into its attachments and pins, and the
+// canvas reports the now-missing source instead of silently losing the node.
+func TestPlaygroundCanvasSessionCascade(t *testing.T) {
+	db := playgroundTestDB(t, "sqlite")
+	session := createPlayground(t, 7, "canvas-cascade")
+	sessionID := session["id"].(string)
+	attachment := playgroundUploadAttachment(t, 7, sessionID, "cascade-a", "image/png", playgroundPNGFixture(64))
+	attachmentID := attachment["id"].(string)
+	created := canvasEnvelope(t, playgroundRequest(t, 7, http.MethodPost, "/api/playground/canvases", map[string]any{
+		"title": "Cascade",
+		"document": canvasDocument([]any{
+			canvasRefNode("a1", "attachment", map[string]any{"sessionId": sessionID, "attachmentId": attachmentID}),
+		}, nil),
+	}, controller.CreatePlaygroundCanvasProject).Body.Bytes())
+	canvasID := created["id"].(string)
+
+	require.NoError(t, model.DeletePlaygroundSession(7, sessionID))
+	var attachments, pins int64
+	require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("session_id = ?", sessionID).Count(&attachments).Error)
+	assert.Zero(t, attachments)
+	require.NoError(t, db.Model(&model.PlaygroundCanvasAsset{}).Where("canvas_id = ?", canvasID).Count(&pins).Error)
+	assert.Zero(t, pins)
+
+	detail := playgroundRequest(t, 7, http.MethodGet, "/api/playground/canvases/"+canvasID, nil, controller.GetPlaygroundCanvasProject)
+	var envelope struct {
+		Success bool
+		Data    struct {
+			UnavailableNodeIDs []string `json:"unavailable_node_ids"`
+		}
+	}
+	require.NoError(t, common.Unmarshal(detail.Body.Bytes(), &envelope))
+	require.True(t, envelope.Success, detail.Body.String())
+	assert.Equal(t, []string{"a1"}, envelope.Data.UnavailableNodeIDs)
+
+	// Nothing is left for the orphan cleanup, and another account cannot read
+	// the board.
+	deleted, err := model.DeleteOrphanedPlaygroundAttachments(common.GetTimestamp(), 100)
+	require.NoError(t, err)
+	assert.Zero(t, deleted)
+	assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 8, http.MethodGet, "/api/playground/canvases/"+canvasID, nil, controller.GetPlaygroundCanvasProject).Code)
+}
+
+// Deleting the referenced message marks its node as "source deleted" while the
+// stored snapshot keeps the node visible and the board editable.
+func TestPlaygroundCanvasReferenceSourceDeleted(t *testing.T) {
+	playgroundTestDB(t, "sqlite")
+	session := createPlayground(t, 7, "canvas-source-deleted")
+	sessionID := session["id"].(string)
+	messagePath := "/api/playground/sessions/" + sessionID + "/messages"
+	require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodPut, messagePath, map[string]any{
+		"revision": 0, "messages": []any{map[string]any{"client_key": "m1", "payload": map[string]any{
+			"key": "m1", "from": "assistant", "status": "complete",
+			"versions": []any{map[string]any{"id": "v1", "content": "snapshot text"}},
+		}}},
+	}, controller.ReplacePlaygroundMessages).Code)
+
+	created := canvasEnvelope(t, playgroundRequest(t, 7, http.MethodPost, "/api/playground/canvases", map[string]any{
+		"title": "Deleted source",
+		"document": canvasDocument([]any{
+			canvasRefNode("m1", "message", map[string]any{"sessionId": sessionID, "messageKey": "m1"}),
+		}, nil),
+	}, controller.CreatePlaygroundCanvasProject).Body.Bytes())
+	canvasID := created["id"].(string)
+	var revision int64
+	unavailable := func() []string {
+		detail := playgroundRequest(t, 7, http.MethodGet, "/api/playground/canvases/"+canvasID, nil, controller.GetPlaygroundCanvasProject)
+		var envelope struct {
+			Data struct {
+				UnavailableNodeIDs []string `json:"unavailable_node_ids"`
+				Revision           int64    `json:"revision"`
+			}
+		}
+		require.NoError(t, common.Unmarshal(detail.Body.Bytes(), &envelope))
+		revision = envelope.Data.Revision
+		return envelope.Data.UnavailableNodeIDs
+	}
+	assert.Empty(t, unavailable())
+
+	// The message disappears, so the node's source is now deleted.
+	require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodPut, messagePath, map[string]any{
+		"revision": 1, "messages": []any{},
+	}, controller.ReplacePlaygroundMessages).Code)
+	assert.Equal(t, []string{"m1"}, unavailable())
+
+	// The dangling reference does not block an unrelated edit: the node keeps
+	// its snapshot and the document stays saveable.
+	updated := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/canvases/"+canvasID, map[string]any{
+		"revision": revision,
+		"document": canvasDocument([]any{map[string]any{
+			"id": "m1", "type": "message", "position": map[string]any{"x": 120, "y": 40},
+			"data": map[string]any{"kind": "message", "text": "snapshot text", "snapshot": map[string]any{
+				"sessionId": sessionID, "messageKey": "m1", "role": "assistant", "text": "snapshot text",
+			}, "ref": map[string]any{"sessionId": sessionID, "messageKey": "m1"}},
+		}}, nil),
+	}, controller.UpdatePlaygroundCanvasProject)
+	require.Equal(t, http.StatusOK, updated.Code, updated.Body.String())
+	assert.Contains(t, updated.Body.String(), "snapshot text")
 }

@@ -40,6 +40,7 @@ const canvasProjectSummarySchema = z.object({
 
 const canvasProjectSchema = canvasProjectSummarySchema.extend({
   document: canvasDocumentSchema,
+  unavailable_node_ids: z.array(z.string()).optional(),
 })
 
 function mapCanvasSummary(value: unknown): CanvasProjectSummary {
@@ -62,6 +63,9 @@ function mapCanvasProject(value: unknown): CanvasServerProject {
   return {
     ...mapCanvasSummary(project),
     document: project.document,
+    ...(project.unavailable_node_ids
+      ? { unavailableNodeIds: project.unavailable_node_ids }
+      : {}),
   }
 }
 

@@ -19,9 +19,14 @@ For commercial licensing, please contact support@quantumnous.com
 import { expect, test } from 'vitest'
 
 import { CANVAS_MAX_NODES, CANVAS_NODE_DATA_MAX_BYTES } from '../../constants'
-import type { CanvasFlowEdge, CanvasFlowNode } from '../../types'
+import type {
+  CanvasFlowEdge,
+  CanvasFlowNode,
+  CanvasServerProject,
+} from '../../types'
 import {
   CANVAS_ERRORS,
+  applyCanvasReferenceStatus,
   fromServerDocument,
   parseCanvasImport,
   serializeCanvasExport,
@@ -129,4 +134,76 @@ test('validation rejects a document that exceeds the byte budget', () => {
     []
   )
   expect(validateCanvasDocument(document)).toBe(CANVAS_ERRORS.TOO_LARGE)
+})
+
+function canvasProject(
+  project: Partial<CanvasServerProject> & {
+    document: CanvasServerProject['document']
+  }
+): CanvasServerProject {
+  return {
+    id: 'c1',
+    title: 'Board',
+    nodeCount: project.document.nodes.length,
+    edgeCount: project.document.edges.length,
+    documentBytes: 0,
+    revision: 1,
+    createdAt: 0,
+    updatedAt: 0,
+    ...project,
+  }
+}
+
+test('reference status marks deleted sources and clears stale flags', () => {
+  const project = canvasProject({
+    unavailableNodeIds: ['n2'],
+    document: {
+      nodes: [
+        {
+          id: 'n1',
+          type: 'message',
+          position: { x: 0, y: 0 },
+          data: { kind: 'message', text: 'kept', sourceDeleted: true },
+        },
+        {
+          id: 'n2',
+          type: 'attachment',
+          position: { x: 0, y: 0 },
+          data: {
+            kind: 'attachment',
+            label: 'cat.png',
+            ref: { sessionId: 'pgs_1', attachmentId: 'pgf_1' },
+          },
+        },
+      ],
+      edges: [],
+    },
+  })
+
+  const marked = applyCanvasReferenceStatus(project)
+
+  expect(marked.document.nodes[0].data).not.toHaveProperty('sourceDeleted')
+  expect(marked.document.nodes[1].data).toMatchObject({
+    sourceDeleted: true,
+    label: 'cat.png',
+    ref: { sessionId: 'pgs_1', attachmentId: 'pgf_1' },
+  })
+})
+
+test('reference status leaves a resolvable project untouched', () => {
+  const project = canvasProject({
+    document: {
+      nodes: [
+        {
+          id: 'n1',
+          type: 'message',
+          position: { x: 0, y: 0 },
+          data: { kind: 'message', text: 'ok' },
+        },
+      ],
+      edges: [],
+    },
+  })
+
+  expect(applyCanvasReferenceStatus(project)).toBe(project)
 })

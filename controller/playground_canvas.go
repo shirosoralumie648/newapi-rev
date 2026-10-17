@@ -116,6 +116,10 @@ type playgroundCanvasResponse struct {
 	CreatedAt     int64           `json:"created_at"`
 	UpdatedAt     int64           `json:"updated_at"`
 	Document      json.RawMessage `json:"document,omitempty"`
+	// UnavailableNodeIDs names nodes whose referenced source no longer exists, so
+	// the client can render the "source deleted" state without rewriting the
+	// stored document.
+	UnavailableNodeIDs []string `json:"unavailable_node_ids,omitempty"`
 }
 
 func writePlaygroundCanvasError(c *gin.Context, err error) {
@@ -236,12 +240,19 @@ func normalizePlaygroundCanvasDocument(document *playgroundCanvasDocument) (stri
 	return string(encoded), len(document.Nodes), len(document.Edges), nil
 }
 
-// playgroundCanvasReferences collects the resources a document claims. Node
+// playgroundCanvasReferenceClaim pairs a node id with the resource it claims, so
+// the same parse feeds both reference validation and the read-side "source
+// deleted" report.
+type playgroundCanvasReferenceClaim struct {
+	NodeID    string
+	Reference model.PlaygroundCanvasReference
+}
+
+// playgroundCanvasNodeReferences collects the resources a document claims. Node
 // data is opaque and bounded, so a node without a well-formed `ref` object
-// contributes nothing; the model layer rejects any reference that belongs to
-// another account or no longer exists.
-func playgroundCanvasReferences(document *playgroundCanvasDocument) []model.PlaygroundCanvasReference {
-	references := make([]model.PlaygroundCanvasReference, 0)
+// contributes nothing; the model layer classifies each reference.
+func playgroundCanvasNodeReferences(document *playgroundCanvasDocument) []playgroundCanvasReferenceClaim {
+	references := make([]playgroundCanvasReferenceClaim, 0)
 	if document == nil {
 		return references
 	}
@@ -258,12 +269,66 @@ func playgroundCanvasReferences(document *playgroundCanvasDocument) []model.Play
 		if ref.SessionID == "" && ref.MessageKey == "" && ref.AttachmentID == "" && ref.ArtifactID == "" {
 			continue
 		}
-		references = append(references, model.PlaygroundCanvasReference{
-			SessionID: ref.SessionID, MessageKey: ref.MessageKey,
-			AttachmentID: ref.AttachmentID, ArtifactID: ref.ArtifactID,
+		references = append(references, playgroundCanvasReferenceClaim{
+			NodeID: document.Nodes[index].ID,
+			Reference: model.PlaygroundCanvasReference{
+				SessionID: ref.SessionID, MessageKey: ref.MessageKey,
+				AttachmentID: ref.AttachmentID, ArtifactID: ref.ArtifactID,
+			},
 		})
 	}
 	return references
+}
+
+// validatePlaygroundCanvasReferences checks ownership of every claimed resource
+// and returns the attachment IDs the canvas pins. A reference whose resource was
+// deleted is accepted so the board stays editable; it is reported as
+// unavailable on read.
+func validatePlaygroundCanvasReferences(userID int, document *playgroundCanvasDocument) ([]string, error) {
+	nodeReferences := playgroundCanvasNodeReferences(document)
+	references := make([]model.PlaygroundCanvasReference, 0, len(nodeReferences))
+	attachmentIDs := make([]string, 0)
+	for _, nodeReference := range nodeReferences {
+		references = append(references, nodeReference.Reference)
+		if nodeReference.Reference.AttachmentID != "" {
+			attachmentIDs = append(attachmentIDs, nodeReference.Reference.AttachmentID)
+		}
+	}
+	if err := model.ValidatePlaygroundCanvasReferences(userID, references); err != nil {
+		return nil, err
+	}
+	return attachmentIDs, nil
+}
+
+// playgroundCanvasUnavailableNodeIDs resolves the stored document's references
+// for the owner and returns the nodes whose source no longer exists.
+func playgroundCanvasUnavailableNodeIDs(userID int, document string) []string {
+	if document == "" {
+		return nil
+	}
+	var decoded playgroundCanvasDocument
+	if common.UnmarshalJsonStr(document, &decoded) != nil {
+		return nil
+	}
+	nodeReferences := playgroundCanvasNodeReferences(&decoded)
+	if len(nodeReferences) == 0 {
+		return nil
+	}
+	references := make([]model.PlaygroundCanvasReference, 0, len(nodeReferences))
+	for _, nodeReference := range nodeReferences {
+		references = append(references, nodeReference.Reference)
+	}
+	available, err := model.PlaygroundCanvasReferenceAvailability(userID, references)
+	if err != nil {
+		return nil
+	}
+	unavailable := make([]string, 0)
+	for index, resolved := range available {
+		if !resolved {
+			unavailable = append(unavailable, nodeReferences[index].NodeID)
+		}
+	}
+	return unavailable
 }
 
 func playgroundDecodeCanvasProject(project *model.PlaygroundCanvasProject, created bool) playgroundCanvasResponse {
@@ -331,7 +396,8 @@ func CreatePlaygroundCanvasProject(c *gin.Context) {
 		writePlaygroundCanvasError(c, err)
 		return
 	}
-	if err := model.ValidatePlaygroundCanvasReferences(c.GetInt("id"), playgroundCanvasReferences(request.Document)); err != nil {
+	attachmentIDs, err := validatePlaygroundCanvasReferences(c.GetInt("id"), request.Document)
+	if err != nil {
 		writePlaygroundCanvasError(c, err)
 		return
 	}
@@ -342,7 +408,7 @@ func CreatePlaygroundCanvasProject(c *gin.Context) {
 	if request.ClientID != "" {
 		project.ClientID = &request.ClientID
 	}
-	stored, created, err := model.CreatePlaygroundCanvasProject(c.GetInt("id"), project)
+	stored, created, err := model.CreatePlaygroundCanvasProject(c.GetInt("id"), project, attachmentIDs)
 	if err != nil {
 		writePlaygroundCanvasError(c, err)
 		return
@@ -356,7 +422,9 @@ func GetPlaygroundCanvasProject(c *gin.Context) {
 		writePlaygroundCanvasError(c, err)
 		return
 	}
-	common.ApiSuccess(c, playgroundDecodeCanvasProject(project, false))
+	response := playgroundDecodeCanvasProject(project, false)
+	response.UnavailableNodeIDs = playgroundCanvasUnavailableNodeIDs(c.GetInt("id"), string(project.Document))
+	common.ApiSuccess(c, response)
 }
 
 func UpdatePlaygroundCanvasProject(c *gin.Context) {
@@ -383,13 +451,15 @@ func UpdatePlaygroundCanvasProject(c *gin.Context) {
 			writePlaygroundCanvasError(c, err)
 			return
 		}
-		if err := model.ValidatePlaygroundCanvasReferences(c.GetInt("id"), playgroundCanvasReferences(request.Document)); err != nil {
+		attachmentIDs, err := validatePlaygroundCanvasReferences(c.GetInt("id"), request.Document)
+		if err != nil {
 			writePlaygroundCanvasError(c, err)
 			return
 		}
 		input.Document = &document
 		input.NodeCount = nodeCount
 		input.EdgeCount = edgeCount
+		input.AttachmentIDs = attachmentIDs
 	}
 	if input.Document == nil && input.Title == nil {
 		writePlaygroundCanvasError(c, model.ErrPlaygroundCanvasInvalid)

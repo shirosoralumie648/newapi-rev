@@ -52,6 +52,9 @@ export type CanvasNodeData = {
   snapshot?: CanvasMessageSnapshot
   ref?: CanvasNodeRef
   label?: string
+  // Set by the read path when the node's referenced resource was deleted. The
+  // node keeps its snapshot/label so the content stays visible.
+  sourceDeleted?: boolean
 }
 
 export type CanvasFlowNode = Node<CanvasNodeData>
@@ -103,4 +106,6 @@ export type CanvasProjectSummary = {
 
 export type CanvasServerProject = CanvasProjectSummary & {
   document: CanvasServerDocument
+  // Node ids whose referenced source no longer exists for this account.
+  unavailableNodeIds?: string[]
 }

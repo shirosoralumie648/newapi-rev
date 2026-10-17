@@ -382,6 +382,7 @@ func migrateDB() error {
 		&PlaygroundArtifactVersion{},
 		&PlaygroundAttachment{},
 		&PlaygroundCanvasProject{},
+		&PlaygroundCanvasAsset{},
 	)
 	if err != nil {
 		return err

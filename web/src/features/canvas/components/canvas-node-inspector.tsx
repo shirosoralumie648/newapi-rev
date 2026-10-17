@@ -76,6 +76,12 @@ export function CanvasNodeInspector(props: CanvasNodeInspectorProps) {
         </p>
       </div>
 
+      {node.data.sourceDeleted ? (
+        <p className='border-warning/40 bg-warning/10 text-warning rounded-md border p-2 text-xs'>
+          {t('The original was deleted. A saved snapshot is shown instead.')}
+        </p>
+      ) : null}
+
       {editable ? (
         <label className='grid gap-1.5'>
           <span className='text-muted-foreground text-xs'>

@@ -303,6 +303,13 @@ func DeletePlaygroundAttachment(userID int, sessionID, id string) error {
 		if attachment.ReferencedAt > 0 {
 			return ErrPlaygroundAttachmentInUse
 		}
+		var pinned int64
+		if err := tx.Model(&PlaygroundCanvasAsset{}).Where("attachment_id = ? AND user_id = ?", id, userID).Count(&pinned).Error; err != nil {
+			return err
+		}
+		if pinned > 0 {
+			return ErrPlaygroundAttachmentInUse
+		}
 		return tx.Where("id = ? AND user_id = ?", id, userID).Delete(&PlaygroundAttachment{}).Error
 	})
 }
@@ -326,7 +333,8 @@ func syncPlaygroundAttachmentReferences(tx *gorm.DB, userID int, sessionID strin
 }
 
 // DeleteOrphanedPlaygroundAttachments removes unreferenced attachments whose
-// last state change predates the cutoff. Referenced rows are never touched.
+// last state change predates the cutoff. Referenced rows and attachments pinned
+// by a canvas are never touched.
 func DeleteOrphanedPlaygroundAttachments(updatedBefore int64, batchSize int) (int64, error) {
 	if batchSize <= 0 {
 		batchSize = 200
@@ -335,14 +343,16 @@ func DeleteOrphanedPlaygroundAttachments(updatedBefore int64, batchSize int) (in
 	for {
 		var ids []string
 		if err := DB.Model(&PlaygroundAttachment{}).
-			Where("referenced_at = 0 AND updated_at < ?", updatedBefore).
+			Where("referenced_at = 0 AND updated_at < ? AND id NOT IN (?)", updatedBefore,
+				DB.Model(&PlaygroundCanvasAsset{}).Select("attachment_id")).
 			Order("updated_at ASC, id ASC").Limit(batchSize).Pluck("id", &ids).Error; err != nil {
 			return total, err
 		}
 		if len(ids) == 0 {
 			return total, nil
 		}
-		result := DB.Where("id IN ? AND referenced_at = 0 AND updated_at < ?", ids, updatedBefore).Delete(&PlaygroundAttachment{})
+		result := DB.Where("id IN ? AND referenced_at = 0 AND updated_at < ? AND id NOT IN (?)", ids, updatedBefore,
+			DB.Model(&PlaygroundCanvasAsset{}).Select("attachment_id")).Delete(&PlaygroundAttachment{})
 		if result.Error != nil {
 			return total, result.Error
 		}
