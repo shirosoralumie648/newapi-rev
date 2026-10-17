@@ -23,7 +23,8 @@ if tonumber(redis.call('HGET', KEYS[1], 'Id') or '0') ~= tonumber(ARGV[2])
   return -1
 end
 local quota = tonumber(redis.call('HGET', KEYS[1], 'Quota'))
-if quota == nil or quota < tonumber(ARGV[1]) then
+local limit = tonumber(ARGV[4] or '0') or 0
+if quota == nil or quota + limit < tonumber(ARGV[1]) then
   return 0
 end
 redis.call('HINCRBY', KEYS[1], 'Quota', -tonumber(ARGV[1]))
@@ -78,9 +79,9 @@ func quotaResultFromLua(result int, err error) (cacheQuotaResult, error) {
 	}
 }
 
-func cacheTryReserveUserQuota(userID int, amount int64) (cacheQuotaResult, error) {
+func cacheTryReserveUserQuota(userID int, amount int64, overdraftLimit int64) (cacheQuotaResult, error) {
 	result, err := common.RDB.Eval(context.Background(), userQuotaReserveScript,
-		[]string{getUserCacheKey(userID)}, amount, userID, userCacheSchemaVersion).Int()
+		[]string{getUserCacheKey(userID)}, amount, userID, userCacheSchemaVersion, overdraftLimit).Int()
 	return quotaResultFromLua(result, err)
 }
 
@@ -140,9 +141,9 @@ func persistTokenQuotaDelta(id int, delta int) error {
 	return nil
 }
 
-func reserveUserQuotaDB(id int, quota int) (bool, error) {
+func reserveUserQuotaDB(id int, quota int, overdraftLimit int64) (bool, error) {
 	result := DB.Model(&User{}).
-		Where("id = ? AND quota >= ?", id, quota).
+		Where("id = ? AND quota + ? >= ?", id, overdraftLimit, quota).
 		Update("quota", gorm.Expr("quota - ?", quota))
 	return result.RowsAffected == 1, result.Error
 }
@@ -158,8 +159,10 @@ func reserveTokenQuotaDB(id int, quota int) (bool, error) {
 	return result.RowsAffected == 1, result.Error
 }
 
-// TryReserveUserQuota atomically checks and deducts a user's wallet quota. With
-// a non-empty requestId the deduction and an active wallet hold commit in one
+// TryReserveUserQuota atomically checks and deducts a user's wallet quota. The
+// check admits spending down to the account's overdraft credit line, so a group
+// configured for postpaid usage can consume with no prepaid balance. With a
+// non-empty requestId the deduction and an active wallet hold commit in one
 // transaction, which is what makes a reservation left behind by a crash
 // refundable. An empty requestId keeps the legacy cache/batch path.
 func TryReserveUserQuota(id int, quota int, requestId string) (bool, error) {
@@ -169,24 +172,25 @@ func TryReserveUserQuota(id int, quota int, requestId string) (bool, error) {
 	if quota == 0 {
 		return true, nil
 	}
+	limit := overdraftLimitForCharge(id)
 	if requestId == "" {
 		// Legacy path without a durable hold, kept for callers that carry no
 		// stable request reference.
 		if !common.RedisEnabled {
-			return reserveUserQuotaDB(id, quota)
+			return reserveUserQuotaDB(id, quota, limit)
 		}
 
-		result, err := cacheTryReserveUserQuota(id, int64(quota))
+		result, err := cacheTryReserveUserQuota(id, int64(quota), limit)
 		if err == nil && result == cacheQuotaMiss {
 			if _, hydrateErr := GetUserCache(id); hydrateErr == nil {
-				result, err = cacheTryReserveUserQuota(id, int64(quota))
+				result, err = cacheTryReserveUserQuota(id, int64(quota), limit)
 			}
 		}
 		if err != nil || result == cacheQuotaMiss {
 			if err != nil {
 				common.SysLog(common.LogText("user quota cache reserve unavailable, falling back to database: %s", err.Error()))
 			}
-			return reserveUserQuotaDB(id, quota)
+			return reserveUserQuotaDB(id, quota, limit)
 		}
 		if result == cacheQuotaInsufficient {
 			return false, nil
@@ -201,57 +205,71 @@ func TryReserveUserQuota(id int, quota int, requestId string) (bool, error) {
 		return true, nil
 	}
 	if !common.RedisEnabled {
-		return reserveWalletQuotaWithHoldTx(id, int64(quota), requestId, true)
+		applied, err := reserveWalletQuotaWithHoldTx(id, int64(quota), requestId, true)
+		return applied > 0, err
 	}
 
-	result, err := cacheTryReserveUserQuota(id, int64(quota))
+	result, err := cacheTryReserveUserQuota(id, int64(quota), limit)
 	if err == nil && result == cacheQuotaMiss {
 		if _, hydrateErr := GetUserCache(id); hydrateErr == nil {
-			result, err = cacheTryReserveUserQuota(id, int64(quota))
+			result, err = cacheTryReserveUserQuota(id, int64(quota), limit)
 		}
 	}
 	if err != nil || result == cacheQuotaMiss {
 		if err != nil {
 			common.SysLog(common.LogText("user quota cache reserve unavailable, falling back to database: %s", err.Error()))
 		}
-		return reserveWalletQuotaWithHoldTx(id, int64(quota), requestId, true)
+		applied, err := reserveWalletQuotaWithHoldTx(id, int64(quota), requestId, true)
+		return applied > 0, err
 	}
 	if result == cacheQuotaInsufficient {
 		return false, nil
 	}
 	// The cache already authorized the reservation, so the database write only
 	// has to persist it together with the hold.
-	if _, err = reserveWalletQuotaWithHoldTx(id, int64(quota), requestId, false); err != nil {
+	applied, err := reserveWalletQuotaWithHoldTx(id, int64(quota), requestId, false)
+	if err != nil {
 		compensated, compensateErr := cacheApplyUserQuotaDelta(id, int64(quota))
 		if compensateErr != nil || compensated != cacheQuotaOK {
 			common.SysError(common.LogText("failed to compensate reserved user quota: result=%d error=%v", compensated, compensateErr))
 		}
 		return false, err
 	}
+	if applied < int64(quota) {
+		// A stale cache authorized more than the committed balance could cover:
+		// return the part the wallet never gave up to the cache so the two stay
+		// in step.
+		syncWalletQuotaCache(id, int64(quota)-applied, "wallet hold reserve beyond the credit line")
+	}
 	return true, nil
 }
 
-// ReserveUserQuotaWithDebt deducts quota without a balance check, admitting
-// wallet debt for the uncovered part (the same semantics as a settlement
-// top-up). With a non-empty requestId the deduction and the hold extension
+// ReserveUserQuotaWithDebt deducts quota without a balance check: the wallet is
+// debited down to its overdraft credit line and the remainder is recorded as
+// debt (the same semantics as a settlement top-up). It returns the amount that
+// left the wallet so consumption accounting never records more than the balance
+// movement. With a non-empty requestId the deduction and the hold extension
 // commit together; otherwise it falls back to the legacy batch queue.
-func ReserveUserQuotaWithDebt(id int, quota int, requestId string) error {
+func ReserveUserQuotaWithDebt(id int, quota int, requestId string) (int64, error) {
 	if quota < 0 {
-		return errors.New("quota cannot be negative")
+		return 0, errors.New("quota cannot be negative")
 	}
 	if quota == 0 {
-		return nil
+		return 0, nil
 	}
 	if requestId == "" {
-		return DecreaseUserQuota(id, quota, false)
+		// 兼容路径同样受透支上限约束：扣到信用额度为止，超出部分记为欠款。
+		applied, err := SettleWalletCharge(id, quota)
+		return int64(applied), err
 	}
-	if _, err := reserveWalletQuotaWithHoldTx(id, int64(quota), requestId, false); err != nil {
-		return err
+	applied, err := reserveWalletQuotaWithHoldTx(id, int64(quota), requestId, false)
+	if err != nil {
+		return 0, err
 	}
 	// DecreaseUserQuota keeps the cache in step for this path; mirror it so the
 	// cache cannot authorize the already spent quota again.
-	syncWalletQuotaCache(id, -int64(quota), "wallet reserve with debt")
-	return nil
+	syncWalletQuotaCache(id, -applied, "wallet reserve with debt")
+	return applied, nil
 }
 
 // TryReserveTokenQuota atomically checks and deducts a token quota. Unlimited

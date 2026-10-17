@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -61,7 +62,7 @@ func walletLedgerTestDB(t *testing.T, dialect string) *gorm.DB {
 	DB = db
 	LOG_DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&WalletLedgerEntry{}, &WalletHold{}, &User{}))
+		require.NoError(t, db.Migrator().DropTable(&WalletLedgerEntry{}, &WalletHold{}, &WalletDebt{}, &User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
@@ -74,8 +75,8 @@ func walletLedgerTestDB(t *testing.T, dialect string) *gorm.DB {
 
 	// A fresh migration and a repeated migration both succeed, so the new
 	// tables are created idempotently on every engine.
-	require.NoError(t, db.AutoMigrate(&User{}, &WalletLedgerEntry{}, &WalletHold{}))
-	require.NoError(t, db.AutoMigrate(&User{}, &WalletLedgerEntry{}, &WalletHold{}))
+	require.NoError(t, db.AutoMigrate(&User{}, &WalletLedgerEntry{}, &WalletHold{}, &WalletDebt{}))
+	require.NoError(t, db.AutoMigrate(&User{}, &WalletLedgerEntry{}, &WalletHold{}, &WalletDebt{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -277,7 +278,9 @@ func TestWalletHoldReserveExtendsAndSettles(t *testing.T) {
 
 		// A mid-flight reserve (channel switch, image override) extends the same
 		// hold and can admit wallet debt.
-		require.NoError(t, ReserveUserQuotaWithDebt(71, 150, "hold-settle-a"))
+		applied, err := ReserveUserQuotaWithDebt(71, 150, "hold-settle-a")
+		require.NoError(t, err)
+		require.EqualValues(t, 150, applied)
 		hold, err = GetWalletHoldByRequestId("hold-settle-a")
 		require.NoError(t, err)
 		assert.EqualValues(t, 450, hold.Amount)
@@ -581,7 +584,9 @@ func TestWalletHoldRedisReserveWritesHold(t *testing.T) {
 
 	// The cache stays authoritative for the next reservation and the same hold
 	// grows with it.
-	require.NoError(t, ReserveUserQuotaWithDebt(user.Id, 1, "hold-redis-a"))
+	applied, err := ReserveUserQuotaWithDebt(user.Id, 1, "hold-redis-a")
+	require.NoError(t, err)
+	require.EqualValues(t, 1, applied)
 	assert.Equal(t, 1, getUserQuotaFromDB(t, user.Id))
 	hold, err = GetWalletHoldByRequestId("hold-redis-a")
 	require.NoError(t, err)
@@ -597,4 +602,239 @@ func TestWalletHoldRedisReserveWritesHold(t *testing.T) {
 	cached, err = GetUserCache(user.Id)
 	require.NoError(t, err)
 	assert.Equal(t, 2, cached.Quota)
+}
+
+// useWalletOverdraftLimit installs one overdraft credit line (USD, plus per
+// group overrides) for the duration of a test and restores the shared setting
+// afterwards.
+func useWalletOverdraftLimit(t *testing.T, usd float64, groupOverrides map[string]float64) {
+	t.Helper()
+	setting := operation_setting.GetQuotaSetting()
+	previousUSD, previousOverrides := setting.OverdraftLimitUSD, setting.OverdraftGroupOverrides
+	previousUnit := common.QuotaPerUnit
+	setting.OverdraftLimitUSD = usd
+	setting.OverdraftGroupOverrides = groupOverrides
+	common.QuotaPerUnit = 500_000
+	t.Cleanup(func() {
+		setting.OverdraftLimitUSD = previousUSD
+		setting.OverdraftGroupOverrides = previousOverrides
+		common.QuotaPerUnit = previousUnit
+	})
+}
+
+// A settlement charge may use the account's overdraft credit line, and whatever
+// exceeds it becomes tracked debt instead of a negative balance that keeps
+// growing. Debt rows live in the ledger next to the wallet rows, so both
+// accounts reconcile.
+func TestWalletDebtSettleRespectsOverdraftLimit(t *testing.T) {
+	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
+		useWalletOverdraftLimit(t, 0.02, nil)
+		require.NoError(t, db.Create(&User{Id: 201, Username: "debt-settle", AffCode: "debt-settle", Quota: 5_000, Group: "default", Status: common.UserStatusEnabled}).Error)
+
+		// A pre-consume of the whole balance, then a settlement 3_000 above the
+		// reservation: the credit line (10_000) still covers it.
+		reserved, err := TryReserveUserQuota(201, 5_000, "debt-settle-a")
+		require.NoError(t, err)
+		require.True(t, reserved)
+		charged, err := SettleWalletHold(201, "debt-settle-a", 3_000)
+		require.NoError(t, err)
+		assert.EqualValues(t, 3_000, charged)
+		balance, err := GetUserQuota(201, true)
+		require.NoError(t, err)
+		assert.Equal(t, -3_000, balance)
+		debt, err := WalletDebtForUser(201)
+		require.NoError(t, err)
+		assert.Zero(t, debt, "a charge inside the credit line is no debt")
+		_, readOnly, err := ResolveWalletDebtStatus(201)
+		require.NoError(t, err)
+		assert.False(t, readOnly)
+
+		// The next charge exceeds the remaining credit line: the wallet is
+		// debited exactly down to it and the uncovered 1_000 becomes debt.
+		charged, err = SettleWalletHold(201, "debt-settle-b", 8_000)
+		require.NoError(t, err)
+		assert.EqualValues(t, 7_000, charged)
+		balance, err = GetUserQuota(201, true)
+		require.NoError(t, err)
+		assert.Equal(t, -10_000, balance, "the wallet never goes below its credit line")
+		debt, err = WalletDebtForUser(201)
+		require.NoError(t, err)
+		assert.EqualValues(t, 1_000, debt)
+
+		var entry WalletLedgerEntry
+		require.NoError(t, db.Where("user_id = ? AND kind = ?", 201, WalletLedgerKindDebt).First(&entry).Error)
+		assert.EqualValues(t, 1_000, entry.Amount)
+		assert.Contains(t, entry.Meta, "outstanding_debt=1000")
+		reconcile, err := ReconcileWalletLedgerForUser(201)
+		require.NoError(t, err)
+		assert.True(t, reconcile.Reconciled, "wallet sum %d vs balance %d, debt rows %d vs stored %d", reconcile.LedgerSum, reconcile.Quota, reconcile.Debt, reconcile.DebtBalance)
+		assert.EqualValues(t, 1_000, reconcile.Debt)
+
+		// A group override replaces the default credit line for that group only.
+		useWalletOverdraftLimit(t, 0, map[string]float64{"default": 0.04})
+		assert.EqualValues(t, 20_000, OverdraftLimitQuotaForGroup("default"))
+		assert.Zero(t, OverdraftLimitQuotaForGroup("basic"))
+	})
+}
+
+// Concurrent charges of one account are serialized on the wallet row, so no
+// matter how many requests settle at the same time the wallet balance never
+// goes below its credit line; the rest is recorded as debt.
+func TestWalletDebtConcurrentChargesStayWithinOverdraftLimit(t *testing.T) {
+	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
+		useWalletOverdraftLimit(t, 0.02, nil) // 10_000 quota
+		require.NoError(t, db.Create(&User{Id: 211, Username: "debt-concurrent", AffCode: "debt-concurrent", Quota: 0, Group: "default", Status: common.UserStatusEnabled}).Error)
+
+		const charges = 5
+		const chargeQuota = 4_000
+		var wg sync.WaitGroup
+		for i := range charges {
+			wg.Go(func() {
+				if _, err := SettleWalletHold(211, fmt.Sprintf("debt-concurrent-%d", i), chargeQuota); err != nil {
+					t.Errorf("concurrent settlement %d failed: %v", i, err)
+				}
+			})
+		}
+		wg.Wait()
+
+		balance, err := GetUserQuota(211, true)
+		require.NoError(t, err)
+		assert.Equal(t, -10_000, balance, "concurrent settlements must not exceed the overdraft limit")
+		debt, err := WalletDebtForUser(211)
+		require.NoError(t, err)
+		assert.EqualValues(t, charges*chargeQuota-10_000, debt)
+		reconcile, err := ReconcileWalletLedgerForUser(211)
+		require.NoError(t, err)
+		assert.True(t, reconcile.Reconciled, "wallet sum %d vs balance %d, debt rows %d vs stored %d", reconcile.LedgerSum, reconcile.Quota, reconcile.Debt, reconcile.DebtBalance)
+	})
+}
+
+// Debt locks the account read-only, a recharge collects it automatically
+// without an administrator, and a partial recharge still leaves the account
+// locked until the debt is covered.
+func TestWalletDebtReadOnlyRecoversAfterRecharge(t *testing.T) {
+	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
+		useWalletOverdraftLimit(t, 0, nil)
+		require.NoError(t, db.Create(&User{Id: 221, Username: "debt-readonly", AffCode: "debt-readonly", Quota: 1_000, Group: "default", Status: common.UserStatusEnabled}).Error)
+
+		charged, err := SettleWalletHold(221, "debt-readonly-a", 4_000)
+		require.NoError(t, err)
+		assert.EqualValues(t, 1_000, charged)
+		debt, readOnly, err := ResolveWalletDebtStatus(221)
+		require.NoError(t, err)
+		assert.True(t, readOnly)
+		assert.EqualValues(t, 3_000, debt)
+
+		// A partial recharge is collected at the next check and keeps the lock.
+		_, err = ApplyWalletLedgerDeltaDB(221, WalletLedgerKindTopUp, 1_000, WalletLedgerRefTopUp, "debt-topup-partial", "")
+		require.NoError(t, err)
+		debt, readOnly, err = ResolveWalletDebtStatus(221)
+		require.NoError(t, err)
+		assert.True(t, readOnly, "a partially covered debt keeps the account read-only")
+		assert.EqualValues(t, 2_000, debt)
+		balance, err := GetUserQuota(221, true)
+		require.NoError(t, err)
+		assert.Zero(t, balance, "the recharge paid the debt instead of becoming spendable")
+
+		// The covering recharge releases the lock and leaves the remainder.
+		_, err = ApplyWalletLedgerDeltaDB(221, WalletLedgerKindTopUp, 5_000, WalletLedgerRefTopUp, "debt-topup-full", "")
+		require.NoError(t, err)
+		debt, readOnly, err = ResolveWalletDebtStatus(221)
+		require.NoError(t, err)
+		assert.False(t, readOnly)
+		assert.Zero(t, debt)
+		balance, err = GetUserQuota(221, true)
+		require.NoError(t, err)
+		assert.Equal(t, 3_000, balance)
+
+		// Both accounts still reconcile after the collection.
+		reconcile, err := ReconcileWalletLedgerForUser(221)
+		require.NoError(t, err)
+		assert.True(t, reconcile.Reconciled, "wallet sum %d vs balance %d, debt rows %d vs stored %d", reconcile.LedgerSum, reconcile.Quota, reconcile.Debt, reconcile.DebtBalance)
+		assert.Zero(t, reconcile.Debt)
+		var repayments int64
+		require.NoError(t, db.Model(&WalletLedgerEntry{}).Where("user_id = ? AND kind = ?", 221, WalletLedgerKindDebtRepayment).Count(&repayments).Error)
+		assert.EqualValues(t, 2, repayments, "each collection writes one wallet-side repayment row")
+	})
+}
+
+// The overdraft credit line is usable for new requests: a pre-consume may debit
+// the wallet down to it, and it blocks exactly at the line.
+func TestWalletDebtPreConsumeUsesOverdraftLimit(t *testing.T) {
+	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
+		useWalletOverdraftLimit(t, 0.02, nil) // 10_000 quota
+		require.NoError(t, db.Create(&User{Id: 231, Username: "debt-preconsume", AffCode: "debt-preconsume", Quota: 0, Group: "default", Status: common.UserStatusEnabled}).Error)
+
+		reserved, err := TryReserveUserQuota(231, 6_000, "debt-preconsume-a")
+		require.NoError(t, err)
+		require.True(t, reserved, "the credit line admits a postpaid reservation")
+		balance, err := GetUserQuota(231, true)
+		require.NoError(t, err)
+		assert.Equal(t, -6_000, balance)
+
+		reserved, err = TryReserveUserQuota(231, 5_000, "debt-preconsume-b")
+		require.NoError(t, err)
+		assert.False(t, reserved, "a reservation beyond the credit line is rejected")
+		balance, err = GetUserQuota(231, true)
+		require.NoError(t, err)
+		assert.Equal(t, -6_000, balance)
+
+		// Without a credit line the same reservation is refused.
+		useWalletOverdraftLimit(t, 0, nil)
+		reserved, err = TryReserveUserQuota(232, 1, "debt-preconsume-c")
+		require.NoError(t, err)
+		assert.False(t, reserved)
+	})
+}
+
+// Administrators can list every account with outstanding debt together with the
+// owed amount; settled accounts stay out of the list.
+func TestWalletDebtorsListOutstandingAccounts(t *testing.T) {
+	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
+		useWalletOverdraftLimit(t, 0, nil)
+		require.NoError(t, db.Create(&User{Id: 241, Username: "debtor-a", AffCode: "debtor-a", Quota: 1_000, Group: "vip", Status: common.UserStatusEnabled}).Error)
+		require.NoError(t, db.Create(&User{Id: 242, Username: "debtor-b", AffCode: "debtor-b", Quota: 0, Group: "default", Status: common.UserStatusEnabled}).Error)
+		require.NoError(t, db.Create(&User{Id: 243, Username: "settled", AffCode: "settled", Quota: 9_000, Group: "default", Status: common.UserStatusEnabled}).Error)
+
+		_, err := SettleWalletHold(241, "debtor-a-charge", 6_000)
+		require.NoError(t, err)
+		_, err = SettleWalletHold(242, "debtor-b-charge", 500)
+		require.NoError(t, err)
+
+		page := &common.PageInfo{Page: 1, PageSize: 10}
+		debtors, total, err := ListWalletDebtors(page)
+		require.NoError(t, err)
+		assert.EqualValues(t, 2, total)
+		require.Len(t, debtors, 2)
+		byId := map[int]WalletDebtor{}
+		for _, debtor := range debtors {
+			byId[debtor.UserId] = debtor
+		}
+		assert.EqualValues(t, 5_000, byId[241].Debt)
+		assert.Equal(t, "debtor-a", byId[241].Username)
+		assert.Equal(t, "vip", byId[241].Group)
+		assert.Equal(t, int64(0), byId[241].Quota)
+		assert.EqualValues(t, 500, byId[242].Debt)
+		_, settles := byId[243]
+		assert.False(t, settles, "an account without debt is not listed")
+	})
+}
+
+// A legacy settlement without a request id follows the same credit line: the
+// uncovered part becomes debt instead of a negative balance.
+func TestWalletDebtLegacySettlementClampsAtCreditLine(t *testing.T) {
+	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
+		useWalletOverdraftLimit(t, 0, nil)
+		require.NoError(t, db.Create(&User{Id: 251, Username: "debt-legacy", AffCode: "debt-legacy", Quota: 700, Group: "default", Status: common.UserStatusEnabled}).Error)
+
+		applied, err := SettleWalletCharge(251, 1_200)
+		require.NoError(t, err)
+		assert.Equal(t, 700, applied)
+		balance, err := GetUserQuota(251, true)
+		require.NoError(t, err)
+		assert.Zero(t, balance)
+		debt, err := WalletDebtForUser(251)
+		require.NoError(t, err)
+		assert.EqualValues(t, 500, debt)
+	})
 }

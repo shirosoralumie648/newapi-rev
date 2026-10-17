@@ -82,14 +82,14 @@ func playgroundTestDB(t *testing.T, dialect string) *gorm.DB {
 	common.SetDatabaseTypes(common.DatabaseType(dialect), previousLog)
 	model.DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundMessage{}, &model.PlaygroundSession{}, &model.Task{}, &model.User{}))
+		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundMessage{}, &model.PlaygroundSession{}, &model.Task{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
 		model.DB = previous
 		common.SetDatabaseTypes(previousMain, previousLog)
 	})
-	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasAsset{}, &model.Task{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasAsset{}, &model.Task{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -164,8 +164,8 @@ func TestPlaygroundPersistenceMatrix(t *testing.T) {
 			id := session["id"].(string)
 			assert.Equal(t, id, createPlayground(t, 7, "local-session")["id"])
 			assert.NotEqual(t, id, createPlayground(t, 8, "local-session")["id"])
-			require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasAsset{}, &model.User{}))
-			require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasAsset{}, &model.User{}))
+			require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasAsset{}, &model.WalletDebt{}, &model.User{}))
+			require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasAsset{}, &model.WalletDebt{}, &model.User{}))
 			reloaded, err := model.GetPlaygroundSession(7, id)
 			require.NoError(t, err)
 			assert.Equal(t, "Conversation", reloaded.Title)
@@ -382,8 +382,8 @@ func TestPlaygroundMigrationCreateIsAtomicAndReplayDoesNotOverwriteMessages(t *t
 	require.Len(t, messages, 1)
 	assert.Contains(t, string(messages[0].Payload), "Imported history")
 	// Repeated startup migrations retain populated payloads and the owner/client uniqueness guarantee.
-	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundCanvasProject{}, &model.User{}))
-	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundCanvasProject{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundCanvasProject{}, &model.WalletDebt{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundCanvasProject{}, &model.WalletDebt{}, &model.User{}))
 	messages, _, err = model.ListPlaygroundMessages(7, first.Data.ID)
 	require.NoError(t, err)
 	require.Len(t, messages, 1)
@@ -1972,6 +1972,40 @@ func TestPlaygroundTaskStorageBudget(t *testing.T) {
 			response := playgroundRequest(t, 7, http.MethodPost, "/v1/videos", map[string]any{"model": "kling-v1", "prompt": "fox"}, controller.PlaygroundVideoTask)
 			assert.Equal(t, http.StatusTooManyRequests, response.Code, response.Body.String())
 			assert.Contains(t, response.Body.String(), controller.PlaygroundTaskStorageLimitErrorCode)
+		})
+	}
+}
+
+// The workspace rejects new billable work (generation and uploads) from an
+// account with unsettled wallet debt; the debt is re-read on the server and the
+// account recovers automatically once a recharge covers it.
+func TestPlaygroundWalletDebtGatesNewWork(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			useWalletOverdraftLimit(t, 0, nil)
+			require.NoError(t, db.Create(&model.WalletDebt{UserId: 9, Amount: 2_500}).Error)
+
+			generation := playgroundRequest(t, 9, http.MethodPost, "/v1/videos", map[string]any{"model": "kling-v1", "prompt": "fox"}, controller.PlaygroundVideoTask)
+			assert.Equal(t, http.StatusForbidden, generation.Code, generation.Body.String())
+			assert.Contains(t, generation.Body.String(), controller.PlaygroundWalletDebtErrorCode)
+
+			upload := playgroundRequest(t, 9, http.MethodPost, "/api/playground/sessions/session-1/attachments", map[string]any{}, controller.CreatePlaygroundAttachment)
+			assert.Equal(t, http.StatusForbidden, upload.Code, upload.Body.String())
+			assert.Contains(t, upload.Body.String(), controller.PlaygroundWalletDebtErrorCode)
+
+			// Reads stay available while the wallet holds debt.
+			read := playgroundRequest(t, 9, http.MethodGet, "/api/playground/sessions", nil, controller.ListPlaygroundSessions)
+			assert.NotEqual(t, http.StatusForbidden, read.Code, read.Body.String())
+
+			// Recharging covers the debt, so the read-only lock clears by itself.
+			_, err := model.ApplyWalletLedgerDeltaDB(9, model.WalletLedgerKindTopUp, 5_000, model.WalletLedgerRefTopUp, "pg-debt-topup", "")
+			require.NoError(t, err)
+			recovered := playgroundRequest(t, 9, http.MethodPost, "/v1/videos", map[string]any{"model": "kling-v1", "prompt": "fox"}, controller.PlaygroundVideoTask)
+			assert.NotContains(t, recovered.Body.String(), controller.PlaygroundWalletDebtErrorCode, recovered.Body.String())
+			balance, err := model.GetUserQuota(9, true)
+			require.NoError(t, err)
+			assert.Equal(t, 2_500, balance, "the recharge paid the debt instead of becoming spendable")
 		})
 	}
 }
