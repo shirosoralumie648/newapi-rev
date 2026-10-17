@@ -36,11 +36,7 @@ export interface MessageAttachment {
  * user to paste the result obtained elsewhere (or to deny the call), and the
  * answer is only relayed to the model as a `tool` message.
  */
-export type MessageToolCallStatus =
-  | 'pending'
-  | 'completed'
-  | 'denied'
-  | 'error'
+export type MessageToolCallStatus = 'pending' | 'completed' | 'denied' | 'error'
 
 export interface MessageToolCall {
   id: string

@@ -179,9 +179,7 @@ export function PlaygroundChat({
             ? () => onEditMessage(previousUserMessage)
             : undefined
         }
-        onDelete={
-          onDeleteMessage ? () => onDeleteMessage(message) : undefined
-        }
+        onDelete={onDeleteMessage ? () => onDeleteMessage(message) : undefined}
       />
     ) : undefined
 

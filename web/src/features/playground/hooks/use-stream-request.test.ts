@@ -241,9 +241,7 @@ describe('latest-wins stream request coordination', () => {
         choices: [
           {
             delta: {
-              tool_calls: [
-                { index: 0, function: { arguments: ':"Paris"}' } },
-              ],
+              tool_calls: [{ index: 0, function: { arguments: ':"Paris"}' } }],
             },
           },
         ],
