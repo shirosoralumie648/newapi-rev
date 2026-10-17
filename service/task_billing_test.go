@@ -1208,6 +1208,58 @@ func TestRecalculate_Subscription_NegativeDelta(t *testing.T) {
 	assert.Equal(t, model.LogTypeRefund, log.Type)
 }
 
+// Task settlement beyond the subscription's remaining quota charges the wallet
+// for the overflow when the plan allows it and records the matching wallet
+// ledger consumption row (WL-03, upstream #6911).
+func TestRecalculate_Subscription_OverflowChargesWallet(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID, subID = 15, 15, 15, 3
+	const preConsumed = 200
+	const actualQuota = 500 // delta 300 exceeds the 100 left in the subscription
+	const subTotal, subUsed int64 = 100_000, 99_900
+	const tokenRemain = 8000
+	const wallet = 1000
+	const remaining, overflow = 100, 200
+
+	seedUser(t, userID, wallet)
+	seedToken(t, tokenID, userID, "sk-sub-overflow", tokenRemain)
+	seedChannel(t, channelID)
+	seedSubscription(t, subID, userID, subTotal, subUsed)
+	require.NoError(t, model.DB.Model(&model.UserSubscription{}).
+		Where("id = ?", subID).
+		Update("allow_wallet_overflow", true).Error)
+	seedChargedAccounting(t, userID, channelID, tokenID, preConsumed, 1)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceSubscription, subID)
+
+	RecalculateTaskQuota(ctx, task, actualQuota, common.NewMessage("subscription overflow"))
+
+	// The subscription absorbs its remaining quota, the wallet covers the excess.
+	assert.Equal(t, subUsed+remaining, getSubscriptionUsed(t, subID))
+	assert.Equal(t, wallet-overflow, getUserQuota(t, userID))
+
+	// Token and usage accounting still settle the full delta.
+	assert.Equal(t, tokenRemain-(actualQuota-preConsumed), getTokenRemainQuota(t, tokenID))
+	assert.Equal(t, actualQuota, getTokenUsedQuota(t, tokenID))
+	usedQuota, requestCount := getUserUsageAccounting(t, userID)
+	assert.Equal(t, actualQuota, usedQuota)
+	assert.Equal(t, 1, requestCount)
+	assert.Equal(t, int64(actualQuota), getChannelUsedQuota(t, channelID))
+	assert.Equal(t, actualQuota, task.Quota)
+
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	assert.Equal(t, model.LogTypeConsume, log.Type)
+	assert.Equal(t, actualQuota-preConsumed, log.Quota)
+
+	var ledger []model.WalletLedgerEntry
+	require.NoError(t, model.DB.Where("user_id = ? AND kind = ?", userID, model.WalletLedgerKindConsumeHourly).Find(&ledger).Error)
+	require.Len(t, ledger, 1)
+	assert.EqualValues(t, -overflow, ledger[0].Amount)
+}
+
 // ===========================================================================
 // CAS + Billing integration tests
 // Simulates the flow in updateVideoSingleTask (service/task_polling.go)

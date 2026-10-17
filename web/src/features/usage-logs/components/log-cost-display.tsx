@@ -82,9 +82,15 @@ export function LogCostDisplay(props: LogCostDisplayProps) {
   const { t } = useTranslation()
   const isSubscription = props.other?.billing_source === 'subscription'
   const showToolSurcharge = hasToolSurcharge(props.other)
-  const quota = isSubscription
-    ? (props.other?.subscription_consumed ?? props.quota)
-    : props.quota
+  // A subscription log normally bills the subscription only, but the settlement
+  // overflow beyond the plan total is charged to the wallet when the plan allows
+  // it (WL-03). The billed amount is the subscription part plus that overflow;
+  // when the subscription part is absent the log quota is already the total.
+  let quota = props.quota
+  const subscriptionConsumed = props.other?.subscription_consumed
+  if (isSubscription && subscriptionConsumed != null) {
+    quota = subscriptionConsumed + (props.other?.wallet_quota_deducted ?? 0)
+  }
   let source: string | undefined
 
   // A log billed to a subscription always names its funding source: that

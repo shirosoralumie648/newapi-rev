@@ -442,12 +442,14 @@ func postConsumeQuotaWithResult(relayInfo *relaycommon.RelayInfo, quota int, pre
 		if relayInfo.SubscriptionId == 0 {
 			return result, errors.New("subscription id is missing")
 		}
-		delta := int64(quota)
-		if delta != 0 {
-			if err := model.PostConsumeUserSubscriptionDelta(relayInfo.SubscriptionId, delta); err != nil {
+		if quota != 0 {
+			settlement, err := model.SettleUserSubscriptionDelta(relayInfo.SubscriptionId, int64(quota))
+			if err != nil {
 				return result, err
 			}
-			relayInfo.SubscriptionPostDelta += delta
+			relayInfo.SubscriptionPostDelta += settlement.SubscriptionDelta
+			relayInfo.SubscriptionWalletOverflow += settlement.WalletDelta
+			relayInfo.SubscriptionOverflowUncovered += settlement.WalletUncovered
 		}
 	} else {
 		// Wallet

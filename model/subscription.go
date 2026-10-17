@@ -10,6 +10,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/pkg/cachex"
+	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/samber/hot"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
@@ -1424,29 +1425,48 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 	return returnValue, nil
 }
 
-// RefundSubscriptionPreConsume is idempotent and refunds pre-consumed subscription quota by requestId.
+// RefundSubscriptionPreConsume refunds pre-consumed subscription quota by
+// requestId. The refund record status and the subscription amount change in one
+// transaction, and the status update claims the record atomically, so a
+// concurrent refund or a retry after a failed transaction refunds exactly once.
 func RefundSubscriptionPreConsume(requestId string) error {
 	if strings.TrimSpace(requestId) == "" {
 		return errors.New("requestId is empty")
 	}
 	return DB.Transaction(func(tx *gorm.DB) error {
 		var record SubscriptionPreConsumeRecord
-		if err := lockForUpdate(tx).
-			Where("request_id = ?", requestId).First(&record).Error; err != nil {
-			return err
+		query := tx.Where("request_id = ?", requestId).Limit(1).Find(&record)
+		if query.Error != nil {
+			return query.Error
+		}
+		if query.RowsAffected == 0 {
+			return fmt.Errorf("subscription pre-consume record not found for request %s", requestId)
 		}
 		if record.Status == "refunded" {
 			return nil
 		}
-		if record.PreConsumed <= 0 {
-			record.Status = "refunded"
-			return tx.Save(&record).Error
-		}
-		if err := PostConsumeUserSubscriptionDelta(record.UserSubscriptionId, -record.PreConsumed); err != nil {
+		// Lock the subscription before touching the record so the lock order
+		// matches PreConsumeUserSubscription (subscription, then record).
+		var sub UserSubscription
+		if err := lockForUpdate(tx).Where("id = ?", record.UserSubscriptionId).First(&sub).Error; err != nil {
 			return err
 		}
-		record.Status = "refunded"
-		return tx.Save(&record).Error
+		claim := tx.Model(&SubscriptionPreConsumeRecord{}).
+			Where("id = ? AND status <> ?", record.Id, "refunded").
+			Updates(map[string]any{"status": "refunded", "updated_at": common.GetTimestamp()})
+		if claim.Error != nil {
+			return claim.Error
+		}
+		if claim.RowsAffected == 0 {
+			// A concurrent refund won the claim; its transaction already applied
+			// the amount refund, so this replay must not refund again.
+			return nil
+		}
+		if record.PreConsumed <= 0 {
+			return nil
+		}
+		_, err := applyUserSubscriptionUsedDeltaTx(tx, &sub, -record.PreConsumed)
+		return err
 	})
 }
 
@@ -1554,4 +1574,152 @@ func PostConsumeUserSubscriptionDelta(userSubscriptionId int, delta int64) error
 		sub.AmountUsed = newUsed
 		return tx.Save(&sub).Error
 	})
+}
+
+// applyUserSubscriptionUsedDeltaTx applies a used-amount delta to a locked
+// subscription and saves it. The used amount never exceeds the plan total
+// (positive deltas are capped, so a settlement can never overshoot the plan)
+// and never drops below zero (negative deltas are capped). It returns the delta
+// actually applied, which is smaller than the requested delta when a cap hit.
+func applyUserSubscriptionUsedDeltaTx(tx *gorm.DB, sub *UserSubscription, delta int64) (int64, error) {
+	if sub == nil {
+		return 0, errors.New("subscription is nil")
+	}
+	if delta == 0 {
+		return 0, nil
+	}
+	if delta > 0 && sub.AmountTotal > 0 {
+		remaining := sub.AmountTotal - sub.AmountUsed
+		if remaining < 0 {
+			remaining = 0
+		}
+		if delta > remaining {
+			delta = remaining
+		}
+	}
+	newUsed := sub.AmountUsed + delta
+	if newUsed < 0 {
+		newUsed = 0
+	}
+	applied := newUsed - sub.AmountUsed
+	sub.AmountUsed = newUsed
+	if err := tx.Save(sub).Error; err != nil {
+		return 0, err
+	}
+	return applied, nil
+}
+
+// SubscriptionSettlementResult reports how one settlement delta was covered.
+type SubscriptionSettlementResult struct {
+	// SubscriptionDelta is the part of the delta applied to the subscription's amount_used.
+	SubscriptionDelta int64
+	// WalletDelta is the overflow charged to the wallet (positive = deducted).
+	WalletDelta int64
+	// WalletUncovered is the overflow that was charged nowhere: the wallet is
+	// only charged down to zero until the WL-06 overdraft policy lands, and a
+	// subscription may disallow wallet overflow entirely.
+	WalletUncovered int64
+	// AllowWalletOverflow is the subscription snapshot of the plan setting.
+	AllowWalletOverflow bool
+}
+
+// SettleUserSubscriptionDelta applies a settlement delta to one subscription in
+// a single transaction. A positive delta that exceeds the subscription's
+// remaining quota is split: the subscription absorbs up to its total and, when
+// the subscription allows wallet overflow, the excess is charged to the owner's
+// wallet in the same transaction together with the matching wallet_ledger
+// consumption row (capped at the available balance, never below zero). A
+// subscription that disallows wallet overflow keeps its limit and reports the
+// excess as uncovered; so does any part the wallet balance cannot cover.
+// Negative deltas refund the subscription only, capped at zero.
+func SettleUserSubscriptionDelta(userSubscriptionId int, delta int64) (*SubscriptionSettlementResult, error) {
+	if userSubscriptionId <= 0 {
+		return nil, errors.New("invalid userSubscriptionId")
+	}
+	result := &SubscriptionSettlementResult{}
+	if delta == 0 {
+		return result, nil
+	}
+	settleUserId := 0
+	settleAllowOverflow := false
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var sub UserSubscription
+		if err := lockForUpdate(tx).Where("id = ?", userSubscriptionId).First(&sub).Error; err != nil {
+			return err
+		}
+		applied, err := applyUserSubscriptionUsedDeltaTx(tx, &sub, delta)
+		if err != nil {
+			return err
+		}
+		result.SubscriptionDelta = applied
+		result.AllowWalletOverflow = sub.AllowWalletOverflow
+		settleUserId = sub.UserId
+		settleAllowOverflow = sub.AllowWalletOverflow
+
+		overflow := delta - applied
+		if overflow <= 0 {
+			return nil
+		}
+		result.WalletUncovered = overflow
+		if !sub.AllowWalletOverflow {
+			return nil
+		}
+		charged, uncovered, err := chargeWalletOverflowTx(tx, sub.UserId, overflow)
+		if err != nil {
+			return err
+		}
+		result.WalletDelta = charged
+		result.WalletUncovered = uncovered
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if result.WalletDelta > 0 {
+		// Mirror DecreaseUserQuota: keep the cached balance (used by the atomic
+		// reservation path) consistent with the committed deduction.
+		chargedDelta := result.WalletDelta
+		chargedUser := settleUserId
+		gopool.Go(func() {
+			if err := cacheDecrUserQuota(chargedUser, chargedDelta); err != nil {
+				common.SysLog(common.LogText("failed to sync subscription overflow charge to user quota cache: %s", err.Error()))
+			}
+		})
+	}
+	if result.WalletUncovered > 0 {
+		common.SysError(common.LogText("subscription settlement overflow is not fully covered (user=%d subscription=%d requested=%d subscription_applied=%d wallet_charged=%d uncovered=%d allow_wallet_overflow=%t)",
+			settleUserId, userSubscriptionId, delta, result.SubscriptionDelta, result.WalletDelta, result.WalletUncovered, settleAllowOverflow))
+	}
+	return result, nil
+}
+
+// chargeWalletOverflowTx charges a subscription overflow to the wallet inside
+// tx: the balance is deducted down to zero (no overdraft before the WL-06
+// policy lands) and the deduction is recorded as an hourly consumption row in
+// the same transaction. The returned uncovered part stays uncharged for the
+// caller to record.
+func chargeWalletOverflowTx(tx *gorm.DB, userId int, overflow int64) (charged int64, uncovered int64, err error) {
+	if overflow <= 0 {
+		return 0, 0, nil
+	}
+	var user User
+	if err := lockForUpdate(tx).Select("id", "quota").Where("id = ?", userId).First(&user).Error; err != nil {
+		return 0, 0, err
+	}
+	available := int64(user.Quota)
+	if available < 0 {
+		available = 0
+	}
+	charged = min(overflow, available)
+	uncovered = overflow - charged
+	if charged == 0 {
+		return 0, uncovered, nil
+	}
+	if err := tx.Model(&User{}).Where("id = ?", userId).Update("quota", int64(user.Quota)-charged).Error; err != nil {
+		return 0, 0, err
+	}
+	if err := upsertWalletConsumeLedgerTx(tx, userId, walletConsumeHourBucket(common.GetTimestamp()), -charged); err != nil {
+		return 0, 0, err
+	}
+	return charged, uncovered, nil
 }
