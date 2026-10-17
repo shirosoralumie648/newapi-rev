@@ -392,6 +392,58 @@ Playground
 | UP-13 | 稳定分组标识（改名不使令牌失效） | UP-00 | 可选 |
 | UP-14 | Responses → ChatCompletions 协议降级 | UP-00 | 可选 |
 
+## 11. 钱包（2026-10-17 调研与决策）
+
+> 来源：对 newapi-rev 钱包、计费与支付代码的只读调研（main @ `2cbfb4f`），对照 OpenRouter、LobeHub Cloud、one-api 的做法。用户已批准下列 8 项推荐方案。所有钱包 Step 都要先读 `.agents/rules/billing.md`，沿用 9.4 节规则：在 CI 的真实数据库（MySQL、PostgreSQL、SQLite）上测试，本地不跑测试。所有钱包 Step 都排在 UP-00 之后，正确性修复优先。
+
+### 11.1 现状中的主要问题
+
+- **没有账本**：余额是可变整数，变动只在 `logs` 留痕（可能在独立库或 ClickHouse，会被清理，写入失败不回滚），无法从流水重算余额或对账。
+- **钱包预扣不持久**：预扣直接扣余额，状态只在内存；进程在结算/退款前崩溃会丢钱；退款是异步 goroutine 且不幂等。关机时也不 flush `BATCH_UPDATE_ENABLED` 的内存队列（上游 #7657）。
+- **可无限透支**：信任旁路不预扣，结算补扣不检查余额（上游 #6609）。
+- **订阅 bug**：退款改金额与改状态不在同一事务、可能重复退款（#5556）；结算超出订阅剩余额度时只扣了预扣部分，`AllowWalletOverflow` 只在预扣阶段生效（#6911）。
+- **quota 列类型**：struct tag 是 32 位 `int`，启动检查却要求 64 位且跑在 AutoMigrate 之前（上游未合并 PR #5136）。
+- 另有：令牌额度绝对值写入覆盖并发扣费、支付侧无退款/拒付/发票且 `Money` 为 float64、币种口径混乱（#3206）、额度无来源与有效期、4 位 `aff_code` 碰撞（#6215）。
+
+### 11.2 已批准的决策
+
+1. **账本（Q1=B）**：新建 append-only `wallet_ledger`，放在**主库**，和余额变更在同一事务内写入；资金类事件（充值、兑换、调整、退款、订阅余额支付、签到、邀请转入、存储日结、拒付冲正）每笔一行，API 消费按用户每小时聚合一行（明细仍查 logs）。每日对账 `Σledger = 当前余额`，偏差告警，不自动改余额。
+2. **计量单位（Q2=A）**：继续用整数 quota（1 USD = 500000），把列真正迁到 64 位并修启动检查顺序（参考 #5136，CI 真库验证）；支付金额改为精确十进制并带币种。
+3. **额度分桶（Q3=B，账本之后）**：`credit_grants` 存放赠送、签到、邀请、兑换、促销额度，可设有效期；扣费顺序：订阅 → 赠送额度（先到期先用）→ 充值余额；充值余额永不过期。
+4. **持久化预扣（Q4=B）**：`wallet_holds` 记录每笔钱包预扣，结算/退款时关闭且幂等，超时未关闭自动退款（修崩溃丢钱）；关机时 flush 批量队列（#7657）；BL-03 工作流预算挂在父 hold 上。可用余额仍等于 quota，不做真冻结。
+5. **透支（Q5=B）**：按用户组配置透支上限，默认 0；信任旁路收紧；超限部分记欠款，用户只读直到充值（修 #6609）。同时修订阅退款事务（#5556）与超额转扣钱包（#6911）。
+6. **存储费用（Q6=A）**：存储日结从同一钱包扣，写入统一账本；`playground_storage_ledger` 只保留日明细，不做第二本账。
+7. **团队（Q7=C）**：现阶段用“一个账号 + 多令牌 + 令牌周期额度（UP-07）”做成员预算；账本和额度分桶落地后再做组织钱包。
+8. **退款、拒付与支付渠道（Q8=B）**：处理各支付商退款/拒付 webhook，订单标 refunded/disputed，在账本冲正（最多扣到 0，余下记欠款），支持管理员退回未用余额；可选开启 Stripe 自动开发票（#3204）；可选支付宝/微信支付官方直连适配器（统一 `PaymentProvider` 接口）；订阅按套餐原币收款，不做汇率换算（#3206）。
+
+另外：UP-08 缩小为令牌侧额度的增量更新（用户侧 fork 已修）；`aff_code` 加长并碰撞重试（#6215）。
+
+### 11.3 与已有 Step 的协调
+
+- UP-05：兑换写入账本；兑换额度在 WL-07 后进入 grant 桶。依赖 WL-05。
+- UP-06：订阅扣费复用 WL-03、WL-07 的实现。依赖 WL-03。
+- UP-07：令牌周期额度即“成员预算”，不写钱包账本。
+- UP-03：限流可降低并发透支，透支控制归 WL-06。
+- BL-02：存储日结写统一账本，只读宽限与 WL-06 欠款规则统一。依赖 WL-05、WL-06。
+- BL-03：工作流预算挂在 WL-04 的父 hold 上。依赖 WL-04。
+- DB-02：只是非货币资源计数器，不涉及钱包。
+
+### 11.4 钱包 Step
+
+执行优先级：UP-00 之后先做 UP-01，以及 WL-05（账本）、WL-01（64 位 quota）、WL-02（关机 flush），随后 UP-09、UP-08、WL-03（订阅 bug）、WL-04（持久化预扣）、WL-06（透支上限），再进入第 9 节第一批；WL-07、WL-08、WL-09 排在中后段。
+
+| ID | 标题 | 依赖 | 优先级 |
+| --- | --- | --- | --- |
+| WL-05 | wallet_ledger 追加式钱包账本 + 每日对账 | UP-00 | 刚需 |
+| WL-01 | quota 列迁移到真正的 64 位 + 启动检查顺序修复 | UP-00 | 刚需 |
+| WL-02 | 关机时清空批量额度队列与在途退款 | UP-00 | 刚需 |
+| WL-03 | 订阅退款改为单一事务 + 结算超额转扣钱包 | UP-00, WL-05 | 刚需 |
+| WL-04 | wallet_holds 持久化钱包预扣 + 超时回收 + 幂等退款 | WL-05 | 刚需 |
+| WL-06 | 按用户组透支上限 + 信任旁路收紧 + 欠款只读 | WL-04 | 刚需 |
+| WL-07 | credit_grants 额度来源与有效期（分桶） | WL-04, WL-03 | 推荐 |
+| WL-08 | 支付退款/拒付 webhook、订单状态扩展、金额精确十进制与支付渠道 | WL-06 | 推荐 |
+| WL-09 | aff_code 加长 + 碰撞重试（可选按充值比例返利） | UP-00 | 推荐 |
+
 ## 8. 变更记录
 
 | 日期 | 变更 |
@@ -417,3 +469,4 @@ Playground
 | 2026-10-17 | P6-05：为长任务设置并发、存储和生命周期限制——任务行新增 `TaskPrivateData.PlaygroundOrigin` 来源标记（`controller/playground_generation.go` 写入 `constant.ContextKeyPlaygroundOrigin`，`controller/relay.go` 创建任务时沿用），生命周期策略只作用于工作区来源任务且不触碰 `User.Quota`/token 计费；`enforcePlaygroundTaskBudget` 在 Relay 前同时强制并发（沿用 `model.CountActivePlaygroundTasks` 与 `TaskMaxConcurrency`）与新增的账户级结果存储预算 `TaskUserResultMaxBytes`（默认 64 MiB，零/负值继承，全局与用户组可覆盖），`model.PlaygroundTaskResultStorageBytes` 按方言 SQL（SQLite `json_extract` + `LENGTH(CAST(data AS BLOB))`、MySQL `JSON_UNQUOTE(JSON_EXTRACT(...))` + `OCTET_LENGTH(CAST(data AS CHAR))`、PostgreSQL `private_data->>'playground_origin'` + `OCTET_LENGTH(CAST(data AS TEXT))`）统计工作区任务结果快照字节，超限返回 429 `PLAYGROUND_TASK_STORAGE_LIMIT_EXCEEDED`；新增调度清理 `service/playground_task_cleanup.go`（`playground_task_cleanup`，7 天 TTL、每 6 小时、每批 200）与 `model.DeleteExpiredPlaygroundTasks`（只硬删除 `finish_time` 已过期的终态工作区任务行）；新增 `POST /api/playground/tasks/:taskId/cancel`（`UserAuth` + `accessTokenSessionRule`）与 `model.CancelPlaygroundTask`（owner+origin 过滤、状态 CAS 转 FAILURE、`FailReason="Task canceled"`，成功后 `service.RefundTaskQuota` 退还预留额度，404/409/500 稳定错误码），前端任务列表新增取消按钮 + `ConfirmDialog` + `useCancelPlaygroundTask`；`GET /api/playground/usage` 新增 `tasks` 指标（活跃并发 vs `TaskMaxConcurrency`、快照字节 vs `TaskUserResultMaxBytes`）并在用量弹层展示，管理端配额新增 `task_user_result_max_bytes` 字段；`model/playground_test.go` 新增 `TestPlaygroundTaskStorageBudget`（SQLite/MySQL/PostgreSQL 矩阵 + 控制器 429）、`TestPlaygroundTaskExpiryCleanup`（矩阵）、`TestPlaygroundTaskCancellation`（owner 作用域/404/409/CAS/退款守卫），扩展 `TestPlaygroundUsageForUserReportsOwnerTotals` 与真实路由鉴权；前端扩展 `playground-generation-panel.test.tsx`、`playground-usage-popover.test.tsx`，`static-keys.ts` 登记新常量键；补 10 个新键的七语言翻译（`i18n:sync` missingCount=0、extrasCount=0）；无新依赖；本地未运行测试/typecheck/lint/build（CI-only，本地未运行测试）。 |
 | 2026-10-17 | 计划：新增第 9 节“第二阶段追加计划”——根据对 lobehub/lobehub 与 basketikun/infinite-canvas 的源码调研，追加 27 个 Step（ST-01..06 对象存储、DB-01..04 数据存储、CH-01..07 聊天工作区、CV-01..05 画布、BL-01..04 计费、SEC-02 沙箱预览），记录存储（ObjectStore + R2 推荐）、计费（权益制默认 + 可选 GB-月计量）决策与 4 项用户批准的例外；全部排在 P6-02/P6-04/P6-05 之后。 |
 | 2026-10-17 | 计划：新增第 10 节“上游同步策略与上游借鉴 Step”——确定以 merge 方式独占同步上游 QuantumNous/new-api（UP-00，P6 完成后执行，之后每 7 天一次），追加 UP-01..UP-14（断开取消上游、首字超时换渠道、RPM/TPM 准入、count_tokens、兑换码兑换订阅、套餐分组限制与多窗口额度、令牌周期额度、管理员额度增量更新、/mj/image 访问控制、请求阶段耗时、切换模型清理历史、生图异步模式、稳定分组标识、Responses→Chat 降级）；第 9 节 27 个 Step 改为依赖 UP-00；接受上游敏感词默认关闭；零输出中断流照常收 prompt 费用。 |
+| 2026-10-17 | 计划：新增第 11 节“钱包”——批准 8 项钱包方案（主库 append-only 账本 + 每日对账、64 位 quota、额度分桶与有效期、持久化钱包预扣 + 关机 flush、按组透支上限与欠款只读、存储日结入统一账本、团队预算暂用令牌周期额度、退款/拒付 webhook 冲正与原币收款），追加 WL-01..WL-09，正确性修复排在 UP-00 之后最先执行；UP-08 缩小为令牌侧，UP-05/UP-06/BL-02/BL-03 改为复用钱包账本与预扣。 |
