@@ -3,6 +3,7 @@ package helper
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
@@ -104,6 +106,26 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		stopOnce    sync.Once
 	)
 
+	// The first-token window is only armed while the response is still
+	// untouched: once a byte reached the client the relay must not switch
+	// channels anymore, so the idle STREAMING_TIMEOUT keeps governing the rest.
+	firstTokenTimeout := resolveFirstTokenTimeout(info)
+	if c == nil || c.Writer == nil || c.Writer.Written() {
+		firstTokenTimeout = 0
+	}
+	var (
+		firstTokenTimer *time.Timer
+		firstTokenChan  <-chan time.Time
+		firstTokenGate  firstTokenGate
+	)
+	if firstTokenTimeout > 0 {
+		firstTokenTimer = time.NewTimer(firstTokenTimeout)
+		firstTokenChan = firstTokenTimer.C
+	}
+	// Set when the first-token window closed on a silent channel. The seal is
+	// applied in cleanup, once no stream goroutine may touch the writer again.
+	abandonedByFirstTokenTimeout := false
+
 	stop := func() {
 		stopOnce.Do(func() {
 			close(stopChan)
@@ -125,6 +147,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	logger.LogDebug(c, "relay max idle conns: %d", common.RelayMaxIdleConns)
 	logger.LogDebug(c, "relay max idle conns per host: %d", common.RelayMaxIdleConnsPerHost)
 	logger.LogDebug(c, "streaming timeout seconds: %d", int64(streamingTimeout.Seconds()))
+	logger.LogDebug(c, "first token timeout seconds: %d", int64(firstTokenTimeout.Seconds()))
 	logger.LogDebug(c, "ping interval seconds: %d", int64(pingInterval.Seconds()))
 
 	cleanup := func() {
@@ -136,11 +159,21 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			}
 
 			ticker.Stop()
+			if firstTokenTimer != nil {
+				firstTokenTimer.Stop()
+			}
 			if pingTicker != nil {
 				pingTicker.Stop()
 			}
 
 			wg.Wait()
+
+			// Adaptors write synthetic final frames after this handler returns;
+			// the seal keeps a silent, already-abandoned attempt from
+			// committing a partial stream before the relay retries.
+			if abandonedByFirstTokenTimeout {
+				sealStreamResponse(c)
+			}
 		})
 	}
 	// Ensure gin.Context is not returned to Gin's pool while any stream goroutine can still use it.
@@ -174,6 +207,12 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			for {
 				select {
 				case <-pingTicker.C:
+					// Pings commit the response. While a first-token window is
+					// armed and no chunk arrived yet, sending one would block
+					// the channel fallback.
+					if firstTokenTimer != nil && !firstTokenGate.committedOutput() {
+						continue
+					}
 					var err error
 					func() {
 						writeMutex.Lock()
@@ -217,6 +256,14 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		sr := newStreamResult(info.StreamStatus)
 		for data := range dataChan {
 			sr.reset()
+			if !firstTokenGate.claim() {
+				// The first-token timeout already gave up on this channel;
+				// this chunk must not commit the response before the retry.
+				continue
+			}
+			if firstTokenTimer != nil {
+				firstTokenTimer.Stop()
+			}
 			func() {
 				writeMutex.Lock()
 				defer writeMutex.Unlock()
@@ -296,15 +343,33 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	})
 
 	// 主循环等待完成或超时
-	select {
-	case <-ticker.C:
-		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonTimeout, nil)
-	case <-stopChan:
-		// EndReason already set by the goroutine that triggered stopChan
-	case <-c.Request.Context().Done():
-		// 客户端断开：立即 cleanup 关闭上游 resp.Body，解除 scanner 阻塞并让上游停止生成，
-		// 避免为已放弃的请求继续消费上游 token。
-		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
+waitForEnd:
+	for {
+		select {
+		case <-ticker.C:
+			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonTimeout, nil)
+			break waitForEnd
+		case <-firstTokenChan:
+			if !firstTokenGate.abandon() {
+				// Data already reached the client: keep streaming and let the
+				// idle ticker end the stream instead of switching channels.
+				continue
+			}
+			abandonedByFirstTokenTimeout = true
+			timeoutErr := errors.New(i18n.T(c, i18n.MsgRelayFirstTokenTimeout, map[string]any{
+				"Seconds": int(firstTokenTimeout.Seconds()),
+			}))
+			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonFirstTokenTimeout, timeoutErr)
+			break waitForEnd
+		case <-stopChan:
+			// EndReason already set by the goroutine that triggered stopChan
+			break waitForEnd
+		case <-c.Request.Context().Done():
+			// 客户端断开：立即 cleanup 关闭上游 resp.Body，解除 scanner 阻塞并让上游停止生成，
+			// 避免为已放弃的请求继续消费上游 token。
+			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
+			break waitForEnd
+		}
 	}
 
 	cleanup()

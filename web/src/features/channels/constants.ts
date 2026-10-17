@@ -491,6 +491,8 @@ export const FIELD_DESCRIPTIONS = {
   MULTI_KEY_MODE: 'How to select keys: random or sequential polling',
   BATCH_ADD: 'Create multiple channels from multiple keys',
   OPENAI_ORG: 'OpenAI Organization ID (optional)',
+  FIRST_TOKEN_TIMEOUT:
+    'Seconds to wait for the first streamed data chunk after the upstream responds. When it elapses without any data, the request switches to another channel; 0 uses the global STREAMING_FIRST_TOKEN_TIMEOUT default and streams that already sent data never switch.',
 } as const
 
 // ============================================================================

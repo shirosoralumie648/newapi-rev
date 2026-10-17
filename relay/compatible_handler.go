@@ -175,6 +175,13 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 		return newApiErr
 	}
 
+	if firstTokenErr := helper.FirstTokenTimeoutError(info); firstTokenErr != nil {
+		// The channel never sent a first chunk and nothing reached the client,
+		// so the relay may fall back to another channel.
+		service.ResetStatusCode(firstTokenErr, statusCodeMappingStr)
+		return firstTokenErr
+	}
+
 	var containAudioTokens = usage.(*dto.Usage).CompletionTokenDetails.AudioTokens > 0 || usage.(*dto.Usage).PromptTokensDetails.AudioTokens > 0
 	var containsAudioRatios = ratio_setting.ContainsAudioRatio(info.OriginModelName) || ratio_setting.ContainsAudioCompletionRatio(info.OriginModelName)
 

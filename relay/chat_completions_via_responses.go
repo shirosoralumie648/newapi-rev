@@ -12,6 +12,7 @@ import (
 	openaichannel "github.com/QuantumNous/new-api/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
@@ -178,6 +179,12 @@ func relayResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, adaptor 
 		if newApiErr != nil {
 			service.ResetStatusCode(newApiErr, statusCodeMappingStr)
 			return nil, newApiErr
+		}
+		if firstTokenErr := helper.FirstTokenTimeoutError(info); firstTokenErr != nil {
+			// The channel never sent a first chunk and nothing reached the
+			// client, so the relay may fall back to another channel.
+			service.ResetStatusCode(firstTokenErr, statusCodeMappingStr)
+			return nil, firstTokenErr
 		}
 		return usage, nil
 	}

@@ -78,6 +78,13 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		return newAPIError
 	}
 
+	if firstTokenErr := helper.FirstTokenTimeoutError(info); firstTokenErr != nil {
+		// The channel never sent a first chunk and nothing reached the client,
+		// so the relay may fall back to another channel.
+		service.ResetStatusCode(firstTokenErr, statusCodeMappingStr)
+		return firstTokenErr
+	}
+
 	usageDto := usage.(*dto.Usage)
 	if info.RelayMode == relayconstant.RelayModeResponsesCompact {
 		originModelName := info.OriginModelName

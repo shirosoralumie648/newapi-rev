@@ -7673,6 +7673,8 @@
     "The canvas is full; the run could not add a result node.": "画布已满，本次运行无法添加结果节点。",
     "The step that produced this result is no longer on the canvas.": "生成该结果的步骤已不在画布上。",
     "A connected reference image could not be read.": "无法读取已连接的参考图片。",
-    "A connected reference image is larger than the 8 MiB limit.": "已连接的参考图片超过 8 MiB 上限。"
+    "A connected reference image is larger than the 8 MiB limit.": "已连接的参考图片超过 8 MiB 上限。",
+    "First Token Timeout": "首字超时",
+    "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch.": "收到上游响应后等待第一个流式数据块的秒数；超时未收到数据时会切换到其他渠道；0 表示使用全局默认值。已开始向客户端输出的流不会再切换。"
   }
 }

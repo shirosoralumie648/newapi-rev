@@ -85,6 +85,7 @@ const CONFIGURATION_BLOCKS = {
       'http_protocol',
       'http2_connection_shards',
       'tls_insecure_skip_verify',
+      'first_token_timeout',
       'disable_task_polling_sleep',
     ],
   },
@@ -177,6 +178,7 @@ export function getChannelConfigurationState(
       (values.http_protocol && values.http_protocol !== 'auto') ||
       (values.http2_connection_shards ?? 1) > 1 ||
       values.tls_insecure_skip_verify ||
+      (values.first_token_timeout ?? 0) > 0 ||
       values.disable_task_polling_sleep
     ),
     upstreamModelDetection:

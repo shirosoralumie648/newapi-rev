@@ -89,6 +89,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	defer func() {
 		if newAPIError != nil {
+			// The last attempt may have sealed the writer while abandoning a
+			// silent stream; the error response must still reach the client.
+			helper.ResetSealedStreamResponse(c)
 			service.RecordRequestPolicyTermination(c, newAPIError)
 			logger.LogError(c, common.LogText("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
 			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
@@ -185,6 +188,11 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			break
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
+
+		// A failed attempt may have sealed the response writer after a
+		// first-token timeout, so the fallback to the next channel starts from
+		// a clean writer.
+		helper.ResetSealedStreamResponse(c)
 
 		switch relayFormat {
 		case types.RelayFormatOpenAIRealtime:

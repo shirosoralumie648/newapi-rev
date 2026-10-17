@@ -7673,6 +7673,8 @@
     "The canvas is full; the run could not add a result node.": "The canvas is full; the run could not add a result node.",
     "The step that produced this result is no longer on the canvas.": "The step that produced this result is no longer on the canvas.",
     "A connected reference image could not be read.": "A connected reference image could not be read.",
-    "A connected reference image is larger than the 8 MiB limit.": "A connected reference image is larger than the 8 MiB limit."
+    "A connected reference image is larger than the 8 MiB limit.": "A connected reference image is larger than the 8 MiB limit.",
+    "First Token Timeout": "First Token Timeout",
+    "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch.": "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch."
   }
 }

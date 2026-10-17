@@ -7673,6 +7673,8 @@
     "The canvas is full; the run could not add a result node.": "Canvas đã đầy; lần chạy không thể thêm nút kết quả.",
     "The step that produced this result is no longer on the canvas.": "Bước tạo ra kết quả này không còn trên canvas.",
     "A connected reference image could not be read.": "Không đọc được ảnh tham chiếu đã kết nối.",
-    "A connected reference image is larger than the 8 MiB limit.": "Ảnh tham chiếu đã kết nối vượt quá giới hạn 8 MiB."
+    "A connected reference image is larger than the 8 MiB limit.": "Ảnh tham chiếu đã kết nối vượt quá giới hạn 8 MiB.",
+    "First Token Timeout": "Hết thời gian chờ token đầu tiên",
+    "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch.": "Số giây chờ khối dữ liệu phát trực tuyến đầu tiên sau khi upstream phản hồi. Nếu không có dữ liệu trong thời gian này, yêu cầu sẽ chuyển sang kênh khác; 0 dùng giá trị mặc định toàn cục. Luồng đã gửi dữ liệu sẽ không chuyển nữa."
   }
 }

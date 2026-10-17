@@ -19,6 +19,10 @@ const (
 	StreamEndReasonEOF         StreamEndReason = "eof"
 	StreamEndReasonPanic       StreamEndReason = "panic"
 	StreamEndReasonPingFail    StreamEndReason = "ping_fail"
+	// StreamEndReasonFirstTokenTimeout marks a stream that received upstream
+	// response headers but no data chunk within the first-token window, while
+	// nothing had reached the client yet, so the relay may switch channels.
+	StreamEndReasonFirstTokenTimeout StreamEndReason = "first_token_timeout"
 )
 
 // ResponseOutcome is the protocol-level result of one response, independent of

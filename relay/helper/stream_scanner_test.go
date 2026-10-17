@@ -14,7 +14,9 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/i18n"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -582,4 +584,197 @@ func TestNewStreamScannerCallerLimit(t *testing.T) {
 	require.True(t, scanner.Scan())
 	assert.Equal(t, "data: ok", scanner.Text())
 	require.NoError(t, scanner.Err())
+}
+
+// ---------- First-token (TTFB) timeout ----------
+
+func setFirstTokenTimeoutGlobal(t *testing.T, globalSeconds int) {
+	t.Helper()
+	oldGlobal := constant.StreamingFirstTokenTimeout
+	constant.StreamingFirstTokenTimeout = globalSeconds
+	t.Cleanup(func() { constant.StreamingFirstTokenTimeout = oldGlobal })
+}
+
+// startSilentStream runs StreamScannerHandler over a pipe that delivers no data
+// chunk by itself. The caller writes to or closes the returned writer; done
+// closes once the handler returned.
+func startSilentStream(t *testing.T, info *relaycommon.RelayInfo) (*gin.Context, *httptest.ResponseRecorder, *io.PipeWriter, <-chan struct{}) {
+	t.Helper()
+
+	pr, pw := io.Pipe()
+	t.Cleanup(func() {
+		_ = pr.Close()
+		_ = pw.Close()
+	})
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	done := make(chan struct{})
+	go func() {
+		StreamScannerHandler(c, &http.Response{Body: pr}, info, func(data string, sr *StreamResult) {
+			_ = StringData(c, data)
+		})
+		close(done)
+	}()
+	return c, recorder, pw, done
+}
+
+func waitForStreamEnd(t *testing.T, done <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the stream to end")
+	}
+}
+
+func TestStreamScannerHandler_FirstTokenTimeoutAbandonsSilentChannel(t *testing.T) {
+	// Not parallel: modifies global constant.StreamingFirstTokenTimeout
+	setFirstTokenTimeoutGlobal(t, 0)
+	require.NoError(t, i18n.Init())
+
+	info := &relaycommon.RelayInfo{DisablePing: true, ChannelMeta: &relaycommon.ChannelMeta{}}
+	info.ChannelSetting.FirstTokenTimeout = 1
+
+	c, recorder, _, done := startSilentStream(t, info)
+	waitForStreamEnd(t, done)
+
+	require.NotNil(t, info.StreamStatus)
+	assert.Equal(t, relaycommon.StreamEndReasonFirstTokenTimeout, info.StreamStatus.EndReason)
+	assert.False(t, info.StreamStatus.IsNormalEnd())
+	assert.Empty(t, recorder.Body.String(), "no byte may reach the client before a channel fallback")
+
+	// Adaptors emit synthetic final frames after the scanner returns; the seal
+	// keeps them from committing a partial stream before the retry starts.
+	assert.NoError(t, StringData(c, "leftover"))
+	assert.Empty(t, recorder.Body.String())
+	assert.False(t, c.Writer.Written())
+
+	// The retry itself starts from a clean writer.
+	ResetSealedStreamResponse(c)
+	require.NoError(t, StringData(c, "retried"))
+	assert.Contains(t, recorder.Body.String(), "retried")
+
+	// The timeout surfaces as a retryable channel error.
+	apiErr := FirstTokenTimeoutError(info)
+	require.NotNil(t, apiErr)
+	assert.Equal(t, types.ErrorCodeChannelFirstTokenTimeout, apiErr.GetErrorCode())
+	assert.Equal(t, http.StatusBadGateway, apiErr.StatusCode)
+	assert.True(t, types.IsChannelError(apiErr), "the relay must treat the timeout as a channel error")
+	assert.False(t, types.IsSkipRetryError(apiErr))
+}
+
+func TestStreamScannerHandler_FirstTokenTimeoutUsesGlobalDefault(t *testing.T) {
+	// Not parallel: modifies global constant.StreamingFirstTokenTimeout
+	setFirstTokenTimeoutGlobal(t, 1)
+	require.NoError(t, i18n.Init())
+
+	info := &relaycommon.RelayInfo{DisablePing: true, ChannelMeta: &relaycommon.ChannelMeta{}}
+
+	_, recorder, _, done := startSilentStream(t, info)
+	waitForStreamEnd(t, done)
+
+	require.NotNil(t, info.StreamStatus)
+	assert.Equal(t, relaycommon.StreamEndReasonFirstTokenTimeout, info.StreamStatus.EndReason)
+	assert.Empty(t, recorder.Body.String())
+	assert.NotNil(t, FirstTokenTimeoutError(info))
+}
+
+func TestStreamScannerHandler_FirstTokenTimeoutDisabledByDefault(t *testing.T) {
+	// Not parallel: modifies global constant.StreamingFirstTokenTimeout
+	setFirstTokenTimeoutGlobal(t, 0)
+
+	info := &relaycommon.RelayInfo{DisablePing: true, ChannelMeta: &relaycommon.ChannelMeta{}}
+
+	c, recorder, pw, done := startSilentStream(t, info)
+	time.Sleep(200 * time.Millisecond)
+	require.NoError(t, pw.Close())
+	waitForStreamEnd(t, done)
+
+	require.NotNil(t, info.StreamStatus)
+	assert.Equal(t, relaycommon.StreamEndReasonEOF, info.StreamStatus.EndReason)
+	assert.Nil(t, FirstTokenTimeoutError(info), "a disabled first-token window must not fail the request")
+	assert.False(t, c.Writer.Written())
+	assert.Empty(t, recorder.Body.String())
+}
+
+func TestStreamScannerHandler_FirstTokenTimeoutSkipsCommittedResponse(t *testing.T) {
+	// Not parallel: modifies global constant.StreamingFirstTokenTimeout
+	setFirstTokenTimeoutGlobal(t, 0)
+
+	info := &relaycommon.RelayInfo{DisablePing: true, ChannelMeta: &relaycommon.ChannelMeta{}}
+	info.ChannelSetting.FirstTokenTimeout = 1
+
+	// A response that already reached the client can no longer switch channels.
+	c, _, pw, done := startSilentStream(t, info)
+	c.Writer.WriteHeaderNow()
+	time.Sleep(200 * time.Millisecond)
+	require.NoError(t, pw.Close())
+	waitForStreamEnd(t, done)
+
+	require.NotNil(t, info.StreamStatus)
+	assert.Equal(t, relaycommon.StreamEndReasonEOF, info.StreamStatus.EndReason)
+	assert.Nil(t, FirstTokenTimeoutError(info))
+	assert.True(t, c.Writer.Written())
+}
+
+func TestStreamScannerHandler_FirstTokenTimeoutKeepsStreamAfterOutput(t *testing.T) {
+	// Not parallel: modifies global constants
+	oldStreaming := constant.StreamingTimeout
+	constant.StreamingTimeout = 1
+	t.Cleanup(func() { constant.StreamingTimeout = oldStreaming })
+	setFirstTokenTimeoutGlobal(t, 1)
+
+	info := &relaycommon.RelayInfo{DisablePing: true, ChannelMeta: &relaycommon.ChannelMeta{}}
+	c, recorder, pw, done := startSilentStream(t, info)
+
+	_, err := fmt.Fprint(pw, "data: {\"id\":1}\n")
+	require.NoError(t, err)
+
+	// The stream then stalls: only the idle streaming timeout ends it, and no
+	// channel switch may happen after the chunk was delivered.
+	waitForStreamEnd(t, done)
+
+	assert.Contains(t, recorder.Body.String(), "{\"id\":1}")
+	require.NotNil(t, info.StreamStatus)
+	assert.Equal(t, relaycommon.StreamEndReasonTimeout, info.StreamStatus.EndReason)
+	assert.Nil(t, FirstTokenTimeoutError(info))
+}
+
+func TestStreamScannerHandler_FirstTokenTimeoutSuppressesEarlyPing(t *testing.T) {
+	// Not parallel: modifies global constant and the ping setting
+	setFirstTokenTimeoutGlobal(t, 0)
+
+	setting := operation_setting.GetGeneralSetting()
+	oldEnabled := setting.PingIntervalEnabled
+	oldSeconds := setting.PingIntervalSeconds
+	setting.PingIntervalEnabled = true
+	setting.PingIntervalSeconds = 1
+	t.Cleanup(func() {
+		setting.PingIntervalEnabled = oldEnabled
+		setting.PingIntervalSeconds = oldSeconds
+	})
+
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+	info.ChannelSetting.FirstTokenTimeout = 2
+
+	_, recorder, pw, done := startSilentStream(t, info)
+
+	go func() {
+		time.Sleep(1500 * time.Millisecond)
+		_, _ = fmt.Fprint(pw, "data: {\"id\":1}\n")
+		_, _ = fmt.Fprint(pw, "data: [DONE]\n")
+		_ = pw.Close()
+	}()
+
+	waitForStreamEnd(t, done)
+
+	body := recorder.Body.String()
+	assert.Contains(t, body, "{\"id\":1}")
+	assert.NotContains(t, body, ": PING",
+		"a ping must not commit the response while a first-token fallback is still possible")
+	assert.Equal(t, relaycommon.StreamEndReasonDone, info.StreamStatus.EndReason)
+	assert.Nil(t, FirstTokenTimeoutError(info))
 }
