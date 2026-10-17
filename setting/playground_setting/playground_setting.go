@@ -34,6 +34,7 @@ type PlaygroundQuotaPolicy struct {
 	CanvasNodeDataMaxBytes    int64 `json:"canvas_node_data_max_bytes"`
 	CanvasUserMaxBytes        int64 `json:"canvas_user_max_bytes"`
 	TaskMaxConcurrency        int   `json:"task_max_concurrency"`
+	TaskUserResultMaxBytes    int64 `json:"task_user_result_max_bytes"`
 }
 
 // PlaygroundSetting is the persisted configuration. Defaults is the global
@@ -88,6 +89,10 @@ func builtinPlaygroundQuotaPolicy() PlaygroundQuotaPolicy {
 		CanvasNodeDataMaxBytes: 64 << 10,
 		CanvasUserMaxBytes:     16 << 20,
 		TaskMaxConcurrency:     3,
+		// The account-level result storage budget for Playground-origin async
+		// tasks. Scheduled expiry frees finished task rows after the retention
+		// window, so a healthy workspace stays far below this ceiling.
+		TaskUserResultMaxBytes: 64 << 20,
 	}
 }
 
@@ -180,5 +185,8 @@ func applyPlaygroundQuotaOverrides(policy *PlaygroundQuotaPolicy, override *Play
 	}
 	if override.TaskMaxConcurrency > 0 {
 		policy.TaskMaxConcurrency = override.TaskMaxConcurrency
+	}
+	if override.TaskUserResultMaxBytes > 0 {
+		policy.TaskUserResultMaxBytes = override.TaskUserResultMaxBytes
 	}
 }

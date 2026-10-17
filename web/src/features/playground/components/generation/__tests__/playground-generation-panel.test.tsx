@@ -17,7 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createInstance, type i18n } from 'i18next'
 import { I18nextProvider } from 'react-i18next'
@@ -60,7 +66,9 @@ const artifactFixture: TaskArtifact = {
 function mockTaskEndpoints(tasks: TaskLog[], artifacts: TaskArtifact[] = []) {
   return vi.spyOn(api, 'get').mockImplementation(async (url) => {
     if (url.startsWith('/api/task/self')) {
-      return { data: { success: true, data: { items: tasks, total: tasks.length } } }
+      return {
+        data: { success: true, data: { items: tasks, total: tasks.length } },
+      }
     }
     if (url.endsWith('/artifacts')) {
       return { data: { success: true, data: { artifacts } } }
@@ -173,6 +181,31 @@ test('a successful task result is sent to the canvas as a task reference', async
         ref: { taskId: 't1', taskArtifactKey: 'output-1' },
       },
     ])
+  )
+})
+
+test('a running task is canceled through the confirm dialog', async () => {
+  mockTaskEndpoints([
+    { ...taskFixture, id: 12, task_id: 't2', status: 'IN_PROGRESS' },
+  ])
+  const post = vi.spyOn(api, 'post').mockResolvedValue({
+    data: { success: true, data: { task_id: 't2', status: 'FAILURE' } },
+  })
+  const user = userEvent.setup()
+  renderPanel()
+
+  await user.click(await screen.findByRole('button', { name: 'Cancel task' }))
+  const dialog = await screen.findByRole('alertdialog')
+  expect(dialog).toHaveTextContent('Cancel this task?')
+  await user.click(within(dialog).getByRole('button', { name: 'Cancel task' }))
+
+  expect(post).toHaveBeenCalledWith(
+    '/api/playground/tasks/t2/cancel',
+    {},
+    expect.anything()
+  )
+  await waitFor(() =>
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
   )
 })
 

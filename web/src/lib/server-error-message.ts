@@ -86,8 +86,12 @@ const serverErrorMessageKeys = {
   TELEGRAM_BIND_INTERNAL_ERROR: 'Telegram binding failed. Please try again.',
   PLAYGROUND_TASK_LIMIT_EXCEEDED:
     'Playground task concurrency limit reached. Wait for a running task to finish.',
-  PLAYGROUND_TASK_LIMIT_UNAVAILABLE:
-    'Unable to check the account task budget.',
+  PLAYGROUND_TASK_LIMIT_UNAVAILABLE: 'Unable to check the account task budget.',
+  PLAYGROUND_TASK_STORAGE_LIMIT_EXCEEDED:
+    'Playground task result storage limit reached. Wait for old task results to expire.',
+  PLAYGROUND_TASK_NOT_FOUND: 'Task not found.',
+  PLAYGROUND_TASK_NOT_CANCELABLE: 'Only a running task can be canceled.',
+  PLAYGROUND_TASK_CANCEL_FAILED: 'Unable to cancel the task.',
 } as const
 
 function isRecord(value: unknown): value is Record<string, unknown> {

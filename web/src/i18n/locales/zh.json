@@ -7461,6 +7461,16 @@
     "Failed to load the generation tasks": "加载生成任务失败",
     "Unable to send the result to the canvas": "无法将结果发送到画布",
     "Playground task concurrency limit reached. Wait for a running task to finish.": "已达到任务并发上限，请等待正在运行的任务完成。",
-    "Unable to check the account task budget.": "无法检查账户任务额度。"
+    "Unable to check the account task budget.": "无法检查账户任务额度。",
+    "Task canceled": "任务已取消",
+    "Cancel task": "取消任务",
+    "Cancel this task?": "取消此任务？",
+    "The task will be canceled and its reserved quota refunded.": "任务将被取消，已预留的额度将退还。",
+    "Failed to cancel the task": "取消任务失败",
+    "Task not found.": "未找到任务。",
+    "Only a running task can be canceled.": "只有正在运行的任务可以取消。",
+    "Unable to cancel the task.": "无法取消任务。",
+    "Playground task result storage limit reached. Wait for old task results to expire.": "任务结果存储已达上限，请等待旧任务结果过期。",
+    "Task result storage per user": "每用户任务结果存储"
   }
 }

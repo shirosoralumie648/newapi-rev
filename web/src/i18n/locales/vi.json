@@ -7461,6 +7461,16 @@
     "Failed to load the generation tasks": "Không tải được nhiệm vụ tạo nội dung",
     "Unable to send the result to the canvas": "Không thể gửi kết quả tới bảng vẽ",
     "Playground task concurrency limit reached. Wait for a running task to finish.": "Đã đạt giới hạn nhiệm vụ đồng thời. Vui lòng chờ nhiệm vụ đang chạy hoàn tất.",
-    "Unable to check the account task budget.": "Không thể kiểm tra hạn mức nhiệm vụ của tài khoản."
+    "Unable to check the account task budget.": "Không thể kiểm tra hạn mức nhiệm vụ của tài khoản.",
+    "Task canceled": "Đã hủy tác vụ",
+    "Cancel task": "Hủy tác vụ",
+    "Cancel this task?": "Hủy tác vụ này?",
+    "The task will be canceled and its reserved quota refunded.": "Tác vụ sẽ bị hủy và hạn ngạch đã đặt trước sẽ được hoàn trả.",
+    "Failed to cancel the task": "Không thể hủy tác vụ",
+    "Task not found.": "Không tìm thấy tác vụ.",
+    "Only a running task can be canceled.": "Chỉ có thể hủy tác vụ đang chạy.",
+    "Unable to cancel the task.": "Không thể hủy tác vụ.",
+    "Playground task result storage limit reached. Wait for old task results to expire.": "Đã đạt giới hạn lưu trữ kết quả tác vụ Playground. Vui lòng chờ kết quả cũ hết hạn.",
+    "Task result storage per user": "Lưu trữ kết quả tác vụ mỗi người dùng"
   }
 }

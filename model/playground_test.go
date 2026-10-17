@@ -125,6 +125,9 @@ func playgroundRequest(t *testing.T, user int, method, path string, body any, ha
 		if parts[3] == "canvases" {
 			c.Params = append(c.Params, gin.Param{Key: "canvasId", Value: parts[4]})
 		}
+		if parts[3] == "tasks" {
+			c.Params = append(c.Params, gin.Param{Key: "taskId", Value: parts[4]})
+		}
 	}
 	if len(parts) > 6 {
 		c.Params = append(c.Params, gin.Param{Key: "artifactId", Value: parts[6]})
@@ -984,6 +987,7 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	attachmentBase := "/api/playground/sessions/" + sessionID + "/attachments"
 	for _, route := range []struct{ method, path string }{
 		{http.MethodGet, "/api/playground/usage"},
+		{http.MethodPost, "/api/playground/tasks/missing/cancel"},
 		{http.MethodGet, attachmentBase}, {http.MethodPost, attachmentBase},
 		{http.MethodGet, attachmentBase + "/missing"}, {http.MethodGet, attachmentBase + "/missing/content"},
 		{http.MethodDelete, attachmentBase + "/missing"},
@@ -1048,6 +1052,7 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	usageResponse := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, "/api/playground/usage", nil)
 	require.Equal(t, 200, usageResponse.Code, usageResponse.Body.String())
 	assert.Contains(t, usageResponse.Body.String(), `"sessions"`)
+	assert.Contains(t, usageResponse.Body.String(), `"tasks"`)
 
 	// Canvas routes share the same session-only authentication contract.
 	canvasBase := "/api/playground/canvases"
@@ -1359,6 +1364,8 @@ func TestPlaygroundUsageForUserReportsOwnerTotals(t *testing.T) {
 		policy.ArtifactUserMaxBytes = 8192
 		policy.CanvasUserMaxProjects = 6
 		policy.CanvasUserMaxBytes = 16384
+		policy.TaskMaxConcurrency = 4
+		policy.TaskUserResultMaxBytes = 1 << 20
 	})
 	usePlaygroundGroupQuota(t, "default", playground_setting.PlaygroundQuotaPolicy{CanvasUserMaxProjects: 9})
 
@@ -1371,6 +1378,18 @@ func TestPlaygroundUsageForUserReportsOwnerTotals(t *testing.T) {
 	artifactResult(t, playgroundRequest(t, 8, http.MethodPost, "/api/playground/sessions/"+otherSession+"/artifacts", otherInput, controller.CreatePlaygroundArtifact))
 	playgroundUploadAttachment(t, 8, otherSession, "usage-file-other", "image/png", playgroundPNGFixture(32))
 	createCanvasProject(t, 8, "usage-canvas-other")
+
+	usageTasks := []model.Task{
+		{TaskID: "usage-pg-active", Platform: "sunoapi", UserId: 7, Status: model.TaskStatusInProgress, SubmitTime: common.GetTimestamp(), PrivateData: model.TaskPrivateData{PlaygroundOrigin: true}},
+		{TaskID: "usage-pg-finished", Platform: "sunoapi", UserId: 7, Status: model.TaskStatusSuccess, SubmitTime: common.GetTimestamp(), FinishTime: common.GetTimestamp(),
+			Data: []byte(playgroundTaskDataFixture(512)), PrivateData: model.TaskPrivateData{PlaygroundOrigin: true}},
+		{TaskID: "usage-api-finished", Platform: "sunoapi", UserId: 7, Status: model.TaskStatusSuccess, SubmitTime: common.GetTimestamp(), FinishTime: common.GetTimestamp(),
+			Data: []byte(playgroundTaskDataFixture(256))},
+		{TaskID: "usage-pg-other", Platform: "sunoapi", UserId: 8, Status: model.TaskStatusInProgress, SubmitTime: common.GetTimestamp(), PrivateData: model.TaskPrivateData{PlaygroundOrigin: true}},
+	}
+	for index := range usageTasks {
+		require.NoError(t, model.DB.Create(&usageTasks[index]).Error)
+	}
 
 	usage, err := model.PlaygroundUsageForUser(7)
 	require.NoError(t, err)
@@ -1389,6 +1408,10 @@ func TestPlaygroundUsageForUserReportsOwnerTotals(t *testing.T) {
 	assert.EqualValues(t, 9, usage.Canvas.Limit)
 	assert.NotZero(t, usage.Canvas.UsedBytes)
 	assert.EqualValues(t, 16384, usage.Canvas.LimitBytes)
+	assert.EqualValues(t, 1, usage.Tasks.Used)
+	assert.EqualValues(t, 4, usage.Tasks.Limit)
+	assert.EqualValues(t, len(playgroundTaskDataFixture(512)), usage.Tasks.UsedBytes)
+	assert.EqualValues(t, 1<<20, usage.Tasks.LimitBytes)
 }
 
 // The account-level artifact budget is enforced on the write path, so the
@@ -1447,4 +1470,171 @@ func TestPlaygroundTaskConcurrencyCount(t *testing.T) {
 	count, err = model.CountActivePlaygroundTasks(7)
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, count)
+}
+
+// playgroundTaskDataFixture builds a valid result snapshot whose serialized
+// size is deterministic, so storage assertions do not depend on the exact
+// bytes the database serializes back.
+func playgroundTaskDataFixture(size int) string {
+	return `{"url":"https://cdn.example.com/` + strings.Repeat("a", size) + `.mp4"}`
+}
+
+// The account-level result storage budget counts only Playground-origin task
+// snapshots and is enforced before a new workspace submission is accepted.
+func TestPlaygroundTaskStorageBudget(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+				policy.TaskMaxConcurrency = 3
+				policy.TaskUserResultMaxBytes = 1 << 20
+			})
+
+			snapshot := playgroundTaskDataFixture(2048)
+			keep := model.Task{TaskID: "pg-budget-finished", Platform: "sunoapi", UserId: 7, Status: model.TaskStatusSuccess,
+				SubmitTime: common.GetTimestamp(), FinishTime: common.GetTimestamp(),
+				Data: []byte(snapshot), PrivateData: model.TaskPrivateData{PlaygroundOrigin: true}}
+			require.NoError(t, db.Create(&keep).Error)
+
+			stored, err := model.PlaygroundTaskResultStorageBytes(7)
+			require.NoError(t, err)
+			assert.GreaterOrEqual(t, stored, int64(len(snapshot)))
+			assert.LessOrEqual(t, stored, int64(len(snapshot)+64))
+
+			// A direct API task snapshot never consumes the workspace budget.
+			direct := model.Task{TaskID: "api-budget-finished", Platform: "sunoapi", UserId: 7, Status: model.TaskStatusSuccess,
+				SubmitTime: common.GetTimestamp(), FinishTime: common.GetTimestamp(), Data: []byte(playgroundTaskDataFixture(4096))}
+			require.NoError(t, db.Create(&direct).Error)
+			storedWithDirect, err := model.PlaygroundTaskResultStorageBytes(7)
+			require.NoError(t, err)
+			assert.Equal(t, stored, storedWithDirect)
+
+			stored, err = model.PlaygroundTaskResultStorageBytes(8)
+			require.NoError(t, err)
+			assert.Zero(t, stored)
+
+			// Over the limit, a workspace submission is rejected with the
+			// stable storage code before the relay pipeline starts.
+			usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+				policy.TaskUserResultMaxBytes = 1024
+			})
+			active := model.Task{TaskID: "pg-budget-active", Platform: "sunoapi", UserId: 7, Status: model.TaskStatusInProgress,
+				SubmitTime: common.GetTimestamp(), PrivateData: model.TaskPrivateData{PlaygroundOrigin: true}}
+			require.NoError(t, db.Create(&active).Error)
+			response := playgroundRequest(t, 7, http.MethodPost, "/v1/videos", map[string]any{"model": "kling-v1", "prompt": "fox"}, controller.PlaygroundVideoTask)
+			assert.Equal(t, http.StatusTooManyRequests, response.Code, response.Body.String())
+			assert.Contains(t, response.Body.String(), controller.PlaygroundTaskStorageLimitErrorCode)
+		})
+	}
+}
+
+// The scheduled cleanup removes only terminal Playground-origin task rows that
+// outlived the retention window; running, recent, and direct API rows stay.
+func TestPlaygroundTaskExpiryCleanup(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			now := common.GetTimestamp()
+			expired := now - int64((8 * 24 * time.Hour).Seconds())
+			recent := now - int64(time.Hour.Seconds())
+			tasks := []model.Task{
+				{TaskID: "pg-expired", Platform: "sunoapi", UserId: 7, Status: model.TaskStatusSuccess, SubmitTime: expired, FinishTime: expired,
+					Data: []byte(playgroundTaskDataFixture(128)), PrivateData: model.TaskPrivateData{PlaygroundOrigin: true}},
+				{TaskID: "pg-expired-failed", Platform: "sunoapi", UserId: 7, Status: model.TaskStatusFailure, SubmitTime: expired, FinishTime: expired,
+					PrivateData: model.TaskPrivateData{PlaygroundOrigin: true}},
+				{TaskID: "pg-recent", Platform: "sunoapi", UserId: 7, Status: model.TaskStatusSuccess, SubmitTime: recent, FinishTime: recent,
+					Data: []byte(playgroundTaskDataFixture(128)), PrivateData: model.TaskPrivateData{PlaygroundOrigin: true}},
+				{TaskID: "pg-running", Platform: "sunoapi", UserId: 7, Status: model.TaskStatusInProgress, SubmitTime: expired,
+					PrivateData: model.TaskPrivateData{PlaygroundOrigin: true}},
+				{TaskID: "pg-no-finish", Platform: "sunoapi", UserId: 7, Status: model.TaskStatusSuccess, SubmitTime: expired,
+					PrivateData: model.TaskPrivateData{PlaygroundOrigin: true}},
+				{TaskID: "api-expired", Platform: "sunoapi", UserId: 7, Status: model.TaskStatusSuccess, SubmitTime: expired, FinishTime: expired,
+					Data: []byte(playgroundTaskDataFixture(128))},
+			}
+			for index := range tasks {
+				require.NoError(t, db.Create(&tasks[index]).Error)
+			}
+
+			deleted, err := model.DeleteExpiredPlaygroundTasks(now-int64((7*24*time.Hour).Seconds()), 100)
+			require.NoError(t, err)
+			assert.EqualValues(t, 2, deleted)
+
+			var remaining []string
+			require.NoError(t, db.Model(&model.Task{}).Where("user_id = ?", 7).Order("task_id ASC").Pluck("task_id", &remaining).Error)
+			assert.Equal(t, []string{"api-expired", "pg-no-finish", "pg-recent", "pg-running"}, remaining)
+		})
+	}
+}
+
+// Cancellation is owner-scoped to Playground-origin tasks and transitions the
+// row with a status CAS, so a task that already completed cannot be canceled
+// and its reserved quota stays intact for the caller's refund.
+func TestPlaygroundTaskCancellation(t *testing.T) {
+	db := playgroundTestDB(t, "sqlite")
+	now := common.GetTimestamp()
+	tasks := []model.Task{
+		{TaskID: "pg-cancel-active", Platform: "sunoapi", UserId: 7, Status: model.TaskStatusInProgress, SubmitTime: now,
+			Quota: 50, PrivateData: model.TaskPrivateData{PlaygroundOrigin: true}},
+		{TaskID: "pg-cancel-done", Platform: "sunoapi", UserId: 7, Status: model.TaskStatusSuccess, SubmitTime: now, FinishTime: now,
+			Data: []byte(playgroundTaskDataFixture(64)), PrivateData: model.TaskPrivateData{PlaygroundOrigin: true}},
+		{TaskID: "pg-cancel-other", Platform: "sunoapi", UserId: 8, Status: model.TaskStatusQueued, SubmitTime: now,
+			PrivateData: model.TaskPrivateData{PlaygroundOrigin: true}},
+		{TaskID: "api-cancel-active", Platform: "sunoapi", UserId: 7, Status: model.TaskStatusInProgress, SubmitTime: now},
+	}
+	for index := range tasks {
+		require.NoError(t, db.Create(&tasks[index]).Error)
+	}
+
+	// Another account's rows and direct API rows are invisible to the workspace.
+	for _, foreign := range []struct {
+		user   int
+		taskID string
+	}{
+		{8, "pg-cancel-active"},
+		{7, "api-cancel-active"},
+		{7, "pg-cancel-missing"},
+		{0, "pg-cancel-active"},
+	} {
+		_, err := model.CancelPlaygroundTask(foreign.user, foreign.taskID)
+		assert.ErrorIs(t, err, model.ErrPlaygroundTaskNotFound, "task %s for user %d", foreign.taskID, foreign.user)
+	}
+
+	// A task that already reached a terminal state cannot be canceled twice.
+	_, err := model.CancelPlaygroundTask(7, "pg-cancel-done")
+	assert.ErrorIs(t, err, model.ErrPlaygroundTaskNotCancelable)
+
+	canceled, err := model.CancelPlaygroundTask(7, "pg-cancel-active")
+	require.NoError(t, err)
+	assert.Equal(t, model.TaskStatusFailure, canceled.Status)
+	assert.Equal(t, "100%", canceled.Progress)
+	assert.Equal(t, model.PlaygroundTaskCanceledReason, canceled.FailReason)
+	assert.NotZero(t, canceled.FinishTime)
+	assert.Equal(t, 50, canceled.Quota, "the caller refunds the reserved quota after the CAS win")
+
+	_, err = model.CancelPlaygroundTask(7, "pg-cancel-active")
+	assert.ErrorIs(t, err, model.ErrPlaygroundTaskNotCancelable)
+
+	var stored model.Task
+	require.NoError(t, db.Where("task_id = ?", "pg-cancel-active").First(&stored).Error)
+	assert.Equal(t, model.TaskStatusFailure, stored.Status)
+	assert.Equal(t, model.PlaygroundTaskCanceledReason, stored.FailReason)
+
+	// The route contract maps owner scope to 404 and terminal rows to 409.
+	response := playgroundRequest(t, 7, http.MethodPost, "/api/playground/tasks/pg-cancel-other/cancel", nil, controller.PlaygroundTaskCancel)
+	assert.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), "PLAYGROUND_TASK_NOT_FOUND")
+	response = playgroundRequest(t, 7, http.MethodPost, "/api/playground/tasks/pg-cancel-done/cancel", nil, controller.PlaygroundTaskCancel)
+	assert.Equal(t, http.StatusConflict, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), "PLAYGROUND_TASK_NOT_CANCELABLE")
+
+	// A quota-free running task cancels through the route with the stable success envelope.
+	zeroQuota := model.Task{TaskID: "pg-cancel-zero", Platform: "sunoapi", UserId: 7, Status: model.TaskStatusQueued, SubmitTime: now,
+		PrivateData: model.TaskPrivateData{PlaygroundOrigin: true}}
+	require.NoError(t, db.Create(&zeroQuota).Error)
+	response = playgroundRequest(t, 7, http.MethodPost, "/api/playground/tasks/pg-cancel-zero/cancel", nil, controller.PlaygroundTaskCancel)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), `"success":true`)
+	require.NoError(t, db.Where("task_id = ?", "pg-cancel-zero").First(&stored).Error)
+	assert.Equal(t, model.TaskStatusFailure, stored.Status)
+	assert.Equal(t, model.PlaygroundTaskCanceledReason, stored.FailReason)
 }

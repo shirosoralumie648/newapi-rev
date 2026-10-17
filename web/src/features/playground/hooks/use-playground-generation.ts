@@ -27,6 +27,7 @@ import {
   PLAYGROUND_TASK_TERMINAL_STATUSES,
 } from '../constants'
 import {
+  cancelPlaygroundTask,
   submitAudioSpeech,
   submitImageGeneration,
   submitVideoGeneration,
@@ -76,6 +77,28 @@ export function useTaskArtifactsRequest() {
   return useMutation({
     mutationFn: (taskId: string) => getTaskArtifacts(taskId),
     meta: { errorToast: false },
+  })
+}
+
+/**
+ * Cancels one running workspace task. Whether the request succeeds or reports
+ * that the task already finished, the durable task rows and the account usage
+ * view are refreshed, so the list always shows the settled state.
+ */
+export function useCancelPlaygroundTask() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (taskId: string) => cancelPlaygroundTask(taskId),
+    meta: { errorToast: false },
+    onSettled: () => {
+      void queryClient.invalidateQueries({
+        queryKey: playgroundQueryKeys.tasks(),
+      })
+      void queryClient.invalidateQueries({
+        predicate: (query) =>
+          query.queryKey[0] === 'playground' && query.queryKey[2] === 'usage',
+      })
+    },
   })
 }
 

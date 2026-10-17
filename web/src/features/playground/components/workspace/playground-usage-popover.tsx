@@ -58,7 +58,9 @@ function PlaygroundUsageSummary(props: { userId: number | null }) {
   const query = usePlaygroundUsage(props.userId)
 
   if (query.isPending) {
-    return <p className='text-muted-foreground'>{t('Loading resource usage...')}</p>
+    return (
+      <p className='text-muted-foreground'>{t('Loading resource usage...')}</p>
+    )
   }
   if (query.isError || !query.data) {
     return (
@@ -92,6 +94,12 @@ function PlaygroundUsageSummary(props: { userId: number | null }) {
       key: 'canvas',
       label: t('Canvas'),
       metric: usage.canvas,
+      bytes: true,
+    },
+    {
+      key: 'tasks',
+      label: t('Tasks'),
+      metric: usage.tasks,
       bytes: true,
     },
   ] as const

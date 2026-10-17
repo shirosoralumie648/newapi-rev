@@ -7461,6 +7461,16 @@
     "Failed to load the generation tasks": "Failed to load the generation tasks",
     "Unable to send the result to the canvas": "Unable to send the result to the canvas",
     "Playground task concurrency limit reached. Wait for a running task to finish.": "Playground task concurrency limit reached. Wait for a running task to finish.",
-    "Unable to check the account task budget.": "Unable to check the account task budget."
+    "Unable to check the account task budget.": "Unable to check the account task budget.",
+    "Task canceled": "Task canceled",
+    "Cancel task": "Cancel task",
+    "Cancel this task?": "Cancel this task?",
+    "The task will be canceled and its reserved quota refunded.": "The task will be canceled and its reserved quota refunded.",
+    "Failed to cancel the task": "Failed to cancel the task",
+    "Task not found.": "Task not found.",
+    "Only a running task can be canceled.": "Only a running task can be canceled.",
+    "Unable to cancel the task.": "Unable to cancel the task.",
+    "Playground task result storage limit reached. Wait for old task results to expire.": "Playground task result storage limit reached. Wait for old task results to expire.",
+    "Task result storage per user": "Task result storage per user"
   }
 }

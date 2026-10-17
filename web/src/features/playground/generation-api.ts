@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { z } from 'zod'
 
 import { api } from '@/lib/api'
+import { requireServerSuccess } from '@/lib/server-error-message'
 
 import { API_ENDPOINTS } from './constants'
 
@@ -117,6 +118,23 @@ export async function submitVideoGeneration(
   const parsed = videoTaskSchema.safeParse(response.data)
   if (!parsed.success) return ''
   return parsed.data.task_id ?? parsed.data.id ?? ''
+}
+
+/**
+ * Cancels one unfinished workspace generation task. The server guards the
+ * transition with a status CAS, so a task that finished meanwhile answers with
+ * the stable not-cancelable error instead of overwriting its result.
+ */
+export async function cancelPlaygroundTask(
+  taskId: string,
+  signal?: AbortSignal
+): Promise<void> {
+  const response = await api.post(
+    `${API_ENDPOINTS.PLAYGROUND_TASKS}/${encodeURIComponent(taskId)}/cancel`,
+    {},
+    { signal, skipErrorHandler: true }
+  )
+  requireServerSuccess(response.data)
 }
 
 /**
