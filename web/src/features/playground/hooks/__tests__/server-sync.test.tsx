@@ -25,7 +25,11 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { DEFAULT_CONFIG, DEFAULT_PARAMETER_ENABLED } from '../../constants'
+import {
+  DEFAULT_CONFIG,
+  DEFAULT_CONTEXT_SETTINGS,
+  DEFAULT_PARAMETER_ENABLED,
+} from '../../constants'
 import { playgroundQueryKeys } from '../../lib/query-keys'
 import { saveSessionsState } from '../../session-storage'
 import type { Message, PlaygroundSession } from '../../types'
@@ -56,6 +60,8 @@ const localDraft: PlaygroundSession = {
   config: DEFAULT_CONFIG,
   parameterEnabled: DEFAULT_PARAMETER_ENABLED,
   systemPrompt: '',
+  context: { ...DEFAULT_CONTEXT_SETTINGS },
+  contextSummary: null,
   messages: [{ ...message, versions: [{ id: 'v', content: 'Local history' }] }],
 }
 
@@ -543,5 +549,46 @@ test('a save without message changes skips the message write and keeps the revis
     id: remote.id,
     revision: 1,
     messageRevision: 0,
+  })
+})
+
+test('context settings are written in the session metadata patch', async () => {
+  mockServer()
+  const patch = vi.spyOn(api, 'patch').mockImplementation(async (url) => {
+    if (String(url).endsWith('/messages')) {
+      throw new Error('The stored snapshot already matches')
+    }
+    return {
+      data: { success: true, data: { ...remote, revision: 1 } },
+    }
+  })
+  const hook = mount()
+  await waitFor(() =>
+    expect(hook.result.current.local.activeSessionId).toBe(remote.id)
+  )
+
+  act(() =>
+    hook.result.current.local.updateContextSettings({
+      historyLimit: 10,
+      tokenBudget: 2000,
+      autoSummarize: true,
+      summaryModel: 'summary-model',
+    })
+  )
+  await waitFor(() =>
+    expect(hook.result.current.local.sessions[0].syncPending).toBe(false)
+  )
+
+  const metadataCall = patch.mock.calls.find(
+    ([url]) => !String(url).endsWith('/messages')
+  )
+  expect(metadataCall?.[1]).toMatchObject({
+    context: {
+      history_limit: 10,
+      token_budget: 2000,
+      auto_summarize: true,
+      summary_model: 'summary-model',
+    },
+    context_summary: null,
   })
 })

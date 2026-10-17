@@ -46,6 +46,16 @@ export const parameterEnabledSchema = z.object({
   seed: z.boolean().optional(),
 })
 
+// Context management settings of one conversation. The stored shape stays
+// opaque here on purpose: a locally stored value that no longer matches any
+// version's contract must never make the whole conversation unreadable, so
+// normalizeContextSettings clamps or defaults every field of it.
+export const playgroundContextSchema = z.unknown()
+
+// The persisted compression node, opaque for the same reason.
+// normalizeContextSummary turns anything unusable into "no summary".
+export const playgroundContextSummarySchema = z.unknown()
+
 const messageRoleSchema = z.enum(['user', 'assistant', 'system'])
 const messageStatusSchema = z.enum([
   'loading',
@@ -145,6 +155,10 @@ export const playgroundSessionSchema = z.object({
   parameterEnabled: storedParameterEnabledSchema,
   /** Absent in data written before the conversation system prompt existed. */
   systemPrompt: z.string().optional(),
+  /** Absent in data written before context management existed. */
+  context: playgroundContextSchema.optional(),
+  /** Absent or null when the conversation sends its full stored history. */
+  contextSummary: playgroundContextSummarySchema.nullable().optional(),
   messages: messagesSchema,
   server: z
     .object({

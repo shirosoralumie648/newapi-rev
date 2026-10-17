@@ -28,6 +28,10 @@ import {
   PLAYGROUND_REQUEST_ID_HEADER,
 } from './constants'
 import {
+  normalizeContextSettings,
+  normalizeContextSummary,
+} from './lib/context/playground-context'
+import {
   messagesSchema,
   playgroundConfigSchema,
   parameterEnabledSchema,
@@ -41,6 +45,8 @@ import type {
   Message,
   ParameterEnabled,
   PlaygroundConfig,
+  PlaygroundContextSettings,
+  PlaygroundContextSummary,
   PlaygroundMessageCost,
   PlaygroundServerSession,
 } from './types'
@@ -125,6 +131,32 @@ export async function getUserGroups(): Promise<GroupOption[]> {
   }))
 }
 
+// Wire shapes of the session context fields. The server speaks snake_case; the
+// stored/state shapes stay camelCase like the rest of the playground types.
+const serverContextSettingsSchema = z.object({
+  history_limit: z.number().finite().nonnegative().optional(),
+  token_budget: z.number().finite().nonnegative().optional(),
+  auto_summarize: z.boolean().optional(),
+  summary_model: z.string().max(512).optional(),
+})
+
+const serverContextSummarySchema = z.object({
+  id: z.string().min(1).max(200),
+  content: z.string(),
+  through_message_key: z.string().min(1).max(200),
+  message_count: z.number().finite().nonnegative().optional(),
+  model: z.string().max(512).optional(),
+  created_at: z.number().finite().optional(),
+  request_id: z.string().min(1).max(64).optional(),
+  usage: z
+    .object({
+      promptTokens: z.number().finite().nonnegative(),
+      completionTokens: z.number().finite().nonnegative(),
+      totalTokens: z.number().finite().nonnegative(),
+    })
+    .optional(),
+})
+
 const serverSessionSchema = z.object({
   created: z.boolean().optional(),
   id: z.string().min(1),
@@ -133,6 +165,8 @@ const serverSessionSchema = z.object({
   config: playgroundConfigSchema,
   parameter_enabled: parameterEnabledSchema,
   system_prompt: z.string().optional(),
+  context: serverContextSettingsSchema.optional(),
+  context_summary: serverContextSummarySchema.nullable().optional(),
   created_at: z.number().int().nonnegative(),
   updated_at: z.number().int().nonnegative(),
   revision: z.number().int().nonnegative(),
@@ -145,8 +179,42 @@ export interface PlaygroundSessionInput {
   config?: PlaygroundConfig
   parameter_enabled?: ParameterEnabled
   system_prompt?: string
+  context?: PlaygroundContextSettings
+  context_summary?: PlaygroundContextSummary | null
   revision?: number
   messages?: Message[]
+}
+
+// Translate the local context settings and compression node into the wire
+// shape; an explicitly null summary stays null so the server clears it.
+function serializeSessionContextInput(
+  input: PlaygroundSessionInput
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = { ...input }
+  if (input.context) {
+    payload.context = {
+      history_limit: input.context.historyLimit,
+      token_budget: input.context.tokenBudget,
+      auto_summarize: input.context.autoSummarize,
+      summary_model: input.context.summaryModel,
+    }
+  }
+  if (input.context_summary !== undefined) {
+    const summary = input.context_summary
+    payload.context_summary = summary
+      ? {
+          id: summary.id,
+          content: summary.content,
+          through_message_key: summary.throughMessageKey,
+          message_count: summary.messageCount,
+          model: summary.model,
+          created_at: summary.createdAt,
+          ...(summary.requestId ? { request_id: summary.requestId } : {}),
+          ...(summary.usage ? { usage: summary.usage } : {}),
+        }
+      : null
+  }
+  return payload
 }
 
 export interface PlaygroundMessageSnapshot {
@@ -255,6 +323,22 @@ function normalizeServerMessagePayload(
   }
 }
 
+function mapServerContextSummary(value: unknown): unknown {
+  if (value == null) return null
+  const parsed = serverContextSummarySchema.safeParse(value)
+  if (!parsed.success) return null
+  return {
+    id: parsed.data.id,
+    content: parsed.data.content,
+    throughMessageKey: parsed.data.through_message_key,
+    messageCount: parsed.data.message_count,
+    model: parsed.data.model,
+    createdAt: parsed.data.created_at,
+    requestId: parsed.data.request_id,
+    usage: parsed.data.usage,
+  }
+}
+
 function mapServerSession(value: unknown): PlaygroundServerSession {
   const session = serverSessionSchema.parse(value)
   return {
@@ -267,6 +351,15 @@ function mapServerSession(value: unknown): PlaygroundServerSession {
       ...session.parameter_enabled,
     },
     systemPrompt: session.system_prompt ?? '',
+    context: normalizeContextSettings({
+      historyLimit: session.context?.history_limit,
+      tokenBudget: session.context?.token_budget,
+      autoSummarize: session.context?.auto_summarize,
+      summaryModel: session.context?.summary_model,
+    }),
+    contextSummary: normalizeContextSummary(
+      mapServerContextSummary(session.context_summary)
+    ),
     createdAt: session.created_at * 1000,
     updatedAt: session.updated_at * 1000,
     revision: session.revision,
@@ -304,7 +397,7 @@ export async function createPlaygroundSession(
   const response = await api.post(
     API_ENDPOINTS.PLAYGROUND_SESSIONS,
     {
-      ...input,
+      ...serializeSessionContextInput(input),
       messages: input.messages?.map((message) => ({
         client_key: message.key,
         payload: message,
@@ -326,7 +419,7 @@ export async function updatePlaygroundSession(
 ): Promise<PlaygroundServerSession> {
   const response = await api.patch(
     `${API_ENDPOINTS.PLAYGROUND_SESSIONS}/${encodeURIComponent(sessionId)}`,
-    input,
+    serializeSessionContextInput(input),
     { signal }
   )
   requireServerSuccess(response.data)

@@ -22,11 +22,16 @@ import { useAuthStore } from '@/stores/auth-store'
 
 import {
   DEFAULT_CONFIG,
+  DEFAULT_CONTEXT_SETTINGS,
   DEFAULT_PARAMETER_ENABLED,
   DEFAULT_SESSION_TITLE,
   MAX_STORED_SESSIONS,
   STORAGE_KEYS,
 } from './constants'
+import {
+  normalizeContextSettings,
+  normalizeContextSummary,
+} from './lib/context/playground-context'
 import {
   clearLegacyPlaygroundData,
   normalizeMessagesForStorage,
@@ -43,6 +48,8 @@ import type {
   Message,
   ParameterEnabled,
   PlaygroundConfig,
+  PlaygroundContextSettings,
+  PlaygroundContextSummary,
   PlaygroundSession,
   PlaygroundSessionsState,
 } from './types'
@@ -55,7 +62,9 @@ type StoredEnvelope = {
 function createSession(
   config: PlaygroundConfig = DEFAULT_CONFIG,
   parameterEnabled: ParameterEnabled = DEFAULT_PARAMETER_ENABLED,
-  systemPrompt = ''
+  systemPrompt = '',
+  context: PlaygroundContextSettings = DEFAULT_CONTEXT_SETTINGS,
+  contextSummary: PlaygroundContextSummary | null = null
 ): PlaygroundSession {
   const now = Date.now()
   return {
@@ -66,6 +75,8 @@ function createSession(
     config: { ...config },
     parameterEnabled: { ...parameterEnabled },
     systemPrompt,
+    context: { ...context },
+    contextSummary,
     messages: [],
   }
 }
@@ -86,6 +97,8 @@ function normalizeSession(value: unknown): PlaygroundSession | null {
     ...parsed.data,
     title: parsed.data.title.trim(),
     systemPrompt: parsed.data.systemPrompt ?? '',
+    context: normalizeContextSettings(parsed.data.context),
+    contextSummary: normalizeContextSummary(parsed.data.contextSummary),
     messages: normalizeMessagesForStorage(parsed.data.messages),
   }
 }
@@ -168,6 +181,8 @@ function migrateStoredSession(value: unknown): PlaygroundSession | null {
     parameterEnabled: parameterEnabled.data,
     systemPrompt:
       typeof source.systemPrompt === 'string' ? source.systemPrompt : undefined,
+    context: source.context,
+    contextSummary: source.contextSummary,
     messages: messages.data,
   })
 }
@@ -332,7 +347,15 @@ export function saveSessionsState(
 export function createEmptySession(
   config: PlaygroundConfig,
   parameterEnabled: ParameterEnabled,
-  systemPrompt = ''
+  systemPrompt = '',
+  context: PlaygroundContextSettings = DEFAULT_CONTEXT_SETTINGS,
+  contextSummary: PlaygroundContextSummary | null = null
 ): PlaygroundSession {
-  return createSession(config, parameterEnabled, systemPrompt)
+  return createSession(
+    config,
+    parameterEnabled,
+    systemPrompt,
+    context,
+    contextSummary
+  )
 }

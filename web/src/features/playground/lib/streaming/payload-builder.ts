@@ -16,71 +16,58 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { MESSAGE_ROLES, TOOL_CALL_STATUS } from '../../constants'
 import type {
   ChatCompletionRequest,
   ChatCompletionMessage,
   Message,
   PlaygroundConfig,
+  PlaygroundContextSettings,
+  PlaygroundContextSummary,
   ParameterEnabled,
 } from '../../types'
 import {
-  getMessageToolCalls,
-  getToolCallResponseContent,
-} from '../message/message-tool-call-utils'
-import { formatMessageForAPI, isValidMessage } from '../message/message-utils'
+  formatMessageForRequest,
+  planPlaygroundContext,
+} from '../context/playground-context'
+import { isValidMessage } from '../message/message-utils'
 
-// One stored message can become several request messages: an assistant reply
-// that requested tool calls is followed by one `tool` message per answered
-// call. Pending calls stay out until the user answers or denies them.
-function formatMessageForRequest(message: Message): ChatCompletionMessage[] {
-  const formatted = formatMessageForAPI(message)
-  if (message.from !== MESSAGE_ROLES.ASSISTANT) {
-    return [formatted]
-  }
-
-  const answeredCalls = getMessageToolCalls(message).filter(
-    (call) => call.status !== TOOL_CALL_STATUS.PENDING
-  )
-  if (answeredCalls.length === 0) {
-    return [formatted]
-  }
-
-  return [
-    {
-      ...formatted,
-      tool_calls: answeredCalls.map((call) => ({
-        id: call.id,
-        type: 'function' as const,
-        function: {
-          name: call.name,
-          arguments: call.arguments,
-        },
-      })),
-    },
-    ...answeredCalls.map((call) => ({
-      role: 'tool' as const,
-      content: getToolCallResponseContent(call),
-      tool_call_id: call.id,
-    })),
-  ]
+/**
+ * Context management input for one payload: the conversation's settings and
+ * the compression node that applies. Omitted entirely when the caller wants
+ * the plain stored history (legacy call sites and tests).
+ */
+export interface ChatCompletionPayloadContext {
+  settings: PlaygroundContextSettings
+  summary?: PlaygroundContextSummary | null
 }
 
 /**
  * Build API request payload from messages and config. A conversation-level
  * system prompt is injected as the first `system` message; an empty or
- * whitespace-only prompt adds nothing.
+ * whitespace-only prompt adds nothing. With context management enabled the
+ * request carries only the messages the plan keeps, prefixed by the
+ * compression node when one applies.
  */
 export function buildChatCompletionPayload(
   messages: Message[],
   config: PlaygroundConfig,
   parameterEnabled: ParameterEnabled,
-  systemPrompt = ''
+  systemPrompt = '',
+  context?: ChatCompletionPayloadContext
 ): ChatCompletionRequest {
-  // Filter and format valid messages
-  const processedMessages = messages
-    .filter(isValidMessage)
-    .flatMap(formatMessageForRequest)
+  // Filter and format valid messages; the plan applies the limits and the
+  // compression node, the plain path sends the history unchanged.
+  const plan = context
+    ? planPlaygroundContext({
+        messages,
+        settings: context.settings,
+        summary: context.summary,
+        systemPrompt,
+      })
+    : null
+  const processedMessages: ChatCompletionMessage[] = plan
+    ? plan.requestMessages
+    : messages.filter(isValidMessage).flatMap(formatMessageForRequest)
 
   const prompt = systemPrompt.trim()
   const requestMessages: ChatCompletionMessage[] = prompt

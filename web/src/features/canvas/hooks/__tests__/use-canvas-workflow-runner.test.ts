@@ -23,7 +23,10 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { clearPlaygroundAttachmentCache } from '@/features/playground/lib/attachment-store'
 import { api } from '@/lib/api'
 
-import { CANVAS_WORKFLOW_MESSAGES } from '../../constants'
+import {
+  CANVAS_WORKFLOW_IMAGE_INPUT_MAX_BYTES,
+  CANVAS_WORKFLOW_MESSAGES,
+} from '../../constants'
 import { CANVAS_WORKFLOW_ERRORS } from '../../lib/canvas-workflow'
 import type {
   CanvasFlowEdge,
@@ -843,6 +846,45 @@ test('reports an unreadable reference image without calling the relay', async ()
   ).toMatchObject({
     status: 'failed',
     error: CANVAS_WORKFLOW_MESSAGES.IMAGE_UNAVAILABLE,
+  })
+})
+
+test('refuses a reference image above the input size bound', async () => {
+  const post = vi.spyOn(api, 'post').mockImplementation(() => {
+    throw new Error('Unexpected POST')
+  })
+  vi.spyOn(api, 'get').mockImplementation(async () => {
+    const blob = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' })
+    Object.defineProperty(blob, 'size', {
+      configurable: true,
+      value: CANVAS_WORKFLOW_IMAGE_INPUT_MAX_BYTES + 1,
+    })
+    return { data: blob }
+  })
+  const hook = renderHook(() =>
+    useRunnerHarness(
+      [
+        graphNode('a1', 'attachment', {
+          ref: { sessionId: 'pgs_1', attachmentId: 'att_1' },
+        }),
+        graphNode('t1', 'task', {
+          text: 'paint the photo',
+          workflow: { model: 'gpt-image-1', generation: 'image' },
+        }),
+      ],
+      [{ id: 'e1', source: 'a1', target: 't1' }]
+    )
+  )
+
+  act(() => hook.result.current.runner.run())
+  await waitFor(() => expect(hook.result.current.runner.phase).toBe('idle'))
+
+  expect(post).not.toHaveBeenCalled()
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 't1')?.data.workflow
+  ).toMatchObject({
+    status: 'failed',
+    error: CANVAS_WORKFLOW_MESSAGES.IMAGE_TOO_LARGE,
   })
 })
 
