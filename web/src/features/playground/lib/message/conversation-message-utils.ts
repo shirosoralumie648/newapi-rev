@@ -94,6 +94,18 @@ export function appendUserMessagePair(
   ]
 }
 
+/**
+ * Continue the conversation after the user answered (or denied) the tool calls
+ * requested by the latest assistant reply. No new user turn is added: the
+ * answers travel as `tool` messages expanded from the assistant snapshot.
+ */
+export function createToolContinuationMessages(
+  messages: Message[],
+  startedAt: number = Date.now()
+): Message[] {
+  return [...messages, createLoadingAssistantMessage(startedAt)]
+}
+
 export function createRegeneratedMessages(
   messages: Message[],
   messageKey: string

@@ -25,6 +25,7 @@ import { sendChatCompletion } from '../api'
 import { ERROR_MESSAGES } from '../constants'
 import {
   applyStreamingChunk,
+  applyToolCallDelta,
   buildChatCompletionPayload,
   ensurePlaygroundMessageAttachments,
   updateAssistantMessageWithError,
@@ -36,6 +37,7 @@ import {
   isAssistantMessageFinal,
   isAssistantMessagePending,
 } from '../lib'
+import type { ToolCallDelta } from '../lib'
 import type { Message, PlaygroundConfig, ParameterEnabled } from '../types'
 import { useStreamRequest } from './use-stream-request'
 
@@ -56,6 +58,7 @@ type PendingStreamChunks = {
   generation: number
   content: string
   reasoning: string
+  toolCalls: ToolCallDelta[]
 }
 
 function mergePendingStreamChunk(
@@ -87,6 +90,7 @@ export function useChatHandler({
     generation: 0,
     content: '',
     reasoning: '',
+    toolCalls: [],
   })
   const streamFlushTimerRef = useRef<number | null>(null)
   const requestSessionIdRef = useRef<string | null>(sessionId)
@@ -100,6 +104,7 @@ export function useChatHandler({
       generation,
       content: '',
       reasoning: '',
+      toolCalls: [],
     }
   }, [])
 
@@ -113,7 +118,11 @@ export function useChatHandler({
 
       const pendingChunks = pendingStreamChunksRef.current
       if (pendingChunks.generation !== generation) return
-      if (!pendingChunks.reasoning && !pendingChunks.content) {
+      if (
+        !pendingChunks.reasoning &&
+        !pendingChunks.content &&
+        pendingChunks.toolCalls.length === 0
+      ) {
         return
       }
 
@@ -121,6 +130,7 @@ export function useChatHandler({
         generation,
         content: '',
         reasoning: '',
+        toolCalls: [],
       }
       onMessageUpdate((prev) => {
         if (generation !== requestGenerationRef.current) return prev
@@ -141,6 +151,10 @@ export function useChatHandler({
               'content',
               pendingChunks.content
             )
+          }
+
+          for (const delta of pendingChunks.toolCalls) {
+            updatedMessage = applyToolCallDelta(updatedMessage, delta)
           }
 
           return updatedMessage
@@ -208,6 +222,18 @@ export function useChatHandler({
     [scheduleStreamFlush]
   )
 
+  // Handle streamed tool call fragments; they merge by stream index when the
+  // buffered chunks are flushed into the message snapshot.
+  const handleToolCallDeltas = useCallback(
+    (generation: number, deltas: ToolCallDelta[]) => {
+      if (generation !== requestGenerationRef.current) return
+      if (pendingStreamChunksRef.current.generation !== generation) return
+      pendingStreamChunksRef.current.toolCalls.push(...deltas)
+      scheduleStreamFlush(generation)
+    },
+    [scheduleStreamFlush]
+  )
+
   // Handle stream complete
   const handleStreamComplete = useCallback(
     (generation: number) => {
@@ -263,12 +289,13 @@ export function useChatHandler({
         config,
         parameterEnabled
       )
-      void sendStreamRequest(
-        payload,
-        (type, chunk) => handleStreamUpdate(generation, type, chunk),
-        () => handleStreamComplete(generation),
-        (error, errorCode) => handleStreamError(generation, error, errorCode)
-      )
+      void sendStreamRequest(payload, {
+        onUpdate: (type, chunk) => handleStreamUpdate(generation, type, chunk),
+        onToolCalls: (deltas) => handleToolCallDeltas(generation, deltas),
+        onComplete: () => handleStreamComplete(generation),
+        onError: (error, errorCode) =>
+          handleStreamError(generation, error, errorCode),
+      })
     },
     [
       config,
@@ -276,6 +303,7 @@ export function useChatHandler({
       sendStreamRequest,
       discardPendingStreamUpdates,
       handleStreamUpdate,
+      handleToolCallDeltas,
       handleStreamComplete,
       handleStreamError,
       sessionId,

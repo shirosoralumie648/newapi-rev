@@ -16,13 +16,55 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { MESSAGE_ROLES, TOOL_CALL_STATUS } from '../../constants'
 import type {
   ChatCompletionRequest,
+  ChatCompletionMessage,
   Message,
   PlaygroundConfig,
   ParameterEnabled,
 } from '../../types'
+import {
+  getMessageToolCalls,
+  getToolCallResponseContent,
+} from '../message/message-tool-call-utils'
 import { formatMessageForAPI, isValidMessage } from '../message/message-utils'
+
+// One stored message can become several request messages: an assistant reply
+// that requested tool calls is followed by one `tool` message per answered
+// call. Pending calls stay out until the user answers or denies them.
+function formatMessageForRequest(message: Message): ChatCompletionMessage[] {
+  const formatted = formatMessageForAPI(message)
+  if (message.from !== MESSAGE_ROLES.ASSISTANT) {
+    return [formatted]
+  }
+
+  const answeredCalls = getMessageToolCalls(message).filter(
+    (call) => call.status !== TOOL_CALL_STATUS.PENDING
+  )
+  if (answeredCalls.length === 0) {
+    return [formatted]
+  }
+
+  return [
+    {
+      ...formatted,
+      tool_calls: answeredCalls.map((call) => ({
+        id: call.id,
+        type: 'function' as const,
+        function: {
+          name: call.name,
+          arguments: call.arguments,
+        },
+      })),
+    },
+    ...answeredCalls.map((call) => ({
+      role: 'tool' as const,
+      content: getToolCallResponseContent(call),
+      tool_call_id: call.id,
+    })),
+  ]
+}
 
 /**
  * Build API request payload from messages and config
@@ -35,7 +77,7 @@ export function buildChatCompletionPayload(
   // Filter and format valid messages
   const processedMessages = messages
     .filter(isValidMessage)
-    .map(formatMessageForAPI)
+    .flatMap(formatMessageForRequest)
 
   const payload: ChatCompletionRequest = {
     model: config.model,

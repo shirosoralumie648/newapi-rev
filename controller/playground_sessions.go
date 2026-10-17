@@ -75,6 +75,7 @@ type playgroundMessagePayload struct {
 		ID          string                        `json:"id"`
 		Content     string                        `json:"content"`
 		Attachments []playgroundMessageAttachment `json:"attachments,omitempty"`
+		ToolCalls   []playgroundMessageToolCall   `json:"toolCalls,omitempty"`
 	} `json:"versions"`
 	ActiveVersionIndex *int     `json:"activeVersionIndex,omitempty"`
 	CreatedAt          *float64 `json:"createdAt,omitempty"`
@@ -97,6 +98,22 @@ type playgroundMessagePayload struct {
 	IsContentComplete    *bool   `json:"isContentComplete,omitempty"`
 	Status               string  `json:"status,omitempty"`
 	ErrorCode            *string `json:"errorCode,omitempty"`
+}
+
+// playgroundMessageToolCall is one requested tool call plus the result the user
+// provided manually. The gateway never executes a tool: the recorded request
+// and the user's answer are only relayed to the model as `tool_calls` and
+// `tool` messages. Optional fields use pointers so an absent value keeps its
+// exact JSON shape on the round trip.
+type playgroundMessageToolCall struct {
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Arguments    string   `json:"arguments"`
+	Status       string   `json:"status"`
+	Result       *string  `json:"result,omitempty"`
+	ErrorMessage *string  `json:"errorMessage,omitempty"`
+	CreatedAt    *float64 `json:"createdAt,omitempty"`
+	CompletedAt  *float64 `json:"completedAt,omitempty"`
 }
 
 type playgroundMessageResponse struct {
@@ -269,6 +286,38 @@ func encodePlaygroundSettings(request playgroundSessionRequest) (map[string]any,
 	return updates, nil
 }
 
+// validatePlaygroundToolCalls bounds the persisted tool call state of one
+// message version. Arguments and results are opaque text here; the gateway
+// only checks who may carry calls, their identity, size and status, and never
+// executes anything.
+func validatePlaygroundToolCalls(from string, toolCalls []playgroundMessageToolCall, policy playground_setting.PlaygroundQuotaPolicy) error {
+	if from != "assistant" || len(toolCalls) > policy.ToolCallMaxCount {
+		return common.NewMessage("Invalid Playground message.")
+	}
+	ids := make(map[string]bool, len(toolCalls))
+	for _, toolCall := range toolCalls {
+		if toolCall.ID == "" || len(toolCall.ID) > 200 || ids[toolCall.ID] {
+			return common.NewMessage("Invalid Playground message.")
+		}
+		ids[toolCall.ID] = true
+		if toolCall.Name == "" || len(toolCall.Name) > 200 || int64(len(toolCall.Arguments)) > policy.ToolCallArgumentsMaxBytes {
+			return common.NewMessage("Invalid Playground message.")
+		}
+		if toolCall.Result != nil && int64(len(*toolCall.Result)) > policy.ToolCallResultMaxBytes {
+			return common.NewMessage("Invalid Playground message.")
+		}
+		if toolCall.ErrorMessage != nil && int64(len(*toolCall.ErrorMessage)) > policy.ToolCallResultMaxBytes {
+			return common.NewMessage("Invalid Playground message.")
+		}
+		switch toolCall.Status {
+		case "pending", "completed", "denied", "error":
+		default:
+			return common.NewMessage("Invalid Playground message.")
+		}
+	}
+	return nil
+}
+
 // validatePlaygroundMessages normalizes stored payloads and resolves attachment
 // references against the session's owned attachments. The returned IDs are the
 // attachments the stored snapshot references, ordered for a deterministic
@@ -312,6 +361,11 @@ func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroun
 			version := &payload.Versions[versionIndex]
 			if version.ID == "" || len(version.ID) > 200 {
 				return nil, nil, common.NewMessage("Invalid Playground message.")
+			}
+			if len(version.ToolCalls) > 0 {
+				if err := validatePlaygroundToolCalls(payload.From, version.ToolCalls, policy); err != nil {
+					return nil, nil, err
+				}
 			}
 			if len(version.Attachments) == 0 {
 				continue

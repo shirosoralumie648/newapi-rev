@@ -7461,6 +7461,25 @@
     "Failed to load the generation tasks": "Échec du chargement des tâches de génération",
     "Unable to send the result to the canvas": "Impossible d'envoyer le résultat vers le canevas",
     "Playground task concurrency limit reached. Wait for a running task to finish.": "Limite de tâches simultanées atteinte. Attendez la fin d'une tâche en cours.",
-    "Unable to check the account task budget.": "Impossible de vérifier le budget de tâches du compte."
+    "Unable to check the account task budget.": "Impossible de vérifier le budget de tâches du compte.",
+    "Answer or deny the requested tool calls to continue.": "Répondez ou refusez les appels d'outils demandés pour continuer.",
+    "Awaiting Approval": "En attente d'approbation",
+    "Continue generation": "Continuer la génération",
+    "Denied": "Refusé",
+    "Deny": "Refuser",
+    "Paste the tool result here": "Collez ici le résultat de l'outil",
+    "Provide result": "Fournir le résultat",
+    "Provide tool result": "Fournir le résultat de l'outil",
+    "Responded": "Répondu",
+    "Result provided": "Résultat fourni",
+    "The Playground does not run tools. Paste the result obtained elsewhere; it is sent back to the model as a tool message.": "Le Playground n'exécute pas les outils. Collez le résultat obtenu ailleurs ; il est renvoyé au modèle sous forme de message d'outil.",
+    "The tool call failed.": "L'appel d'outil a échoué.",
+    "This tool call is waiting for a result.": "Cet appel d'outil attend un résultat.",
+    "Tool call arguments size limit": "Limite de taille des arguments d'appel d'outil",
+    "Tool call denied": "Appel d'outil refusé",
+    "Tool call result size limit": "Limite de taille du résultat d'appel d'outil",
+    "Tool calls": "Appels d'outils",
+    "Tool calls per message version": "Appels d'outils par version de message",
+    "Tool result": "Résultat de l'outil"
   }
 }

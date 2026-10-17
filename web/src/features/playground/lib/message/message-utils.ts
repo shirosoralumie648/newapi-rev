@@ -244,6 +244,14 @@ export function formatMessageForAPI(message: Message): ChatCompletionMessage {
 }
 
 /**
+ * Check whether the active version carries tool calls. A reply that only
+ * requested a tool call has no text but is still a valid conversation turn.
+ */
+export function hasToolCallPayload(message: Message): boolean {
+  return (getCurrentVersion(message).toolCalls?.length ?? 0) > 0
+}
+
+/**
  * Check if message is valid for API request
  * Excludes loading/streaming assistant messages and empty content
  */
@@ -251,7 +259,11 @@ export function isValidMessage(message: Message): boolean {
   if (!message || !message.from || !message.versions.length) return false
 
   // Exclude empty assistant messages (loading/streaming placeholders)
-  if (message.from === MESSAGE_ROLES.ASSISTANT && !hasMessageContent(message)) {
+  if (
+    message.from === MESSAGE_ROLES.ASSISTANT &&
+    !hasMessageContent(message) &&
+    !hasToolCallPayload(message)
+  ) {
     return false
   }
 

@@ -7461,6 +7461,25 @@
     "Failed to load the generation tasks": "載入生成任務失敗",
     "Unable to send the result to the canvas": "無法將結果傳送到畫布",
     "Playground task concurrency limit reached. Wait for a running task to finish.": "已達到任務併發上限，請等待正在執行的任務完成。",
-    "Unable to check the account task budget.": "無法檢查帳戶任務額度。"
+    "Unable to check the account task budget.": "無法檢查帳戶任務額度。",
+    "Answer or deny the requested tool calls to continue.": "請先填寫或拒絕工具呼叫結果，然後再繼續。",
+    "Awaiting Approval": "等待確認",
+    "Continue generation": "繼續生成",
+    "Denied": "已拒絕",
+    "Deny": "拒絕",
+    "Paste the tool result here": "在此貼上工具結果",
+    "Provide result": "填寫結果",
+    "Provide tool result": "填寫工具結果",
+    "Responded": "已回應",
+    "Result provided": "結果已填寫",
+    "The Playground does not run tools. Paste the result obtained elsewhere; it is sent back to the model as a tool message.": "演練場不會執行工具。請貼上在其他地方取得的結果，該結果將以工具訊息的形式傳送給模型。",
+    "The tool call failed.": "工具呼叫失敗。",
+    "This tool call is waiting for a result.": "此工具呼叫正在等待結果。",
+    "Tool call arguments size limit": "工具呼叫參數大小上限",
+    "Tool call denied": "已拒絕此工具呼叫",
+    "Tool call result size limit": "工具呼叫結果大小上限",
+    "Tool calls": "工具呼叫",
+    "Tool calls per message version": "每個訊息版本的工具呼叫數",
+    "Tool result": "工具結果"
   }
 }

@@ -15,6 +15,9 @@ type PlaygroundQuotaPolicy struct {
 	MessageMaxCount           int   `json:"message_max_count"`
 	MessageMaxVersions        int   `json:"message_max_versions"`
 	MessageMaxBytes           int64 `json:"message_max_bytes"`
+	ToolCallMaxCount          int   `json:"tool_call_max_count"`
+	ToolCallArgumentsMaxBytes int64 `json:"tool_call_arguments_max_bytes"`
+	ToolCallResultMaxBytes    int64 `json:"tool_call_result_max_bytes"`
 	AttachmentMaxCount        int   `json:"attachment_max_count"`
 	AttachmentMaxFileBytes    int64 `json:"attachment_max_file_bytes"`
 	AttachmentUserMaxBytes    int64 `json:"attachment_user_max_bytes"`
@@ -64,6 +67,9 @@ func builtinPlaygroundQuotaPolicy() PlaygroundQuotaPolicy {
 		MessageMaxCount:           100,
 		MessageMaxVersions:        100,
 		MessageMaxBytes:           1 << 20,
+		ToolCallMaxCount:          16,
+		ToolCallArgumentsMaxBytes: 64 << 10,
+		ToolCallResultMaxBytes:    256 << 10,
 		AttachmentMaxCount:        8,
 		AttachmentMaxFileBytes:    8 << 20,
 		AttachmentUserMaxBytes:    64 << 20,
@@ -123,6 +129,15 @@ func applyPlaygroundQuotaOverrides(policy *PlaygroundQuotaPolicy, override *Play
 	}
 	if override.MessageMaxBytes > 0 {
 		policy.MessageMaxBytes = override.MessageMaxBytes
+	}
+	if override.ToolCallMaxCount > 0 {
+		policy.ToolCallMaxCount = override.ToolCallMaxCount
+	}
+	if override.ToolCallArgumentsMaxBytes > 0 {
+		policy.ToolCallArgumentsMaxBytes = override.ToolCallArgumentsMaxBytes
+	}
+	if override.ToolCallResultMaxBytes > 0 {
+		policy.ToolCallResultMaxBytes = override.ToolCallResultMaxBytes
 	}
 	if override.AttachmentMaxCount > 0 {
 		policy.AttachmentMaxCount = override.AttachmentMaxCount
