@@ -41,6 +41,7 @@ type playgroundSessionRequest struct {
 	ClientID         string                   `json:"client_id"`
 	Config           map[string]any           `json:"config"`
 	ParameterEnabled map[string]bool          `json:"parameter_enabled"`
+	SystemPrompt     *string                  `json:"system_prompt"`
 	Revision         *int64                   `json:"revision"`
 	Messages         []playgroundMessageInput `json:"messages"`
 }
@@ -52,6 +53,7 @@ type playgroundSessionResponse struct {
 	Title            string          `json:"title"`
 	Config           map[string]any  `json:"config"`
 	ParameterEnabled map[string]bool `json:"parameter_enabled"`
+	SystemPrompt     string          `json:"system_prompt"`
 	Revision         int64           `json:"revision"`
 	MessageRevision  int64           `json:"message_revision"`
 	CreatedAt        int64           `json:"created_at"`
@@ -165,6 +167,8 @@ func playgroundStrictPage(c *gin.Context) (*common.PageInfo, bool) {
 	return page, true
 }
 
+// writePlaygroundError maps the stable Playground errors onto their HTTP
+// status, public code and user-facing message.
 func writePlaygroundError(c *gin.Context, err error) {
 	status, code := http.StatusBadRequest, "PLAYGROUND_INVALID_REQUEST"
 	var message *common.Message
@@ -176,6 +180,11 @@ func writePlaygroundError(c *gin.Context, err error) {
 		status = http.StatusNotFound
 		code = "PLAYGROUND_NOT_FOUND"
 		err = common.NewMessage("Playground conversation not found.")
+	}
+	if errors.Is(err, model.ErrPlaygroundPresetNotFound) {
+		status = http.StatusNotFound
+		code = "PLAYGROUND_NOT_FOUND"
+		err = common.NewMessage(err.Error())
 	}
 	if errors.Is(err, model.ErrPlaygroundConflict) {
 		status = http.StatusConflict
@@ -192,6 +201,16 @@ func writePlaygroundError(c *gin.Context, err error) {
 	if errors.Is(err, model.ErrPlaygroundMessageLimit) {
 		status = http.StatusUnprocessableEntity
 		code = "PLAYGROUND_MESSAGE_LIMIT_EXCEEDED"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundPresetLimit) {
+		status = http.StatusUnprocessableEntity
+		code = "PLAYGROUND_PRESET_LIMIT_EXCEEDED"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundSystemPromptLimit) {
+		status = http.StatusUnprocessableEntity
+		code = "PLAYGROUND_SYSTEM_PROMPT_LIMIT_EXCEEDED"
 		err = common.NewMessage(err.Error())
 	}
 	common.ApiErrorStatus(c, status, err, gin.H{"code": code})
@@ -234,7 +253,8 @@ func decodePlaygroundRequest(c *gin.Context, target any, maxBytes int64) bool {
 
 func playgroundDecodeSession(session *model.PlaygroundSession) (playgroundSessionResponse, error) {
 	response := playgroundSessionResponse{ID: session.ID, ClientID: session.ClientID, Created: session.CreatedNow, Title: session.Title, Revision: session.Revision, MessageRevision: session.MessageRevision,
-		CreatedAt: session.CreatedAt, UpdatedAt: session.UpdatedAt, Config: map[string]any{}, ParameterEnabled: map[string]bool{}}
+		SystemPrompt: session.SystemPrompt,
+		CreatedAt:    session.CreatedAt, UpdatedAt: session.UpdatedAt, Config: map[string]any{}, ParameterEnabled: map[string]bool{}}
 	if err := common.Unmarshal([]byte(session.Config), &response.Config); err != nil {
 		return response, err
 	}
@@ -244,7 +264,10 @@ func playgroundDecodeSession(session *model.PlaygroundSession) (playgroundSessio
 	return response, nil
 }
 
-func encodePlaygroundSettings(request playgroundSessionRequest) (map[string]any, error) {
+// encodePlaygroundSettings validates the session settings one request may
+// carry. A system prompt is bounded by the owner's policy; it stays optional so
+// a request that only renames a conversation keeps the stored prompt.
+func encodePlaygroundSettings(request playgroundSessionRequest, systemPromptMaxBytes int64) (map[string]any, error) {
 	updates := map[string]any{}
 	if request.Title != nil {
 		title := strings.TrimSpace(*request.Title)
@@ -252,6 +275,18 @@ func encodePlaygroundSettings(request playgroundSessionRequest) (map[string]any,
 			return nil, common.NewMessage("Playground conversation name must contain 1 to 200 characters.")
 		}
 		updates["title"] = title
+	}
+	if request.SystemPrompt != nil {
+		prompt := *request.SystemPrompt
+		if int64(len(prompt)) > systemPromptMaxBytes {
+			return nil, model.ErrPlaygroundSystemPromptLimit
+		}
+		// PostgreSQL rejects NUL bytes inside text, so the prompt is validated
+		// before it reaches any dialect.
+		if strings.ContainsRune(prompt, 0) {
+			return nil, common.NewMessage("Invalid Playground configuration.")
+		}
+		updates["system_prompt"] = prompt
 	}
 	if request.Config != nil {
 		for key, value := range request.Config {
@@ -499,7 +534,7 @@ func CreatePlaygroundSession(c *gin.Context) {
 		writePlaygroundError(c, common.NewMessage("Invalid Playground request."))
 		return
 	}
-	updates, err := encodePlaygroundSettings(request)
+	updates, err := encodePlaygroundSettings(request, policy.SystemPromptMaxBytes)
 	if err != nil {
 		writePlaygroundError(c, err)
 		return
@@ -518,6 +553,9 @@ func CreatePlaygroundSession(c *gin.Context) {
 	}
 	if flags, ok := updates["parameter_enabled"]; ok {
 		session.ParameterEnabled = flags.(string)
+	}
+	if prompt, ok := updates["system_prompt"]; ok {
+		session.SystemPrompt = prompt.(string)
 	}
 	if request.ClientID != "" {
 		session.ClientID = &request.ClientID
@@ -561,7 +599,7 @@ func UpdatePlaygroundSession(c *gin.Context) {
 		writePlaygroundError(c, common.NewMessage("Invalid Playground request."))
 		return
 	}
-	updates, err := encodePlaygroundSettings(request)
+	updates, err := encodePlaygroundSettings(request, policy.SystemPromptMaxBytes)
 	if err != nil {
 		writePlaygroundError(c, err)
 		return

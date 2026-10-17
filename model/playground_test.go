@@ -82,14 +82,14 @@ func playgroundTestDB(t *testing.T, dialect string) *gorm.DB {
 	common.SetDatabaseTypes(common.DatabaseType(dialect), previousLog)
 	model.DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundMessage{}, &model.PlaygroundSession{}, &model.Task{}, &model.User{}))
+		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundMessage{}, &model.PlaygroundSession{}, &model.Task{}, &model.User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
 		model.DB = previous
 		common.SetDatabaseTypes(previousMain, previousLog)
 	})
-	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasAsset{}, &model.Task{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasAsset{}, &model.Task{}, &model.User{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -124,6 +124,9 @@ func playgroundRequest(t *testing.T, user int, method, path string, body any, ha
 		c.Params = gin.Params{{Key: "id", Value: parts[4]}}
 		if parts[3] == "canvases" {
 			c.Params = append(c.Params, gin.Param{Key: "canvasId", Value: parts[4]})
+		}
+		if parts[3] == "presets" {
+			c.Params = append(c.Params, gin.Param{Key: "presetId", Value: parts[4]})
 		}
 		if parts[3] == "tasks" {
 			c.Params = append(c.Params, gin.Param{Key: "taskId", Value: parts[4]})
@@ -164,8 +167,8 @@ func TestPlaygroundPersistenceMatrix(t *testing.T) {
 			id := session["id"].(string)
 			assert.Equal(t, id, createPlayground(t, 7, "local-session")["id"])
 			assert.NotEqual(t, id, createPlayground(t, 8, "local-session")["id"])
-			require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasAsset{}, &model.User{}))
-			require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasAsset{}, &model.User{}))
+			require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasAsset{}, &model.User{}))
+			require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasAsset{}, &model.User{}))
 			reloaded, err := model.GetPlaygroundSession(7, id)
 			require.NoError(t, err)
 			assert.Equal(t, "Conversation", reloaded.Title)
@@ -1225,6 +1228,11 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodGet, "/api/playground/usage"},
 		{http.MethodGet, "/api/playground/assets?kind=attachment"},
 		{http.MethodPost, "/api/playground/tasks/missing/cancel"},
+		{http.MethodGet, "/api/playground/presets"},
+		{http.MethodPost, "/api/playground/presets"},
+		{http.MethodGet, "/api/playground/presets/missing"},
+		{http.MethodPatch, "/api/playground/presets/missing"},
+		{http.MethodDelete, "/api/playground/presets/missing"},
 		{http.MethodGet, attachmentBase}, {http.MethodPost, attachmentBase},
 		{http.MethodGet, attachmentBase + "/missing"}, {http.MethodGet, attachmentBase + "/missing/content"},
 		{http.MethodDelete, attachmentBase + "/missing"},
@@ -1319,6 +1327,37 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	canvasDetail := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, canvasBase+"/"+canvasEnvelope.Data.ID, nil)
 	require.Equal(t, 200, canvasDetail.Code, canvasDetail.Body.String())
 	require.Equal(t, 200, playgroundAuthenticatedRequest(t, engine, token, http.MethodDelete, canvasBase+"/"+canvasEnvelope.Data.ID, nil).Code)
+
+	// Assistant presets share the same session-only contract and stay
+	// owner-scoped through the real router.
+	presetBase := "/api/playground/presets"
+	presetCreated := playgroundAuthenticatedRequest(t, engine, token, http.MethodPost, presetBase, map[string]any{
+		"name": "Router preset", "system_prompt": "Be brief.",
+	})
+	require.Equal(t, 200, presetCreated.Code, presetCreated.Body.String())
+	var presetEnvelope struct {
+		Data struct{ ID string }
+	}
+	require.NoError(t, common.Unmarshal(presetCreated.Body.Bytes(), &presetEnvelope))
+	require.NotEmpty(t, presetEnvelope.Data.ID)
+	presetList := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, presetBase, nil)
+	require.Equal(t, 200, presetList.Code, presetList.Body.String())
+	assert.Contains(t, presetList.Body.String(), `"total":1`)
+	presetUpdated := playgroundAuthenticatedRequest(t, engine, token, http.MethodPatch, presetBase+"/"+presetEnvelope.Data.ID, map[string]any{"name": "Router preset v2"})
+	require.Equal(t, 200, presetUpdated.Code, presetUpdated.Body.String())
+	assert.Contains(t, presetUpdated.Body.String(), `"name":"Router preset v2"`)
+	presetRead := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, presetBase+"/"+presetEnvelope.Data.ID, nil)
+	require.Equal(t, 200, presetRead.Code, presetRead.Body.String())
+	assert.Contains(t, presetRead.Body.String(), `"system_prompt":"Be brief."`)
+	require.Equal(t, 200, playgroundAuthenticatedRequest(t, engine, token, http.MethodDelete, presetBase+"/"+presetEnvelope.Data.ID, nil).Code)
+
+	// A conversation created through the router carries its system prompt.
+	sessionWithPrompt := playgroundAuthenticatedRequest(t, engine, token, http.MethodPost, "/api/playground/sessions", map[string]any{
+		"title": "Router prompt", "config": map[string]any{"model": "test-model"}, "system_prompt": "Be brief.",
+	})
+	require.Equal(t, 200, sessionWithPrompt.Code, sessionWithPrompt.Body.String())
+	assert.Contains(t, sessionWithPrompt.Body.String(), `"system_prompt":"Be brief."`)
+
 	// Ambient cookies are not accepted as authorization by these bearer APIs.
 	cookieOnly := httptest.NewRequest(http.MethodGet, base, nil)
 	cookieOnly.AddCookie(&http.Cookie{Name: "refresh_token", Value: "not-authority"})
@@ -2088,4 +2127,193 @@ func TestPlaygroundTaskCancellation(t *testing.T) {
 	require.NoError(t, db.Where("task_id = ?", "pg-cancel-zero").First(&stored).Error)
 	assert.Equal(t, model.TaskStatus(model.TaskStatusFailure), stored.Status)
 	assert.Equal(t, model.PlaygroundTaskCanceledReason, stored.FailReason)
+}
+
+// Assistant presets are owner-scoped server resources: another account can
+// neither list nor mutate them, every display field is validated on write, and
+// the per-account budget comes from the shared resource quota policy.
+func TestPlaygroundPresetPersistenceAndOwnership(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			// The new table is part of the migration contract and must stay
+			// idempotent on every dialect.
+			require.NoError(t, db.AutoMigrate(&model.PlaygroundPreset{}))
+
+			created := playgroundRequest(t, 7, http.MethodPost, "/api/playground/presets", map[string]any{
+				"name": "  Code reviewer  ", "avatar": "🧑💻",
+				"config":            map[string]any{"model": "test-model", "temperature": 0.2},
+				"parameter_enabled": map[string]bool{"temperature": true},
+				"system_prompt":     "Review code carefully.",
+			}, controller.CreatePlaygroundPreset)
+			require.Equal(t, http.StatusOK, created.Code, created.Body.String())
+			var envelope struct {
+				Success bool
+				Data    struct {
+					ID               string          `json:"id"`
+					Name             string          `json:"name"`
+					Avatar           string          `json:"avatar"`
+					Config           map[string]any  `json:"config"`
+					ParameterEnabled map[string]bool `json:"parameter_enabled"`
+					SystemPrompt     string          `json:"system_prompt"`
+					CreatedAt        int64           `json:"created_at"`
+					UpdatedAt        int64           `json:"updated_at"`
+				}
+			}
+			require.NoError(t, common.Unmarshal(created.Body.Bytes(), &envelope))
+			require.True(t, envelope.Success, created.Body.String())
+			id := envelope.Data.ID
+			require.True(t, strings.HasPrefix(id, "pgp_"), id)
+			assert.Equal(t, "Code reviewer", envelope.Data.Name)
+			assert.Equal(t, "🧑💻", envelope.Data.Avatar)
+			assert.Equal(t, "Review code carefully.", envelope.Data.SystemPrompt)
+			assert.EqualValues(t, 0.2, envelope.Data.Config["temperature"])
+			assert.True(t, envelope.Data.ParameterEnabled["temperature"])
+			assert.NotZero(t, envelope.Data.CreatedAt)
+
+			// The listing is owner-scoped and reports the effective budget.
+			listed := playgroundRequest(t, 7, http.MethodGet, "/api/playground/presets", nil, controller.ListPlaygroundPresets)
+			var listing struct {
+				Success bool
+				Data    struct {
+					Items []struct{ ID string }
+					Total int
+					Limit int
+				}
+			}
+			require.NoError(t, common.Unmarshal(listed.Body.Bytes(), &listing))
+			require.True(t, listing.Success, listed.Body.String())
+			require.Len(t, listing.Data.Items, 1)
+			assert.Equal(t, id, listing.Data.Items[0].ID)
+			assert.Equal(t, 1, listing.Data.Total)
+			assert.Equal(t, playground_setting.GetPlaygroundQuotaPolicy("default").PresetUserMaxCount, listing.Data.Limit)
+			foreignList := playgroundRequest(t, 8, http.MethodGet, "/api/playground/presets", nil, controller.ListPlaygroundPresets)
+			assert.Contains(t, foreignList.Body.String(), `"total":0`)
+
+			// Mutation is owner-scoped; another account gets the same 404.
+			foreignRead := playgroundRequest(t, 8, http.MethodGet, "/api/playground/presets/"+id, nil, controller.GetPlaygroundPreset)
+			assert.Equal(t, http.StatusNotFound, foreignRead.Code, foreignRead.Body.String())
+			ownRead := playgroundRequest(t, 7, http.MethodGet, "/api/playground/presets/"+id, nil, controller.GetPlaygroundPreset)
+			require.Equal(t, http.StatusOK, ownRead.Code, ownRead.Body.String())
+			assert.Contains(t, ownRead.Body.String(), `"name":"Code reviewer"`)
+			foreignUpdate := playgroundRequest(t, 8, http.MethodPatch, "/api/playground/presets/"+id, map[string]any{"name": "Hijacked"}, controller.UpdatePlaygroundPreset)
+			assert.Equal(t, http.StatusNotFound, foreignUpdate.Code, foreignUpdate.Body.String())
+			assert.Contains(t, foreignUpdate.Body.String(), "PLAYGROUND_NOT_FOUND")
+			foreignDelete := playgroundRequest(t, 8, http.MethodDelete, "/api/playground/presets/"+id, nil, controller.DeletePlaygroundPreset)
+			assert.Equal(t, http.StatusNotFound, foreignDelete.Code, foreignDelete.Body.String())
+
+			updated := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/presets/"+id, map[string]any{
+				"name": "Reviewer", "avatar": "https://example.com/avatar.png", "system_prompt": "Review twice.",
+			}, controller.UpdatePlaygroundPreset)
+			require.Equal(t, http.StatusOK, updated.Code, updated.Body.String())
+			var updatedEnvelope struct {
+				Data struct {
+					Name         string         `json:"name"`
+					Avatar       string         `json:"avatar"`
+					SystemPrompt string         `json:"system_prompt"`
+					Config       map[string]any `json:"config"`
+				}
+			}
+			require.NoError(t, common.Unmarshal(updated.Body.Bytes(), &updatedEnvelope))
+			assert.Equal(t, "Reviewer", updatedEnvelope.Data.Name)
+			assert.Equal(t, "https://example.com/avatar.png", updatedEnvelope.Data.Avatar)
+			assert.Equal(t, "Review twice.", updatedEnvelope.Data.SystemPrompt)
+			assert.EqualValues(t, 0.2, updatedEnvelope.Data.Config["temperature"], "unsent fields keep their stored value")
+
+			for name, body := range map[string]map[string]any{
+				"empty name":       {"name": "   "},
+				"overlong name":    {"name": strings.Repeat("n", 101)},
+				"non-http avatar":  {"name": "A", "avatar": "ftp://example.com/a.png"},
+				"long text avatar": {"name": "A", "avatar": strings.Repeat("x", 65)},
+				"invalid config":   {"name": "A", "config": map[string]any{"temperature": "hot"}},
+			} {
+				response := playgroundRequest(t, 7, http.MethodPost, "/api/playground/presets", body, controller.CreatePlaygroundPreset)
+				assert.Equal(t, http.StatusBadRequest, response.Code, name+": "+response.Body.String())
+			}
+			emptyPatch := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/presets/"+id, map[string]any{}, controller.UpdatePlaygroundPreset)
+			assert.Equal(t, http.StatusBadRequest, emptyPatch.Code, emptyPatch.Body.String())
+			assert.Contains(t, emptyPatch.Body.String(), "Invalid assistant preset.")
+
+			// The resource policy bounds both the stored prompt and the account
+			// preset count with stable capacity errors.
+			usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+				policy.SystemPromptMaxBytes = 16
+			})
+			tooLong := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/presets/"+id, map[string]any{
+				"system_prompt": strings.Repeat("x", 17),
+			}, controller.UpdatePlaygroundPreset)
+			assert.Equal(t, http.StatusUnprocessableEntity, tooLong.Code, tooLong.Body.String())
+			assert.Contains(t, tooLong.Body.String(), "PLAYGROUND_SYSTEM_PROMPT_LIMIT_EXCEEDED")
+			usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+				policy.PresetUserMaxCount = 1
+			})
+			overflow := playgroundRequest(t, 7, http.MethodPost, "/api/playground/presets", map[string]any{"name": "One too many"}, controller.CreatePlaygroundPreset)
+			assert.Equal(t, http.StatusUnprocessableEntity, overflow.Code, overflow.Body.String())
+			assert.Contains(t, overflow.Body.String(), "PLAYGROUND_PRESET_LIMIT_EXCEEDED")
+
+			deleted := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/presets/"+id, nil, controller.DeletePlaygroundPreset)
+			require.Equal(t, http.StatusOK, deleted.Code, deleted.Body.String())
+			repeat := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/presets/"+id, nil, controller.DeletePlaygroundPreset)
+			assert.Equal(t, http.StatusNotFound, repeat.Code, repeat.Body.String())
+			var stored int64
+			require.NoError(t, db.Model(&model.PlaygroundPreset{}).Where("user_id = ?", 7).Count(&stored).Error)
+			assert.Zero(t, stored)
+		})
+	}
+}
+
+// The conversation-level system prompt is stored on the session and bounded by
+// the resource policy. A row written before the column existed (NULL) reads
+// back as an empty prompt instead of failing the request.
+func TestPlaygroundSessionSystemPrompt(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			created := playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions", map[string]any{
+				"title": "Prompted", "client_id": "prompt-session",
+				"config": map[string]any{"model": "test-model"}, "parameter_enabled": map[string]bool{},
+				"system_prompt": "Answer in French.",
+			}, controller.CreatePlaygroundSession)
+			require.Equal(t, http.StatusOK, created.Code, created.Body.String())
+			var envelope struct {
+				Success bool
+				Data    struct {
+					ID           string `json:"id"`
+					SystemPrompt string `json:"system_prompt"`
+				}
+			}
+			require.NoError(t, common.Unmarshal(created.Body.Bytes(), &envelope))
+			require.True(t, envelope.Success, created.Body.String())
+			id := envelope.Data.ID
+			assert.Equal(t, "Answer in French.", envelope.Data.SystemPrompt)
+
+			read := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+id, nil, controller.GetPlaygroundSession)
+			require.Equal(t, http.StatusOK, read.Code, read.Body.String())
+			assert.Contains(t, read.Body.String(), `"system_prompt":"Answer in French."`)
+
+			// An update that does not send the prompt keeps it; an explicit
+			// value replaces it.
+			renamed := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+id, map[string]any{"revision": 0, "title": "Renamed"}, controller.UpdatePlaygroundSession)
+			require.Equal(t, http.StatusOK, renamed.Code, renamed.Body.String())
+			assert.Contains(t, renamed.Body.String(), `"system_prompt":"Answer in French."`)
+			replaced := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+id, map[string]any{"revision": 1, "system_prompt": "Answer in English."}, controller.UpdatePlaygroundSession)
+			require.Equal(t, http.StatusOK, replaced.Code, replaced.Body.String())
+			assert.Contains(t, replaced.Body.String(), `"system_prompt":"Answer in English."`)
+
+			usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+				policy.SystemPromptMaxBytes = 8
+			})
+			tooLong := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+id, map[string]any{"revision": 2, "system_prompt": strings.Repeat("x", 9)}, controller.UpdatePlaygroundSession)
+			assert.Equal(t, http.StatusUnprocessableEntity, tooLong.Code, tooLong.Body.String())
+			assert.Contains(t, tooLong.Body.String(), "PLAYGROUND_SYSTEM_PROMPT_LIMIT_EXCEEDED")
+			nul := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+id, map[string]any{"revision": 2, "system_prompt": "bad\x00prompt"}, controller.UpdatePlaygroundSession)
+			assert.Equal(t, http.StatusBadRequest, nul.Code, nul.Body.String())
+
+			// A legacy row without the column reads back as an empty prompt.
+			require.NoError(t, db.Model(&model.PlaygroundSession{}).Where("id = ? AND user_id = ?", id, 7).Update("system_prompt", gorm.Expr("NULL")).Error)
+			reloaded, err := model.GetPlaygroundSession(7, id)
+			require.NoError(t, err)
+			assert.Empty(t, reloaded.SystemPrompt)
+		})
+	}
 }

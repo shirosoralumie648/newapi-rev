@@ -54,7 +54,8 @@ type StoredEnvelope = {
 
 function createSession(
   config: PlaygroundConfig = DEFAULT_CONFIG,
-  parameterEnabled: ParameterEnabled = DEFAULT_PARAMETER_ENABLED
+  parameterEnabled: ParameterEnabled = DEFAULT_PARAMETER_ENABLED,
+  systemPrompt = ''
 ): PlaygroundSession {
   const now = Date.now()
   return {
@@ -64,6 +65,7 @@ function createSession(
     updatedAt: now,
     config: { ...config },
     parameterEnabled: { ...parameterEnabled },
+    systemPrompt,
     messages: [],
   }
 }
@@ -83,6 +85,7 @@ function normalizeSession(value: unknown): PlaygroundSession | null {
   return {
     ...parsed.data,
     title: parsed.data.title.trim(),
+    systemPrompt: parsed.data.systemPrompt ?? '',
     messages: normalizeMessagesForStorage(parsed.data.messages),
   }
 }
@@ -163,6 +166,8 @@ function migrateStoredSession(value: unknown): PlaygroundSession | null {
     updatedAt: source.updatedAt,
     config: config.data,
     parameterEnabled: parameterEnabled.data,
+    systemPrompt:
+      typeof source.systemPrompt === 'string' ? source.systemPrompt : undefined,
     messages: messages.data,
   })
 }
@@ -326,7 +331,8 @@ export function saveSessionsState(
 
 export function createEmptySession(
   config: PlaygroundConfig,
-  parameterEnabled: ParameterEnabled
+  parameterEnabled: ParameterEnabled,
+  systemPrompt = ''
 ): PlaygroundSession {
-  return createSession(config, parameterEnabled)
+  return createSession(config, parameterEnabled, systemPrompt)
 }

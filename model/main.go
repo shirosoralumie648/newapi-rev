@@ -446,6 +446,7 @@ func migrateDB() error {
 		&UserAccessToken{},
 		&PlaygroundSession{},
 		&PlaygroundMessage{},
+		&PlaygroundPreset{},
 		&PlaygroundArtifact{},
 		&PlaygroundArtifactVersion{},
 		&PlaygroundAttachment{},

@@ -78,10 +78,15 @@ type PlaygroundSession struct {
 	Title            string  `json:"title" gorm:"size:200;not null"`
 	Config           string  `json:"-" gorm:"type:text;not null"`
 	ParameterEnabled string  `json:"-" gorm:"type:text;not null"`
-	Revision         int64   `json:"revision" gorm:"not null"`
-	MessageRevision  int64   `json:"message_revision" gorm:"not null"`
-	CreatedAt        int64   `json:"created_at" gorm:"not null;index"`
-	UpdatedAt        int64   `json:"updated_at" gorm:"not null;index"`
+	// SystemPrompt is the conversation-level instruction injected as the first
+	// `system` message of every request. The column stays nullable so an
+	// existing installation can add it on every supported database; a NULL
+	// value reads back as an empty prompt.
+	SystemPrompt    string `json:"-" gorm:"type:text"`
+	Revision        int64  `json:"revision" gorm:"not null"`
+	MessageRevision int64  `json:"message_revision" gorm:"not null"`
+	CreatedAt       int64  `json:"created_at" gorm:"not null;index"`
+	UpdatedAt       int64  `json:"updated_at" gorm:"not null;index"`
 }
 
 type PlaygroundMessage struct {

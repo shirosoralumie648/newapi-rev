@@ -50,6 +50,7 @@ export type PlaygroundInspectorView =
   | 'canvas'
   | 'generate'
   | 'library'
+  | 'presets'
 
 interface PlaygroundWorkspaceProps {
   disabled?: boolean
@@ -66,6 +67,7 @@ interface PlaygroundWorkspaceProps {
   onToggleInspector: (view: PlaygroundInspectorView) => void
   onCloseInspector: () => void
   artifactsDisabled?: boolean
+  onOpenPresets?: () => void
 }
 
 export function PlaygroundWorkspace(props: PlaygroundWorkspaceProps) {
@@ -80,6 +82,7 @@ export function PlaygroundWorkspace(props: PlaygroundWorkspaceProps) {
       onAction={() => setIsSessionListOpen(false)}
       onCreate={props.onCreate}
       onDelete={props.onDelete}
+      onOpenPresets={props.onOpenPresets}
       onRename={props.onRename}
       onSwitch={props.onSwitch}
       sessions={props.sessions}
@@ -100,6 +103,11 @@ export function PlaygroundWorkspace(props: PlaygroundWorkspaceProps) {
     inspectorTitle = t('Asset library')
     inspectorDescription = t(
       'Attachments, artifacts and generation results in your Playground.'
+    )
+  } else if (props.inspectorView === 'presets') {
+    inspectorTitle = t('Assistant presets')
+    inspectorDescription = t(
+      'Reusable assistants with their own model, parameters and system prompt.'
     )
   }
 

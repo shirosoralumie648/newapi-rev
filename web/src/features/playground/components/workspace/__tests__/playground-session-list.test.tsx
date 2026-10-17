@@ -40,6 +40,7 @@ const makeSession = (
   createdAt: updatedAt,
   config: { ...DEFAULT_CONFIG },
   parameterEnabled: { ...DEFAULT_PARAMETER_ENABLED },
+  systemPrompt: '',
   messages: [],
 })
 

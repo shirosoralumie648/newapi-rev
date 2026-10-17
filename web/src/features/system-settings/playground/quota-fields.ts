@@ -21,6 +21,8 @@ import { safeJsonParse } from '../utils/json-parser'
 // These keys must mirror the JSON tags of playground_setting.PlaygroundQuotaPolicy.
 export const PLAYGROUND_QUOTA_FIELD_KEYS = [
   'session_max_count',
+  'preset_user_max_count',
+  'system_prompt_max_bytes',
   'message_max_count',
   'message_max_versions',
   'message_max_bytes',
@@ -54,6 +56,7 @@ export type PlaygroundQuotaFieldKey =
 
 export const PLAYGROUND_QUOTA_GROUPS = [
   { id: 'conversations', labelKey: 'Conversations' },
+  { id: 'presets', labelKey: 'Presets' },
   { id: 'messages', labelKey: 'Messages' },
   { id: 'tools', labelKey: 'Tool calls' },
   { id: 'attachments', labelKey: 'Attachments' },
@@ -77,6 +80,17 @@ export const PLAYGROUND_QUOTA_FIELDS: readonly PlaygroundQuotaField[] = [
     key: 'session_max_count',
     group: 'conversations',
     labelKey: 'Conversations per user',
+  },
+  {
+    key: 'preset_user_max_count',
+    group: 'presets',
+    labelKey: 'Presets per user',
+  },
+  {
+    key: 'system_prompt_max_bytes',
+    group: 'presets',
+    labelKey: 'System prompt size limit',
+    bytes: true,
   },
   {
     key: 'message_max_count',

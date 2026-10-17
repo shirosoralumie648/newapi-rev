@@ -18,9 +18,11 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { describe, expect, test } from 'vitest'
 
-import type { Message } from '../../types'
+import { DEFAULT_CONFIG, DEFAULT_PARAMETER_ENABLED } from '../../constants'
+import type { Message, PlaygroundSession } from '../../types'
 import {
   playgroundMessageDelta,
+  playgroundSnapshot,
   playgroundSyncedSnapshot,
 } from '../server-sync'
 
@@ -74,5 +76,29 @@ describe('playground message deltas', () => {
 
     expect(delta.upserts.map((item) => item.key)).toEqual(['m1', 'm2'])
     expect(delta.deletes).toEqual([])
+  })
+})
+
+describe('playground session snapshots', () => {
+  function session(systemPrompt: string): PlaygroundSession {
+    return {
+      id: 'local-1',
+      title: 'Chat',
+      createdAt: 1,
+      updatedAt: 1,
+      config: { ...DEFAULT_CONFIG },
+      parameterEnabled: { ...DEFAULT_PARAMETER_ENABLED },
+      systemPrompt,
+      messages: [message('m1', 'first')],
+    }
+  }
+
+  test('editing only the system prompt changes the stored session snapshot', () => {
+    expect(playgroundSnapshot(session('Answer in French.'))).not.toBe(
+      playgroundSnapshot(session(''))
+    )
+    expect(playgroundSnapshot(session('Answer in French.'))).toBe(
+      playgroundSnapshot(session('Answer in French.'))
+    )
   })
 })

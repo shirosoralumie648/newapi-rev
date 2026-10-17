@@ -59,6 +59,7 @@ export const API_ENDPOINTS = {
   USER_MODELS: '/api/user/models',
   USER_GROUPS: '/api/user/self/groups',
   PLAYGROUND_SESSIONS: '/api/playground/sessions',
+  PLAYGROUND_PRESETS: '/api/playground/presets',
   PLAYGROUND_USAGE: '/api/playground/usage',
   PLAYGROUND_ASSETS: '/api/playground/assets',
   PLAYGROUND_TASKS: '/api/playground/tasks',
@@ -100,6 +101,17 @@ export const STORAGE_KEYS = {
 
 export const DEFAULT_SESSION_TITLE = 'New conversation'
 export const MAX_STORED_SESSIONS = 20
+
+// Assistant preset display bounds. The server validates the same values and
+// owns the authoritative per-account quota (preset count and prompt bytes).
+export const PLAYGROUND_PRESET_NAME_MAX_LENGTH = 100
+export const PLAYGROUND_PRESET_AVATAR_MAX_LENGTH = 2048
+
+export const PLAYGROUND_PRESET_ERRORS = {
+  LOAD_FAILED: 'Failed to load assistant presets',
+  SAVE_FAILED: 'Failed to save the assistant preset',
+  DELETE_FAILED: 'Failed to delete the assistant preset',
+} as const
 
 // Conversation attachment limits; the server enforces the same budgets.
 export const PLAYGROUND_ATTACHMENT_ACCEPT =

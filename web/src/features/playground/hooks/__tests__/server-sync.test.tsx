@@ -55,6 +55,7 @@ const localDraft: PlaygroundSession = {
   updatedAt: 20,
   config: DEFAULT_CONFIG,
   parameterEnabled: DEFAULT_PARAMETER_ENABLED,
+  systemPrompt: '',
   messages: [{ ...message, versions: [{ id: 'v', content: 'Local history' }] }],
 }
 
