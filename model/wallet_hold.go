@@ -579,6 +579,28 @@ func refundExpiredWalletHoldTx(holdId int, now int64) (int64, bool, error) {
 	return refunded, closed, err
 }
 
+// CleanupClosedWalletHolds removes terminal holds whose last update predates the
+// retention cutoff, batched by id list so the same statement works on SQLite,
+// MySQL and PostgreSQL. Active holds are never removed: they still own quota.
+func CleanupClosedWalletHolds(cutoff int64, limit int) (int, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	var ids []int
+	if err := DB.Model(&WalletHold{}).
+		Where("status <> ? AND updated_at < ?", WalletHoldStatusActive, cutoff).
+		Order("id asc").
+		Limit(limit).
+		Pluck("id", &ids).Error; err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	res := DB.Where("id IN ?", ids).Delete(&WalletHold{})
+	return int(res.RowsAffected), res.Error
+}
+
 // RefundExpiredWalletHolds refunds every root hold whose reservation lifetime
 // elapsed without a settlement or refund. This is the crash-recovery path: a
 // process that stopped between the pre-consume and the settlement leaves an

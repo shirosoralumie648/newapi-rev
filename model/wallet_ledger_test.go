@@ -474,6 +474,14 @@ func TestWalletHoldExpiryRecoveryRefundsCrashedReservations(t *testing.T) {
 			Where("ref_type = ? AND ref_id = ?", WalletLedgerRefRequestRefund, "hold-race-a").
 			Count(&raceRefundRows).Error)
 		assert.EqualValues(t, 1, raceRefundRows)
+
+		// Closed holds are pruned after the retention window; active holds are kept.
+		cleaned, err := CleanupClosedWalletHolds(common.GetTimestamp()+1, 200)
+		require.NoError(t, err)
+		assert.Equal(t, 3, cleaned, "every closed hold is pruned")
+		var remain int64
+		require.NoError(t, db.Model(&WalletHold{}).Count(&remain).Error)
+		assert.Zero(t, remain)
 	})
 }
 
