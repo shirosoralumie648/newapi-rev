@@ -2135,6 +2135,9 @@ func TestPlaygroundMessageCostLookup(t *testing.T) {
 
 			response := playgroundRequest(t, 7, http.MethodGet, "/api/playground/message-costs?request_ids=pg-cost-owner,pg-cost-other,pg-cost-missing", nil, controller.GetPlaygroundMessageCosts)
 			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			// The client relies on this flag to stop waiting for a row that a
+			// deployment with consume logs switched off would never write.
+			expectedEnabled := common.LogConsumeEnabled
 			var envelope struct {
 				Success bool `json:"success"`
 				Data    struct {
@@ -2152,7 +2155,7 @@ func TestPlaygroundMessageCostLookup(t *testing.T) {
 			}
 			require.NoError(t, common.Unmarshal(response.Body.Bytes(), &envelope))
 			require.True(t, envelope.Success, response.Body.String())
-			assert.True(t, envelope.Data.Enabled)
+			assert.Equal(t, expectedEnabled, envelope.Data.Enabled)
 			require.Len(t, envelope.Data.Items, 1)
 			item := envelope.Data.Items[0]
 			assert.Equal(t, "pg-cost-owner", item.RequestID)
