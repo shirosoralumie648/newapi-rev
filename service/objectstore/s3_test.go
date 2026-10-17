@@ -160,7 +160,8 @@ func TestS3StoreRoundTrip(t *testing.T) {
 	assert.Equal(t, key, info.Key)
 	assert.Equal(t, int64(len(payload)), info.Size)
 	assert.Equal(t, system_setting.ObjectStoreBackendS3, store.Backend())
-	assert.Equal(t, "v1/"+key, server.lastPath())
+	// The request path of path-style addressing starts with the bucket name.
+	assert.Equal(t, fakeS3Bucket+"/v1/"+key, server.lastPath())
 
 	head, err := store.Head(ctx, key)
 	require.NoError(t, err)

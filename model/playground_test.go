@@ -2588,7 +2588,10 @@ func TestPlaygroundSessionSystemPrompt(t *testing.T) {
 			tooLong := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+id, map[string]any{"revision": 2, "system_prompt": strings.Repeat("x", 9)}, controller.UpdatePlaygroundSession)
 			assert.Equal(t, http.StatusUnprocessableEntity, tooLong.Code, tooLong.Body.String())
 			assert.Contains(t, tooLong.Body.String(), "PLAYGROUND_SYSTEM_PROMPT_LIMIT_EXCEEDED")
-			nul := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+id, map[string]any{"revision": 2, "system_prompt": "bad\x00prompt"}, controller.UpdatePlaygroundSession)
+			// A NUL byte is rejected as a malformed request; the payload stays
+			// inside the byte limit so this case exercises the NUL validation
+			// instead of the capacity error above.
+			nul := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+id, map[string]any{"revision": 2, "system_prompt": "a\x00b"}, controller.UpdatePlaygroundSession)
 			assert.Equal(t, http.StatusBadRequest, nul.Code, nul.Body.String())
 
 			// A legacy row without the column reads back as an empty prompt.
