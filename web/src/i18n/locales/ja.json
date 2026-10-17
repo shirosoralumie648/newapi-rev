@@ -7461,6 +7461,23 @@
     "Failed to load the generation tasks": "生成タスクの読み込みに失敗しました",
     "Unable to send the result to the canvas": "結果をキャンバスに送信できません",
     "Playground task concurrency limit reached. Wait for a running task to finish.": "同時実行タスクの上限に達しました。実行中のタスクの完了をお待ちください。",
-    "Unable to check the account task budget.": "アカウントのタスク上限を確認できません。"
+    "Unable to check the account task budget.": "アカウントのタスク上限を確認できません。",
+    "Library": "ライブラリ",
+    "Asset library": "素材ライブラリ",
+    "Asset kind": "素材の種類",
+    "Search assets": "素材を検索",
+    "Generation results": "生成結果",
+    "No assets yet": "素材はまだありません",
+    "Attachments and artifacts you save appear here.": "保存した添付ファイルと成果物がここに表示されます。",
+    "Attachments, artifacts and generation results in your Playground.": "Playground の添付ファイル、成果物、生成結果。",
+    "In use": "使用中",
+    "Send to chat": "会話に送信",
+    "Delete asset?": "素材を削除しますか？",
+    "The asset will be removed from your Playground. Assets still in use cannot be deleted.": "素材は Playground から削除されます。使用中の素材は削除できません。",
+    "Asset deleted": "素材を削除しました",
+    "Unable to load the Playground asset library.": "Playground の素材ライブラリを読み込めません。",
+    "Unable to delete the asset.": "素材を削除できません。",
+    "Unable to add the asset to your message.": "素材をメッセージに追加できません。",
+    "Invalid Playground asset query.": "Playground の素材クエリが無効です。"
   }
 }

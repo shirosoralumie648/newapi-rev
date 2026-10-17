@@ -7461,6 +7461,23 @@
     "Failed to load the generation tasks": "Не удалось загрузить задачи генерации",
     "Unable to send the result to the canvas": "Не удалось отправить результат на холст",
     "Playground task concurrency limit reached. Wait for a running task to finish.": "Достигнут предел одновременных задач. Дождитесь завершения текущей задачи.",
-    "Unable to check the account task budget.": "Не удалось проверить лимит задач аккаунта."
+    "Unable to check the account task budget.": "Не удалось проверить лимит задач аккаунта.",
+    "Library": "Библиотека",
+    "Asset library": "Библиотека материалов",
+    "Asset kind": "Тип материала",
+    "Search assets": "Поиск материалов",
+    "Generation results": "Результаты генерации",
+    "No assets yet": "Материалов пока нет",
+    "Attachments and artifacts you save appear here.": "Сохранённые вложения и артефакты появятся здесь.",
+    "Attachments, artifacts and generation results in your Playground.": "Вложения, артефакты и результаты генерации в вашем Playground.",
+    "In use": "Используется",
+    "Send to chat": "Отправить в чат",
+    "Delete asset?": "Удалить материал?",
+    "The asset will be removed from your Playground. Assets still in use cannot be deleted.": "Материал будет удалён из вашего Playground. Используемые материалы удалить нельзя.",
+    "Asset deleted": "Материал удалён",
+    "Unable to load the Playground asset library.": "Не удалось загрузить библиотеку материалов Playground.",
+    "Unable to delete the asset.": "Не удалось удалить материал.",
+    "Unable to add the asset to your message.": "Не удалось добавить материал в сообщение.",
+    "Invalid Playground asset query.": "Недопустимый запрос материалов Playground."
   }
 }

@@ -58,6 +58,22 @@ export function formatPercent(value: number | null | undefined): string {
   }).format((value as number) / 100)
 }
 
+const BYTE_UNITS = ['B', 'KiB', 'MiB', 'GiB'] as const
+
+/** Format a byte count with binary units, e.g. "2 KiB". */
+export function formatBytes(
+  value: number,
+  locales?: Intl.LocalesArgument
+): string {
+  let amount = value
+  let unit = 0
+  while (amount >= 1024 && unit < BYTE_UNITS.length - 1) {
+    amount /= 1024
+    unit += 1
+  }
+  return `${formatNumber(amount, locales)} ${BYTE_UNITS[unit]}`
+}
+
 export function formatCurrencyUSD(value: number | null | undefined): string {
   return formatCurrencyFromUSD(value == null ? null : (value as number))
 }

@@ -7461,6 +7461,23 @@
     "Failed to load the generation tasks": "Failed to load the generation tasks",
     "Unable to send the result to the canvas": "Unable to send the result to the canvas",
     "Playground task concurrency limit reached. Wait for a running task to finish.": "Playground task concurrency limit reached. Wait for a running task to finish.",
-    "Unable to check the account task budget.": "Unable to check the account task budget."
+    "Unable to check the account task budget.": "Unable to check the account task budget.",
+    "Library": "Library",
+    "Asset library": "Asset library",
+    "Asset kind": "Asset kind",
+    "Search assets": "Search assets",
+    "Generation results": "Generation results",
+    "No assets yet": "No assets yet",
+    "Attachments and artifacts you save appear here.": "Attachments and artifacts you save appear here.",
+    "Attachments, artifacts and generation results in your Playground.": "Attachments, artifacts and generation results in your Playground.",
+    "In use": "In use",
+    "Send to chat": "Send to chat",
+    "Delete asset?": "Delete asset?",
+    "The asset will be removed from your Playground. Assets still in use cannot be deleted.": "The asset will be removed from your Playground. Assets still in use cannot be deleted.",
+    "Asset deleted": "Asset deleted",
+    "Unable to load the Playground asset library.": "Unable to load the Playground asset library.",
+    "Unable to delete the asset.": "Unable to delete the asset.",
+    "Unable to add the asset to your message.": "Unable to add the asset to your message.",
+    "Invalid Playground asset query.": "Invalid Playground asset query."
   }
 }

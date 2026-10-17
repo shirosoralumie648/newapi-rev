@@ -18,7 +18,6 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type { NodeProps } from '@xyflow/react'
 import { ImageIcon, Unlink } from 'lucide-react'
-import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -28,11 +27,7 @@ import {
   NodeTitle,
 } from '@/components/ai-elements/node'
 import { Badge } from '@/components/ui/badge'
-import { playgroundAttachmentContentUrl } from '@/features/playground/api'
-import {
-  getPlaygroundAttachmentObjectUrl,
-  loadPlaygroundAttachment,
-} from '@/features/playground/lib/attachment-store'
+import { useAttachmentPreviewUrl } from '@/features/playground/hooks/use-attachment-preview-url'
 import { cn } from '@/lib/utils'
 
 import { CANVAS_NODE_KIND_LABELS } from '../constants'
@@ -40,43 +35,8 @@ import type { CanvasNodeData, CanvasNodeKind } from '../types'
 
 function readNodePreview(data: CanvasNodeData): string {
   return (
-    data.text?.trim() ||
-    data.snapshot?.text?.trim() ||
-    data.label?.trim() ||
-    ''
+    data.text?.trim() || data.snapshot?.text?.trim() || data.label?.trim() || ''
   )
-}
-
-/**
- * Resolves an attachment node's preview through the owner-scoped content
- * endpoint. The node stores IDs only, so a missing session or attachment
- * simply renders the placeholder and never fetches an unowned URL.
- */
-function useCanvasAttachmentUrl(
-  sessionId?: string,
-  attachmentId?: string
-): string | undefined {
-  const [url, setUrl] = useState<string | undefined>(() =>
-    attachmentId ? getPlaygroundAttachmentObjectUrl(attachmentId) : undefined
-  )
-
-  useEffect(() => {
-    if (url || !sessionId || !attachmentId) return
-    let active = true
-    void loadPlaygroundAttachment(
-      playgroundAttachmentContentUrl(sessionId, attachmentId),
-      attachmentId
-    )
-      .then((entry) => {
-        if (active) setUrl(entry.objectUrl ?? entry.dataUrl)
-      })
-      .catch(() => undefined)
-    return () => {
-      active = false
-    }
-  }, [attachmentId, sessionId, url])
-
-  return url
 }
 
 export function CanvasFlowNodeView(props: NodeProps) {
@@ -89,7 +49,7 @@ export function CanvasFlowNodeView(props: NodeProps) {
   const isAttachmentNode =
     (kind === 'attachment' || kind === 'image') &&
     Boolean(reference?.attachmentId)
-  const attachmentUrl = useCanvasAttachmentUrl(
+  const attachmentUrl = useAttachmentPreviewUrl(
     isAttachmentNode && !sourceDeleted ? reference?.sessionId : undefined,
     isAttachmentNode && !sourceDeleted ? reference?.attachmentId : undefined
   )

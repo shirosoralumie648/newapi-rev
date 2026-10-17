@@ -7461,6 +7461,23 @@
     "Failed to load the generation tasks": "Échec du chargement des tâches de génération",
     "Unable to send the result to the canvas": "Impossible d'envoyer le résultat vers le canevas",
     "Playground task concurrency limit reached. Wait for a running task to finish.": "Limite de tâches simultanées atteinte. Attendez la fin d'une tâche en cours.",
-    "Unable to check the account task budget.": "Impossible de vérifier le budget de tâches du compte."
+    "Unable to check the account task budget.": "Impossible de vérifier le budget de tâches du compte.",
+    "Library": "Bibliothèque",
+    "Asset library": "Bibliothèque de ressources",
+    "Asset kind": "Type de ressource",
+    "Search assets": "Rechercher des ressources",
+    "Generation results": "Résultats de génération",
+    "No assets yet": "Aucune ressource pour le moment",
+    "Attachments and artifacts you save appear here.": "Les pièces jointes et artefacts que vous enregistrez apparaissent ici.",
+    "Attachments, artifacts and generation results in your Playground.": "Pièces jointes, artefacts et résultats de génération de votre Playground.",
+    "In use": "Utilisé",
+    "Send to chat": "Envoyer dans la conversation",
+    "Delete asset?": "Supprimer la ressource ?",
+    "The asset will be removed from your Playground. Assets still in use cannot be deleted.": "La ressource sera supprimée de votre Playground. Les ressources encore utilisées ne peuvent pas être supprimées.",
+    "Asset deleted": "Ressource supprimée",
+    "Unable to load the Playground asset library.": "Impossible de charger la bibliothèque de ressources du Playground.",
+    "Unable to delete the asset.": "Impossible de supprimer la ressource.",
+    "Unable to add the asset to your message.": "Impossible d'ajouter la ressource à votre message.",
+    "Invalid Playground asset query.": "Requête de ressource Playground invalide."
   }
 }

@@ -26,15 +26,23 @@ import { Button } from '@/components/ui/button'
 import { CanvasSendDialog } from '@/features/canvas/components/canvas-send-dialog'
 import {
   buildArtifactCanvasSeeds,
+  buildAttachmentCanvasSeeds,
   buildMessageCanvasSeeds,
   type CanvasSendSeed,
 } from '@/features/canvas/lib/canvas-send'
+import { handleServerError } from '@/lib/handle-server-error'
 import { getServerMessage } from '@/lib/server-error-message'
 import { useAuthStore } from '@/stores/auth-store'
 
-import type { PlaygroundArtifactSummary } from './artifact-api'
+import { playgroundAttachmentContentUrl } from './api'
+import {
+  getPlaygroundArtifact,
+  type PlaygroundArtifactSummary,
+} from './artifact-api'
+import type { PlaygroundAssetItem } from './asset-api'
 import { PlaygroundArtifactPanel } from './components/artifact/playground-artifact-panel'
 import { PlaygroundArtifactSourceSheet } from './components/artifact/playground-artifact-source-sheet'
+import { PlaygroundAssetLibrary } from './components/asset/playground-asset-library'
 import { PlaygroundChat } from './components/chat/playground-chat'
 import { PlaygroundGenerationPanel } from './components/generation/playground-generation-panel'
 import { PlaygroundInput } from './components/input/playground-input'
@@ -57,14 +65,11 @@ import {
   getCurrentVersion,
   getMessageContent,
   getMessageContentState,
+  loadPlaygroundAttachment,
   PLAYGROUND_ATTACHMENT_ERRORS,
   uploadPlaygroundAttachments,
 } from './lib'
-import type {
-  Message,
-  MessageAttachment,
-  PlaygroundRouteTarget,
-} from './types'
+import type { Message, MessageAttachment, PlaygroundRouteTarget } from './types'
 
 export function Playground(props: {
   target?: PlaygroundRouteTarget
@@ -96,6 +101,11 @@ function PlaygroundContent(props: {
   const [canvasOpen, setCanvasOpen] = useState(false)
   const [generationOpen, setGenerationOpen] = useState(false)
   const [canvasProjectId, setCanvasProjectId] = useState<string | null>(null)
+  const [libraryOpen, setLibraryOpen] = useState(false)
+  const [pendingLibraryFiles, setPendingLibraryFiles] = useState<File[]>([])
+  const [pendingLibraryText, setPendingLibraryText] = useState<string | null>(
+    null
+  )
   const appliedSessionRef = useRef<string | null>(null)
   const appliedArtifactRef = useRef<string | null>(null)
   const local = usePlaygroundState()
@@ -384,12 +394,14 @@ function PlaygroundContent(props: {
   if (artifactController.state.isOpen) inspectorView = 'artifacts'
   else if (canvasOpen) inspectorView = 'canvas'
   else if (generationOpen) inspectorView = 'generate'
+  else if (libraryOpen) inspectorView = 'library'
 
   const openCanvasInspector = useCallback(
     (projectId: string | null) => {
       const action = () => {
         artifactController.store.getState().setOpen(false)
         setGenerationOpen(false)
+        setLibraryOpen(false)
         setCanvasProjectId(projectId)
         setCanvasOpen(true)
       }
@@ -411,6 +423,7 @@ function PlaygroundContent(props: {
         }
         setCanvasOpen(false)
         setGenerationOpen(false)
+        setLibraryOpen(false)
         artifactController.store.getState().setOpen(true)
         return
       }
@@ -423,6 +436,24 @@ function PlaygroundContent(props: {
         openCanvasInspector(canvasProjectId)
         return
       }
+      if (view === 'library') {
+        if (libraryOpen) {
+          setLibraryOpen(false)
+          return
+        }
+        const openLibrary = () => {
+          artifactController.store.getState().setOpen(false)
+          setCanvasOpen(false)
+          setGenerationOpen(false)
+          setLibraryOpen(true)
+        }
+        if (artifactController.state.dirty) {
+          artifactController.store.getState().requestDiscard(openLibrary)
+          return
+        }
+        openLibrary()
+        return
+      }
       if (generationOpen) {
         setGenerationOpen(false)
         return
@@ -430,6 +461,7 @@ function PlaygroundContent(props: {
       const action = () => {
         artifactController.store.getState().setOpen(false)
         setCanvasOpen(false)
+        setLibraryOpen(false)
         setGenerationOpen(true)
       }
       if (artifactController.state.dirty) {
@@ -446,6 +478,7 @@ function PlaygroundContent(props: {
       canvasProjectId,
       closeArtifactPanel,
       generationOpen,
+      libraryOpen,
       openCanvasInspector,
     ]
   )
@@ -459,8 +492,17 @@ function PlaygroundContent(props: {
       setCanvasOpen(false)
       return
     }
-    setGenerationOpen(false)
-  }, [artifactController.state.isOpen, canvasOpen, closeArtifactPanel])
+    if (generationOpen) {
+      setGenerationOpen(false)
+      return
+    }
+    setLibraryOpen(false)
+  }, [
+    artifactController.state.isOpen,
+    canvasOpen,
+    closeArtifactPanel,
+    generationOpen,
+  ])
 
   const handleOpenCanvasProject = useCallback(
     (projectId: string) => {
@@ -476,6 +518,80 @@ function PlaygroundContent(props: {
       openCanvasInspector(project.id)
     },
     [openCanvasInspector]
+  )
+
+  const clearPendingLibraryFiles = useCallback(() => {
+    setPendingLibraryFiles([])
+  }, [])
+
+  const clearPendingLibraryText = useCallback(() => {
+    setPendingLibraryText(null)
+  }, [])
+
+  // Library sends go through the composer, not a direct upload: the file joins
+  // the normal pending attachments and is validated and uploaded on submit.
+  const handleLibraryAttachmentToChat = useCallback(
+    async (asset: PlaygroundAssetItem) => {
+      try {
+        const entry = await loadPlaygroundAttachment(
+          playgroundAttachmentContentUrl(asset.sessionId, asset.id),
+          asset.id
+        )
+        const blob = entry.blob
+        if (!blob) return
+        const file = new File([blob], asset.title || asset.id, {
+          type: asset.mediaType || blob.type || 'application/octet-stream',
+        })
+        setPendingLibraryFiles((current) => [...current, file])
+      } catch (error) {
+        handleServerError(error, t('Unable to add the asset to your message.'))
+      }
+    },
+    [t]
+  )
+
+  const handleLibraryArtifactToChat = useCallback(
+    async (asset: PlaygroundAssetItem) => {
+      try {
+        const result = await getPlaygroundArtifact(asset.sessionId, asset.id)
+        setPendingLibraryText(result.version.content)
+      } catch (error) {
+        handleServerError(error, t('Unable to add the asset to your message.'))
+      }
+    },
+    [t]
+  )
+
+  const handleLibraryAssetToCanvas = useCallback(
+    (asset: PlaygroundAssetItem) => {
+      if (asset.kind === 'attachment') {
+        setCanvasSendSeeds(
+          buildAttachmentCanvasSeeds({
+            sessionId: asset.sessionId,
+            attachmentId: asset.id,
+            filename: asset.title || undefined,
+          })
+        )
+        return
+      }
+      setCanvasSendSeeds(
+        buildArtifactCanvasSeeds({
+          sessionId: asset.sessionId,
+          artifactId: asset.id,
+          title: asset.title,
+        })
+      )
+    },
+    []
+  )
+
+  const handleLibraryOpenConversation = useCallback(
+    (sessionId: string) => {
+      const match = sessions.find((session) => session.server?.id === sessionId)
+      if (!match) return
+      if (match.id !== activeSessionId) handleSwitchSession(match.id)
+    },
+    [activeSessionId, handleSwitchSession, sessions]
   )
 
   const requestedSession = props.target?.session
@@ -561,6 +677,16 @@ function PlaygroundContent(props: {
               group={config.group}
               models={models}
               onSendToCanvas={(seeds) => setCanvasSendSeeds(seeds)}
+            />
+          ) : inspectorView === 'library' ? (
+            <PlaygroundAssetLibrary
+              active
+              userId={userId}
+              onOpenConversation={handleLibraryOpenConversation}
+              onSendAttachmentToChat={handleLibraryAttachmentToChat}
+              onSendArtifactToChat={handleLibraryArtifactToChat}
+              onSendSeedsToCanvas={(seeds) => setCanvasSendSeeds(seeds)}
+              onSendToCanvas={handleLibraryAssetToCanvas}
             />
           ) : canonicalSessionId ? (
             <PlaygroundArtifactPanel
@@ -651,6 +777,10 @@ function PlaygroundContent(props: {
               onSubmit={handleInputSubmit}
               parameterEnabled={parameterEnabled}
               hasMessages={messages.length > 0}
+              pendingFiles={pendingLibraryFiles}
+              onPendingFilesConsumed={clearPendingLibraryFiles}
+              pendingText={pendingLibraryText}
+              onPendingTextConsumed={clearPendingLibraryText}
             />
           </div>
         </div>

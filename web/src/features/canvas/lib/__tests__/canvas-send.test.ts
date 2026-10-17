@@ -23,6 +23,7 @@ import { CANVAS_MESSAGE_SNAPSHOT_MAX_CHARS } from '../../constants'
 import type { CanvasServerDocument, CanvasServerProject } from '../../types'
 import {
   buildArtifactCanvasSeeds,
+  buildAttachmentCanvasSeeds,
   buildCanvasSendNodes,
   buildMessageCanvasSeeds,
   buildTaskResultCanvasSeeds,
@@ -111,6 +112,36 @@ test('an artifact becomes a node that references the artifact by id', () => {
       kind: 'artifact',
       label: 'Doc',
       ref: { sessionId: 'pgs_1', artifactId: 'pga_1' },
+    },
+  ])
+})
+
+test('a saved attachment becomes a node that references the attachment by id', () => {
+  expect(
+    buildAttachmentCanvasSeeds({
+      sessionId: 'pgs_1',
+      attachmentId: 'pgf_1',
+      filename: 'cat.png',
+    })
+  ).toEqual([
+    {
+      kind: 'attachment',
+      label: 'cat.png',
+      ref: { sessionId: 'pgs_1', attachmentId: 'pgf_1' },
+    },
+  ])
+})
+
+test('an attachment without a filename still references it by id only', () => {
+  expect(
+    buildAttachmentCanvasSeeds({
+      sessionId: 'pgs_1',
+      attachmentId: 'pgf_2',
+    })
+  ).toEqual([
+    {
+      kind: 'attachment',
+      ref: { sessionId: 'pgs_1', attachmentId: 'pgf_2' },
     },
   ])
 })

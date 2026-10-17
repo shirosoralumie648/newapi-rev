@@ -20,6 +20,7 @@ import { getPlaygroundAttachmentContent } from '../api'
 import type { Message } from '../types'
 
 type AttachmentCacheEntry = {
+  blob?: Blob
   dataUrl?: string
   objectUrl?: string
 }
@@ -87,6 +88,7 @@ export function loadPlaygroundAttachment(
     try {
       const blob = await getPlaygroundAttachmentContent(contentUrl)
       const current = cacheEntry(id)
+      current.blob ??= blob
       current.objectUrl ??= URL.createObjectURL(blob)
       current.dataUrl ??= await blobToDataUrl(blob)
       return current
