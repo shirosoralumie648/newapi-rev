@@ -424,6 +424,7 @@ const playgroundUsageSchema = z.object({
   attachments: playgroundUsageMetricSchema,
   artifacts: playgroundUsageMetricSchema,
   canvas: playgroundUsageMetricSchema,
+  tasks: playgroundUsageMetricSchema,
 })
 
 export interface PlaygroundUsageMetric {
@@ -433,14 +434,15 @@ export interface PlaygroundUsageMetric {
   limitBytes: number
 }
 
-// The unified Playground resource usage: conversations, attachments, artifacts
-// and canvases the owner stores, each against the account-level cap the server
-// enforces for the owner's group.
+// The unified Playground resource usage: conversations, attachments, artifacts,
+// canvases and async generation tasks the owner stores, each against the
+// account-level cap the server enforces for the owner's group.
 export interface PlaygroundResourceUsage {
   sessions: PlaygroundUsageMetric
   attachments: PlaygroundUsageMetric
   artifacts: PlaygroundUsageMetric
   canvas: PlaygroundUsageMetric
+  tasks: PlaygroundUsageMetric
 }
 
 export async function getPlaygroundUsage(
@@ -462,5 +464,6 @@ export async function getPlaygroundUsage(
     attachments: toMetric(metrics.attachments),
     artifacts: toMetric(metrics.artifacts),
     canvas: toMetric(metrics.canvas),
+    tasks: toMetric(metrics.tasks),
   }
 }

@@ -38,6 +38,7 @@ type PlaygroundResourceUsage struct {
 	Attachments PlaygroundUsageMetric `json:"attachments"`
 	Artifacts   PlaygroundUsageMetric `json:"artifacts"`
 	Canvas      PlaygroundUsageMetric `json:"canvas"`
+	Tasks       PlaygroundUsageMetric `json:"tasks"`
 }
 
 // PlaygroundUsageForUser reports the caller's Playground storage against the
@@ -63,6 +64,10 @@ func PlaygroundUsageForUser(userID int) (*PlaygroundResourceUsage, error) {
 		Canvas: PlaygroundUsageMetric{
 			Limit:      int64(policy.CanvasUserMaxProjects),
 			LimitBytes: policy.CanvasUserMaxBytes,
+		},
+		Tasks: PlaygroundUsageMetric{
+			Limit:      int64(policy.TaskMaxConcurrency),
+			LimitBytes: policy.TaskUserResultMaxBytes,
 		},
 	}
 
@@ -112,6 +117,17 @@ func PlaygroundUsageForUser(userID int) (*PlaygroundResourceUsage, error) {
 	}
 	usage.Canvas.Used = canvas.Used
 	usage.Canvas.UsedBytes = canvas.UsedBytes
+
+	activeTasks, err := CountActivePlaygroundTasks(userID)
+	if err != nil {
+		return nil, err
+	}
+	usage.Tasks.Used = activeTasks
+	taskBytes, err := PlaygroundTaskResultStorageBytes(userID)
+	if err != nil {
+		return nil, err
+	}
+	usage.Tasks.UsedBytes = taskBytes
 
 	return usage, nil
 }

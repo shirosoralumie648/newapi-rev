@@ -7480,6 +7480,16 @@
     "Tool call result size limit": "Limite de taille du résultat d'appel d'outil",
     "Tool calls": "Appels d'outils",
     "Tool calls per message version": "Appels d'outils par version de message",
-    "Tool result": "Résultat de l'outil"
+    "Tool result": "Résultat de l'outil",
+    "Task canceled": "Tâche annulée",
+    "Cancel task": "Annuler la tâche",
+    "Cancel this task?": "Annuler cette tâche ?",
+    "The task will be canceled and its reserved quota refunded.": "La tâche sera annulée et le quota réservé remboursé.",
+    "Failed to cancel the task": "Échec de l'annulation de la tâche",
+    "Task not found.": "Tâche introuvable.",
+    "Only a running task can be canceled.": "Seule une tâche en cours peut être annulée.",
+    "Unable to cancel the task.": "Impossible d'annuler la tâche.",
+    "Playground task result storage limit reached. Wait for old task results to expire.": "Limite de stockage des résultats de tâches Playground atteinte. Attendez l'expiration des anciens résultats.",
+    "Task result storage per user": "Stockage des résultats de tâches par utilisateur"
   }
 }

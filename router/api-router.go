@@ -76,6 +76,7 @@ func SetApiRouter(router *gin.Engine) {
 		playgroundRoute.Use(middleware.DisableCache(), middleware.UserAuth())
 		{
 			playgroundRoute.GET("/usage", controller.GetPlaygroundUsage)
+			playgroundRoute.POST("/tasks/:taskId/cancel", controller.PlaygroundTaskCancel)
 			playgroundRoute.GET("/sessions", controller.ListPlaygroundSessions)
 			playgroundRoute.POST("/sessions", controller.CreatePlaygroundSession)
 			playgroundRoute.GET("/sessions/:id", controller.GetPlaygroundSession)

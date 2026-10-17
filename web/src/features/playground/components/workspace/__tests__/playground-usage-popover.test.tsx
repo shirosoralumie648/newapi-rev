@@ -43,6 +43,7 @@ const usage = {
   },
   artifacts: { used: 0, limit: 5, used_bytes: 0, limit_bytes: 1024 },
   canvas: { used: 2, limit: 20, used_bytes: 0, limit_bytes: 0 },
+  tasks: { used: 1, limit: 3, used_bytes: 4096, limit_bytes: 64 * 1024 * 1024 },
 }
 
 let testI18n: i18n
@@ -83,7 +84,13 @@ test('opening the usage popover lists each resource against its account limit', 
   expect(screen.getByText('3 of 10')).toBeVisible()
   expect(screen.getByText('1 of 4')).toBeVisible()
   expect(screen.getByText('2 KiB of 8 MiB')).toBeVisible()
-  expect(api.get).toHaveBeenCalledWith('/api/playground/usage', expect.anything())
+  expect(screen.getByText('Tasks')).toBeVisible()
+  expect(screen.getByText('1 of 3')).toBeVisible()
+  expect(screen.getByText('4 KiB of 64 MiB')).toBeVisible()
+  expect(api.get).toHaveBeenCalledWith(
+    '/api/playground/usage',
+    expect.anything()
+  )
 })
 
 test('a failed usage request shows the error state instead of the summary', async () => {

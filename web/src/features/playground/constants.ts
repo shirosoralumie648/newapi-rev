@@ -60,6 +60,7 @@ export const API_ENDPOINTS = {
   USER_GROUPS: '/api/user/self/groups',
   PLAYGROUND_SESSIONS: '/api/playground/sessions',
   PLAYGROUND_USAGE: '/api/playground/usage',
+  PLAYGROUND_TASKS: '/api/playground/tasks',
 } as const
 
 // Default group — uses 'default' as the safe fallback; auto-group is
@@ -137,6 +138,7 @@ export const PLAYGROUND_GENERATION_ERRORS = {
   VIDEO_FAILED: 'Video generation failed',
   AUDIO_FAILED: 'Audio generation failed',
   TASK_LIST_FAILED: 'Failed to load the generation tasks',
+  TASK_CANCEL_FAILED: 'Failed to cancel the task',
   CANVAS_SEND_FAILED: 'Unable to send the result to the canvas',
 } as const
 

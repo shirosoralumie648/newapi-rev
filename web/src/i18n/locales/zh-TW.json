@@ -7480,6 +7480,16 @@
     "Tool call result size limit": "工具呼叫結果大小上限",
     "Tool calls": "工具呼叫",
     "Tool calls per message version": "每個訊息版本的工具呼叫數",
-    "Tool result": "工具結果"
+    "Tool result": "工具結果",
+    "Task canceled": "任務已取消",
+    "Cancel task": "取消任務",
+    "Cancel this task?": "取消此任務？",
+    "The task will be canceled and its reserved quota refunded.": "任務將被取消，已預留的額度將退還。",
+    "Failed to cancel the task": "取消任務失敗",
+    "Task not found.": "找不到任務。",
+    "Only a running task can be canceled.": "只有正在執行的任務可以取消。",
+    "Unable to cancel the task.": "無法取消任務。",
+    "Playground task result storage limit reached. Wait for old task results to expire.": "任務結果儲存已達上限，請等待舊任務結果過期。",
+    "Task result storage per user": "每位使用者任務結果儲存"
   }
 }

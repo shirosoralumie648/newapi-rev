@@ -7480,6 +7480,16 @@
     "Tool call result size limit": "Ограничение размера результата вызова инструмента",
     "Tool calls": "Вызовы инструментов",
     "Tool calls per message version": "Вызовов инструментов на версию сообщения",
-    "Tool result": "Результат инструмента"
+    "Tool result": "Результат инструмента",
+    "Task canceled": "Задача отменена",
+    "Cancel task": "Отменить задачу",
+    "Cancel this task?": "Отменить эту задачу?",
+    "The task will be canceled and its reserved quota refunded.": "Задача будет отменена, а зарезервированная квота возвращена.",
+    "Failed to cancel the task": "Не удалось отменить задачу",
+    "Task not found.": "Задача не найдена.",
+    "Only a running task can be canceled.": "Отменить можно только выполняющуюся задачу.",
+    "Unable to cancel the task.": "Невозможно отменить задачу.",
+    "Playground task result storage limit reached. Wait for old task results to expire.": "Достигнут лимит хранилища результатов задач Playground. Дождитесь истечения срока старых результатов.",
+    "Task result storage per user": "Хранилище результатов задач на пользователя"
   }
 }

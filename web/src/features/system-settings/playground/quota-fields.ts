@@ -46,6 +46,7 @@ export const PLAYGROUND_QUOTA_FIELD_KEYS = [
   'canvas_node_data_max_bytes',
   'canvas_user_max_bytes',
   'task_max_concurrency',
+  'task_user_result_max_bytes',
 ] as const
 
 export type PlaygroundQuotaFieldKey =
@@ -205,6 +206,12 @@ export const PLAYGROUND_QUOTA_FIELDS: readonly PlaygroundQuotaField[] = [
     key: 'task_max_concurrency',
     group: 'tasks',
     labelKey: 'Concurrent Playground tasks',
+  },
+  {
+    key: 'task_user_result_max_bytes',
+    group: 'tasks',
+    labelKey: 'Task result storage per user',
+    bytes: true,
   },
 ]
 

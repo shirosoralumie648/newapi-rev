@@ -7480,6 +7480,16 @@
     "Tool call result size limit": "ツール呼び出し結果のサイズ上限",
     "Tool calls": "ツール呼び出し",
     "Tool calls per message version": "メッセージバージョンあたりのツール呼び出し数",
-    "Tool result": "ツールの結果"
+    "Tool result": "ツールの結果",
+    "Task canceled": "タスクをキャンセルしました",
+    "Cancel task": "タスクをキャンセル",
+    "Cancel this task?": "このタスクをキャンセルしますか？",
+    "The task will be canceled and its reserved quota refunded.": "タスクはキャンセルされ、予約されたクォータは返還されます。",
+    "Failed to cancel the task": "タスクのキャンセルに失敗しました",
+    "Task not found.": "タスクが見つかりません。",
+    "Only a running task can be canceled.": "実行中のタスクのみキャンセルできます。",
+    "Unable to cancel the task.": "タスクをキャンセルできません。",
+    "Playground task result storage limit reached. Wait for old task results to expire.": "Playground タスク結果のストレージ上限に達しました。古いタスク結果の期限切れをお待ちください。",
+    "Task result storage per user": "ユーザーごとのタスク結果ストレージ"
   }
 }
