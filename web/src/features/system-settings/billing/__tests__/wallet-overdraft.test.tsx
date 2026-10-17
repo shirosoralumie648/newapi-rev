@@ -97,13 +97,13 @@ test('adding a group override saves the whole override map', async () => {
   const user = userEvent.setup()
   renderSection(0.01, { alpha: 0.5 })
 
-  expect(screen.getByText('alpha')).toBeVisible()
+  expect(screen.getByDisplayValue('alpha')).toBeVisible()
   const overrideInput = screen.getByDisplayValue('0.5')
   fireEvent.change(overrideInput, { target: { value: '0.75' } })
 
   await user.type(screen.getByPlaceholderText('Enter a group name'), 'beta')
   await user.click(screen.getByRole('button', { name: 'Add group' }))
-  expect(screen.getByText('beta')).toBeVisible()
+  expect(screen.getByDisplayValue('beta')).toBeVisible()
 
   await user.click(
     screen.getByRole('button', { name: 'Save wallet overdraft' })

@@ -65,7 +65,10 @@ type WalletDebtor struct {
 
 // lockWalletDebtTx loads and locks one account's debt row, or nil when the
 // account never owed anything. Together with the wallet hold it fixes the
-// transaction lock order used by every wallet mutation: hold -> debt -> user.
+// transaction lock order used by every wallet mutation: hold -> user -> debt.
+// The user row comes before the debt row so two charges that create the same
+// account's first debt row serialize on the wallet instead of taking a gap lock
+// that deadlocks with it.
 func lockWalletDebtTx(tx *gorm.DB, userId int) (*WalletDebt, error) {
 	var debt WalletDebt
 	err := lockForUpdate(tx).Where("user_id = ?", userId).First(&debt).Error
@@ -224,16 +227,16 @@ func SettleWalletDebt(userId int) (int64, error) {
 	}
 	collected := int64(0)
 	err = DB.Transaction(func(tx *gorm.DB) error {
+		balance, err := lockUserQuotaTx(tx, userId)
+		if err != nil {
+			return err
+		}
 		debt, err := lockWalletDebtTx(tx, userId)
 		if err != nil {
 			return err
 		}
 		if debt == nil || debt.Amount <= 0 {
 			return nil
-		}
-		balance, err := lockUserQuotaTx(tx, userId)
-		if err != nil {
-			return err
 		}
 		collected = min(debt.Amount, max(balance+limit, 0))
 		if collected <= 0 {
@@ -285,15 +288,17 @@ func walletChargeSplit(balance int64, charge int64, limit int64) (applied int64,
 // chargeWalletQuotaTx applies one wallet charge down to the account's credit
 // line and records everything beyond it as debt. Applied and debt parts are
 // returned so the caller can account only the wallet movement as consumption.
+// It locks the user row before the debt row (hold -> user -> debt), the fixed
+// order every wallet mutation follows.
 func chargeWalletQuotaTx(tx *gorm.DB, userId int, charge int64, limit int64, requestId string) (int64, int64, error) {
 	if charge <= 0 {
 		return 0, 0, nil
 	}
-	debt, err := lockWalletDebtTx(tx, userId)
+	balance, err := lockUserQuotaTx(tx, userId)
 	if err != nil {
 		return 0, 0, err
 	}
-	balance, err := lockUserQuotaTx(tx, userId)
+	debt, err := lockWalletDebtTx(tx, userId)
 	if err != nil {
 		return 0, 0, err
 	}

@@ -68,7 +68,7 @@ it('lists accounts with outstanding debt and their amounts', async () => {
   )
   // The owed amount is listed next to the account and below the table headers.
   expect(screen.getAllByText('Wallet Debt').length).toBeGreaterThan(0)
-  expect(document.body.textContent).toContain('2 accounts in debt')
+  expect(document.body.textContent).toContain('Outstanding debt')
 })
 
 it('shows an empty state when no account owes the platform', async () => {

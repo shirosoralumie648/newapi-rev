@@ -196,8 +196,8 @@ func closeWalletHoldChildrenTx(tx *gorm.DB, parentId int, status string, now int
 }
 
 // reserveWalletQuotaWithHoldTx deducts quota and records the matching hold in
-// one transaction. The lock order is fixed (hold first, then the debt row, then
-// the user row) so concurrent reserves, settlements, refunds and debt
+// one transaction. The lock order is fixed (hold first, then the user row, then
+// the debt row) so concurrent reserves, settlements, refunds and debt
 // collections of one user cannot deadlock.
 //
 // requireBalance=true is the pre-consume reservation: it only deducts when the
