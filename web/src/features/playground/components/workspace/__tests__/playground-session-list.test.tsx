@@ -20,7 +20,11 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, test, vi } from 'vitest'
 
-import { DEFAULT_CONFIG, DEFAULT_PARAMETER_ENABLED } from '../../../constants'
+import {
+  DEFAULT_CONFIG,
+  DEFAULT_CONTEXT_SETTINGS,
+  DEFAULT_PARAMETER_ENABLED,
+} from '../../../constants'
 import type { PlaygroundSession } from '../../../types'
 import { PlaygroundSessionList } from '../playground-session-list'
 
@@ -41,6 +45,8 @@ const makeSession = (
   config: { ...DEFAULT_CONFIG },
   parameterEnabled: { ...DEFAULT_PARAMETER_ENABLED },
   systemPrompt: '',
+  context: { ...DEFAULT_CONTEXT_SETTINGS },
+  contextSummary: null,
   messages: [],
 })
 

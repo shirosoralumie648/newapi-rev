@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 export * from './artifact-utils'
 export * from './attachment-store'
 export * from './attachment-upload'
+export * from './context/playground-context'
 export * from './input/input-control-utils'
 export * from './input/input-tool-utils'
 export * from './message/conversation-message-utils'

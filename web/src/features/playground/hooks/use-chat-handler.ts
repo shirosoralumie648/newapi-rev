@@ -44,6 +44,8 @@ import type {
   Message,
   MessageUsage,
   PlaygroundConfig,
+  PlaygroundContextSettings,
+  PlaygroundContextSummary,
   ParameterEnabled,
 } from '../types'
 import { useStreamRequest } from './use-stream-request'
@@ -53,6 +55,17 @@ interface UseChatHandlerOptions {
   parameterEnabled: ParameterEnabled
   /** Conversation-level instruction injected as the first request message. */
   systemPrompt: string
+  /** Context limits and summary model applied when the payload is built. */
+  contextSettings: PlaygroundContextSettings
+  /**
+   * Resolves the compression node the send should carry, summarizing the
+   * messages a limit leaves out first when automatic summary is enabled. The
+   * callback never rejects for a failed summarization; it falls back to the
+   * current node so the message itself is not blocked.
+   */
+  prepareContextSummary?: (
+    messages: Message[]
+  ) => Promise<PlaygroundContextSummary | null>
   onMessageUpdate: (
     updater: (prev: Message[]) => Message[],
     sessionId?: string | null
@@ -88,6 +101,8 @@ export function useChatHandler({
   config,
   parameterEnabled,
   systemPrompt,
+  contextSettings,
+  prepareContextSummary,
   onMessageUpdate,
   sessionId,
 }: UseChatHandlerOptions) {
@@ -323,7 +338,7 @@ export function useChatHandler({
 
   // Send streaming chat request
   const sendStreamingChat = useCallback(
-    (messages: Message[]) => {
+    (messages: Message[], contextSummary: PlaygroundContextSummary | null) => {
       const generation = requestGenerationRef.current + 1
       requestGenerationRef.current = generation
       requestSessionIdRef.current = sessionId
@@ -337,7 +352,8 @@ export function useChatHandler({
         messages,
         config,
         parameterEnabled,
-        systemPrompt
+        systemPrompt,
+        { settings: contextSettings, summary: contextSummary }
       )
       void sendStreamRequest(payload, {
         onUpdate: (type, chunk) => handleStreamUpdate(generation, type, chunk),
@@ -354,6 +370,7 @@ export function useChatHandler({
       config,
       parameterEnabled,
       systemPrompt,
+      contextSettings,
       sendStreamRequest,
       discardPendingStreamUpdates,
       handleStreamUpdate,
@@ -368,12 +385,16 @@ export function useChatHandler({
 
   // Send non-streaming chat request
   const sendNonStreamingChat = useCallback(
-    async (messages: Message[]) => {
+    async (
+      messages: Message[],
+      contextSummary: PlaygroundContextSummary | null
+    ) => {
       const payload = buildChatCompletionPayload(
         messages,
         config,
         parameterEnabled,
-        systemPrompt
+        systemPrompt,
+        { settings: contextSettings, summary: contextSummary }
       )
       const generation = requestGenerationRef.current + 1
       const abortController = new AbortController()
@@ -447,6 +468,7 @@ export function useChatHandler({
       config,
       parameterEnabled,
       systemPrompt,
+      contextSettings,
       stopStream,
       discardPendingStreamUpdates,
       onMessageUpdate,
@@ -457,18 +479,31 @@ export function useChatHandler({
 
   // Send chat request (stream or non-stream based on config). Older messages
   // may reference attachments whose bytes are not cached yet; load them before
-  // the payload is built so the request still carries the images.
+  // the payload is built so the request still carries the images. The context
+  // summary (when automatic summary is on) is resolved first, because the
+  // payload must carry the node the plan then uses.
   const sendChat = useCallback(
     (messages: Message[]) => {
-      void ensurePlaygroundMessageAttachments(messages).then(() => {
+      void ensurePlaygroundMessageAttachments(messages).then(async () => {
+        let contextSummary: PlaygroundContextSummary | null = null
+        try {
+          contextSummary = (await prepareContextSummary?.(messages)) ?? null
+        } catch {
+          contextSummary = null
+        }
         if (config.stream) {
-          sendStreamingChat(messages)
+          sendStreamingChat(messages, contextSummary)
         } else {
-          void sendNonStreamingChat(messages)
+          void sendNonStreamingChat(messages, contextSummary)
         }
       })
     },
-    [config.stream, sendStreamingChat, sendNonStreamingChat]
+    [
+      config.stream,
+      prepareContextSummary,
+      sendStreamingChat,
+      sendNonStreamingChat,
+    ]
   )
 
   // Stop generation

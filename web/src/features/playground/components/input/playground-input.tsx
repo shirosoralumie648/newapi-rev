@@ -36,11 +36,14 @@ import {
   PLAYGROUND_ATTACHMENT_MAX_BYTES,
   PLAYGROUND_ATTACHMENT_MAX_COUNT,
 } from '../../constants'
+import type { PlaygroundContextPlan } from '../../lib'
 import type {
   ModelOption,
   GroupOption,
   ParameterEnabled,
   PlaygroundConfig,
+  PlaygroundContextSettings,
+  PlaygroundContextSummary,
 } from '../../types'
 import { PlaygroundInputControls } from './playground-input-controls'
 import { PlaygroundInputTools } from './playground-input-tools'
@@ -74,6 +77,13 @@ interface PlaygroundInputProps {
   parameterEnabled: ParameterEnabled
   systemPrompt: string
   onSystemPromptChange: (value: string) => void
+  contextSettings: PlaygroundContextSettings
+  contextPlan: PlaygroundContextPlan
+  contextSummary: PlaygroundContextSummary | null
+  isSummarizing?: boolean
+  onContextSettingsChange: (settings: PlaygroundContextSettings) => void
+  onRemoveContextSummary: () => void
+  onSummarizeContext: () => void
   /**
    * Files the workspace wants added to the composer (for example "send to
    * chat" from the asset library). Each array is consumed once and validated
@@ -106,6 +116,13 @@ export function PlaygroundInput({
   parameterEnabled,
   systemPrompt,
   onSystemPromptChange,
+  contextSettings,
+  contextPlan,
+  contextSummary,
+  isSummarizing,
+  onContextSettingsChange,
+  onRemoveContextSummary,
+  onSummarizeContext,
   pendingFiles,
   onPendingFilesConsumed,
   pendingText,
@@ -191,11 +208,19 @@ export function PlaygroundInput({
             tools={
               <PlaygroundInputTools
                 config={config}
+                contextPlan={contextPlan}
+                contextSettings={contextSettings}
+                contextSummary={contextSummary}
                 disabled={disabled}
                 hasMessages={hasMessages}
-                onConfigChange={onConfigChange}
+                isSummarizing={isSummarizing}
+                models={models}
                 onClearMessages={onClearMessages}
+                onConfigChange={onConfigChange}
+                onContextSettingsChange={onContextSettingsChange}
                 onParameterEnabledChange={onParameterEnabledChange}
+                onRemoveContextSummary={onRemoveContextSummary}
+                onSummarizeContext={onSummarizeContext}
                 onSystemPromptChange={onSystemPromptChange}
                 parameterEnabled={parameterEnabled}
                 systemPrompt={systemPrompt}

@@ -44,6 +44,22 @@ const (
 	// playgroundMessageTokenMax is a sanity ceiling for the display-only token
 	// counts a client may attach to one version, not a billing limit.
 	playgroundMessageTokenMax = 1 << 40
+	// playgroundContextHistoryLimitMax and playgroundContextTokenBudgetMax bound
+	// the caller-supplied context management settings. They are request-shape
+	// limits, not resource quotas: staying inside them never changes what the
+	// model receives beyond the caller's own configuration.
+	playgroundContextHistoryLimitMax = 1000
+	playgroundContextTokenBudgetMax  = 2_000_000
+	// playgroundContextSummaryModelMaxLength mirrors the model name bound of
+	// the conversation config.
+	playgroundContextSummaryModelMaxLength = 512
+	// playgroundContextSummaryMessageCountMax bounds the display-only count of
+	// messages one compression node reports it replaces.
+	playgroundContextSummaryMessageCountMax = 1_000_000
+	// playgroundContextSummaryMaxBytes bounds the stored summary text. A longer
+	// summary is rejected instead of truncated so the stored node always
+	// matches what the model produced.
+	playgroundContextSummaryMaxBytes = 32 << 10
 )
 
 type playgroundSessionRequest struct {
@@ -52,6 +68,8 @@ type playgroundSessionRequest struct {
 	Config           map[string]any           `json:"config"`
 	ParameterEnabled map[string]bool          `json:"parameter_enabled"`
 	SystemPrompt     *string                  `json:"system_prompt"`
+	Context          json.RawMessage          `json:"context"`
+	ContextSummary   json.RawMessage          `json:"context_summary"`
 	Revision         *int64                   `json:"revision"`
 	Messages         []playgroundMessageInput `json:"messages"`
 }
@@ -64,10 +82,15 @@ type playgroundSessionResponse struct {
 	Config           map[string]any  `json:"config"`
 	ParameterEnabled map[string]bool `json:"parameter_enabled"`
 	SystemPrompt     string          `json:"system_prompt"`
-	Revision         int64           `json:"revision"`
-	MessageRevision  int64           `json:"message_revision"`
-	CreatedAt        int64           `json:"created_at"`
-	UpdatedAt        int64           `json:"updated_at"`
+	// Context is the conversation's context management settings; an absent or
+	// legacy NULL column reads back as an empty object and the client picks
+	// its defaults. ContextSummary is the persisted compression node or null.
+	Context         map[string]any  `json:"context"`
+	ContextSummary  json.RawMessage `json:"context_summary"`
+	Revision        int64           `json:"revision"`
+	MessageRevision int64           `json:"message_revision"`
+	CreatedAt       int64           `json:"created_at"`
+	UpdatedAt       int64           `json:"updated_at"`
 }
 
 type playgroundMessageInput struct {
@@ -150,6 +173,22 @@ type playgroundMessageUsage struct {
 	PromptTokens     *float64 `json:"promptTokens,omitempty"`
 	CompletionTokens *float64 `json:"completionTokens,omitempty"`
 	TotalTokens      *float64 `json:"totalTokens,omitempty"`
+}
+
+// playgroundContextSummary is the persisted compression node: the summary that
+// replaces the messages up to (and including) `through_message_key` in every
+// request. The content is produced by an ordinary billed relay call the client
+// makes through /pg; the server only validates and stores it. The usage record
+// labels the summarization call exactly like a message version does.
+type playgroundContextSummary struct {
+	ID                string                  `json:"id"`
+	Content           string                  `json:"content"`
+	ThroughMessageKey string                  `json:"through_message_key"`
+	MessageCount      *int                    `json:"message_count,omitempty"`
+	Model             string                  `json:"model"`
+	CreatedAt         *float64                `json:"created_at,omitempty"`
+	RequestID         *string                 `json:"request_id,omitempty"`
+	Usage             *playgroundMessageUsage `json:"usage,omitempty"`
 }
 
 type playgroundMessageResponse struct {
@@ -238,6 +277,11 @@ func writePlaygroundError(c *gin.Context, err error) {
 		code = "PLAYGROUND_SYSTEM_PROMPT_LIMIT_EXCEEDED"
 		err = common.NewMessage(err.Error())
 	}
+	if errors.Is(err, model.ErrPlaygroundContextSummaryLimit) {
+		status = http.StatusUnprocessableEntity
+		code = "PLAYGROUND_CONTEXT_SUMMARY_LIMIT_EXCEEDED"
+		err = common.NewMessage(err.Error())
+	}
 	common.ApiErrorStatus(c, status, err, gin.H{"code": code})
 }
 
@@ -278,20 +322,124 @@ func decodePlaygroundRequest(c *gin.Context, target any, maxBytes int64) bool {
 
 func playgroundDecodeSession(session *model.PlaygroundSession) (playgroundSessionResponse, error) {
 	response := playgroundSessionResponse{ID: session.ID, ClientID: session.ClientID, Created: session.CreatedNow, Title: session.Title, Revision: session.Revision, MessageRevision: session.MessageRevision,
-		SystemPrompt: session.SystemPrompt,
-		CreatedAt:    session.CreatedAt, UpdatedAt: session.UpdatedAt, Config: map[string]any{}, ParameterEnabled: map[string]bool{}}
+		SystemPrompt: session.SystemPrompt, Context: map[string]any{}, ContextSummary: json.RawMessage("null"),
+		CreatedAt: session.CreatedAt, UpdatedAt: session.UpdatedAt, Config: map[string]any{}, ParameterEnabled: map[string]bool{}}
 	if err := common.Unmarshal([]byte(session.Config), &response.Config); err != nil {
 		return response, err
 	}
 	if err := common.Unmarshal([]byte(session.ParameterEnabled), &response.ParameterEnabled); err != nil {
 		return response, err
 	}
+	if stored := strings.TrimSpace(session.ContextConfig); stored != "" && stored != "null" {
+		if err := common.UnmarshalJsonStr(stored, &response.Context); err != nil {
+			return response, err
+		}
+	}
+	if stored := strings.TrimSpace(session.ContextSummary); stored != "" && stored != "null" {
+		response.ContextSummary = json.RawMessage(stored)
+	}
 	return response, nil
+}
+
+// encodePlaygroundContextSettings validates the conversation's context
+// management object (history limit, token budget, auto summary flag and
+// summary model). Unknown keys, wrong types and out-of-range numbers are
+// rejected instead of silently dropped, and the value is stored as compact
+// canonical JSON. An absent or null value leaves the stored settings alone.
+func encodePlaygroundContextSettings(raw json.RawMessage) (string, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		return "", nil
+	}
+	var values map[string]json.RawMessage
+	if err := common.Unmarshal(trimmed, &values); err != nil {
+		return "", common.NewMessage("Invalid Playground configuration.")
+	}
+	for key, value := range values {
+		switch key {
+		case "history_limit":
+			var limit int
+			if err := common.Unmarshal(value, &limit); err != nil || limit < 0 || limit > playgroundContextHistoryLimitMax {
+				return "", common.NewMessage("Invalid Playground configuration.")
+			}
+		case "token_budget":
+			var budget int64
+			if err := common.Unmarshal(value, &budget); err != nil || budget < 0 || budget > playgroundContextTokenBudgetMax {
+				return "", common.NewMessage("Invalid Playground configuration.")
+			}
+		case "auto_summarize":
+			var enabled bool
+			if err := common.Unmarshal(value, &enabled); err != nil {
+				return "", common.NewMessage("Invalid Playground configuration.")
+			}
+		case "summary_model":
+			var name string
+			if err := common.Unmarshal(value, &name); err != nil || len(name) > playgroundContextSummaryModelMaxLength || strings.ContainsRune(name, 0) {
+				return "", common.NewMessage("Invalid Playground configuration.")
+			}
+		default:
+			return "", common.NewMessage("Invalid Playground configuration.")
+		}
+	}
+	encoded, err := common.Marshal(values)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
+}
+
+// encodePlaygroundContextSummary validates the compression node one request
+// may store. A literal null clears the stored summary; an object replaces it.
+// The summary text is bounded by playgroundContextSummaryMaxBytes and a longer
+// one is rejected with the stable capacity error, so a truncated summary is
+// never persisted as if the model had produced it.
+func encodePlaygroundContextSummary(raw json.RawMessage) (encoded string, clear bool, err error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return "", false, nil
+	}
+	if string(trimmed) == "null" {
+		return "", true, nil
+	}
+	var summary playgroundContextSummary
+	if err := common.Unmarshal(trimmed, &summary); err != nil {
+		return "", false, common.NewMessage("Invalid Playground configuration.")
+	}
+	for _, text := range []string{summary.ID, summary.Content, summary.ThroughMessageKey, summary.Model} {
+		if strings.ContainsRune(text, 0) {
+			return "", false, common.NewMessage("Invalid Playground configuration.")
+		}
+	}
+	if len(summary.Content) > playgroundContextSummaryMaxBytes {
+		return "", false, model.ErrPlaygroundContextSummaryLimit
+	}
+	if summary.ID == "" || len(summary.ID) > 200 || summary.Content == "" ||
+		summary.ThroughMessageKey == "" || len(summary.ThroughMessageKey) > 200 ||
+		len(summary.Model) > playgroundContextSummaryModelMaxLength {
+		return "", false, common.NewMessage("Invalid Playground configuration.")
+	}
+	if summary.MessageCount != nil && (*summary.MessageCount < 0 || *summary.MessageCount > playgroundContextSummaryMessageCountMax) {
+		return "", false, common.NewMessage("Invalid Playground configuration.")
+	}
+	if summary.CreatedAt != nil && (*summary.CreatedAt < 0 || math.IsInf(*summary.CreatedAt, 0) || math.IsNaN(*summary.CreatedAt)) {
+		return "", false, common.NewMessage("Invalid Playground configuration.")
+	}
+	if err := validatePlaygroundMessageUsage(summary.RequestID, summary.Usage); err != nil {
+		return "", false, err
+	}
+	encoded, err = common.Marshal(summary)
+	if err != nil {
+		return "", false, err
+	}
+	return encoded, false, nil
 }
 
 // encodePlaygroundSettings validates the session settings one request may
 // carry. A system prompt is bounded by the owner's policy; it stays optional so
-// a request that only renames a conversation keeps the stored prompt.
+// a request that only renames a conversation keeps the stored prompt. The
+// context settings are the complete settings object the client wants stored —
+// an absent object keeps the previous one — and the compression node is an
+// object to store or an explicit null to remove.
 func encodePlaygroundSettings(request playgroundSessionRequest, systemPromptMaxBytes int64) (map[string]any, error) {
 	updates := map[string]any{}
 	if request.Title != nil {
@@ -312,6 +460,26 @@ func encodePlaygroundSettings(request playgroundSessionRequest, systemPromptMaxB
 			return nil, common.NewMessage("Invalid Playground configuration.")
 		}
 		updates["system_prompt"] = prompt
+	}
+	if request.Context != nil {
+		encoded, err := encodePlaygroundContextSettings(request.Context)
+		if err != nil {
+			return nil, err
+		}
+		if encoded != "" {
+			updates["context_config"] = encoded
+		}
+	}
+	if request.ContextSummary != nil {
+		encoded, clear, err := encodePlaygroundContextSummary(request.ContextSummary)
+		if err != nil {
+			return nil, err
+		}
+		if clear {
+			updates["context_summary"] = ""
+		} else if encoded != "" {
+			updates["context_summary"] = encoded
+		}
 	}
 	if request.Config != nil {
 		for key, value := range request.Config {
@@ -577,7 +745,7 @@ func CreatePlaygroundSession(c *gin.Context) {
 		return
 	}
 	var request playgroundSessionRequest
-	if !decodePlaygroundRequest(c, &request, policy.MessageMaxBytes+(64<<10)) {
+	if !decodePlaygroundRequest(c, &request, policy.MessageMaxBytes+(64<<10)+playgroundContextSummaryMaxBytes) {
 		return
 	}
 	if len(request.ClientID) > 128 {
@@ -594,7 +762,7 @@ func CreatePlaygroundSession(c *gin.Context) {
 		writePlaygroundError(c, err)
 		return
 	}
-	session := &model.PlaygroundSession{Title: "New conversation", Config: "{}", ParameterEnabled: "{}"}
+	session := &model.PlaygroundSession{Title: "New conversation", Config: "{}", ParameterEnabled: "{}", ContextConfig: "{}"}
 	if title, ok := updates["title"]; ok {
 		session.Title = title.(string)
 	}
@@ -606,6 +774,12 @@ func CreatePlaygroundSession(c *gin.Context) {
 	}
 	if prompt, ok := updates["system_prompt"]; ok {
 		session.SystemPrompt = prompt.(string)
+	}
+	if contextConfig, ok := updates["context_config"]; ok {
+		session.ContextConfig = contextConfig.(string)
+	}
+	if contextSummary, ok := updates["context_summary"]; ok {
+		session.ContextSummary = contextSummary.(string)
 	}
 	if request.ClientID != "" {
 		session.ClientID = &request.ClientID
@@ -642,7 +816,7 @@ func UpdatePlaygroundSession(c *gin.Context) {
 		return
 	}
 	var request playgroundSessionRequest
-	if !decodePlaygroundRequest(c, &request, policy.MessageMaxBytes+(64<<10)) {
+	if !decodePlaygroundRequest(c, &request, policy.MessageMaxBytes+(64<<10)+playgroundContextSummaryMaxBytes) {
 		return
 	}
 	if request.Revision == nil || *request.Revision < 0 {

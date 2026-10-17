@@ -23,7 +23,12 @@ import { beforeAll, expect, test, vi } from 'vitest'
 
 import { PromptInputProvider } from '@/components/ai-elements/prompt-input'
 
-import { DEFAULT_CONFIG, DEFAULT_PARAMETER_ENABLED } from '../../../constants'
+import {
+  DEFAULT_CONFIG,
+  DEFAULT_CONTEXT_SETTINGS,
+  DEFAULT_PARAMETER_ENABLED,
+} from '../../../constants'
+import { planPlaygroundContext } from '../../../lib'
 import { PlaygroundInputTools } from '../playground-input-tools'
 
 Object.defineProperty(HTMLElement.prototype, 'getAnimations', {
@@ -40,10 +45,20 @@ function renderTools(
     <PromptInputProvider>
       <PlaygroundInputTools
         config={DEFAULT_CONFIG}
+        contextPlan={planPlaygroundContext({
+          messages: [],
+          settings: DEFAULT_CONTEXT_SETTINGS,
+        })}
+        contextSettings={DEFAULT_CONTEXT_SETTINGS}
+        contextSummary={null}
         hasMessages
+        models={[{ label: 'gpt-4o', value: 'gpt-4o' }]}
         onClearMessages={onClearMessages}
         onConfigChange={() => undefined}
+        onContextSettingsChange={() => undefined}
         onParameterEnabledChange={() => undefined}
+        onRemoveContextSummary={() => undefined}
+        onSummarizeContext={() => undefined}
         onSystemPromptChange={onSystemPromptChange}
         parameterEnabled={DEFAULT_PARAMETER_ENABLED}
         systemPrompt={systemPrompt}

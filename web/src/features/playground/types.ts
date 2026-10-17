@@ -116,6 +116,40 @@ export interface Message {
   errorCode?: string | null
 }
 
+/**
+ * Context management settings of one conversation. `historyLimit` is the
+ * number of stored messages a request may carry and `tokenBudget` the
+ * estimated token budget of the request; 0 disables the respective limit.
+ * `autoSummarize` summarizes the messages a limit leaves out through /pg
+ * before sending, and `summaryModel` picks the model (empty = the
+ * conversation model). Compression only changes what is sent; stored
+ * messages are never deleted.
+ */
+export interface PlaygroundContextSettings {
+  historyLimit: number
+  tokenBudget: number
+  autoSummarize: boolean
+  summaryModel: string
+}
+
+/**
+ * The persisted compression node of a conversation: the summary that replaces
+ * every message up to and including `throughMessageKey` in requests. The
+ * content was produced by an ordinary billed /pg call; `requestId`/`usage`
+ * only label that call. A summary the messages no longer match is ignored and
+ * can be removed, which restores sending the full history.
+ */
+export interface PlaygroundContextSummary {
+  id: string
+  content: string
+  throughMessageKey: string
+  messageCount: number
+  model: string
+  createdAt: number
+  requestId?: string
+  usage?: MessageUsage
+}
+
 export interface PlaygroundSession {
   id: string
   title: string
@@ -125,6 +159,10 @@ export interface PlaygroundSession {
   parameterEnabled: ParameterEnabled
   /** Conversation-level instruction injected as the first `system` message. */
   systemPrompt: string
+  /** Context limits, auto-summary flag and summary model of the conversation. */
+  context: PlaygroundContextSettings
+  /** Persisted compression node, or null when the full history is sent. */
+  contextSummary: PlaygroundContextSummary | null
   messages: Message[]
   server?: { id: string; revision: number; messageRevision: number }
   syncPending?: boolean

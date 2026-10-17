@@ -45,6 +45,7 @@ import {
 } from '../../lib'
 import type {
   Message as MessageType,
+  PlaygroundContextSummary,
   PlaygroundMessageCost,
   PlaygroundMessageLayoutMode,
 } from '../../types'
@@ -52,6 +53,7 @@ import { MessageActions } from '../message/message-actions'
 import { MessageErrorActions } from '../message/message-error-actions'
 import { PlaygroundMessageContent } from '../message/playground-message-content'
 import { PlaygroundMessageEditor } from '../message/playground-message-editor'
+import { PlaygroundContextNode } from './playground-context-node'
 import { PlaygroundEmptyState } from './playground-empty-state'
 
 const MAX_RENDERED_HISTORY_MESSAGES = 24
@@ -82,6 +84,10 @@ interface PlaygroundChatProps {
   onCancelEdit?: (open: boolean) => void
   onSaveEditAndSubmit?: (newContent: string) => void
   messageLayoutMode?: PlaygroundMessageLayoutMode
+  /** Compression node that replaces older messages in the next request. */
+  contextSummary?: PlaygroundContextSummary | null
+  /** Undo the compression: the stored messages stay, the node is removed. */
+  onRemoveContextSummary?: () => void
 }
 
 export function PlaygroundChat({
@@ -105,6 +111,8 @@ export function PlaygroundChat({
   onCancelEdit,
   onSaveEditAndSubmit,
   messageLayoutMode = 'alternating',
+  contextSummary,
+  onRemoveContextSummary,
 }: PlaygroundChatProps) {
   const { t } = useTranslation()
   const [editText, setEditText] = useState('')
@@ -250,6 +258,27 @@ export function PlaygroundChat({
   if (visibleMessages.length === 0 && onSelectPrompt) {
     chatContent = [
       <PlaygroundEmptyState key='empty' onSelectPrompt={onSelectPrompt} />,
+    ]
+  }
+
+  // The compression node sits right after the last message it covers. When
+  // that message is outside the rendered window the node still appears first,
+  // so the conversation never looks like it silently lost history.
+  const compressionKey = contextSummary?.throughMessageKey ?? ''
+  const compressionIndex = compressionKey
+    ? messages.findIndex((message) => message.key === compressionKey)
+    : -1
+  if (contextSummary && compressionIndex >= 0) {
+    const insertIndex = Math.max(0, compressionIndex - visibleMessageOffset + 1)
+    chatContent = [
+      ...chatContent.slice(0, insertIndex),
+      <PlaygroundContextNode
+        disabled={isGenerating}
+        key='playground-context-node'
+        onRemove={onRemoveContextSummary}
+        summary={contextSummary}
+      />,
+      ...chatContent.slice(insertIndex),
     ]
   }
 

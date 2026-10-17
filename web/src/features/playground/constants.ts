@@ -16,7 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { PlaygroundConfig, ParameterEnabled } from './types'
+import type {
+  PlaygroundConfig,
+  PlaygroundContextSettings,
+  ParameterEnabled,
+} from './types'
 
 // Message constants
 export const MESSAGE_ROLES = {
@@ -75,6 +79,34 @@ export const PLAYGROUND_REQUEST_ID_MAX_LENGTH = 64
 // Sanity ceiling for the display-only token counts, mirroring the bound the
 // server applies to a stored message version.
 export const PLAYGROUND_MESSAGE_TOKEN_MAX = 2 ** 40
+
+// Context management bounds. The server validates the same ranges, so a value
+// accepted here is always storable. An image attachment is counted as a fixed
+// token estimate instead of its (data URL) byte size because the real cost is
+// set by the model's vision pricing, not by the encoded text length.
+export const PLAYGROUND_CONTEXT_HISTORY_LIMIT_MAX = 1000
+export const PLAYGROUND_CONTEXT_TOKEN_BUDGET_MAX = 2_000_000
+export const PLAYGROUND_CONTEXT_IMAGE_TOKEN_ESTIMATE = 768
+// Summary input/output bounds. The stored summary must stay within the byte
+// contract the server enforces; a longer model answer is treated as a failed
+// summarization instead of being persisted trimmed.
+export const PLAYGROUND_CONTEXT_SUMMARY_MAX_BYTES = 32 * 1024
+export const PLAYGROUND_SUMMARY_INPUT_MAX_CHARS = 48_000
+// The instruction sent to the summary model. This is model input, not user
+// interface text, so it intentionally stays untranslated.
+export const PLAYGROUND_SUMMARY_SYSTEM_PROMPT =
+  'You compress conversation history. Write a concise factual summary of the following messages: the topics, decisions, facts and open questions later messages may rely on. Reply with the summary only.'
+// Fixed model-facing label that introduces the compression node, both in a
+// request and as context for the next summarization call.
+export const PLAYGROUND_SUMMARY_CONTEXT_PREFIX =
+  'Summary of the earlier conversation:'
+
+export const DEFAULT_CONTEXT_SETTINGS: PlaygroundContextSettings = {
+  historyLimit: 0,
+  tokenBudget: 0,
+  autoSummarize: false,
+  summaryModel: '',
+}
 
 // A settle row is written right after the stream ends, so the first lookup can
 // miss it. The conversation cost view retries a bounded number of times while

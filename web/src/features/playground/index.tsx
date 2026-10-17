@@ -45,6 +45,7 @@ import { PlaygroundArtifactSourceSheet } from './components/artifact/playground-
 import { PlaygroundAssetLibrary } from './components/asset/playground-asset-library'
 import { PlaygroundChat } from './components/chat/playground-chat'
 import { PlaygroundGenerationPanel } from './components/generation/playground-generation-panel'
+import { PlaygroundContextStatus } from './components/input/playground-context-status'
 import { PlaygroundInput } from './components/input/playground-input'
 import { PlaygroundCanvasPanel } from './components/workspace/playground-canvas-panel'
 import { PlaygroundPresetPanel } from './components/workspace/playground-preset-panel'
@@ -56,6 +57,7 @@ import {
 } from './components/workspace/playground-workspace'
 import {
   useChatHandler,
+  usePlaygroundContext,
   usePlaygroundConversation,
   usePlaygroundMessageCosts,
   usePlaygroundOptions,
@@ -125,6 +127,8 @@ function PlaygroundContent(props: {
     config,
     parameterEnabled,
     systemPrompt,
+    context,
+    contextSummary,
     messages,
     isLoadingMessages,
     models,
@@ -135,6 +139,8 @@ function PlaygroundContent(props: {
     updateConfig,
     updateParameterEnabled,
     updateSystemPrompt,
+    updateContextSettings,
+    updateContextSummary,
     applySessionSettings,
     clearMessages,
     sessions,
@@ -144,10 +150,22 @@ function PlaygroundContent(props: {
     switchSession,
   } = local
 
+  const contextController = usePlaygroundContext({
+    sessionId: activeSessionId,
+    messages,
+    config,
+    systemPrompt,
+    settings: context,
+    summary: contextSummary,
+    onSummaryChange: updateContextSummary,
+  })
+
   const { sendChat, stopGeneration, isGenerating } = useChatHandler({
     config,
     parameterEnabled,
     systemPrompt,
+    contextSettings: context,
+    prepareContextSummary: contextController.prepareForSend,
     onMessageUpdate: updateMessages,
     sessionId: activeSessionId,
   })
@@ -353,6 +371,17 @@ function PlaygroundContent(props: {
     handleEditOpenChange(false)
     clearMessages()
   }
+
+  // Undo the compression node. The stored messages were never removed, so the
+  // next request simply carries the full history again.
+  const handleRemoveContextSummary = useCallback(() => {
+    updateContextSummary(null)
+    toast.success(t('Context summary removed'))
+  }, [updateContextSummary, t])
+
+  const handleSummarizeContext = useCallback(() => {
+    void contextController.summarizeNow()
+  }, [contextController.summarizeNow])
 
   const openArtifactSource = useCallback(
     (message: Message) => {
@@ -881,6 +910,8 @@ function PlaygroundContent(props: {
               onCancelEdit={handleEditOpenChange}
               onSaveEdit={(newContent) => applyEdit(newContent, false)}
               onSaveEditAndSubmit={(newContent) => applyEdit(newContent, true)}
+              contextSummary={contextSummary}
+              onRemoveContextSummary={handleRemoveContextSummary}
             />
           </div>
 
@@ -893,22 +924,40 @@ function PlaygroundContent(props: {
                 {t('Answer or deny the requested tool calls to continue.')}
               </p>
             )}
+            <PlaygroundContextStatus
+              className='pb-1'
+              isSummarizing={contextController.isSummarizing}
+              plan={contextController.plan}
+              settings={context}
+            />
             <PlaygroundInput
               config={config}
-              disabled={isGenerating || sync.isLoading || pendingToolCalls}
+              contextPlan={contextController.plan}
+              contextSettings={context}
+              contextSummary={contextSummary}
+              disabled={
+                isGenerating ||
+                sync.isLoading ||
+                pendingToolCalls ||
+                contextController.isSummarizing
+              }
               groups={groups}
               groupValue={config.group}
               isGenerating={isGenerating}
               isModelLoading={isLoadingModels}
+              isSummarizing={contextController.isSummarizing}
               modelValue={config.model}
               models={models}
+              onContextSettingsChange={updateContextSettings}
               onGroupChange={(value) => updateConfig('group', value)}
               onConfigChange={updateConfig}
               onClearMessages={handleClearMessages}
               onModelChange={(value) => updateConfig('model', value)}
               onParameterEnabledChange={updateParameterEnabled}
+              onRemoveContextSummary={handleRemoveContextSummary}
               onStop={stopGeneration}
               onSubmit={handleInputSubmit}
+              onSummarizeContext={handleSummarizeContext}
               onSystemPromptChange={updateSystemPrompt}
               parameterEnabled={parameterEnabled}
               systemPrompt={systemPrompt}

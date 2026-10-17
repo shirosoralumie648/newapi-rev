@@ -34,7 +34,15 @@ import {
 } from '@/components/ui/tooltip'
 
 import { getSearchActionNotice } from '../../lib'
-import type { ParameterEnabled, PlaygroundConfig } from '../../types'
+import type { PlaygroundContextPlan } from '../../lib'
+import type {
+  ModelOption,
+  ParameterEnabled,
+  PlaygroundConfig,
+  PlaygroundContextSettings,
+  PlaygroundContextSummary,
+} from '../../types'
+import { PlaygroundContextPanel } from './playground-context-panel'
 import { PlaygroundParameterPanel } from './playground-parameter-panel'
 import { PlaygroundSystemPromptPanel } from './playground-system-prompt-panel'
 
@@ -42,6 +50,7 @@ type PlaygroundInputToolsProps = {
   config: PlaygroundConfig
   disabled?: boolean
   hasMessages?: boolean
+  models: ModelOption[]
   onClearMessages?: () => void
   onConfigChange: <K extends keyof PlaygroundConfig>(
     key: K,
@@ -54,18 +63,33 @@ type PlaygroundInputToolsProps = {
   parameterEnabled: ParameterEnabled
   systemPrompt: string
   onSystemPromptChange: (value: string) => void
+  contextSettings: PlaygroundContextSettings
+  contextPlan: PlaygroundContextPlan
+  contextSummary: PlaygroundContextSummary | null
+  isSummarizing?: boolean
+  onContextSettingsChange: (settings: PlaygroundContextSettings) => void
+  onRemoveContextSummary: () => void
+  onSummarizeContext: () => void
 }
 
 export function PlaygroundInputTools({
   config,
   disabled,
   hasMessages = false,
+  models,
   onClearMessages,
   onConfigChange,
   onParameterEnabledChange,
   parameterEnabled,
   systemPrompt,
   onSystemPromptChange,
+  contextSettings,
+  contextPlan,
+  contextSummary,
+  isSummarizing,
+  onContextSettingsChange,
+  onRemoveContextSummary,
+  onSummarizeContext,
 }: PlaygroundInputToolsProps) {
   const { t } = useTranslation()
   const attachments = usePromptInputAttachments()
@@ -135,6 +159,19 @@ export function PlaygroundInputTools({
           disabled={disabled}
           onSystemPromptChange={onSystemPromptChange}
           systemPrompt={systemPrompt}
+        />
+
+        <PlaygroundContextPanel
+          currentModel={config.model}
+          disabled={disabled}
+          isSummarizing={isSummarizing}
+          models={models}
+          onRemoveSummary={onRemoveContextSummary}
+          onSettingsChange={onContextSettingsChange}
+          onSummarizeNow={onSummarizeContext}
+          plan={contextPlan}
+          settings={contextSettings}
+          summary={contextSummary}
         />
 
         <Tooltip>

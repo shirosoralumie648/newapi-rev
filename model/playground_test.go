@@ -2599,6 +2599,176 @@ func TestPlaygroundSessionSystemPrompt(t *testing.T) {
 	}
 }
 
+// Conversation context management: the per-session context settings and the
+// persisted compression node round-trip through the owner-scoped session
+// endpoints on every dialect. A request that omits them keeps the stored
+// values, an explicit null removes the summary, malformed or oversized values
+// are rejected without touching the stored snapshot, and a legacy NULL column
+// reads back as the defaults.
+func TestPlaygroundSessionContextManagement(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			created := playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions", map[string]any{
+				"title": "Budgeted", "client_id": "context-session",
+				"config": map[string]any{"model": "test-model"}, "parameter_enabled": map[string]bool{},
+				"context": map[string]any{
+					"history_limit": 12, "token_budget": 20000,
+					"auto_summarize": false, "summary_model": "",
+				},
+			}, controller.CreatePlaygroundSession)
+			require.Equal(t, http.StatusOK, created.Code, created.Body.String())
+
+			type contextSummaryView struct {
+				ID                string   `json:"id"`
+				Content           string   `json:"content"`
+				ThroughMessageKey string   `json:"through_message_key"`
+				MessageCount      *int     `json:"message_count"`
+				Model             string   `json:"model"`
+				CreatedAt         *float64 `json:"created_at"`
+				RequestID         string   `json:"request_id"`
+				Usage             *struct {
+					TotalTokens int `json:"totalTokens"`
+				} `json:"usage"`
+			}
+			type sessionView struct {
+				ID             string              `json:"id"`
+				Context        map[string]any      `json:"context"`
+				ContextSummary *contextSummaryView `json:"context_summary"`
+			}
+			decode := func(t *testing.T, body []byte) sessionView {
+				t.Helper()
+				var envelope struct {
+					Success bool        `json:"success"`
+					Data    sessionView `json:"data"`
+				}
+				require.NoError(t, common.Unmarshal(body, &envelope))
+				require.True(t, envelope.Success, string(body))
+				return envelope.Data
+			}
+			session := decode(t, created.Body.Bytes())
+			createdID := session.ID
+			readSession := func(t *testing.T) sessionView {
+				t.Helper()
+				response := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+createdID, nil, controller.GetPlaygroundSession)
+				require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+				return decode(t, response.Body.Bytes())
+			}
+
+			assert.EqualValues(t, 12, session.Context["history_limit"])
+			assert.EqualValues(t, 20000, session.Context["token_budget"])
+			assert.Equal(t, false, session.Context["auto_summarize"])
+			assert.Equal(t, "", session.Context["summary_model"])
+			require.Nil(t, session.ContextSummary)
+
+			// A full settings object replaces the stored one; a request that
+			// does not carry the object keeps it.
+			updated := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+createdID, map[string]any{
+				"revision": 0,
+				"context": map[string]any{
+					"history_limit": 24, "token_budget": 60000,
+					"auto_summarize": true, "summary_model": "summary-model",
+				},
+			}, controller.UpdatePlaygroundSession)
+			require.Equal(t, http.StatusOK, updated.Code, updated.Body.String())
+			state := decode(t, updated.Body.Bytes())
+			assert.EqualValues(t, 24, state.Context["history_limit"])
+			assert.Equal(t, true, state.Context["auto_summarize"])
+			assert.Equal(t, "summary-model", state.Context["summary_model"])
+			renamed := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+createdID, map[string]any{"revision": 1, "title": "Renamed"}, controller.UpdatePlaygroundSession)
+			require.Equal(t, http.StatusOK, renamed.Code, renamed.Body.String())
+			assert.Equal(t, "summary-model", decode(t, renamed.Body.Bytes()).Context["summary_model"])
+
+			// The compression node stores and replaces the summary, and the
+			// usage record of the summarization call survives the round trip.
+			stored := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+createdID, map[string]any{
+				"revision": 2,
+				"context_summary": map[string]any{
+					"id": "pgc_1", "content": "Earlier messages were compressed.",
+					"through_message_key": "m2", "message_count": 4,
+					"model": "summary-model", "created_at": 100, "request_id": "req-summary-1",
+					"usage": map[string]any{"promptTokens": 10, "completionTokens": 5, "totalTokens": 15},
+				},
+			}, controller.UpdatePlaygroundSession)
+			require.Equal(t, http.StatusOK, stored.Code, stored.Body.String())
+			node := decode(t, stored.Body.Bytes()).ContextSummary
+			require.NotNil(t, node)
+			assert.Equal(t, "pgc_1", node.ID)
+			assert.Equal(t, "Earlier messages were compressed.", node.Content)
+			assert.Equal(t, "m2", node.ThroughMessageKey)
+			require.NotNil(t, node.MessageCount)
+			assert.Equal(t, 4, *node.MessageCount)
+			assert.Equal(t, "summary-model", node.Model)
+			assert.Equal(t, "req-summary-1", node.RequestID)
+			require.NotNil(t, node.Usage)
+			assert.Equal(t, 15, node.Usage.TotalTokens)
+			require.NotNil(t, readSession(t).ContextSummary)
+
+			replaced := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+createdID, map[string]any{
+				"revision": 3,
+				"context_summary": map[string]any{
+					"id": "pgc_2", "content": "Second summary.", "through_message_key": "m6", "model": "summary-model",
+				},
+			}, controller.UpdatePlaygroundSession)
+			require.Equal(t, http.StatusOK, replaced.Code, replaced.Body.String())
+			current := decode(t, replaced.Body.Bytes()).ContextSummary
+			require.NotNil(t, current)
+			assert.Equal(t, "pgc_2", current.ID)
+			assert.Equal(t, "Second summary.", current.Content)
+
+			// Invalid writes leave the stored snapshot untouched: the summary
+			// is still the second one after every rejected request.
+			overlongContent := strings.Repeat("x", (32<<10)+1)
+			rejected := []struct {
+				name   string
+				body   map[string]any
+				status int
+			}{
+				{"unknown context key", map[string]any{"revision": 4, "context": map[string]any{"history_limit": 1, "unknown": true}}, http.StatusBadRequest},
+				{"negative history limit", map[string]any{"revision": 4, "context": map[string]any{"history_limit": -1}}, http.StatusBadRequest},
+				{"fractional token budget", map[string]any{"revision": 4, "context": map[string]any{"token_budget": 1.5}}, http.StatusBadRequest},
+				{"string auto summarize", map[string]any{"revision": 4, "context": map[string]any{"auto_summarize": "yes"}}, http.StatusBadRequest},
+				{"oversized summary model", map[string]any{"revision": 4, "context": map[string]any{"summary_model": strings.Repeat("m", 513)}}, http.StatusBadRequest},
+				{"missing summary content", map[string]any{"revision": 4, "context_summary": map[string]any{"id": "pgc_3", "through_message_key": "m1"}}, http.StatusBadRequest},
+				{"empty summary content", map[string]any{"revision": 4, "context_summary": map[string]any{"id": "pgc_3", "content": "", "through_message_key": "m1"}}, http.StatusBadRequest},
+				{"nul summary content", map[string]any{"revision": 4, "context_summary": map[string]any{"id": "pgc_3", "content": "bad\x00summary", "through_message_key": "m1"}}, http.StatusBadRequest},
+				{"overlong request id", map[string]any{"revision": 4, "context_summary": map[string]any{"id": "pgc_3", "content": "ok", "through_message_key": "m1", "request_id": strings.Repeat("r", 65)}}, http.StatusBadRequest},
+				{"negative usage", map[string]any{"revision": 4, "context_summary": map[string]any{"id": "pgc_3", "content": "ok", "through_message_key": "m1", "usage": map[string]any{"promptTokens": -1, "completionTokens": 1, "totalTokens": 0}}}, http.StatusBadRequest},
+				{"oversized summary content", map[string]any{"revision": 4, "context_summary": map[string]any{"id": "pgc_3", "content": overlongContent, "through_message_key": "m1"}}, http.StatusUnprocessableEntity},
+			}
+			for _, test := range rejected {
+				response := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+createdID, test.body, controller.UpdatePlaygroundSession)
+				assert.Equal(t, test.status, response.Code, test.name+": "+response.Body.String())
+			}
+			still := readSession(t)
+			require.NotNil(t, still.ContextSummary)
+			assert.Equal(t, "pgc_2", still.ContextSummary.ID)
+			assert.Equal(t, "summary-model", still.Context["summary_model"])
+
+			// The compression node is removed with an explicit null.
+			cleared := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+createdID, map[string]any{"revision": 4, "context_summary": nil}, controller.UpdatePlaygroundSession)
+			require.Equal(t, http.StatusOK, cleared.Code, cleared.Body.String())
+			assert.Nil(t, decode(t, cleared.Body.Bytes()).ContextSummary)
+			assert.Nil(t, readSession(t).ContextSummary)
+
+			// Another account cannot write to the conversation at all.
+			foreign := playgroundRequest(t, 8, http.MethodPatch, "/api/playground/sessions/"+createdID, map[string]any{"revision": 5, "context_summary": nil}, controller.UpdatePlaygroundSession)
+			assert.Equal(t, http.StatusNotFound, foreign.Code, foreign.Body.String())
+
+			// A legacy row without the columns reads back as empty defaults.
+			require.NoError(t, db.Model(&model.PlaygroundSession{}).Where("id = ? AND user_id = ?", createdID, 7).
+				Updates(map[string]any{"context_config": gorm.Expr("NULL"), "context_summary": gorm.Expr("NULL")}).Error)
+			legacy, err := model.GetPlaygroundSession(7, createdID)
+			require.NoError(t, err)
+			assert.Empty(t, legacy.ContextConfig)
+			assert.Empty(t, legacy.ContextSummary)
+			legacyView := readSession(t)
+			assert.Empty(t, legacyView.Context)
+			assert.Nil(t, legacyView.ContextSummary)
+		})
+	}
+}
+
 // Message costs are read back from the owner's settled consume rows. The
 // lookup is owner- and type-scoped, so another account's request id, a
 // non-consume row and an unknown id all yield nothing, and a malformed query
