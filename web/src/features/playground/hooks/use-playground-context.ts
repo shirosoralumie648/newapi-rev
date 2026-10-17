@@ -87,7 +87,6 @@ export function usePlaygroundContext(options: UsePlaygroundContextOptions) {
 
   const runSummarization = useCallback(
     async (
-      messages: Message[],
       freshPlan: PlaygroundContextPlan
     ): Promise<PlaygroundContextSummary | null> => {
       const current = latestRef.current
@@ -186,7 +185,7 @@ export function usePlaygroundContext(options: UsePlaygroundContextOptions) {
       if (!current.settings.autoSummarize || !freshPlan.needsSummary) {
         return current.summary
       }
-      return runSummarization(messages, freshPlan)
+      return runSummarization(freshPlan)
     },
     [runSummarization]
   )
@@ -204,7 +203,7 @@ export function usePlaygroundContext(options: UsePlaygroundContextOptions) {
       systemPrompt: current.systemPrompt,
     })
     if (!freshPlan.needsSummary) return
-    await runSummarization(current.messages, freshPlan)
+    await runSummarization(freshPlan)
   }, [runSummarization])
 
   return { plan, isSummarizing, prepareForSend, summarizeNow }
