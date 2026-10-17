@@ -28,6 +28,7 @@ import {
   replacePlaygroundMessages,
   sendChatCompletion,
 } from '../api'
+import type { Message } from '../types'
 
 const wireSession = {
   id: 'pgs_one',
@@ -135,7 +136,7 @@ test('an incremental delta is written through PATCH with only the changed rows',
       data: { revision: 4, upserted: ['m2'], deleted: ['m1'] },
     },
   })
-  const message = {
+  const message: Message = {
     key: 'm2',
     from: 'user',
     versions: [{ id: 'v2', content: 'Edited' }],
@@ -160,7 +161,7 @@ test('an incremental delta is written through PATCH with only the changed rows',
 })
 
 test('the deprecated snapshot endpoint still sends the complete ordered list', async () => {
-  const message = {
+  const message: Message = {
     key: 'm',
     from: 'user',
     versions: [{ id: 'v', content: 'Private text' }],

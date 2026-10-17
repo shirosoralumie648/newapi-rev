@@ -48,6 +48,25 @@ func GetUserWalletReconcile(c *gin.Context) {
 	})
 }
 
+// GetWalletDebtors lists the accounts whose wallet has unsettled debt together
+// with the owed amount, so administrators can see and follow up on the
+// read-only lock without querying the database by hand.
+func GetWalletDebtors(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	debtors, total, err := model.ListWalletDebtors(pageInfo)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(debtors)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    pageInfo,
+	})
+}
+
 // ExportSelfWalletLedger streams the caller's own ledger as CSV.
 func ExportSelfWalletLedger(c *gin.Context) {
 	exportWalletLedgerCSV(c, c.GetInt("id"))

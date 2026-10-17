@@ -209,6 +209,7 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.GET("/:id/wallet/ledger", controller.GetUserWalletLedger)
 				adminRoute.GET("/:id/wallet/ledger/export", controller.ExportUserWalletLedger)
 				adminRoute.GET("/:id/wallet/reconcile", controller.GetUserWalletReconcile)
+				adminRoute.GET("/wallet/debts", controller.GetWalletDebtors)
 
 				// Admin 2FA routes
 				adminRoute.GET("/2fa/stats", controller.Admin2FAStats)

@@ -25,6 +25,7 @@ import { PaymentSettingsSection } from '../integrations/payment-settings-section
 import { RatioSettingsCard } from '../models/ratio-settings-card'
 import type { BillingSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
+import { WalletOverdraftSection } from './wallet-overdraft-section'
 
 const getModelDefaults = (settings: BillingSettings) => ({
   ModelPrice: settings.ModelPrice,
@@ -198,6 +199,16 @@ const BILLING_SECTIONS = [
           minQuota: settings['checkin_setting.min_quota'],
           maxQuota: settings['checkin_setting.max_quota'],
         }}
+      />
+    ),
+  },
+  {
+    id: 'overdraft',
+    titleKey: 'Wallet Overdraft',
+    build: (settings: BillingSettings) => (
+      <WalletOverdraftSection
+        defaultUsd={settings['quota_setting.overdraft_limit_usd']}
+        groupOverridesJson={settings['quota_setting.overdraft_group_overrides']}
       />
     ),
   },

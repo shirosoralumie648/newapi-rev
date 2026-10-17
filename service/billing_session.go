@@ -302,14 +302,16 @@ func (s *BillingSession) reserveFunding(delta int, requireAvailableQuota bool) e
 			return nil
 		}
 		// 与结算补扣（SettleBilling 正差额 → WalletFunding.Settle）语义一致：
-		// 全额无条件扣减，余额不足的部分记为欠费（余额可为负），不中断请求，
-		// 保证日志记录的预扣额度与用户余额的实际变动始终对账一致。
-		// 有 requestId 时该增量同时扩写持久化 hold，供崩溃后回收对照。
-		if err := model.ReserveUserQuotaWithDebt(funding.userId, delta, funding.requestId); err != nil {
+		// 钱包扣减到透支上限为止，超出信用额度的部分记为欠款（钱包账本
+		// kind=debt），不中断请求；只有真正扣走的额度计入消费账本，保证日志
+		// 记录的预扣额度与用户余额的实际变动始终对账一致。有 requestId 时该
+		// 增量同时扩写持久化 hold，供崩溃后回收对照。
+		applied, err := model.ReserveUserQuotaWithDebt(funding.userId, delta, funding.requestId)
+		if err != nil {
 			return types.NewError(err, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
 		}
-		funding.consumed += delta
-		model.RecordWalletConsumeDelta(funding.userId, -int64(delta))
+		funding.consumed += int(applied)
+		model.RecordWalletConsumeDelta(funding.userId, -applied)
 		return nil
 	case *SubscriptionFunding:
 		if err := model.PostConsumeUserSubscriptionDelta(funding.subscriptionId, int64(delta)); err != nil {
@@ -376,7 +378,11 @@ func (s *BillingSession) shouldTrust(c *gin.Context) bool {
 
 	switch s.funding.Source() {
 	case BillingSourceWallet:
-		return float64(s.relayInfo.UserQuota) > trustQuota
+		// 信任旁路只在「余额 − 透支上限」高于阈值时生效：余额必须整段高出信用
+		// 额度，才能保证免预扣请求的结算不会把钱包推过信用额度（修上游 #6609
+		// 的并发 TOCTOU 无限透支）。
+		overdraft := float64(model.OverdraftLimitQuotaForGroup(s.relayInfo.UserGroup))
+		return float64(s.relayInfo.UserQuota)-overdraft > trustQuota
 	case BillingSourceSubscription:
 		// 订阅不能启用信任旁路。原因：
 		// 1. PreConsumeUserSubscription 要求 amount>0 来创建预扣记录并锁定订阅
@@ -418,7 +424,20 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 		return nil, types.NewError(fmt.Errorf("relayInfo is nil"), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 	}
 
+	// 欠款只读：有未结清欠款的账号不能发起新的计费请求。查询同时把充值后已
+	// 可偿还的欠款收回钱包，因此充值后无需人工操作即可恢复。
+	if debt, readOnly, err := model.ResolveWalletDebtStatus(relayInfo.UserId); err != nil {
+		return nil, types.NewError(err, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
+	} else if readOnly {
+		return nil, types.NewErrorWithStatusCode(
+			errors.New(i18n.T(c, i18n.MsgQuotaWalletDebtReadOnly, map[string]any{"Debt": logger.FormatQuota(int(debt))})),
+			types.ErrorCodeInsufficientUserQuota, http.StatusForbidden,
+			types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+	}
+
 	pref := common.NormalizeBillingPreference(relayInfo.UserSetting.BillingPreference)
+	// 用户组的透支上限即钱包可用的信用额度：余额可以低于 0，但不得低于它。
+	overdraft := model.OverdraftLimitQuotaForGroup(relayInfo.UserGroup)
 
 	// 钱包路径需要先检查用户额度
 	tryWallet := func() (*BillingSession, *types.NewAPIError) {
@@ -426,13 +445,13 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 		if err != nil {
 			return nil, types.NewError(err, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
 		}
-		if userQuota <= 0 {
+		if int64(userQuota)+overdraft <= 0 {
 			return nil, types.NewErrorWithStatusCode(
 				errors.New(i18n.T(c, i18n.MsgQuotaUserInsufficient, map[string]any{"Remaining": logger.FormatQuota(userQuota)})),
 				types.ErrorCodeInsufficientUserQuota, http.StatusForbidden,
 				types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
 		}
-		if userQuota-preConsumedQuota < 0 {
+		if int64(userQuota)-int64(preConsumedQuota) < -overdraft {
 			return nil, types.NewErrorWithStatusCode(
 				errors.New(i18n.T(c, i18n.MsgQuotaPreConsumeInsufficient, map[string]any{"Remaining": logger.FormatQuota(userQuota), "Required": logger.FormatQuota(preConsumedQuota)})),
 				types.ErrorCodeInsufficientUserQuota, http.StatusForbidden,

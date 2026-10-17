@@ -103,6 +103,17 @@ Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
   value: () => undefined,
 })
 
+// jsdom does not implement the Web Animations API. Base UI's scroll area reads
+// `getAnimations()` on its viewport from an internal timeout, so the missing
+// method surfaces as an unhandled error after the test that mounted it already
+// finished and fails the whole run. An empty list keeps those timers harmless.
+if (typeof Element.prototype.getAnimations !== 'function') {
+  Object.defineProperty(Element.prototype, 'getAnimations', {
+    configurable: true,
+    value: () => [],
+  })
+}
+
 // Node.js 25+ defines `localStorage`/`sessionStorage` accessors on the global
 // object that resolve to `undefined` unless `--localstorage-file` is set, and
 // vitest's jsdom environment does not replace globals that already exist.

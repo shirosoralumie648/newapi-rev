@@ -42,12 +42,44 @@ const PlaygroundTaskLimitErrorCode = "PLAYGROUND_TASK_LIMIT_EXCEEDED"
 // account-level async task result storage budget.
 const PlaygroundTaskStorageLimitErrorCode = "PLAYGROUND_TASK_STORAGE_LIMIT_EXCEEDED"
 
+// PlaygroundWalletDebtErrorCode is the stable error code returned for new
+// billable workspace work (generation, uploads) from an account whose wallet
+// holds unsettled debt. Reading and exporting stay available.
+const PlaygroundWalletDebtErrorCode = "PLAYGROUND_WALLET_DEBT_READ_ONLY"
+
+// PlaygroundWalletDebtUnavailableErrorCode reports that the debt state could not
+// be checked; the request fails closed.
+const PlaygroundWalletDebtUnavailableErrorCode = "PLAYGROUND_WALLET_DEBT_UNAVAILABLE"
+
+// PlaygroundWalletDebtMessage is the English source message of the read-only
+// workspace lock; the frontend translates it by code.
+const PlaygroundWalletDebtMessage = "Your wallet has unsettled debt. Top up to restore access; reading and exporting data stays available."
+
+// enforcePlaygroundWalletWritable rejects new billable workspace work while the
+// account has unsettled wallet debt. The workspace lock is a server-side
+// control: the debt state is re-read here and never trusted from the client.
+func enforcePlaygroundWalletWritable(c *gin.Context) bool {
+	_, readOnly, err := model.ResolveWalletDebtStatus(c.GetInt("id"))
+	if err != nil {
+		writePlaygroundGenerationError(c, http.StatusInternalServerError, PlaygroundWalletDebtUnavailableErrorCode, "Unable to check the account wallet debt.")
+		return false
+	}
+	if !readOnly {
+		return true
+	}
+	writePlaygroundGenerationError(c, http.StatusForbidden, PlaygroundWalletDebtErrorCode, PlaygroundWalletDebtMessage)
+	return false
+}
+
 // playgroundGenerationHandler establishes the Playground account context and
 // runs the canonical relay or task handler. The request path was already
 // rewritten to its /v1 form by middleware.PlaygroundRelayBridge, so plugin
 // endpoint pinning, model grouping, permissions and billing behave exactly
 // like a direct API call.
 func playgroundGenerationHandler(c *gin.Context, handler gin.HandlerFunc) {
+	if !enforcePlaygroundWalletWritable(c) {
+		return
+	}
 	group := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 	if err := setupPlaygroundToken(c, group); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
