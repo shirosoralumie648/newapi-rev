@@ -32,10 +32,9 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/playground_setting"
 	"github.com/gin-gonic/gin"
 )
-
-const playgroundSnapshotMaxBytes = 1 << 20
 
 type playgroundSessionRequest struct {
 	Title            *string                  `json:"title"`
@@ -157,15 +156,39 @@ func writePlaygroundError(c *gin.Context, err error) {
 		code = "PLAYGROUND_CONFLICT"
 		err = common.NewMessage(err.Error())
 	}
+	// The resource quota policy returns stable capacity errors so the client can
+	// tell a full workspace from a malformed request.
+	if errors.Is(err, model.ErrPlaygroundSessionLimit) {
+		status = http.StatusUnprocessableEntity
+		code = "PLAYGROUND_SESSION_LIMIT_EXCEEDED"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundMessageLimit) {
+		status = http.StatusUnprocessableEntity
+		code = "PLAYGROUND_MESSAGE_LIMIT_EXCEEDED"
+		err = common.NewMessage(err.Error())
+	}
 	common.ApiErrorStatus(c, status, err, gin.H{"code": code})
 }
 
-func decodePlaygroundRequest(c *gin.Context, target any) bool {
+// playgroundRequestPolicy resolves the owner's effective resource budget for
+// request pre-checks. The model re-checks the same policy inside each write
+// transaction.
+func playgroundRequestPolicy(c *gin.Context) (playground_setting.PlaygroundQuotaPolicy, bool) {
+	policy, err := model.PlaygroundQuotaPolicyForUser(c.GetInt("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return policy, false
+	}
+	return policy, true
+}
+
+func decodePlaygroundRequest(c *gin.Context, target any, maxBytes int64) bool {
 	if c.GetInt("id") <= 0 {
 		common.ApiErrorStatus(c, http.StatusUnauthorized, common.NewMessage("Authentication required."))
 		return false
 	}
-	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, playgroundSnapshotMaxBytes+(64<<10)))
+	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes))
 	if err != nil {
 		common.ApiErrorStatus(c, http.StatusRequestEntityTooLarge, common.NewMessage("Playground request is too large."))
 		return false
@@ -251,9 +274,9 @@ func encodePlaygroundSettings(request playgroundSessionRequest) (map[string]any,
 // attachments the stored snapshot references, ordered for a deterministic
 // reference update. Create-time snapshots cannot reference attachments yet, so
 // allowAttachments is false there.
-func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroundMessageInput, allowAttachments bool) ([]model.PlaygroundMessage, []string, error) {
-	if len(inputs) > model.PlaygroundMessageMaxCount {
-		return nil, nil, common.NewMessage("Playground conversations support at most 100 messages.")
+func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroundMessageInput, allowAttachments bool, policy playground_setting.PlaygroundQuotaPolicy) ([]model.PlaygroundMessage, []string, error) {
+	if len(inputs) > policy.MessageMaxCount {
+		return nil, nil, model.ErrPlaygroundMessageLimit
 	}
 	payloads := make([]playgroundMessagePayload, 0, len(inputs))
 	keys := make(map[string]bool, len(inputs))
@@ -263,7 +286,7 @@ func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroun
 		if err := common.Unmarshal(input.Payload, &payload); err != nil {
 			return nil, nil, common.NewMessage("Invalid Playground message.")
 		}
-		if input.ClientKey == "" || len(input.ClientKey) > 200 || keys[input.ClientKey] || payload.Key != input.ClientKey || len(payload.Versions) == 0 || len(payload.Versions) > model.PlaygroundMessageMaxVersions {
+		if input.ClientKey == "" || len(input.ClientKey) > 200 || keys[input.ClientKey] || payload.Key != input.ClientKey || len(payload.Versions) == 0 || len(payload.Versions) > policy.MessageMaxVersions {
 			return nil, nil, common.NewMessage("Invalid Playground message.")
 		}
 		keys[input.ClientKey] = true
@@ -293,7 +316,7 @@ func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroun
 			if len(version.Attachments) == 0 {
 				continue
 			}
-			if !allowAttachments || payload.From != "user" || len(version.Attachments) > model.PlaygroundAttachmentMaxCount {
+			if !allowAttachments || payload.From != "user" || len(version.Attachments) > policy.AttachmentMaxCount {
 				return nil, nil, common.NewMessage("Invalid Playground message.")
 			}
 			seen := make(map[string]bool, len(version.Attachments))
@@ -359,8 +382,8 @@ func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroun
 			return nil, nil, err
 		}
 		total += len(encoded)
-		if total > playgroundSnapshotMaxBytes {
-			return nil, nil, common.NewMessage("Playground messages exceed the storage limit.")
+		if int64(total) > policy.MessageMaxBytes {
+			return nil, nil, model.ErrPlaygroundMessageLimit
 		}
 		messages = append(messages, model.PlaygroundMessage{ClientKey: payload.Key, Payload: model.LongText(encoded)})
 	}
@@ -393,8 +416,12 @@ func ListPlaygroundSessions(c *gin.Context) {
 }
 
 func CreatePlaygroundSession(c *gin.Context) {
+	policy, ok := playgroundRequestPolicy(c)
+	if !ok {
+		return
+	}
 	var request playgroundSessionRequest
-	if !decodePlaygroundRequest(c, &request) {
+	if !decodePlaygroundRequest(c, &request, policy.MessageMaxBytes+(64<<10)) {
 		return
 	}
 	if len(request.ClientID) > 128 {
@@ -406,7 +433,7 @@ func CreatePlaygroundSession(c *gin.Context) {
 		writePlaygroundError(c, err)
 		return
 	}
-	messages, _, err := validatePlaygroundMessages(c.GetInt("id"), "", request.Messages, false)
+	messages, _, err := validatePlaygroundMessages(c.GetInt("id"), "", request.Messages, false, policy)
 	if err != nil {
 		writePlaygroundError(c, err)
 		return
@@ -425,7 +452,7 @@ func CreatePlaygroundSession(c *gin.Context) {
 		session.ClientID = &request.ClientID
 	}
 	if err = model.CreatePlaygroundSession(c.GetInt("id"), session, messages); err != nil {
-		common.ApiError(c, err)
+		writePlaygroundError(c, err)
 		return
 	}
 	response, err := playgroundDecodeSession(session)
@@ -451,8 +478,12 @@ func GetPlaygroundSession(c *gin.Context) {
 }
 
 func UpdatePlaygroundSession(c *gin.Context) {
+	policy, ok := playgroundRequestPolicy(c)
+	if !ok {
+		return
+	}
 	var request playgroundSessionRequest
-	if !decodePlaygroundRequest(c, &request) {
+	if !decodePlaygroundRequest(c, &request, policy.MessageMaxBytes+(64<<10)) {
 		return
 	}
 	if request.Revision == nil || *request.Revision < 0 {
@@ -499,15 +530,19 @@ func ListPlaygroundMessages(c *gin.Context) {
 }
 
 func ReplacePlaygroundMessages(c *gin.Context) {
+	policy, ok := playgroundRequestPolicy(c)
+	if !ok {
+		return
+	}
 	var request playgroundMessagesRequest
-	if !decodePlaygroundRequest(c, &request) {
+	if !decodePlaygroundRequest(c, &request, policy.MessageMaxBytes+(64<<10)) {
 		return
 	}
 	if request.Messages == nil || request.Revision == nil || *request.Revision < 0 {
 		writePlaygroundError(c, common.NewMessage("Invalid Playground request."))
 		return
 	}
-	messages, attachmentIDs, err := validatePlaygroundMessages(c.GetInt("id"), c.Param("id"), *request.Messages, true)
+	messages, attachmentIDs, err := validatePlaygroundMessages(c.GetInt("id"), c.Param("id"), *request.Messages, true, policy)
 	if err != nil {
 		writePlaygroundError(c, err)
 		return

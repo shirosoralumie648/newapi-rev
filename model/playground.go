@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/playground_setting"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -30,14 +31,11 @@ import (
 var (
 	ErrPlaygroundSessionNotFound = gorm.ErrRecordNotFound
 	ErrPlaygroundConflict        = errors.New("Playground changed on another device. Reload before saving.")
+	// ErrPlaygroundSessionLimit and ErrPlaygroundMessageLimit are the stable
+	// capacity errors the resource quota policy produces for conversations.
+	ErrPlaygroundSessionLimit = errors.New("Playground conversation limit exceeded.")
+	ErrPlaygroundMessageLimit = errors.New("Playground message limit exceeded.")
 )
-
-const PlaygroundMessageMaxCount = 100
-
-// PlaygroundMessageMaxVersions bounds the branch history stored per message.
-// Every edit or regeneration appends a version, so the limit is enforced with
-// the rest of the snapshot inside the session-locked write transaction.
-const PlaygroundMessageMaxVersions = 100
 
 type PlaygroundSession struct {
 	CreatedNow       bool    `json:"-" gorm:"-"`
@@ -92,10 +90,24 @@ func CreatePlaygroundSession(userID int, session *PlaygroundSession, messages []
 		session.Title = "New conversation"
 	}
 	err = DB.Transaction(func(tx *gorm.DB) error {
+		// Locking the owner row serializes the conversation count for the whole
+		// account, so concurrent creates cannot both slip past the limit.
+		var owner User
+		if err := lockForUpdate(tx).Where("id = ?", userID).First(&owner).Error; err != nil {
+			return err
+		}
+		policy := playground_setting.GetPlaygroundQuotaPolicy(owner.Group)
+		var count int64
+		if err := tx.Model(&PlaygroundSession{}).Where("user_id = ?", userID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count >= int64(policy.SessionMaxCount) {
+			return ErrPlaygroundSessionLimit
+		}
 		if err := tx.Create(session).Error; err != nil {
 			return err
 		}
-		return insertPlaygroundMessages(tx, userID, session.ID, messages)
+		return insertPlaygroundMessages(tx, userID, session.ID, messages, policy)
 	})
 	if err != nil && session.ClientID != nil {
 		existing, findErr := FindPlaygroundSessionByClientID(userID, *session.ClientID)
@@ -209,11 +221,18 @@ func DeletePlaygroundSession(userID int, id string) error {
 	})
 }
 
-func insertPlaygroundMessages(tx *gorm.DB, userID int, sessionID string, messages []PlaygroundMessage) error {
+func insertPlaygroundMessages(tx *gorm.DB, userID int, sessionID string, messages []PlaygroundMessage, policy playground_setting.PlaygroundQuotaPolicy) error {
 	// Capacity is re-checked inside the session-locked transaction so a
 	// concurrent writer cannot slip a snapshot past the limit.
-	if len(messages) > PlaygroundMessageMaxCount {
-		return common.NewMessage("Playground conversations support at most 100 messages.")
+	if len(messages) > policy.MessageMaxCount {
+		return ErrPlaygroundMessageLimit
+	}
+	var storedBytes int64
+	for index := range messages {
+		storedBytes += int64(len(messages[index].Payload))
+	}
+	if storedBytes > policy.MessageMaxBytes {
+		return ErrPlaygroundMessageLimit
 	}
 	now := common.GetTimestamp()
 	for index := range messages {
@@ -252,7 +271,11 @@ func ReplacePlaygroundMessages(userID int, sessionID string, revision int64, mes
 		if err := tx.Where("session_id = ? AND user_id = ?", sessionID, userID).Delete(&PlaygroundMessage{}).Error; err != nil {
 			return err
 		}
-		if err := insertPlaygroundMessages(tx, userID, sessionID, messages); err != nil {
+		policy, err := playgroundPolicyForUser(tx, userID)
+		if err != nil {
+			return err
+		}
+		if err := insertPlaygroundMessages(tx, userID, sessionID, messages, policy); err != nil {
 			return err
 		}
 		return syncPlaygroundAttachmentReferences(tx, userID, sessionID, referencedAttachmentIDs)

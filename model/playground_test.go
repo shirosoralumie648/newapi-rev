@@ -37,6 +37,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/router"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/playground_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -707,6 +708,32 @@ func playgroundPNGFixture(size int) []byte {
 	return data
 }
 
+// usePlaygroundQuotaDefaults overrides the global resource budget for one test
+// and restores it afterwards. The policy is the single source of the limits, so
+// tests no longer reach into package variables.
+func usePlaygroundQuotaDefaults(t *testing.T, mutate func(policy *playground_setting.PlaygroundQuotaPolicy)) {
+	t.Helper()
+	defaults := playground_setting.GetPlaygroundSetting().Defaults
+	previous := *defaults
+	mutate(defaults)
+	t.Cleanup(func() { *defaults = previous })
+}
+
+// usePlaygroundGroupQuota sets one user group's override and restores it.
+func usePlaygroundGroupQuota(t *testing.T, group string, override playground_setting.PlaygroundQuotaPolicy) {
+	t.Helper()
+	settings := playground_setting.GetPlaygroundSetting()
+	previous, existed := settings.GroupOverrides[group]
+	settings.GroupOverrides[group] = override
+	t.Cleanup(func() {
+		if existed {
+			settings.GroupOverrides[group] = previous
+			return
+		}
+		delete(settings.GroupOverrides, group)
+	})
+}
+
 func playgroundUploadAttachment(t *testing.T, user int, sessionID, clientKey, mediaType string, data []byte) map[string]any {
 	t.Helper()
 	response := playgroundRequest(t, user, http.MethodPost, "/api/playground/sessions/"+sessionID+"/attachments", map[string]any{
@@ -727,10 +754,8 @@ func TestPlaygroundAttachmentPersistenceMatrix(t *testing.T) {
 	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
 		t.Run(dialect, func(t *testing.T) {
 			db := playgroundTestDB(t, dialect)
-			previousMax, previousUserMax := model.PlaygroundAttachmentMaxBytes, model.PlaygroundUserAttachmentMaxBytes
-			model.PlaygroundAttachmentMaxBytes, model.PlaygroundUserAttachmentMaxBytes = 4096, 8192
-			t.Cleanup(func() {
-				model.PlaygroundAttachmentMaxBytes, model.PlaygroundUserAttachmentMaxBytes = previousMax, previousUserMax
+			usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+				policy.AttachmentMaxFileBytes, policy.AttachmentUserMaxBytes = 4096, 8192
 			})
 			session := createPlayground(t, 7, "attachments")
 			id := session["id"].(string)
@@ -791,10 +816,8 @@ func TestPlaygroundAttachmentPersistenceMatrix(t *testing.T) {
 
 func TestPlaygroundAttachmentValidationLimits(t *testing.T) {
 	playgroundTestDB(t, "sqlite")
-	previousMax, previousUserMax := model.PlaygroundAttachmentMaxBytes, model.PlaygroundUserAttachmentMaxBytes
-	model.PlaygroundAttachmentMaxBytes, model.PlaygroundUserAttachmentMaxBytes = 4096, 8192
-	t.Cleanup(func() {
-		model.PlaygroundAttachmentMaxBytes, model.PlaygroundUserAttachmentMaxBytes = previousMax, previousUserMax
+	usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+		policy.AttachmentMaxFileBytes, policy.AttachmentUserMaxBytes = 4096, 8192
 	})
 	session := createPlayground(t, 7, "attachment-limits")
 	id := session["id"].(string)
@@ -871,8 +894,9 @@ func TestPlaygroundAttachmentMessageReferences(t *testing.T) {
 	assistantID := assistant["id"].(string)
 	roleRejected := playgroundRequest(t, 7, http.MethodPut, path, map[string]any{"revision": 2, "messages": []any{message("a1", "assistant", []map[string]any{{"id": assistantID}})}}, controller.ReplacePlaygroundMessages)
 	assert.Equal(t, http.StatusBadRequest, roleRejected.Code)
-	many := make([]map[string]any, 0, model.PlaygroundAttachmentMaxCount+1)
-	for index := range model.PlaygroundAttachmentMaxCount + 1 {
+	manyLimit := playground_setting.GetPlaygroundQuotaPolicy("default").AttachmentMaxCount
+	many := make([]map[string]any, 0, manyLimit+1)
+	for index := range manyLimit + 1 {
 		many = append(many, map[string]any{"id": fmt.Sprintf("pgf_%d", index)})
 	}
 	tooMany := playgroundRequest(t, 7, http.MethodPut, path, map[string]any{"revision": 2, "messages": []any{message("u4", "user", many)}}, controller.ReplacePlaygroundMessages)
@@ -1216,7 +1240,7 @@ func TestPlaygroundMessageVersionBranches(t *testing.T) {
 				assert.Equal(t, http.StatusBadRequest, rejected.Code, rejected.Body.String())
 			}
 
-			versions := make([]any, model.PlaygroundMessageMaxVersions+1)
+			versions := make([]any, playground_setting.GetPlaygroundQuotaPolicy("default").MessageMaxVersions+1)
 			for versionIndex := range versions {
 				versions[versionIndex] = map[string]any{"id": fmt.Sprintf("v%d", versionIndex), "content": "x"}
 			}
@@ -1237,7 +1261,7 @@ func TestPlaygroundMessageVersionBranches(t *testing.T) {
 
 			// The model re-checks the snapshot capacity inside the write
 			// transaction; an over-limit write rolls back and keeps history.
-			tooMany := make([]model.PlaygroundMessage, model.PlaygroundMessageMaxCount+1)
+			tooMany := make([]model.PlaygroundMessage, playground_setting.GetPlaygroundQuotaPolicy("default").MessageMaxCount+1)
 			for index := range tooMany {
 				tooMany[index] = model.PlaygroundMessage{ClientKey: fmt.Sprintf("m%d", index), Payload: `{"key":"m","from":"user","versions":[{"id":"v","content":"x"}]}`}
 			}
@@ -1249,4 +1273,68 @@ func TestPlaygroundMessageVersionBranches(t *testing.T) {
 			require.Len(t, messages, 2)
 		})
 	}
+}
+
+// The Playground resource quota policy resolves an effective budget from the
+// user group: built-in defaults, then the global configuration, then the group
+// override. Capacity is enforced server-side and reported as a stable error.
+func TestPlaygroundQuotaPolicyResolutionAndSessionLimit(t *testing.T) {
+	playgroundTestDB(t, "sqlite")
+	usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+		policy.SessionMaxCount = 2
+	})
+	usePlaygroundGroupQuota(t, "default", playground_setting.PlaygroundQuotaPolicy{SessionMaxCount: 1})
+
+	policy, err := model.PlaygroundQuotaPolicyForUser(7)
+	require.NoError(t, err)
+	assert.Equal(t, 1, policy.SessionMaxCount, "the group override wins over the global default")
+	assert.Equal(t, playground_setting.GetPlaygroundQuotaPolicy("").MessageMaxCount, policy.MessageMaxCount, "unset group fields inherit")
+
+	first := createPlayground(t, 7, "quota-first")
+	overflow := playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions", map[string]any{
+		"title": "Overflow", "config": map[string]any{}, "parameter_enabled": map[string]any{},
+	}, controller.CreatePlaygroundSession)
+	assert.Equal(t, http.StatusUnprocessableEntity, overflow.Code, overflow.Body.String())
+	assert.Contains(t, overflow.Body.String(), "PLAYGROUND_SESSION_LIMIT_EXCEEDED")
+
+	// Deleting a conversation frees its slot, so the next create succeeds.
+	require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+first["id"].(string), nil, controller.DeletePlaygroundSession).Code)
+	assert.NotEmpty(t, createPlayground(t, 7, "quota-second")["id"])
+}
+
+// A snapshot over the configured message count must be rejected inside the
+// write transaction with the stable message code.
+func TestPlaygroundMessageQuotaLimit(t *testing.T) {
+	playgroundTestDB(t, "sqlite")
+	usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+		policy.MessageMaxCount = 2
+	})
+	session := createPlayground(t, 7, "message-quota")
+	message := func(key string) map[string]any {
+		return map[string]any{"client_key": key, "payload": map[string]any{
+			"key": key, "from": "user", "versions": []any{map[string]any{"id": key + "-v1", "content": "text"}},
+		}}
+	}
+	response := playgroundRequest(t, 7, http.MethodPut, "/api/playground/sessions/"+session["id"].(string)+"/messages", map[string]any{
+		"revision": 0, "messages": []any{message("m1"), message("m2"), message("m3")},
+	}, controller.ReplacePlaygroundMessages)
+	assert.Equal(t, http.StatusUnprocessableEntity, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), "PLAYGROUND_MESSAGE_LIMIT_EXCEEDED")
+}
+
+// The per-account attachment file count is part of the quota policy, separate
+// from the byte budget.
+func TestPlaygroundAttachmentCountLimit(t *testing.T) {
+	playgroundTestDB(t, "sqlite")
+	usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+		policy.AttachmentUserMaxCount = 1
+	})
+	session := createPlayground(t, 7, "attachment-count")
+	png := playgroundPNGFixture(64)
+	playgroundUploadAttachment(t, 7, session["id"].(string), "count-a", "image/png", png)
+	response := playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions/"+session["id"].(string)+"/attachments", map[string]any{
+		"client_key": "count-b", "media_type": "image/png", "data": base64.StdEncoding.EncodeToString(png),
+	}, controller.CreatePlaygroundAttachment)
+	assert.Equal(t, http.StatusUnprocessableEntity, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), "PLAYGROUND_ATTACHMENT_LIMIT_EXCEEDED")
 }

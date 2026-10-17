@@ -29,11 +29,12 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/playground_setting"
 	"github.com/gin-gonic/gin"
 )
 
 // The request body carries the canvas document plus its JSON envelope; the
-// stored document itself is capped at model.PlaygroundCanvasDocumentMaxBytes.
+// stored document is capped by the owner's canvas document byte budget.
 const playgroundCanvasRequestMaxBytes = 2 << 20
 
 var playgroundCanvasNodeTypes = map[string]bool{
@@ -180,11 +181,11 @@ func isFinitePlaygroundCanvasPosition(value float64, limit float64) bool {
 // returns the canonical serialization plus its counters. Unknown node data
 // travels untouched but stays bounded; every node/edge id is re-checked so a
 // stored document can never contain dangling edges.
-func normalizePlaygroundCanvasDocument(document *playgroundCanvasDocument) (string, int, int, error) {
+func normalizePlaygroundCanvasDocument(document *playgroundCanvasDocument, policy playground_setting.PlaygroundQuotaPolicy) (string, int, int, error) {
 	if document == nil {
 		return "", 0, 0, model.ErrPlaygroundCanvasInvalid
 	}
-	if len(document.Nodes) > model.PlaygroundCanvasMaxNodes || len(document.Edges) > model.PlaygroundCanvasMaxEdges {
+	if len(document.Nodes) > policy.CanvasMaxNodes || len(document.Edges) > policy.CanvasMaxEdges {
 		return "", 0, 0, model.ErrPlaygroundCanvasLimit
 	}
 	if document.Viewport != nil {
@@ -209,7 +210,7 @@ func normalizePlaygroundCanvasDocument(document *playgroundCanvasDocument) (stri
 				return "", 0, 0, model.ErrPlaygroundCanvasInvalid
 			}
 		}
-		if len(node.Data) > 64<<10 {
+		if len(node.Data) > int(policy.CanvasNodeDataMaxBytes) {
 			return "", 0, 0, model.ErrPlaygroundCanvasLimit
 		}
 	}
@@ -234,7 +235,7 @@ func normalizePlaygroundCanvasDocument(document *playgroundCanvasDocument) (stri
 	if err != nil {
 		return "", 0, 0, err
 	}
-	if len(encoded) > model.PlaygroundCanvasDocumentMaxBytes {
+	if int64(len(encoded)) > policy.CanvasDocumentMaxBytes {
 		return "", 0, 0, model.ErrPlaygroundCanvasLimit
 	}
 	return string(encoded), len(document.Nodes), len(document.Edges), nil
@@ -378,6 +379,10 @@ func ListPlaygroundCanvasProjects(c *gin.Context) {
 }
 
 func CreatePlaygroundCanvasProject(c *gin.Context) {
+	policy, ok := playgroundRequestPolicy(c)
+	if !ok {
+		return
+	}
 	var request playgroundCanvasRequest
 	if !decodePlaygroundCanvasRequest(c, &request) {
 		return
@@ -391,7 +396,7 @@ func CreatePlaygroundCanvasProject(c *gin.Context) {
 		writePlaygroundCanvasError(c, err)
 		return
 	}
-	document, nodeCount, edgeCount, err := normalizePlaygroundCanvasDocument(request.Document)
+	document, nodeCount, edgeCount, err := normalizePlaygroundCanvasDocument(request.Document, policy)
 	if err != nil {
 		writePlaygroundCanvasError(c, err)
 		return
@@ -428,6 +433,10 @@ func GetPlaygroundCanvasProject(c *gin.Context) {
 }
 
 func UpdatePlaygroundCanvasProject(c *gin.Context) {
+	policy, ok := playgroundRequestPolicy(c)
+	if !ok {
+		return
+	}
 	var request playgroundCanvasRequest
 	if !decodePlaygroundCanvasRequest(c, &request) {
 		return
@@ -446,7 +455,7 @@ func UpdatePlaygroundCanvasProject(c *gin.Context) {
 		input.Title = &title
 	}
 	if request.Document != nil {
-		document, nodeCount, edgeCount, err := normalizePlaygroundCanvasDocument(request.Document)
+		document, nodeCount, edgeCount, err := normalizePlaygroundCanvasDocument(request.Document, policy)
 		if err != nil {
 			writePlaygroundCanvasError(c, err)
 			return

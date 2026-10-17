@@ -23,25 +23,8 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/playground_setting"
 	"gorm.io/gorm"
-)
-
-const (
-	// PlaygroundCanvasDocumentMaxBytes bounds one serialized canvas document.
-	PlaygroundCanvasDocumentMaxBytes = 1 << 20
-	// PlaygroundCanvasMaxNodes and PlaygroundCanvasMaxEdges bound one document.
-	PlaygroundCanvasMaxNodes = 200
-	PlaygroundCanvasMaxEdges = 400
-)
-
-// The project count and byte budgets are variables so tests can exercise the
-// boundaries without storing full-size documents; administrator quota
-// configuration can replace them later.
-var (
-	// PlaygroundCanvasMaxProjects bounds the projects one account can keep.
-	PlaygroundCanvasMaxProjects = 20
-	// PlaygroundCanvasUserMaxBytes bounds the total stored canvas documents per account.
-	PlaygroundCanvasUserMaxBytes int64 = 16 << 20
 )
 
 var (
@@ -275,14 +258,15 @@ func CreatePlaygroundCanvasProject(userID int, project *PlaygroundCanvasProject,
 	created := false
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		var user User
-		if err := lockForUpdate(tx).Select("id").Where("id = ?", userID).First(&user).Error; err != nil {
+		if err := lockForUpdate(tx).Where("id = ?", userID).First(&user).Error; err != nil {
 			return err
 		}
+		policy := playground_setting.GetPlaygroundQuotaPolicy(user.Group)
 		var count int64
 		if err := tx.Model(&PlaygroundCanvasProject{}).Where("user_id = ?", userID).Count(&count).Error; err != nil {
 			return err
 		}
-		if count >= int64(PlaygroundCanvasMaxProjects) {
+		if count >= int64(policy.CanvasUserMaxProjects) {
 			return ErrPlaygroundCanvasLimit
 		}
 		var stored int64
@@ -290,7 +274,7 @@ func CreatePlaygroundCanvasProject(userID int, project *PlaygroundCanvasProject,
 			Select("COALESCE(SUM(document_bytes), 0)").Scan(&stored).Error; err != nil {
 			return err
 		}
-		if stored+int64(len(project.Document)) > PlaygroundCanvasUserMaxBytes {
+		if stored+int64(len(project.Document)) > policy.CanvasUserMaxBytes {
 			return ErrPlaygroundCanvasLimit
 		}
 		if err := tx.Create(project).Error; err != nil {
@@ -374,12 +358,16 @@ func UpdatePlaygroundCanvasProject(userID int, id string, revision int64, input 
 		if input.Document != nil {
 			size := int64(len(*input.Document))
 			if size != project.DocumentBytes {
+				policy, err := playgroundPolicyForUser(tx, userID)
+				if err != nil {
+					return err
+				}
 				var stored int64
 				if err := tx.Model(&PlaygroundCanvasProject{}).Where("user_id = ? AND id <> ?", userID, id).
 					Select("COALESCE(SUM(document_bytes), 0)").Scan(&stored).Error; err != nil {
 					return err
 				}
-				if stored+size > PlaygroundCanvasUserMaxBytes {
+				if stored+size > policy.CanvasUserMaxBytes {
 					return ErrPlaygroundCanvasLimit
 				}
 			}

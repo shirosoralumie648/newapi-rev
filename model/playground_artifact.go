@@ -27,16 +27,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/playground_setting"
 	"gorm.io/gorm"
-)
-
-const (
-	PlaygroundArtifactContentMaxBytes   = 256 << 10
-	PlaygroundArtifactMaxVersions       = 100
-	PlaygroundArtifactMaxBytes          = 8 << 20
-	PlaygroundSessionMaxArtifacts       = 32
-	PlaygroundSessionArtifactMaxBytes   = 32 << 20
-	PlaygroundSessionMaxArtifactRecords = 256
 )
 
 var (
@@ -161,7 +153,7 @@ func playgroundArtifactFingerprint(operation, sessionID string, input any) (stri
 	return playgroundArtifactHash(string(encoded)), nil
 }
 
-func normalizePlaygroundArtifactSnapshot(kind string, title, language *string, content *string) error {
+func normalizePlaygroundArtifactSnapshot(kind string, title, language *string, content *string, maxContentBytes int64) error {
 	*title = strings.TrimSpace(*title)
 	*language = strings.ToLower(strings.TrimSpace(*language))
 	if *language == "" {
@@ -175,7 +167,7 @@ func normalizePlaygroundArtifactSnapshot(kind string, title, language *string, c
 		content == nil || !utf8.ValidString(*content) || strings.ContainsRune(*content, 0) {
 		return ErrPlaygroundArtifactInvalid
 	}
-	if len(*content) > PlaygroundArtifactContentMaxBytes {
+	if int64(len(*content)) > maxContentBytes {
 		return ErrPlaygroundArtifactLimit
 	}
 	return nil
@@ -248,7 +240,10 @@ func validatePlaygroundArtifactSource(tx *gorm.DB, session *PlaygroundSession, s
 	return nil
 }
 
-func checkPlaygroundArtifactCapacity(tx *gorm.DB, userID int, sessionID, artifactID string, addedBytes int64, creating bool) error {
+func checkPlaygroundArtifactCapacity(tx *gorm.DB, userID int, sessionID, artifactID string, addedBytes int64, creating bool, policy playground_setting.PlaygroundQuotaPolicy) error {
+	if addedBytes > policy.ArtifactContentMaxBytes {
+		return ErrPlaygroundArtifactLimit
+	}
 	artifacts := tx.Model(&PlaygroundArtifact{}).Where("user_id = ? AND session_id = ?", userID, sessionID)
 	if creating {
 		var records, active int64
@@ -258,7 +253,7 @@ func checkPlaygroundArtifactCapacity(tx *gorm.DB, userID int, sessionID, artifac
 		if err := tx.Model(&PlaygroundArtifact{}).Where("user_id = ? AND session_id = ? AND deleted_at = 0", userID, sessionID).Count(&active).Error; err != nil {
 			return err
 		}
-		if records >= PlaygroundSessionMaxArtifactRecords || active >= PlaygroundSessionMaxArtifacts {
+		if records >= int64(policy.ArtifactSessionMaxRecords) || active >= int64(policy.ArtifactSessionMaxCount) {
 			return ErrPlaygroundArtifactLimit
 		}
 	} else {
@@ -270,7 +265,7 @@ func checkPlaygroundArtifactCapacity(tx *gorm.DB, userID int, sessionID, artifac
 			Select("COUNT(*) AS count, COALESCE(SUM(byte_size), 0) AS bytes").Scan(&usage).Error; err != nil {
 			return err
 		}
-		if usage.Count >= PlaygroundArtifactMaxVersions || usage.Bytes+addedBytes > PlaygroundArtifactMaxBytes {
+		if usage.Count >= int64(policy.ArtifactMaxVersions) || usage.Bytes+addedBytes > policy.ArtifactMaxBytes {
 			return ErrPlaygroundArtifactLimit
 		}
 	}
@@ -279,7 +274,7 @@ func checkPlaygroundArtifactCapacity(tx *gorm.DB, userID int, sessionID, artifac
 		Select("COALESCE(SUM(byte_size), 0)").Scan(&bytes).Error; err != nil {
 		return err
 	}
-	if bytes+addedBytes > PlaygroundSessionArtifactMaxBytes {
+	if bytes+addedBytes > policy.ArtifactSessionMaxBytes {
 		return ErrPlaygroundArtifactLimit
 	}
 	return nil
@@ -312,6 +307,10 @@ func findPlaygroundArtifactCreation(tx *gorm.DB, userID int, sessionID, requestI
 }
 
 func CreatePlaygroundArtifact(userID int, sessionID string, input CreatePlaygroundArtifactInput) (*PlaygroundArtifactResult, error) {
+	policy, err := PlaygroundQuotaPolicyForUser(userID)
+	if err != nil {
+		return nil, err
+	}
 	source := &input.Source
 	source.ContentHash = strings.ToLower(source.ContentHash)
 	hashBytes, hashErr := hex.DecodeString(source.ContentHash)
@@ -321,7 +320,7 @@ func CreatePlaygroundArtifact(userID int, sessionID string, input CreatePlaygrou
 		(source.CodeBlockIndex != nil && (*source.CodeBlockIndex < 0 || input.Kind != "code")) {
 		return nil, ErrPlaygroundArtifactInvalid
 	}
-	if err := normalizePlaygroundArtifactSnapshot(input.Kind, &input.Title, &input.Language, input.Content); err != nil {
+	if err := normalizePlaygroundArtifactSnapshot(input.Kind, &input.Title, &input.Language, input.Content, policy.ArtifactContentMaxBytes); err != nil {
 		return nil, err
 	}
 	fingerprint, err := playgroundArtifactFingerprint("create", sessionID, input)
@@ -346,7 +345,7 @@ func CreatePlaygroundArtifact(userID int, sessionID string, input CreatePlaygrou
 		if err := validatePlaygroundArtifactSource(tx, session, input.Source); err != nil {
 			return err
 		}
-		if err := checkPlaygroundArtifactCapacity(tx, userID, sessionID, "", int64(len(*input.Content)), true); err != nil {
+		if err := checkPlaygroundArtifactCapacity(tx, userID, sessionID, "", int64(len(*input.Content)), true, policy); err != nil {
 			return err
 		}
 		key, err := common.GenerateRandomCharsKey(24)
@@ -425,7 +424,7 @@ func findPlaygroundArtifactWrite(tx *gorm.DB, artifact *PlaygroundArtifact, requ
 }
 
 // Save and restore share the same request-ID namespace and transaction ordering.
-func writePlaygroundArtifactVersion(userID int, sessionID, artifactID, requestID, fingerprint string, revision int64, title, language, content, restoreID string) (*PlaygroundArtifactResult, error) {
+func writePlaygroundArtifactVersion(userID int, sessionID, artifactID, requestID, fingerprint string, revision int64, title, language, content, restoreID string, policy playground_setting.PlaygroundQuotaPolicy) (*PlaygroundArtifactResult, error) {
 	var result *PlaygroundArtifactResult
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		if _, err := lockPlaygroundArtifactSession(tx, userID, sessionID); err != nil {
@@ -452,7 +451,7 @@ func writePlaygroundArtifactVersion(userID int, sessionID, artifactID, requestID
 		if artifact.Revision != revision {
 			return ErrPlaygroundConflict
 		}
-		if err := checkPlaygroundArtifactCapacity(tx, userID, sessionID, artifactID, int64(len(content)), false); err != nil {
+		if err := checkPlaygroundArtifactCapacity(tx, userID, sessionID, artifactID, int64(len(content)), false, policy); err != nil {
 			return err
 		}
 		result, err = appendPlaygroundArtifactVersion(tx, artifact, requestID, fingerprint, title, language, content, restoreID)
@@ -481,26 +480,34 @@ func SavePlaygroundArtifactVersion(userID int, sessionID, artifactID string, inp
 	if !playgroundArtifactRequestPattern.MatchString(input.RequestID) || input.ExpectedRevision == nil || *input.ExpectedRevision < 1 {
 		return nil, ErrPlaygroundArtifactInvalid
 	}
+	policy, err := PlaygroundQuotaPolicyForUser(userID)
+	if err != nil {
+		return nil, err
+	}
 	// Empty save language is plaintext; the client sends markdown for Markdown documents.
-	if err := normalizePlaygroundArtifactSnapshot("", &input.Title, &input.Language, input.Content); err != nil {
+	if err := normalizePlaygroundArtifactSnapshot("", &input.Title, &input.Language, input.Content, policy.ArtifactContentMaxBytes); err != nil {
 		return nil, err
 	}
 	fingerprint, err := playgroundArtifactFingerprint("save", sessionID, input)
 	if err != nil {
 		return nil, err
 	}
-	return writePlaygroundArtifactVersion(userID, sessionID, artifactID, input.RequestID, fingerprint, *input.ExpectedRevision, input.Title, input.Language, *input.Content, "")
+	return writePlaygroundArtifactVersion(userID, sessionID, artifactID, input.RequestID, fingerprint, *input.ExpectedRevision, input.Title, input.Language, *input.Content, "", policy)
 }
 
 func RestorePlaygroundArtifactVersion(userID int, sessionID, artifactID string, input RestorePlaygroundArtifactInput) (*PlaygroundArtifactResult, error) {
 	if !playgroundArtifactRequestPattern.MatchString(input.RequestID) || input.ExpectedRevision == nil || *input.ExpectedRevision < 1 || input.VersionID == "" || len(input.VersionID) > 32 {
 		return nil, ErrPlaygroundArtifactInvalid
 	}
+	policy, err := PlaygroundQuotaPolicyForUser(userID)
+	if err != nil {
+		return nil, err
+	}
 	fingerprint, err := playgroundArtifactFingerprint("restore", sessionID, input)
 	if err != nil {
 		return nil, err
 	}
-	return writePlaygroundArtifactVersion(userID, sessionID, artifactID, input.RequestID, fingerprint, *input.ExpectedRevision, "", "", "", input.VersionID)
+	return writePlaygroundArtifactVersion(userID, sessionID, artifactID, input.RequestID, fingerprint, *input.ExpectedRevision, "", "", "", input.VersionID, policy)
 }
 
 func GetPlaygroundArtifact(userID int, sessionID, artifactID, versionID string) (*PlaygroundArtifactResult, error) {

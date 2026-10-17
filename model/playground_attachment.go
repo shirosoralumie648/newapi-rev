@@ -28,22 +28,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/playground_setting"
 	"gorm.io/gorm"
-)
-
-const (
-	// PlaygroundAttachmentMaxCount bounds the attachments referenced by one message version.
-	PlaygroundAttachmentMaxCount = 8
-)
-
-// The byte budgets are variables so tests can exercise the boundaries without
-// allocating full-size payloads, and so administrator quota configuration can
-// replace them later.
-var (
-	// PlaygroundAttachmentMaxBytes bounds one decoded attachment.
-	PlaygroundAttachmentMaxBytes = 8 << 20
-	// PlaygroundUserAttachmentMaxBytes bounds the total stored attachment bytes per account.
-	PlaygroundUserAttachmentMaxBytes = 64 << 20
 )
 
 var (
@@ -102,8 +88,9 @@ func IsPlaygroundAttachmentMediaType(mediaType string) bool {
 
 // ValidatePlaygroundAttachmentInput normalizes user text and rejects payloads
 // whose declared media type does not match their signature, so an upload can
-// never be stored under a renderable type it is not.
-func ValidatePlaygroundAttachmentInput(input *PlaygroundAttachmentInput) error {
+// never be stored under a renderable type it is not. maxFileBytes is the
+// effective per-file budget from the owner's resource quota policy.
+func ValidatePlaygroundAttachmentInput(input *PlaygroundAttachmentInput, maxFileBytes int64) error {
 	input.ClientKey = strings.TrimSpace(input.ClientKey)
 	input.MediaType = strings.ToLower(strings.TrimSpace(input.MediaType))
 	input.Filename = strings.TrimSpace(input.Filename)
@@ -119,7 +106,7 @@ func ValidatePlaygroundAttachmentInput(input *PlaygroundAttachmentInput) error {
 	if utf8.RuneCountInString(input.Filename) > 255 || !utf8.ValidString(input.Filename) || strings.ContainsRune(input.Filename, 0) {
 		return ErrPlaygroundAttachmentInvalid
 	}
-	if len(input.Data) == 0 || len(input.Data) > PlaygroundAttachmentMaxBytes {
+	if len(input.Data) == 0 || int64(len(input.Data)) > maxFileBytes {
 		return ErrPlaygroundAttachmentLimit
 	}
 	if !playgroundAttachmentMatchesMediaType(input.MediaType, input.Data) {
@@ -169,7 +156,11 @@ func CreatePlaygroundAttachment(userID int, sessionID string, input PlaygroundAt
 	if userID <= 0 {
 		return nil, false, gorm.ErrRecordNotFound
 	}
-	if err := ValidatePlaygroundAttachmentInput(&input); err != nil {
+	policy, err := PlaygroundQuotaPolicyForUser(userID)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := ValidatePlaygroundAttachmentInput(&input, policy.AttachmentMaxFileBytes); err != nil {
 		return nil, false, err
 	}
 	clientKeyHash := playgroundAttachmentClientKeyHash(input.ClientKey)
@@ -187,22 +178,32 @@ func CreatePlaygroundAttachment(userID int, sessionID string, input PlaygroundAt
 	}
 
 	var attachment PlaygroundAttachment
-	err := DB.Transaction(func(tx *gorm.DB) error {
+	err = DB.Transaction(func(tx *gorm.DB) error {
 		if _, err := lockPlaygroundSession(tx, userID, sessionID); err != nil {
 			return err
 		}
-		// Locking the owner row makes the per-account byte budget exact even
-		// when uploads for different sessions race.
+		// Locking the owner row makes the per-account byte and file budgets
+		// exact even when uploads for different sessions race.
 		var user User
-		if err := lockForUpdate(tx).Select("id").Where("id = ?", userID).First(&user).Error; err != nil {
+		if err := lockForUpdate(tx).Where("id = ?", userID).First(&user).Error; err != nil {
 			return err
 		}
-		var stored int64
+		policy := playground_setting.GetPlaygroundQuotaPolicy(user.Group)
+		if int64(len(input.Data)) > policy.AttachmentMaxFileBytes {
+			return ErrPlaygroundAttachmentLimit
+		}
+		var count, stored int64
+		if err := tx.Model(&PlaygroundAttachment{}).Where("user_id = ?", userID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count >= int64(policy.AttachmentUserMaxCount) {
+			return ErrPlaygroundAttachmentLimit
+		}
 		if err := tx.Model(&PlaygroundAttachment{}).Where("user_id = ?", userID).
 			Select("COALESCE(SUM(byte_size), 0)").Scan(&stored).Error; err != nil {
 			return err
 		}
-		if stored+int64(len(input.Data)) > int64(PlaygroundUserAttachmentMaxBytes) {
+		if stored+int64(len(input.Data)) > policy.AttachmentUserMaxBytes {
 			return ErrPlaygroundAttachmentLimit
 		}
 		key, err := common.GenerateRandomCharsKey(24)

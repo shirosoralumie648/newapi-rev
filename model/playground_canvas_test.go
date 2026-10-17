@@ -28,6 +28,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/controller"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/playground_setting"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -208,13 +209,14 @@ func TestPlaygroundCanvasDocumentValidation(t *testing.T) {
 			"data": map[string]any{"blob": strings.Repeat("x", (65 << 10))}}},
 		nil,
 	)), http.StatusUnprocessableEntity)
-	tooManyNodes := make([]any, 0, model.PlaygroundCanvasMaxNodes+1)
-	for index := range model.PlaygroundCanvasMaxNodes + 1 {
+	canvasPolicy := playground_setting.GetPlaygroundQuotaPolicy("default")
+	tooManyNodes := make([]any, 0, canvasPolicy.CanvasMaxNodes+1)
+	for index := range canvasPolicy.CanvasMaxNodes + 1 {
 		tooManyNodes = append(tooManyNodes, canvasNode(fmt.Sprintf("n%d", index), "text", 0, 0))
 	}
 	reject("too many nodes", withDocument(canvasDocument(tooManyNodes, nil)), http.StatusUnprocessableEntity)
-	fullEdges := make([]any, 0, model.PlaygroundCanvasMaxEdges+1)
-	for index := range model.PlaygroundCanvasMaxEdges + 1 {
+	fullEdges := make([]any, 0, canvasPolicy.CanvasMaxEdges+1)
+	for index := range canvasPolicy.CanvasMaxEdges + 1 {
 		fullEdges = append(fullEdges, map[string]any{"id": fmt.Sprintf("e%d", index), "source": "n1", "target": "n2"})
 	}
 	reject("too many edges", withDocument(canvasDocument(
@@ -320,10 +322,8 @@ func TestPlaygroundCanvasReferenceOwnership(t *testing.T) {
 
 func TestPlaygroundCanvasLimits(t *testing.T) {
 	playgroundTestDB(t, "sqlite")
-	previousProjects, previousBytes := model.PlaygroundCanvasMaxProjects, model.PlaygroundCanvasUserMaxBytes
-	model.PlaygroundCanvasMaxProjects, model.PlaygroundCanvasUserMaxBytes = 2, 4096
-	t.Cleanup(func() {
-		model.PlaygroundCanvasMaxProjects, model.PlaygroundCanvasUserMaxBytes = previousProjects, previousBytes
+	usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+		policy.CanvasUserMaxProjects, policy.CanvasUserMaxBytes = 2, 4096
 	})
 
 	// Both the project count and the byte budget reject the next create.
