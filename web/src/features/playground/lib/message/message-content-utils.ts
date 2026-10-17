@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { MESSAGE_ROLES, MESSAGE_STATUS } from '../../constants'
 import type { Message } from '../../types'
 import { parseThinkTags } from './message-reasoning-utils'
+import { getCurrentVersion } from './message-utils'
 
 type MessageContentStateBase = {
   displayContent: string
@@ -58,7 +59,8 @@ function shouldShowMessageContent(
   message: Message,
   versionContent: string
 ): boolean {
-  const hasAttachments = (message.versions[0]?.attachments?.length ?? 0) > 0
+  const hasAttachments =
+    (getCurrentVersion(message).attachments?.length ?? 0) > 0
   return (
     (message.from === MESSAGE_ROLES.USER || !message.isReasoningStreaming) &&
     (versionContent.length > 0 || hasAttachments)

@@ -46,10 +46,29 @@ export function createMessageVersion(
 }
 
 /**
- * Get current version from message (always returns the first version)
+ * Resolve the active version index. Missing or out-of-range indexes fall back
+ * to the first version so legacy snapshots stay readable.
+ */
+export function getActiveVersionIndex(message: Message): number {
+  if (message.versions.length === 0) return 0
+
+  const index = message.activeVersionIndex ?? 0
+  if (index < 0 || index >= message.versions.length) return 0
+
+  return index
+}
+
+/**
+ * Get the active version from a message. Editing and regenerating append a new
+ * version and select it, so history stays available as switchable branches.
  */
 export function getCurrentVersion(message: Message): MessageVersion {
-  return message.versions[0] || { id: 'default', content: '' }
+  return (
+    message.versions[getActiveVersionIndex(message)] || {
+      id: 'default',
+      content: '',
+    }
+  )
 }
 
 /**
@@ -67,17 +86,65 @@ export function hasMessageContent(message: Message): boolean {
 }
 
 /**
- * Update current version content in message
+ * Update the content of the active version in place, preserving every other
+ * version so streaming never discards an existing branch.
  */
 export function updateCurrentVersionContent(
   message: Message,
   content: string
 ): Message {
-  const currentVersion = getCurrentVersion(message)
+  const activeIndex = getActiveVersionIndex(message)
+  const currentVersion = message.versions[activeIndex]
+
+  if (!currentVersion) {
+    return {
+      ...message,
+      versions: [createMessageVersion(content)],
+      activeVersionIndex: 0,
+    }
+  }
+
   return {
     ...message,
-    versions: [{ ...currentVersion, content }],
+    versions: message.versions.map((version, index) =>
+      index === activeIndex ? { ...version, content } : version
+    ),
   }
+}
+
+/**
+ * Append a new version to a message and select it, keeping older versions so
+ * edits and regenerations remain available as switchable branches.
+ */
+export function appendMessageVersion(
+  message: Message,
+  content: string,
+  attachments?: MessageAttachment[]
+): Message {
+  const versions = [
+    ...message.versions,
+    createMessageVersion(content, attachments),
+  ]
+
+  return {
+    ...message,
+    versions,
+    activeVersionIndex: versions.length - 1,
+  }
+}
+
+/**
+ * Select an existing version as active. Out-of-range indexes are ignored.
+ */
+export function setActiveMessageVersion(
+  message: Message,
+  versionIndex: number
+): Message {
+  if (versionIndex < 0 || versionIndex >= message.versions.length) {
+    return message
+  }
+
+  return { ...message, activeVersionIndex: versionIndex }
 }
 
 /**

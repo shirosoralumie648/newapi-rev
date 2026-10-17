@@ -108,7 +108,11 @@ export async function ensurePlaygroundMessageAttachments(
 ): Promise<void> {
   const missing = new Map<string, string>()
   for (const message of messages) {
-    for (const attachment of message.versions[0]?.attachments ?? []) {
+    // Only the active version is sent and rendered, so its attachments are the
+    // only bytes the next request needs; hidden branches load lazily on switch.
+    const activeVersion =
+      message.versions[message.activeVersionIndex ?? 0] ?? message.versions[0]
+    for (const attachment of activeVersion?.attachments ?? []) {
       if (!getPlaygroundAttachmentDataUrl(attachment.id) && attachment.url) {
         missing.set(attachment.id, attachment.url)
       }

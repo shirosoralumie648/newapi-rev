@@ -85,6 +85,7 @@ const messageSchema = z.object({
   key: z.string().min(1).max(200),
   from: messageRoleSchema,
   versions: z.array(messageVersionSchema).min(1),
+  activeVersionIndex: z.number().int().nonnegative().optional(),
   createdAt: z.number().finite().optional(),
   startedAt: z.number().finite().optional(),
   completedAt: z.number().finite().optional(),

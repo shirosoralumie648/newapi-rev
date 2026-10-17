@@ -20,6 +20,14 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import {
+  Branch,
+  BranchMessages,
+  BranchNext,
+  BranchPage,
+  BranchPrevious,
+  BranchSelector,
+} from '@/components/ai-elements/branch'
+import {
   Conversation,
   ConversationContent,
   ConversationScrollButton,
@@ -28,6 +36,7 @@ import { Loader } from '@/components/ai-elements/loader'
 import { Message } from '@/components/ai-elements/message'
 
 import {
+  getActiveVersionIndex,
   getChatMessageRenderState,
   getEditingMessageContent,
   getMessageAlignment,
@@ -52,6 +61,7 @@ interface PlaygroundChatProps {
   onRegenerateMessage?: (message: MessageType) => void
   onEditMessage?: (message: MessageType) => void
   onDeleteMessage?: (message: MessageType) => void
+  onSelectVersion?: (message: MessageType, versionIndex: number) => void
   onCreateArtifact?: (message: MessageType) => void
   onSelectPrompt?: (prompt: string) => void
   isGenerating?: boolean
@@ -69,6 +79,7 @@ export function PlaygroundChat({
   onRegenerateMessage,
   onEditMessage,
   onDeleteMessage,
+  onSelectVersion,
   onCreateArtifact,
   onSelectPrompt,
   isGenerating = false,
@@ -116,7 +127,7 @@ export function PlaygroundChat({
 
   let chatContent = visibleMessages.map((message, visibleMessageIndex) => {
     const messageIndex = visibleMessageOffset + visibleMessageIndex
-    const { alwaysShowActions, content, isEditing } = getChatMessageRenderState(
+    const { alwaysShowActions, isEditing } = getChatMessageRenderState(
       messages,
       message,
       messageIndex,
@@ -128,6 +139,37 @@ export function PlaygroundChat({
       : null
     const alignment = getMessageAlignment(message, messageLayoutMode)
     const isSourceVisible = sourceMessageKeys.has(message.key)
+    const messageActions = (
+      <MessageActions
+        message={message}
+        onCopy={onCopyMessage}
+        onRegenerate={onRegenerateMessage}
+        onToggleSource={handleToggleMessageSource}
+        onEdit={onEditMessage}
+        onDelete={onDeleteMessage}
+        onCreateArtifact={onCreateArtifact}
+        isSourceVisible={isSourceVisible}
+        isGenerating={isGenerating}
+        alwaysVisible={alwaysShowActions}
+        className='mt-1.5'
+      />
+    )
+    const errorActions = isError ? (
+      <MessageErrorActions
+        disabled={isGenerating}
+        onRetry={
+          onRegenerateMessage ? () => onRegenerateMessage(message) : undefined
+        }
+        onEditPrompt={
+          onEditMessage && previousUserMessage
+            ? () => onEditMessage(previousUserMessage)
+            : undefined
+        }
+        onDelete={
+          onDeleteMessage ? () => onDeleteMessage(message) : undefined
+        }
+      />
+    ) : undefined
 
     return (
       <Message
@@ -147,49 +189,32 @@ export function PlaygroundChat({
               originalText={originalText}
             />
           ) : (
-            <PlaygroundMessageContent
-              alignment={alignment}
-              actions={
-                <MessageActions
-                  message={message}
-                  onCopy={onCopyMessage}
-                  onRegenerate={onRegenerateMessage}
-                  onToggleSource={handleToggleMessageSource}
-                  onEdit={onEditMessage}
-                  onDelete={onDeleteMessage}
-                  onCreateArtifact={onCreateArtifact}
-                  isSourceVisible={isSourceVisible}
-                  isGenerating={isGenerating}
-                  alwaysVisible={alwaysShowActions}
-                  className='mt-1.5'
-                />
+            <Branch
+              defaultBranch={getActiveVersionIndex(message)}
+              key={`${message.key}:${message.versions.length}`}
+              onBranchChange={(versionIndex) =>
+                onSelectVersion?.(message, versionIndex)
               }
-              isSourceVisible={isSourceVisible}
-              message={message}
-              errorActions={
-                isError ? (
-                  <MessageErrorActions
-                    disabled={isGenerating}
-                    onRetry={
-                      onRegenerateMessage
-                        ? () => onRegenerateMessage(message)
-                        : undefined
-                    }
-                    onEditPrompt={
-                      onEditMessage && previousUserMessage
-                        ? () => onEditMessage(previousUserMessage)
-                        : undefined
-                    }
-                    onDelete={
-                      onDeleteMessage
-                        ? () => onDeleteMessage(message)
-                        : undefined
-                    }
+            >
+              <BranchMessages>
+                {message.versions.map((version, versionIndex) => (
+                  <PlaygroundMessageContent
+                    actions={messageActions}
+                    alignment={alignment}
+                    errorActions={errorActions}
+                    isSourceVisible={isSourceVisible}
+                    key={`${version.id}-${versionIndex}`}
+                    message={message}
+                    versionContent={version.content}
                   />
-                ) : undefined
-              }
-              versionContent={content}
-            />
+                ))}
+              </BranchMessages>
+              <BranchSelector from={message.from}>
+                <BranchPrevious disabled={isGenerating} />
+                <BranchPage />
+                <BranchNext disabled={isGenerating} />
+              </BranchSelector>
+            </Branch>
           )}
         </div>
       </Message>

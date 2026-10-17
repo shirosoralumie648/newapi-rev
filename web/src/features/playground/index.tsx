@@ -114,6 +114,7 @@ function PlaygroundContent() {
     handleEditOpenChange,
     applyEdit,
     handleDeleteMessage,
+    handleSelectMessageVersion,
   } = usePlaygroundConversation({
     messages,
     updateMessages,
@@ -392,6 +393,7 @@ function PlaygroundContent() {
               onRegenerateMessage={handleRegenerateMessage}
               onEditMessage={handleEditMessage}
               onDeleteMessage={handleDeleteMessage}
+              onSelectVersion={handleSelectMessageVersion}
               onSelectPrompt={handleSendMessage}
               onCreateArtifact={
                 artifactCreationEnabled ? openArtifactSource : undefined

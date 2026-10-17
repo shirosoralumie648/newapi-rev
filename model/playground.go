@@ -34,6 +34,11 @@ var (
 
 const PlaygroundMessageMaxCount = 100
 
+// PlaygroundMessageMaxVersions bounds the branch history stored per message.
+// Every edit or regeneration appends a version, so the limit is enforced with
+// the rest of the snapshot inside the session-locked write transaction.
+const PlaygroundMessageMaxVersions = 100
+
 type PlaygroundSession struct {
 	CreatedNow       bool    `json:"-" gorm:"-"`
 	ID               string  `json:"id" gorm:"size:128;primaryKey"`
@@ -199,6 +204,11 @@ func DeletePlaygroundSession(userID int, id string) error {
 }
 
 func insertPlaygroundMessages(tx *gorm.DB, userID int, sessionID string, messages []PlaygroundMessage) error {
+	// Capacity is re-checked inside the session-locked transaction so a
+	// concurrent writer cannot slip a snapshot past the limit.
+	if len(messages) > PlaygroundMessageMaxCount {
+		return common.NewMessage("Playground conversations support at most 100 messages.")
+	}
 	now := common.GetTimestamp()
 	for index := range messages {
 		messages[index].ID = 0

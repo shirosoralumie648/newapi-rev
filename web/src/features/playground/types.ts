@@ -41,6 +41,8 @@ export interface Message {
   key: string
   from: MessageRole
   versions: MessageVersion[]
+  /** Index of the active version in `versions`; defaults to 0 for legacy data. */
+  activeVersionIndex?: number
   createdAt?: number
   startedAt?: number
   completedAt?: number

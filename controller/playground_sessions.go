@@ -77,11 +77,12 @@ type playgroundMessagePayload struct {
 		Content     string                        `json:"content"`
 		Attachments []playgroundMessageAttachment `json:"attachments,omitempty"`
 	} `json:"versions"`
-	CreatedAt   *float64 `json:"createdAt,omitempty"`
-	StartedAt   *float64 `json:"startedAt,omitempty"`
-	CompletedAt *float64 `json:"completedAt,omitempty"`
-	DurationMs  *float64 `json:"durationMs,omitempty"`
-	Sources     []struct {
+	ActiveVersionIndex *int     `json:"activeVersionIndex,omitempty"`
+	CreatedAt          *float64 `json:"createdAt,omitempty"`
+	StartedAt          *float64 `json:"startedAt,omitempty"`
+	CompletedAt        *float64 `json:"completedAt,omitempty"`
+	DurationMs         *float64 `json:"durationMs,omitempty"`
+	Sources            []struct {
 		Href  string `json:"href"`
 		Title string `json:"title"`
 	} `json:"sources,omitempty"`
@@ -262,10 +263,15 @@ func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroun
 		if err := common.Unmarshal(input.Payload, &payload); err != nil {
 			return nil, nil, common.NewMessage("Invalid Playground message.")
 		}
-		if input.ClientKey == "" || len(input.ClientKey) > 200 || keys[input.ClientKey] || payload.Key != input.ClientKey || len(payload.Versions) == 0 || len(payload.Versions) > 100 {
+		if input.ClientKey == "" || len(input.ClientKey) > 200 || keys[input.ClientKey] || payload.Key != input.ClientKey || len(payload.Versions) == 0 || len(payload.Versions) > model.PlaygroundMessageMaxVersions {
 			return nil, nil, common.NewMessage("Invalid Playground message.")
 		}
 		keys[input.ClientKey] = true
+		// A branch selection must point at a stored version; otherwise the
+		// client could persist an index no renderer can resolve.
+		if payload.ActiveVersionIndex != nil && (*payload.ActiveVersionIndex < 0 || *payload.ActiveVersionIndex >= len(payload.Versions)) {
+			return nil, nil, common.NewMessage("Invalid Playground message.")
+		}
 		if payload.ErrorCode != nil && len(*payload.ErrorCode) > 500 {
 			return nil, nil, common.NewMessage("Invalid Playground message.")
 		}

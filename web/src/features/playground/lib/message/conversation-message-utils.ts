@@ -16,31 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { MESSAGE_ROLES } from '../../constants'
-/*
-Copyright (C) 2023-2026 QuantumNous
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as
-published by the Free Software Foundation, either version 3 of the
-License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program. If not, see <https://www.gnu.org/licenses/>.
-
-For commercial licensing, please contact support@quantumnous.com
-*/
+import { MESSAGE_ROLES, MESSAGE_STATUS } from '../../constants'
 import type { Message, MessageAttachment } from '../../types'
 import {
+  appendMessageVersion,
   createLoadingAssistantMessage,
   createUserMessage,
   getMessageContent,
-  updateCurrentVersionContent,
 } from './message-utils'
 
 type ApplyMessageEditResult = {
@@ -50,8 +32,52 @@ type ApplyMessageEditResult = {
 
 type ChatMessageRenderState = {
   alwaysShowActions: boolean
-  content: string
   isEditing: boolean
+}
+
+// Append a fresh reply version and reset the message to a pending state. The
+// previous answer stays selectable as a branch.
+function startAssistantReply(
+  message: Message,
+  startedAt: number = Date.now()
+): Message {
+  return {
+    ...appendMessageVersion(message, ''),
+    startedAt,
+    completedAt: undefined,
+    durationMs: undefined,
+    sources: undefined,
+    reasoning: undefined,
+    isReasoningStreaming: false,
+    isReasoningComplete: false,
+    isContentComplete: false,
+    status: MESSAGE_STATUS.LOADING,
+    errorCode: null,
+  }
+}
+
+// The generated reply must stay the last message because streaming handlers
+// target the final assistant message. Reuse the reply that follows the user
+// message as a new version when present; otherwise append a loading reply.
+function regenerateAssistantReply(
+  messages: Message[],
+  userMessageIndex: number,
+  startedAt: number = Date.now()
+): Message[] {
+  const assistantIndex = userMessageIndex + 1
+  const assistant = messages[assistantIndex]
+
+  if (assistant?.from === MESSAGE_ROLES.ASSISTANT) {
+    return [
+      ...messages.slice(0, assistantIndex),
+      startAssistantReply(assistant, startedAt),
+    ]
+  }
+
+  return [
+    ...messages.slice(0, userMessageIndex + 1),
+    createLoadingAssistantMessage(startedAt),
+  ]
 }
 
 export function appendUserMessagePair(
@@ -81,13 +107,13 @@ export function createRegeneratedMessages(
   }
 
   if (messages[messageIndex].from === MESSAGE_ROLES.USER) {
-    return [
-      ...messages.slice(0, messageIndex + 1),
-      createLoadingAssistantMessage(),
-    ]
+    return regenerateAssistantReply(messages, messageIndex)
   }
 
-  return [...messages.slice(0, messageIndex), createLoadingAssistantMessage()]
+  return [
+    ...messages.slice(0, messageIndex),
+    startAssistantReply(messages[messageIndex]),
+  ]
 }
 
 export function removeMessageByKey(
@@ -128,7 +154,7 @@ export function applyMessageEdit(
   const updatedMessages = messages.map((message) =>
     message.key === messageKey
       ? {
-          ...updateCurrentVersionContent(message, content),
+          ...appendMessageVersion(message, content),
           createdAt: shouldSubmit ? submittedAt : message.createdAt,
         }
       : message
@@ -142,10 +168,11 @@ export function applyMessageEdit(
   }
 
   return {
-    messages: [
-      ...updatedMessages.slice(0, messageIndex + 1),
-      createLoadingAssistantMessage(submittedAt),
-    ],
+    messages: regenerateAssistantReply(
+      updatedMessages,
+      messageIndex,
+      submittedAt
+    ),
     shouldSend: true,
   }
 }
@@ -172,7 +199,6 @@ export function getChatMessageRenderState(
     alwaysShowActions:
       messageIndex === messages.length - 1 &&
       message.from === MESSAGE_ROLES.ASSISTANT,
-    content: getMessageContent(message),
     isEditing: editingKey === message.key,
   }
 }

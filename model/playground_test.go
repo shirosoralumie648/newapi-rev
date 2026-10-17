@@ -1159,3 +1159,94 @@ func TestPlaygroundArtifactConcurrentWritesMatrix(t *testing.T) {
 		})
 	}
 }
+
+// Editing or regenerating a Playground message keeps its earlier answers as
+// switchable versions. The snapshot must round-trip every version and the
+// selected branch index across all three supported databases, reject invalid
+// branch indexes and over-capacity payloads, and stay owner-scoped.
+func TestPlaygroundMessageVersionBranches(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			playgroundTestDB(t, dialect)
+			session := createPlayground(t, 7, "branches")
+			id := session["id"].(string)
+			path := "/api/playground/sessions/" + id + "/messages"
+			body := map[string]any{
+				"revision": 0,
+				"messages": []any{
+					map[string]any{"client_key": "user-1", "payload": map[string]any{
+						"key": "user-1", "from": "user", "activeVersionIndex": 1,
+						"versions": []any{
+							map[string]any{"id": "u1", "content": "First question"},
+							map[string]any{"id": "u2", "content": "Edited question"},
+						},
+					}},
+					map[string]any{"client_key": "assistant-1", "payload": map[string]any{
+						"key": "assistant-1", "from": "assistant", "status": "complete", "isContentComplete": true,
+						"activeVersionIndex": 1,
+						"versions": []any{
+							map[string]any{"id": "a1", "content": "First answer"},
+							map[string]any{"id": "a2", "content": "Regenerated answer"},
+						},
+					}},
+				},
+			}
+			response := playgroundRequest(t, 7, http.MethodPut, path, body, controller.ReplacePlaygroundMessages)
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+
+			messages, revision, err := model.ListPlaygroundMessages(7, id)
+			require.NoError(t, err)
+			require.EqualValues(t, 1, revision)
+			require.Len(t, messages, 2)
+			assert.Contains(t, string(messages[0].Payload), `"activeVersionIndex":1`)
+			assert.Contains(t, string(messages[0].Payload), "First question")
+			assert.Contains(t, string(messages[0].Payload), "Edited question")
+			assert.Contains(t, string(messages[1].Payload), "First answer")
+			assert.Contains(t, string(messages[1].Payload), "Regenerated answer")
+
+			for _, index := range []int{-1, 2} {
+				invalid := map[string]any{
+					"revision": 1,
+					"messages": []any{map[string]any{"client_key": "user-1", "payload": map[string]any{
+						"key": "user-1", "from": "user", "activeVersionIndex": index,
+						"versions": []any{map[string]any{"id": "u1", "content": "First question"}},
+					}}},
+				}
+				rejected := playgroundRequest(t, 7, http.MethodPut, path, invalid, controller.ReplacePlaygroundMessages)
+				assert.Equal(t, http.StatusBadRequest, rejected.Code, rejected.Body.String())
+			}
+
+			versions := make([]any, model.PlaygroundMessageMaxVersions+1)
+			for versionIndex := range versions {
+				versions[versionIndex] = map[string]any{"id": fmt.Sprintf("v%d", versionIndex), "content": "x"}
+			}
+			overflow := map[string]any{
+				"revision": 1,
+				"messages": []any{map[string]any{"client_key": "user-1", "payload": map[string]any{
+					"key": "user-1", "from": "user", "versions": versions,
+				}}},
+			}
+			assert.Equal(t, http.StatusBadRequest, playgroundRequest(t, 7, http.MethodPut, path, overflow, controller.ReplacePlaygroundMessages).Code)
+			messages, revision, err = model.ListPlaygroundMessages(7, id)
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, revision)
+			require.Len(t, messages, 2)
+
+			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 8, http.MethodGet, path, nil, controller.ListPlaygroundMessages).Code)
+			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 8, http.MethodPut, path, body, controller.ReplacePlaygroundMessages).Code)
+
+			// The model re-checks the snapshot capacity inside the write
+			// transaction; an over-limit write rolls back and keeps history.
+			tooMany := make([]model.PlaygroundMessage, model.PlaygroundMessageMaxCount+1)
+			for index := range tooMany {
+				tooMany[index] = model.PlaygroundMessage{ClientKey: fmt.Sprintf("m%d", index), Payload: `{"key":"m","from":"user","versions":[{"id":"v","content":"x"}]}`}
+			}
+			_, err = model.ReplacePlaygroundMessages(7, id, 1, tooMany, nil)
+			assert.Error(t, err)
+			messages, revision, err = model.ListPlaygroundMessages(7, id)
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, revision)
+			require.Len(t, messages, 2)
+		})
+	}
+}
