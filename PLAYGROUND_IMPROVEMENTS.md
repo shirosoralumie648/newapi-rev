@@ -257,7 +257,8 @@ Playground
 - [x] SQLite、MySQL、PostgreSQL 新库和升级库迁移均通过（SQLite 3.50.4 / MySQL 8.0.46 / PostgreSQL 16.15，新库 ×2 + v1.0.0-rc.43 升级库 ×2；MySQL 5.7.44 最低版本验证通过）；
 - [x] 真实浏览器覆盖桌面、移动端、暗色模式、键盘操作和失败路径（Playwright + Chromium 7 个用例：桌面/移动工作区、会话 Sheet 键盘操作与 Escape、暗色持久化、失败列表重试恢复、刷新/重登录同步；冷启动与复用实例两种运行方式均通过）；
 - [x] 真实浏览器覆盖附件与多模态链路（Playwright：选择图片→服务端上传→SSE 回复→请求体含 `image_url` data URL→刷新后消息与附件从服务端恢复并经内容接口加载）；
-- [x] 最终 diff 不包含无关生成文件、密钥、直接上游调用或许可证遗漏（`.claude-flow/`、`.swarm/`、`graphify-out/` 已加入 `.gitignore`；新增 Go/TS 文件无密钥、无直连上游调用、许可证头齐全，提交前复查）。
+- [x] 最终 diff 不包含无关生成文件、密钥、直接上游调用或许可证遗漏（`.claude-flow/`、`.swarm/`、`graphify-out/` 已加入 `.gitignore`；新增 Go/TS 文件无密钥、无直连上游调用、许可证头齐全，提交前复查）；
+- [x] 推送 main 与 PR 均触发 CI（`.github/workflows/ci.yml` 增加 `push: branches: [main]`，backend/frontend 两个 job 的 `if` 允许 push，checkout 以 `github.repository`/`github.sha` 兼容 push，concurrency 按 ref+sha 分组避免 main 连续推送互相取消）；本 Step 仅改 CI 配置，本地未运行测试（CI-only）。
 
 ## 7. 当前待办优先级
 
@@ -295,3 +296,4 @@ Playground
 | 2026-10-16 | 引入 Playwright E2E 真实浏览器验收（`web/e2e/`：globalSetup 初始化实例、每用例 UI 登录规避一次性刷新令牌、后端 harness 关闭登录限频、桌面/移动双 project；`bun run test:e2e`，7 用例全通过，冷启动与复用实例各跑一遍）。E2E 暴露并修复两处同步缺陷：主动取消的读写不再污染同步错误态，并通过 settle 计数与取消过滤自动重试（`server-sync.test.tsx` 新增两个用例）；自行处理失败的 Playground 查询通过 `keepPageOnInternalServerError` meta 保留页面错误态，不再触发全局 500 跳转（`server-error-notifications.test.ts` 覆盖）。全量前端测试 2260/2260、typecheck、oxlint 通过。 |
 | 2026-10-17 | 完成 Phase 4 附件与多模态消息：服务端 `playground_attachments` 表（base64 LongText 存储、媒体签名校验、单文件 8 MiB/每用户 64 MiB 预算、client key 幂等重放、会话级联删除、引用状态与孤儿 TTL 清理系统任务）；受控内容接口（`UserAuth` + owner/session 过滤、nosniff/沙箱 CSP、字节精确输出）；消息快照接受附件引用（仅用户消息、事务内重算引用、被引用禁止删除）；前端 `PromptInput` 附件入口/预览/限制、上传→消息→多模态 payload 全链路与消息附件预览；E2E 新增附件用例（上传→SSE→请求体 `image_url`→刷新恢复）。后端矩阵在 SQLite 3.50.4 / MySQL 8.0.46 / MySQL 5.7.44 / PostgreSQL 16.15 全部通过（期间清理了 PG 测试库中旧迁移遗留表导致的索引同名冲突）。 |
 | 2026-10-17 | 更新验收清单：勾选会话创建/切换/重命名/删除/清空、迟到 chunk 隔离、损坏数据降级、文本请求兼容、附件服务端控制、网络失败草稿保护，以及附件多模态的真实浏览器验收项；补齐附件相关 11 个新键与既有缺失键的七语言翻译（`i18n:sync` missingCount=0）。 |
+| 2026-10-17 | S00：让 GitHub CI 在推送 main 时运行——`.github/workflows/ci.yml` 增加 `push: branches: [main]`，checkout 以 `github.event.pull_request.base.repo.full_name \|\| github.repository` 与 push 时的 `github.sha` 修正，backend/frontend 两个 job 的 `if` 放开 push，concurrency 改为 ref+sha 分组避免 main 连续推送互相取消；仅改 CI 配置，本地未运行测试（CI-only）。 |
