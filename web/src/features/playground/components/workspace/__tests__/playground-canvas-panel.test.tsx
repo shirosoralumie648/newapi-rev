@@ -29,6 +29,11 @@ vi.mock('@/features/canvas/api', () => ({
   listCanvasProjects: vi.fn(),
 }))
 
+Object.defineProperty(HTMLElement.prototype, 'getAnimations', {
+  configurable: true,
+  value: () => [],
+})
+
 const first = {
   id: 'c1',
   title: 'Board A',
