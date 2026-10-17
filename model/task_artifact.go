@@ -504,6 +504,29 @@ func syncPlaygroundCanvasTaskArtifactPins(tx *gorm.DB, userID int, canvasID stri
 	return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&rows).Error
 }
 
+// HasPlaygroundTasksAwaitingArtifacts reports whether the store pass has work:
+// an artifact still waiting for its bytes, or a successful workspace task that
+// was never projected. The scheduler folds this into its enablement so an idle
+// deployment creates no system task rows.
+func HasPlaygroundTasksAwaitingArtifacts(finishedAfter int64) (bool, error) {
+	var pending int64
+	if err := DB.Model(&PlaygroundTaskArtifact{}).
+		Where("state = ?", TaskArtifactStatePending).Limit(1).Count(&pending).Error; err != nil {
+		return false, err
+	}
+	if pending > 0 {
+		return true, nil
+	}
+	var unprojected int64
+	err := DB.Model(&Task{}).
+		Where("status = ?", TaskStatusSuccess).
+		Where("finish_time >= ? AND finish_time > 0", finishedAfter).
+		Where(playgroundTaskOriginCondition()).
+		Where("task_id NOT IN (?)", DB.Model(&PlaygroundTaskArtifactSync{}).Select("task_id")).
+		Limit(1).Count(&unprojected).Error
+	return unprojected > 0, err
+}
+
 // MarkPlaygroundTaskArtifactsSynced records that every artifact of one task
 // reached a terminal state, so the store pass stops listing it.
 func MarkPlaygroundTaskArtifactsSynced(userID int, taskID string) error {

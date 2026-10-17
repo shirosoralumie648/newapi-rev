@@ -3027,6 +3027,16 @@ func TestPlaygroundTaskArtifactRecordsAndPins(t *testing.T) {
 				missingIDs = append(missingIDs, missing[index].TaskID)
 			}
 			assert.Equal(t, []string{"pg-artifact-task"}, missingIDs)
+
+			// The scheduled store pass is only scheduled while it has work.
+			cutoff := now - int64((30 * 24 * time.Hour).Seconds())
+			hasWork, err := model.HasPlaygroundTasksAwaitingArtifacts(cutoff)
+			require.NoError(t, err)
+			assert.True(t, hasWork)
+			require.NoError(t, model.MarkPlaygroundTaskArtifactsSynced(7, "pg-artifact-task"))
+			hasWork, err = model.HasPlaygroundTasksAwaitingArtifacts(cutoff)
+			require.NoError(t, err)
+			assert.False(t, hasWork)
 		})
 	}
 }

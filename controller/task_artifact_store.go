@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/service"
@@ -47,7 +48,15 @@ func (playgroundTaskArtifactStoreHandler) Type() string {
 }
 
 func (playgroundTaskArtifactStoreHandler) Enabled() bool {
-	return service.TaskArtifactStoreConfigured()
+	if !service.TaskArtifactStoreConfigured() {
+		return false
+	}
+	cutoff := common.GetTimestamp() - int64(service.TaskArtifactRetention().Seconds())
+	hasWork, err := model.HasPlaygroundTasksAwaitingArtifacts(cutoff)
+	if err != nil {
+		return false
+	}
+	return hasWork
 }
 
 func (playgroundTaskArtifactStoreHandler) Interval() time.Duration {
