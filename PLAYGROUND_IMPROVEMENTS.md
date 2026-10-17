@@ -444,6 +444,54 @@ Playground
 | WL-08 | 支付退款/拒付 webhook、订单状态扩展、金额精确十进制与支付渠道 | WL-06 | 推荐 |
 | WL-09 | aff_code 加长 + 碰撞重试（可选按充值比例返利） | UP-00 | 推荐 |
 
+## 12. 邀请返利
+
+> 来源：对 newapi-rev 邀请/返利代码（`repo-ro` main @ `1e8458b`）与上游 QuantumNous/new-api issue/PR 的只读调研，对照硅基流动、智谱 BigModel、Notion/Webflow 等同类做法与国内合规要求（详见 `/workspace/newapi-rev-research/referral.md`，2026-10-17）。用户已批准 referral.md 第 4 节全部推荐方案，并把 RF-02..RF-09 加入编排器；WL-09 收窄为纯正确性修复（即 RF-01，不另建 RF-01）。所有返利 Step 都要先读 `.agents/rules/billing.md`，沿用 9.4 节规则：在 CI 的真实数据库（MySQL、PostgreSQL、SQLite）上测试，本地不跑测试。RF-02..RF-09 排在 WL-05/WL-07/WL-08（WL-06 按需）之后，并通过它们间接依赖 UP-00。
+
+### 12.1 现状中的主要问题
+
+- **无充值返佣**：只有注册一次性固定奖（`QuotaForInviter`/`QuotaForInvitee`），充值/兑换成功路径没有任何 aff 逻辑（上游 #6906、#5358、#5829 等持续在要）。
+- **注册即发、可刷**：奖励注册时直接入账，无付费门槛与退款窗口，小号自邀可套利（上游 #128 提议「消费后解锁」）。
+- **无退款追回、未接账本**：`aff_quota`/`aff_history` 是 users 表可变整数，`TransferAffQuotaToQuota` 全量写且无流水，与 WL-05 账本目标冲突。
+- **4 位 `aff_code` 无重试**：碰撞导致注册失败（上游 #6215）。
+- **`aff_count` 统计 bug**：`QuotaForInviter=0` 时邀请人数不自增（上游 #6362/#6363）。
+- **无明细面板、归因粗糙**：只有 3 个汇总数字；localStorage 无归因窗口、无消费门槛；上游 #4360、#5766 未合并。
+- **合规只覆盖「开关」**：现有支付合规门控只决定允许/禁止，未处理单层 vs 多级、佣金提现的个税/支付牌照问题；上游 #6539 的多层级佣金结构不可采用。
+
+### 12.2 已批准的决策
+
+1. **奖励类型（D1=B）**：邀请人按被邀请人**实付充值**比例返佣；被邀请人保留固定新人礼（`QuotaForInvitee` 不变）。
+2. **奖励形式（D2=A）**：以 WL-07 赠送额度（`credit_grants`，`source=referral`）发放，可设有效期、不可提现/转让/开票；现金结算为**默认关闭**的开关，复用现有 `IsPaymentComplianceConfirmed` 门控。
+3. **返佣期限（D3=B）**：默认注册后 12 个月内每笔充值返；配置支持 0=仅首充、-1=永久。
+4. **发放时点与防刷（D4=C）**：付费且过退款窗口后才发放；同 IP/设备/邮箱域限次、每日/每月封顶、禁止自邀、大额人工审核；重复实名不重复发（国内站可选实名后发放）。
+5. **退款追回（D5=B）**：佣金 `pending → locked → settled`，锁定 14~30 天可配；窗口内退款直接撤销；已结算的通过 WL-05 账本冲正，最多扣到 0、余下记欠款（WL-06）。
+6. **归因（D6=B）**：链接 + 邀请码双通道，注册时单次绑定，不引入 cookie/多触点追踪；不允许用户自行改绑；`aff_code` 加长 8~12 位并碰撞重试（修 #6215）。
+7. **统计面板（D7=B）**：用户端邀请明细 + 管理端汇总与 CSV 导出（对应上游 #6364）。
+8. **按用户组配置（D8=B）**：全局默认 + 用户组覆盖 + 单人覆盖，复用 fork 已有的 `GroupOverrides` 模式。
+9. **渠道代理档位（D9=A+，可选）**：推荐官/代理档位可选且仅单层；明确不做多级/团队计酬（《禁止传销条例》红线，不采用 #6539 结构）。
+10. **存量迁移**：`aff_quota`/`aff_history` 迁入账本 + referral grant，`TransferAffQuotaToQuota` 账本化。
+
+### 12.3 与 WL-09 的合并/收窄
+
+- 用户已批准把 **WL-09 收窄**为纯正确性修复：`aff_code` 加长 8~12 位 + 碰撞重试 + 回归测试（修上游 #6215），保留 id WL-09，不另建 RF-01；原「可选按充值比例返利」整体拆到 RF-02..RF-09。
+- 这样 WL-09 与钱包解耦、可随 UP-00 后立即发布，不必等账本/退款链路；报告里 RF-01 作为依赖的地方一律改为 WL-09（如 RF-02 依赖 WL-09）。
+
+### 12.4 邀请返利 Step
+
+执行优先级：WL-09 随 UP-00 之后尽快做；RF-02 → RF-03（需 WL-05/WL-04）→ RF-04（WL-07）→ RF-05（WL-08/WL-06）；RF-06、RF-07 可与 RF-04 并行；RF-08 可选；RF-09 收尾。
+
+| ID | 标题 | 依赖 | 优先级 |
+| --- | --- | --- | --- |
+| WL-09 | aff_code 加长（8~12 位）与碰撞重试，旧码兼容 | UP-00 | 刚需 |
+| RF-02 | 邀请关系与归因记录模型 | WL-09 | 刚需 |
+| RF-03 | 充值返佣引擎（事件、幂等、比例配置） | RF-02, WL-05, WL-04 | 推荐 |
+| RF-04 | 佣金分桶、锁定与发放 | RF-03, WL-07 | 推荐 |
+| RF-05 | 退款/拒付冲正与欠款 | RF-04, WL-08, WL-06 | 推荐 |
+| RF-06 | 防刷与上限 | RF-02, RF-03 | 推荐 |
+| RF-07 | 邀请统计面板（用户端 + 管理端） | RF-02, RF-03 | 推荐 |
+| RF-08 | 按用户组比例与推荐官档位（可选） | RF-03 | 可选 |
+| RF-09 | 存量 aff_quota 迁移与账本衔接 | WL-05, WL-07, RF-04 | 推荐 |
+
 ## 8. 变更记录
 
 | 日期 | 变更 |
@@ -473,3 +521,4 @@ Playground
 | 2026-10-17 | P6-03：在画布中增加 `model` 工作流节点与运行/失败重试/任务取消——工作流链为产出节点 → `model`（经 `/pg/chat/completions` 非流式调用）→ `task`（`submitImageGeneration`/`submitVideoGeneration` 提交）→ `task-result`（只在 `ref` 保存 `taskId`/`taskArtifactKey` 引用）；服务端节点类型契约新增 `model`（`controller/playground_canvas_test.go` 覆盖类型接受、未知类型拒绝与节点数据字节上限）；前端 `canvas-workflow.ts` 做无环与输入校验并拓扑排序，`use-canvas-workflow-runner.ts` 顺序执行并对 `running` 步骤轮询 `getUserTaskLogs` durable 行而非重复提交、加载时按 durable 行恢复 `running` 任务节点、失败步骤起重试并复用已存输出、取消本地运行并对未完成任务调用 `cancelPlaygroundTask` 后按 durable 行结算；成功后仅为下游 `task-result` 抓取 `getTaskArtifacts`；运行状态以 `record:false` 写入不入撤销历史，节点/工具栏/Inspector 显示状态、错误、重试与取消；新增 `canvas-workflow.test.ts`、`use-canvas-workflow-runner.test.ts`、`canvas-toolbar.test.tsx`，扩展 `canvas-node.test.tsx`、`canvas-node-inspector.test.tsx`、`use-canvas-editor.test.ts`；补 19 个新键的七语言翻译（`i18n:sync` missingCount=0、extrasCount=0）；无新依赖；本地未运行测试/typecheck/lint/build（CI-only）。 |
 | 2026-10-17 | 计划：新增第 11 节“钱包”——批准 8 项钱包方案（主库 append-only 账本 + 每日对账、64 位 quota、额度分桶与有效期、持久化钱包预扣 + 关机 flush、按组透支上限与欠款只读、存储日结入统一账本、团队预算暂用令牌周期额度、退款/拒付 webhook 冲正与原币收款），追加 WL-01..WL-09，正确性修复排在 UP-00 之后最先执行；UP-08 缩小为令牌侧，UP-05/UP-06/BL-02/BL-03 改为复用钱包账本与预扣。 |
 | 2026-10-17 | 上游同步：merge QuantumNous/new-api main @ `5e9595190`（54 个上游提交，merge 方式，不改写 fork 历史）；冲突按策略解决（语言包取 key 并集，ci.yml 保留 fork 的 checkout 写法，static-keys.ts 两边都保留，代码冲突语义合并）；**行为变化**：4013729f6 fix: disable sensitive word filtering by default and clear the default word list (#7814)；本地未运行测试（CI-only）。 |
+| 2026-10-17 | 计划：新增第 12 节“邀请返利”——批准单层按被邀请人实付充值比例返佣（被邀请人保留固定新人礼；佣金以 WL-07 赠送额度发放、可设有效期、不可提现，现金结算默认关闭并复用 `IsPaymentComplianceConfirmed` 门控）；默认注册后 12 个月内每笔充值返（0=仅首充、-1=永久）；防刷（付费后才发、同 IP/设备/邮箱域限次、禁止自邀、日/月封顶、大额人工审核）；佣金 pending→locked→settled、锁定 14~30 天可配、窗口内退款撤销、已结算走 WL-05 冲正并扣到 0 记欠款（WL-06）；链接+邀请码注册时单次绑定、不可自行改绑；用户端明细+管理端汇总与 CSV 导出；全局默认+用户组+单人覆盖（GroupOverrides）与可选单层推荐官档位（禁止多级）；WL-09 收窄为 aff_code 加长 8~12 位与碰撞重试（#6215）并去掉可选按充值比例返利，追加 RF-02..RF-09 且排在 WL-05/WL-07/WL-08（WL-06 按需）之后。 |
