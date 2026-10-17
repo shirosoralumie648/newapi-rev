@@ -832,11 +832,15 @@ func newAuditTestDatabase(t *testing.T, kind, dsn string) (*gorm.DB, string) {
 	t.Helper()
 	if kind == "sqlite" {
 		// Mirror the production SQLite settings (see common.SQLitePath): WAL
-		// keeps readers from blocking the single writer, busy_timeout(30000)
-		// queues writers instead of failing them, and _txlock=immediate takes
-		// the write lock up front so concurrent transactions cannot hit
-		// SQLite's lock-promotion deadlock avoidance (SQLITE_BUSY).
-		sqliteDSN := t.TempDir() + "/audit.db?_pragma=busy_timeout(30000)&_pragma=journal_mode(WAL)&_txlock=immediate"
+		// keeps readers from blocking the single writer, which removes the
+		// lock-promotion deadlock that used to make both concurrent account
+		// deletions fail, and busy_timeout(30000) queues writers instead of
+		// failing them. The transaction lock mode stays deferred on purpose:
+		// _txlock=immediate takes the write lock when the transaction starts,
+		// and tests that hold two transactions open at once (for example
+		// TestManageUserQuotaConcurrentSnapshots, whose query callback waits
+		// for both transactions to reach it) would then deadlock.
+		sqliteDSN := t.TempDir() + "/audit.db?_pragma=busy_timeout(30000)&_pragma=journal_mode(WAL)"
 		db, err := gorm.Open(sqlite.Open(sqliteDSN), &gorm.Config{})
 		require.NoError(t, err)
 		return db, sqliteDSN
