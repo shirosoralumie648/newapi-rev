@@ -152,6 +152,13 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		return newAPIError
 	}
 
+	if firstTokenErr := helper.FirstTokenTimeoutError(info); firstTokenErr != nil {
+		// The channel never sent a first chunk and nothing reached the client,
+		// so the relay may fall back to another channel.
+		service.ResetStatusCode(firstTokenErr, statusCodeMappingStr)
+		return firstTokenErr
+	}
+
 	service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), nil)
 	return nil
 }

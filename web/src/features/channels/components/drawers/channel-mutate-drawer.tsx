@@ -170,6 +170,8 @@ import {
   channelFormSchema,
   channelsQueryKeys,
   getAdvancedCustomStats,
+  MAX_FIRST_TOKEN_TIMEOUT_SECONDS,
+  normalizeFirstTokenTimeout,
   transformChannelToFormDefaults,
   type ChannelFormValues,
   deduplicateKeys,
@@ -302,6 +304,7 @@ const SENSITIVE_FORM_FIELDS = [
   'http_protocol',
   'http2_connection_shards',
   'tls_insecure_skip_verify',
+  'first_token_timeout',
   'pass_through_body_enabled',
   'responses_websocket_enabled',
   'system_prompt',
@@ -2183,6 +2186,37 @@ export function ChannelMutateDrawer({
               onCheckedChange={field.onChange}
             />
           </FormControl>
+        </FormItem>
+      )}
+    />
+  )
+
+  const firstTokenTimeoutFields = (
+    <FormField
+      control={form.control}
+      name='first_token_timeout'
+      render={({ field }) => (
+        <FormItem>
+          <FormLabel>{t('First Token Timeout')}</FormLabel>
+          <FormControl>
+            <Input
+              type='number'
+              min={0}
+              max={MAX_FIRST_TOKEN_TIMEOUT_SECONDS}
+              placeholder='0'
+              disabled={sensitiveLocked}
+              value={field.value ?? 0}
+              onChange={(event) =>
+                field.onChange(
+                  normalizeFirstTokenTimeout(Number(event.target.value))
+                )
+              }
+            />
+          </FormControl>
+          <FormDescription>
+            {t(FIELD_DESCRIPTIONS.FIRST_TOKEN_TIMEOUT)}
+          </FormDescription>
+          <FormMessage />
         </FormItem>
       )}
     />
@@ -4791,6 +4825,7 @@ export function ChannelMutateDrawer({
                 {httpProtocolFields}
                 {httpShardsFields}
                 {tlsInsecureSkipVerifyFields}
+                {firstTokenTimeoutFields}
               </fieldset>
             </div>
             {upstreamModelDetectionFields}

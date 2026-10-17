@@ -35,6 +35,28 @@ type ChannelSettings struct {
 	// TLSInsecureSkipVerify accepts upstream certificates that fail
 	// verification, such as self-signed ones, for this channel only.
 	TLSInsecureSkipVerify bool `json:"tls_insecure_skip_verify,omitempty"`
+	// FirstTokenTimeout is the channel-level streaming first-token (TTFB)
+	// window in seconds: once upstream response headers arrived, the relay
+	// switches to another channel when no streamed data chunk shows up within
+	// this window. Zero inherits the global STREAMING_FIRST_TOKEN_TIMEOUT
+	// default (itself disabled by zero).
+	FirstTokenTimeout int `json:"first_token_timeout,omitempty"`
+}
+
+// MaxFirstTokenTimeoutSeconds bounds the per-channel first-token window so a
+// typo cannot keep a request waiting on one channel for hours.
+const MaxFirstTokenTimeoutSeconds = 3600
+
+// ValidateFirstTokenTimeout rejects a first-token window outside the supported
+// range. Zero means "inherit the global default".
+func (s *ChannelSettings) ValidateFirstTokenTimeout() error {
+	if s == nil || s.FirstTokenTimeout == 0 {
+		return nil
+	}
+	if s.FirstTokenTimeout < 0 || s.FirstTokenTimeout > MaxFirstTokenTimeoutSeconds {
+		return fmt.Errorf("invalid first_token_timeout: %d (0 inherits the global default, maximum %d)", s.FirstTokenTimeout, MaxFirstTokenTimeoutSeconds)
+	}
+	return nil
 }
 
 // BindsTaskPlugin reports whether the channel is bound to the task plugin,

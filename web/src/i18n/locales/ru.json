@@ -7704,6 +7704,8 @@
     "The canvas is full; the run could not add a result node.": "Холст заполнен; запуск не смог добавить узел результата.",
     "The step that produced this result is no longer on the canvas.": "Шаг, создавший этот результат, больше не находится на холсте.",
     "A connected reference image could not be read.": "Не удалось прочитать подключённое референсное изображение.",
-    "A connected reference image is larger than the 8 MiB limit.": "Подключённое референсное изображение превышает лимит 8 MiB."
+    "A connected reference image is larger than the 8 MiB limit.": "Подключённое референсное изображение превышает лимит 8 MiB.",
+    "First Token Timeout": "Тайм-аут первого токена",
+    "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch.": "Сколько секунд ждать первый блок потоковых данных после ответа вышестоящего сервиса. Если данные не приходят вовремя, запрос переключается на другой канал; 0 — использовать глобальное значение по умолчанию. Потоки, которые уже отправили данные, не переключаются."
   }
 }

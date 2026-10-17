@@ -1661,6 +1661,27 @@ test('turning on the upstream TLS verification skip saves it in the channel sett
   })
 })
 
+test('a first token timeout entered in Other Settings is saved with the channel', async () => {
+  const put = vi
+    .spyOn(api, 'put')
+    .mockResolvedValue({ data: { success: true } })
+  const user = userEvent.setup()
+  render(<ConfigurationHarness currentRow={editingChannel} />)
+  await screen.findByDisplayValue('Existing channel')
+  const otherTab = screen.getByRole('tab', { name: /Other Settings/ })
+  await user.click(otherTab)
+  const timeoutInput = screen.getByLabelText('First Token Timeout')
+  expect(timeoutInput).toHaveValue(0)
+  fireEvent.change(timeoutInput, { target: { value: '25' } })
+  expect(timeoutInput).toHaveValue(25)
+  await user.click(screen.getByRole('button', { name: 'Update Channel' }))
+  await waitFor(() => expect(put).toHaveBeenCalled())
+  const payload = put.mock.calls[0]?.[1] as { setting: string }
+  expect(JSON.parse(payload.setting)).toMatchObject({
+    first_token_timeout: 25,
+  })
+})
+
 test('an invalid edit switches categories and replaces configured styling with the field error', async () => {
   const user = userEvent.setup()
   render(<ConfigurationHarness currentRow={editingChannel} />)

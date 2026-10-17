@@ -50,6 +50,35 @@ func TestChannelValidateSettingsRejectsInvalidHTTPTransport(t *testing.T) {
 	}
 }
 
+func TestChannelValidateSettingsFirstTokenTimeout(t *testing.T) {
+	tests := []struct {
+		name    string
+		timeout int
+		wantErr string
+	}{
+		{name: "zero inherits the global default", timeout: 0},
+		{name: "positive window is valid", timeout: 60},
+		{name: "maximum window is valid", timeout: dto.MaxFirstTokenTimeoutSeconds},
+		{name: "negative window is rejected", timeout: -1, wantErr: "first_token_timeout"},
+		{name: "window above the maximum is rejected", timeout: dto.MaxFirstTokenTimeoutSeconds + 1, wantErr: "first_token_timeout"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			channel := &Channel{}
+			channel.SetSetting(dto.ChannelSettings{FirstTokenTimeout: tt.timeout})
+			err := channel.ValidateSettings()
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				assert.Equal(t, tt.timeout, channel.GetSetting().FirstTokenTimeout)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
 func TestAdvancedCustomChannelRequiresModelListRouteOnlyWhenUpdateChecksEnabled(t *testing.T) {
 	inferenceRoute := dto.AdvancedCustomRoute{
 		IncomingPath: "/v1/chat/completions",

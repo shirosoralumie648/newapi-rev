@@ -7704,6 +7704,8 @@
     "The canvas is full; the run could not add a result node.": "キャンバスが満杯のため、実行は結果ノードを追加できませんでした。",
     "The step that produced this result is no longer on the canvas.": "この結果を生成したステップはキャンバス上にありません。",
     "A connected reference image could not be read.": "接続済みの参照画像を読み込めませんでした。",
-    "A connected reference image is larger than the 8 MiB limit.": "接続済みの参照画像が 8 MiB の上限を超えています。"
+    "A connected reference image is larger than the 8 MiB limit.": "接続済みの参照画像が 8 MiB の上限を超えています。",
+    "First Token Timeout": "初回トークンのタイムアウト",
+    "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch.": "上流の応答後に最初のストリーミングデータを受信するまで待つ秒数。時間内にデータが届かない場合は別のチャネルに切り替わります。0 はグローバル既定値を使用します。すでにデータを送信したストリームは切り替わりません。"
   }
 }
