@@ -29,11 +29,10 @@ import { PlaygroundQuotaSection } from '../playground-quota-section'
 
 type OptionBody = { key: string; value: string }
 
-const put = vi.spyOn(api, 'put')
-
 function bodyFor(key: string): OptionBody | undefined {
-  return put.mock.calls
-    .map((call) => call[1] as OptionBody)
+  return vi
+    .mocked(api.put)
+    .mock.calls.map((call) => call[1] as OptionBody)
     .find((body) => body.key === key)
 }
 
@@ -72,8 +71,7 @@ function renderSection(
 }
 
 beforeEach(() => {
-  put.mockReset()
-  put.mockResolvedValue({ data: { success: true } })
+  vi.spyOn(api, 'put').mockResolvedValue({ data: { success: true } })
 })
 
 test('editing a global default saves the full defaults policy with the changed value', async () => {
