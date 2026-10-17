@@ -45,49 +45,62 @@ func (w *WalletFunding) PreConsume(amount int) error {
 	if amount <= 0 {
 		return nil
 	}
-	reserved, err := model.TryReserveUserQuota(w.userId, amount)
+	reserved, err := model.TryReserveUserQuota(w.userId, amount, w.requestId)
 	if err != nil {
 		return err
 	}
 	if !reserved {
 		return ErrInsufficientWalletQuota
 	}
-	w.consumed = amount
+	w.consumed += amount
 	model.RecordWalletConsumeDelta(w.userId, -int64(amount))
 	return nil
 }
 
 func (w *WalletFunding) Settle(delta int) error {
-	if delta == 0 {
+	if w.requestId == "" {
+		if delta == 0 {
+			return nil
+		}
+		if delta > 0 {
+			if err := model.DecreaseUserQuota(w.userId, delta, false); err != nil {
+				return err
+			}
+		} else {
+			if err := model.IncreaseUserQuota(w.userId, -delta, false); err != nil {
+				return err
+			}
+		}
+		model.RecordWalletConsumeDelta(w.userId, -int64(delta))
 		return nil
 	}
-	if delta > 0 {
-		if err := model.DecreaseUserQuota(w.userId, delta, false); err != nil {
-			return err
-		}
-	} else {
-		if err := model.IncreaseUserQuota(w.userId, -delta, false); err != nil {
-			return err
-		}
+	// 结算与关闭 hold 在同一事务内完成：崩溃后回收任务据此判断预扣是否已结束，
+	// 重放同一 requestId 不会二次扣费。
+	charged, err := model.SettleWalletHold(w.userId, w.requestId, int64(delta))
+	if err != nil {
+		return err
 	}
-	model.RecordWalletConsumeDelta(w.userId, -int64(delta))
+	if charged != 0 {
+		model.RecordWalletConsumeDelta(w.userId, -charged)
+	}
 	return nil
 }
 
 func (w *WalletFunding) Refund() error {
-	if w.consumed <= 0 {
+	if w.requestId == "" {
+		if w.consumed <= 0 {
+			return nil
+		}
+		if err := model.IncreaseUserQuota(w.userId, w.consumed, false); err != nil {
+			return err
+		}
+		model.RecordWalletConsumeDelta(w.userId, int64(w.consumed))
 		return nil
 	}
-	// 账本引用让退款幂等：重复调用同一 requestId 不会二次退款。
-	if w.requestId != "" {
-		return model.RefundWalletQuota(w.userId, w.consumed, model.WalletLedgerRefRequestRefund, w.requestId)
-	}
-	// 没有稳定引用时退回普通额度返还，并作为消费差额入账。
-	if err := model.IncreaseUserQuota(w.userId, w.consumed, false); err != nil {
-		return err
-	}
-	model.RecordWalletConsumeDelta(w.userId, int64(w.consumed))
-	return nil
+	// 账本引用与 hold 状态共同保证退款幂等：重复调用同一 requestId 不会二次退款，
+	// 退款金额取持久化的 hold 金额而不是内存计数。
+	_, err := model.RefundWalletHold(w.userId, w.requestId, w.consumed)
+	return err
 }
 
 // ---------------------------------------------------------------------------

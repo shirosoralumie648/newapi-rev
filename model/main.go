@@ -387,6 +387,11 @@ func migrateDB() error {
 	if err := migratePrefillGroupUniqueness(DB); err != nil {
 		return err
 	}
+	// The (session_id, client_key) unique index is added by AutoMigrate; remove
+	// any duplicate rows a snapshot-replacing release could have left behind.
+	if err := migratePlaygroundMessageUniqueness(DB); err != nil {
+		return err
+	}
 	// Migrate price_amount column from float/double to decimal for existing tables
 	migrateSubscriptionPlanPriceAmount()
 	// Migrate model_limits column from varchar to text for existing tables
@@ -447,6 +452,7 @@ func migrateDB() error {
 		&PlaygroundCanvasProject{},
 		&PlaygroundCanvasAsset{},
 		&WalletLedgerEntry{},
+		&WalletHold{},
 	)
 	if err != nil {
 		return err

@@ -91,12 +91,12 @@ func TestTryReserveQuotaWithoutRedis(t *testing.T) {
 	resetBatchUpdateTestState(t)
 
 	user := createReserveTestUser(t, 100)
-	reserved, err := TryReserveUserQuota(user.Id, 60)
+	reserved, err := TryReserveUserQuota(user.Id, 60, "")
 	require.NoError(t, err)
 	assert.True(t, reserved)
 	assert.Equal(t, 40, getUserQuotaFromDB(t, user.Id))
 
-	reserved, err = TryReserveUserQuota(user.Id, 41)
+	reserved, err = TryReserveUserQuota(user.Id, 41, "")
 	require.NoError(t, err)
 	assert.False(t, reserved)
 	assert.Equal(t, 40, getUserQuotaFromDB(t, user.Id))
@@ -122,12 +122,12 @@ func TestRedisBatchReserveNeverFallsBackToStaleDatabaseBalance(t *testing.T) {
 	common.BatchUpdateEnabled = true
 
 	user := createReserveTestUser(t, 10)
-	reserved, err := TryReserveUserQuota(user.Id, 8)
+	reserved, err := TryReserveUserQuota(user.Id, 8, "")
 	require.NoError(t, err)
 	assert.True(t, reserved)
 	assert.Equal(t, 10, getUserQuotaFromDB(t, user.Id), "batch delta is not flushed yet")
 
-	reserved, err = TryReserveUserQuota(user.Id, 3)
+	reserved, err = TryReserveUserQuota(user.Id, 3, "")
 	require.NoError(t, err)
 	assert.False(t, reserved, "stale DB balance must not authorize a second spend")
 	cachedUser, err := GetUserCache(user.Id)
@@ -192,12 +192,12 @@ func TestReserveFallsBackToDatabaseWhenRedisIsUnavailable(t *testing.T) {
 	server.Close()
 
 	// Redis 故障时降级为数据库条件更新：服务保持可用且不会超扣。
-	reserved, err := TryReserveUserQuota(user.Id, 5)
+	reserved, err := TryReserveUserQuota(user.Id, 5, "")
 	require.NoError(t, err)
 	assert.True(t, reserved)
 	assert.Equal(t, 15, getUserQuotaFromDB(t, user.Id))
 
-	reserved, err = TryReserveUserQuota(user.Id, 16)
+	reserved, err = TryReserveUserQuota(user.Id, 16, "")
 	require.NoError(t, err)
 	assert.False(t, reserved)
 	assert.Equal(t, 15, getUserQuotaFromDB(t, user.Id))
@@ -212,7 +212,7 @@ func TestSynchronousReserveCompensatesCacheWhenPersistenceFails(t *testing.T) {
 	require.NoError(t, populateUserCache(user))
 	require.NoError(t, DB.Delete(&user).Error)
 
-	reserved, err := TryReserveUserQuota(user.Id, 6)
+	reserved, err := TryReserveUserQuota(user.Id, 6, "")
 	assert.False(t, reserved)
 	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
 	cached, cacheErr := cacheGetUserBase(user.Id)

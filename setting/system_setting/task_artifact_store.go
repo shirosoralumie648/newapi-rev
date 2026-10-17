@@ -16,6 +16,11 @@ const (
 	TaskArtifactStoreModeUpstream = "upstream"
 	TaskArtifactStoreModeS3       = "s3"
 
+	ObjectStoreBackendLocal = "local"
+	ObjectStoreBackendS3    = "s3"
+	ObjectStoreBackendDB    = "db"
+
+	DefaultObjectStoreLocalDir                = "data/objectstore"
 	DefaultTaskArtifactStorePresignTTLSeconds = 900
 	MaxTaskArtifactStorePresignTTLSeconds     = 7 * 24 * 60 * 60
 )
@@ -29,6 +34,13 @@ const (
 	TaskArtifactStoreS3SecretKeyEnv  = "TASK_ARTIFACT_STORE_S3_SECRET_KEY"
 	TaskArtifactStoreS3PrefixEnv     = "TASK_ARTIFACT_STORE_S3_PREFIX"
 	TaskArtifactStoreS3PresignTTLEnv = "TASK_ARTIFACT_STORE_S3_PRESIGN_TTL"
+)
+
+const (
+	ObjectStoreBackendEnv    = "OBJECT_STORE_BACKEND"
+	ObjectStoreLocalDirEnv   = "OBJECT_STORE_LOCAL_DIR"
+	ObjectStorePrefixEnv     = "OBJECT_STORE_PREFIX"
+	ObjectStorePresignTTLEnv = "OBJECT_STORE_PRESIGN_TTL"
 )
 
 var (
@@ -72,6 +84,103 @@ func LoadTaskArtifactStoreConfig() TaskArtifactStoreConfig {
 		config.Mode = TaskArtifactStoreModeUpstream
 	}
 	return config
+}
+
+// ObjectStoreConfig is the unified object storage contract shared by
+// Playground attachments and task artifacts. Only the local backend is
+// implemented in this release.
+type ObjectStoreConfig struct {
+	Backend           string
+	LocalDir          string
+	Prefix            string
+	PresignTTLSeconds int
+}
+
+// LoadObjectStoreConfig reads and validates startup-only configuration. The
+// local backend is the default; invalid values fall back to local defaults.
+func LoadObjectStoreConfig() ObjectStoreConfig {
+	config := ObjectStoreConfig{
+		Backend:           common.GetEnvOrDefaultString(ObjectStoreBackendEnv, ObjectStoreBackendLocal),
+		LocalDir:          common.GetEnvOrDefaultString(ObjectStoreLocalDirEnv, DefaultObjectStoreLocalDir),
+		Prefix:            common.GetEnvOrDefaultString(ObjectStorePrefixEnv, ""),
+		PresignTTLSeconds: common.GetEnvOrDefault(ObjectStorePresignTTLEnv, DefaultTaskArtifactStorePresignTTLSeconds),
+	}
+	if err := ValidateObjectStoreConfig(config); err != nil {
+		common.SysError(common.LogText("invalid object store configuration: %s; using local defaults", err.Error()))
+		return ObjectStoreConfig{
+			Backend:           ObjectStoreBackendLocal,
+			LocalDir:          DefaultObjectStoreLocalDir,
+			Prefix:            "",
+			PresignTTLSeconds: DefaultTaskArtifactStorePresignTTLSeconds,
+		}
+	}
+	return config
+}
+
+// ValidateObjectStoreConfig performs syntax checks only. It never resolves
+// hosts, contacts an endpoint, or accesses the local directory.
+func ValidateObjectStoreConfig(config ObjectStoreConfig) error {
+	switch config.Backend {
+	case ObjectStoreBackendLocal:
+	case ObjectStoreBackendS3, ObjectStoreBackendDB:
+		return fmt.Errorf("object store backend %q is not implemented", config.Backend)
+	default:
+		return fmt.Errorf("unsupported object store backend %q", config.Backend)
+	}
+	if config.PresignTTLSeconds <= 0 || config.PresignTTLSeconds > MaxTaskArtifactStorePresignTTLSeconds {
+		return fmt.Errorf("object store presign TTL must be between 1 and %d seconds", MaxTaskArtifactStorePresignTTLSeconds)
+	}
+	if config.Backend == ObjectStoreBackendLocal {
+		if err := validateObjectStoreLocalDir(config.LocalDir); err != nil {
+			return err
+		}
+	}
+	if err := validateStoragePrefix(config.Prefix); err != nil {
+		return fmt.Errorf("object store %w", err)
+	}
+	return nil
+}
+
+func validateObjectStoreLocalDir(directory string) error {
+	if directory == "" {
+		return errors.New("object store local directory is required")
+	}
+	if directory != strings.TrimSpace(directory) || len(directory) > 4096 {
+		return errors.New("object store local directory syntax is invalid")
+	}
+	for _, character := range directory {
+		if unicode.IsControl(character) {
+			return errors.New("object store local directory must not contain control characters")
+		}
+	}
+	normalized := strings.ReplaceAll(directory, "\\", "/")
+	for part := range strings.SplitSeq(normalized, "/") {
+		if part == "." || part == ".." {
+			return errors.New("object store local directory must not contain dot segments")
+		}
+	}
+	return nil
+}
+
+func validateStoragePrefix(prefix string) error {
+	if prefix == "" {
+		return nil
+	}
+	if prefix != strings.TrimSpace(prefix) || len(prefix) > 512 ||
+		strings.HasPrefix(prefix, "/") || strings.Contains(prefix, "\\") {
+		return errors.New("prefix syntax is invalid")
+	}
+	for part := range strings.SplitSeq(prefix, "/") {
+		if part == "." || part == ".." {
+			return errors.New("prefix must not contain dot segments")
+		}
+	}
+	for _, character := range prefix {
+		if unicode.IsControl(character) {
+			return errors.New("prefix must not contain control characters")
+		}
+	}
+	return nil
 }
 
 // ValidateTaskArtifactStoreConfig performs syntax checks only. It never
@@ -128,19 +237,8 @@ func ValidateTaskArtifactStoreConfig(config TaskArtifactStoreConfig) error {
 	}
 
 	if config.S3Prefix != "" {
-		if config.S3Prefix != strings.TrimSpace(config.S3Prefix) || len(config.S3Prefix) > 512 ||
-			strings.HasPrefix(config.S3Prefix, "/") || strings.Contains(config.S3Prefix, "\\") {
-			return errors.New("S3 prefix syntax is invalid")
-		}
-		for part := range strings.SplitSeq(config.S3Prefix, "/") {
-			if part == "." || part == ".." {
-				return errors.New("S3 prefix must not contain dot segments")
-			}
-		}
-		for _, character := range config.S3Prefix {
-			if unicode.IsControl(character) {
-				return errors.New("S3 prefix must not contain control characters")
-			}
+		if err := validateStoragePrefix(config.S3Prefix); err != nil {
+			return fmt.Errorf("S3 %w", err)
 		}
 	}
 	return nil

@@ -61,6 +61,7 @@ func TestMain(m *testing.M) {
 		&model.SystemTask{},
 		&model.SystemTaskLock{},
 		&model.WalletLedgerEntry{},
+		&model.WalletHold{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -86,6 +87,7 @@ func truncate(t *testing.T) {
 		model.DB.Exec("DELETE FROM system_task_locks")
 		model.DB.Exec("DELETE FROM system_tasks")
 		model.DB.Exec("DELETE FROM wallet_ledger")
+		model.DB.Exec("DELETE FROM wallet_holds")
 	})
 }
 

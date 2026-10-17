@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
-import { ImageDialog } from '../image-dialog'
+import { ImageDialog } from '../dialogs/image-dialog'
 
 const { get } = vi.hoisted(() => ({ get: vi.fn() }))
 

@@ -68,6 +68,15 @@ type playgroundMessagesRequest struct {
 	Messages *[]playgroundMessageInput `json:"messages"`
 }
 
+// playgroundMessageDeltaRequest is one incremental message write. Upserts carry
+// the messages the client added or changed, deletes the client keys it removed;
+// at least one of them must be present.
+type playgroundMessageDeltaRequest struct {
+	Revision *int64                    `json:"revision"`
+	Upserts  *[]playgroundMessageInput `json:"upserts"`
+	Deletes  *[]string                 `json:"deletes"`
+}
+
 type playgroundMessagePayload struct {
 	Key      string `json:"key"`
 	From     string `json:"from"`
@@ -319,13 +328,11 @@ func validatePlaygroundToolCalls(from string, toolCalls []playgroundMessageToolC
 }
 
 // validatePlaygroundMessages normalizes stored payloads and resolves attachment
-// references against the session's owned attachments. The returned IDs are the
-// attachments the stored snapshot references, ordered for a deterministic
-// reference update. Create-time snapshots cannot reference attachments yet, so
-// allowAttachments is false there.
-func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroundMessageInput, allowAttachments bool, policy playground_setting.PlaygroundQuotaPolicy) ([]model.PlaygroundMessage, []string, error) {
+// references against the session's owned attachments. Create-time snapshots
+// cannot reference attachments yet, so allowAttachments is false there.
+func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroundMessageInput, allowAttachments bool, policy playground_setting.PlaygroundQuotaPolicy) ([]model.PlaygroundMessage, error) {
 	if len(inputs) > policy.MessageMaxCount {
-		return nil, nil, model.ErrPlaygroundMessageLimit
+		return nil, model.ErrPlaygroundMessageLimit
 	}
 	payloads := make([]playgroundMessagePayload, 0, len(inputs))
 	keys := make(map[string]bool, len(inputs))
@@ -333,62 +340,62 @@ func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroun
 	for _, input := range inputs {
 		var payload playgroundMessagePayload
 		if err := common.Unmarshal(input.Payload, &payload); err != nil {
-			return nil, nil, common.NewMessage("Invalid Playground message.")
+			return nil, common.NewMessage("Invalid Playground message.")
 		}
 		if input.ClientKey == "" || len(input.ClientKey) > 200 || keys[input.ClientKey] || payload.Key != input.ClientKey || len(payload.Versions) == 0 || len(payload.Versions) > policy.MessageMaxVersions {
-			return nil, nil, common.NewMessage("Invalid Playground message.")
+			return nil, common.NewMessage("Invalid Playground message.")
 		}
 		keys[input.ClientKey] = true
 		// A branch selection must point at a stored version; otherwise the
 		// client could persist an index no renderer can resolve.
 		if payload.ActiveVersionIndex != nil && (*payload.ActiveVersionIndex < 0 || *payload.ActiveVersionIndex >= len(payload.Versions)) {
-			return nil, nil, common.NewMessage("Invalid Playground message.")
+			return nil, common.NewMessage("Invalid Playground message.")
 		}
 		if payload.ErrorCode != nil && len(*payload.ErrorCode) > 500 {
-			return nil, nil, common.NewMessage("Invalid Playground message.")
+			return nil, common.NewMessage("Invalid Playground message.")
 		}
 		switch payload.From {
 		case "user", "assistant", "system":
 		default:
-			return nil, nil, common.NewMessage("Invalid Playground message.")
+			return nil, common.NewMessage("Invalid Playground message.")
 		}
 		switch payload.Status {
 		case "", "loading", "streaming", "complete", "error":
 		default:
-			return nil, nil, common.NewMessage("Invalid Playground message.")
+			return nil, common.NewMessage("Invalid Playground message.")
 		}
 		for versionIndex := range payload.Versions {
 			version := &payload.Versions[versionIndex]
 			if version.ID == "" || len(version.ID) > 200 {
-				return nil, nil, common.NewMessage("Invalid Playground message.")
+				return nil, common.NewMessage("Invalid Playground message.")
 			}
 			if len(version.ToolCalls) > 0 {
 				if err := validatePlaygroundToolCalls(payload.From, version.ToolCalls, policy); err != nil {
-					return nil, nil, err
+					return nil, err
 				}
 			}
 			if len(version.Attachments) == 0 {
 				continue
 			}
 			if !allowAttachments || payload.From != "user" || len(version.Attachments) > policy.AttachmentMaxCount {
-				return nil, nil, common.NewMessage("Invalid Playground message.")
+				return nil, common.NewMessage("Invalid Playground message.")
 			}
 			seen := make(map[string]bool, len(version.Attachments))
 			for _, attachment := range version.Attachments {
 				if attachment.ID == "" || len(attachment.ID) > 200 || seen[attachment.ID] {
-					return nil, nil, common.NewMessage("Invalid Playground message.")
+					return nil, common.NewMessage("Invalid Playground message.")
 				}
 				seen[attachment.ID] = true
 				attachmentIDs[attachment.ID] = true
 			}
 		}
 		if len(payload.Sources) > 100 {
-			return nil, nil, common.NewMessage("Invalid Playground message.")
+			return nil, common.NewMessage("Invalid Playground message.")
 		}
 		for _, source := range payload.Sources {
 			parsed, err := url.Parse(source.Href)
 			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || len(source.Href) > 4096 || len(source.Title) > 500 {
-				return nil, nil, common.NewMessage("Invalid Playground message.")
+				return nil, common.NewMessage("Invalid Playground message.")
 			}
 		}
 		payloads = append(payloads, payload)
@@ -404,17 +411,12 @@ func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroun
 		var err error
 		resolved, err = model.GetPlaygroundAttachmentsByIDs(userID, sessionID, ids)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		if len(resolved) != len(ids) {
-			return nil, nil, common.NewMessage("Playground attachment not found.")
+			return nil, common.NewMessage("Playground attachment not found.")
 		}
 	}
-	referenced := make([]string, 0, len(resolved))
-	for id := range resolved {
-		referenced = append(referenced, id)
-	}
-	sort.Strings(referenced)
 
 	messages := make([]model.PlaygroundMessage, 0, len(payloads))
 	total := 0
@@ -433,15 +435,30 @@ func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroun
 		// Only the message contract is persisted; unknown credential/provider fields are discarded.
 		encoded, err := common.Marshal(payload)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		total += len(encoded)
 		if int64(total) > policy.MessageMaxBytes {
-			return nil, nil, model.ErrPlaygroundMessageLimit
+			return nil, model.ErrPlaygroundMessageLimit
 		}
 		messages = append(messages, model.PlaygroundMessage{ClientKey: payload.Key, Payload: model.LongText(encoded)})
 	}
-	return messages, referenced, nil
+	return messages, nil
+}
+
+// validatePlaygroundMessageDeletes bounds the client keys one delta removes.
+// Removing an already absent key is allowed so a retried delta stays replayable.
+func validatePlaygroundMessageDeletes(keys []string) ([]string, error) {
+	deletes := make([]string, 0, len(keys))
+	seen := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		if key == "" || len(key) > 200 || seen[key] {
+			return nil, common.NewMessage("Invalid Playground request.")
+		}
+		seen[key] = true
+		deletes = append(deletes, key)
+	}
+	return deletes, nil
 }
 
 func ListPlaygroundSessions(c *gin.Context) {
@@ -487,7 +504,7 @@ func CreatePlaygroundSession(c *gin.Context) {
 		writePlaygroundError(c, err)
 		return
 	}
-	messages, _, err := validatePlaygroundMessages(c.GetInt("id"), "", request.Messages, false, policy)
+	messages, err := validatePlaygroundMessages(c.GetInt("id"), "", request.Messages, false, policy)
 	if err != nil {
 		writePlaygroundError(c, err)
 		return
@@ -583,6 +600,13 @@ func ListPlaygroundMessages(c *gin.Context) {
 	common.ApiSuccess(c, gin.H{"revision": revision, "messages": responses})
 }
 
+// ReplacePlaygroundMessages is the deprecated full-snapshot writer. It stays
+// available for one release so clients that still send the complete message
+// list keep working; the server translates the snapshot into incremental
+// writes, so unchanged rows are never rewritten. It is scheduled for removal
+// once every client uses PATCH /sessions/:id/messages (the delta endpoint).
+//
+// Deprecated: use ApplyPlaygroundMessagesDelta.
 func ReplacePlaygroundMessages(c *gin.Context) {
 	policy, ok := playgroundRequestPolicy(c)
 	if !ok {
@@ -596,12 +620,12 @@ func ReplacePlaygroundMessages(c *gin.Context) {
 		writePlaygroundError(c, common.NewMessage("Invalid Playground request."))
 		return
 	}
-	messages, attachmentIDs, err := validatePlaygroundMessages(c.GetInt("id"), c.Param("id"), *request.Messages, true, policy)
+	messages, err := validatePlaygroundMessages(c.GetInt("id"), c.Param("id"), *request.Messages, true, policy)
 	if err != nil {
 		writePlaygroundError(c, err)
 		return
 	}
-	revision, err := model.ReplacePlaygroundMessages(c.GetInt("id"), c.Param("id"), *request.Revision, messages, attachmentIDs)
+	revision, err := model.ReplacePlaygroundMessages(c.GetInt("id"), c.Param("id"), *request.Revision, messages)
 	if err != nil {
 		writePlaygroundError(c, err)
 		return
@@ -611,4 +635,71 @@ func ReplacePlaygroundMessages(c *gin.Context) {
 		responses = append(responses, playgroundMessageResponse{ClientKey: message.ClientKey, Payload: json.RawMessage(message.Payload)})
 	}
 	common.ApiSuccess(c, gin.H{"revision": revision, "messages": responses})
+}
+
+// ApplyPlaygroundMessagesDelta applies one incremental message write: only the
+// upserted and deleted rows are touched, and the caller's revision is the CAS
+// token that serializes concurrent writers. A delta that changes nothing keeps
+// the stored revision.
+func ApplyPlaygroundMessagesDelta(c *gin.Context) {
+	policy, ok := playgroundRequestPolicy(c)
+	if !ok {
+		return
+	}
+	var request playgroundMessageDeltaRequest
+	if !decodePlaygroundRequest(c, &request, policy.MessageMaxBytes+(64<<10)) {
+		return
+	}
+	if request.Revision == nil || *request.Revision < 0 || (request.Upserts == nil && request.Deletes == nil) {
+		writePlaygroundError(c, common.NewMessage("Invalid Playground request."))
+		return
+	}
+	upserts := make([]playgroundMessageInput, 0)
+	if request.Upserts != nil {
+		upserts = *request.Upserts
+	}
+	deletes := make([]string, 0)
+	if request.Deletes != nil {
+		var err error
+		deletes, err = validatePlaygroundMessageDeletes(*request.Deletes)
+		if err != nil {
+			writePlaygroundError(c, err)
+			return
+		}
+	}
+	if len(upserts) == 0 && len(deletes) == 0 {
+		writePlaygroundError(c, common.NewMessage("Invalid Playground request."))
+		return
+	}
+	messages, err := validatePlaygroundMessages(c.GetInt("id"), c.Param("id"), upserts, true, policy)
+	if err != nil {
+		writePlaygroundError(c, err)
+		return
+	}
+	// One key cannot be upserted and deleted in the same delta: the two would
+	// fight over the stored row and silently move the message to the end.
+	if len(deletes) > 0 {
+		deleted := make(map[string]bool, len(deletes))
+		for _, key := range deletes {
+			deleted[key] = true
+		}
+		for _, message := range messages {
+			if deleted[message.ClientKey] {
+				writePlaygroundError(c, common.NewMessage("Invalid Playground request."))
+				return
+			}
+		}
+	}
+	revision, err := model.ApplyPlaygroundMessagesDelta(c.GetInt("id"), c.Param("id"), *request.Revision, model.PlaygroundMessageDelta{Upserts: messages, Deletes: deletes})
+	if err != nil {
+		writePlaygroundError(c, err)
+		return
+	}
+	upserted := make([]string, 0, len(messages))
+	for _, message := range messages {
+		upserted = append(upserted, message.ClientKey)
+	}
+	// The response echoes the keys the request carried; rows whose stored payload
+	// already matched were not rewritten and the revision stayed the same.
+	common.ApiSuccess(c, gin.H{"revision": revision, "upserted": upserted, "deleted": deletes})
 }

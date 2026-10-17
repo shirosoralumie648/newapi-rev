@@ -20,13 +20,54 @@ For commercial licensing, please contact support@quantumnous.com
 import { useAuthStore } from '@/stores/auth-store'
 
 import {
+  applyPlaygroundMessagesDelta,
   createPlaygroundSession,
   getPlaygroundMessages,
-  replacePlaygroundMessages,
   updatePlaygroundSession,
 } from '../api'
-import type { PlaygroundSession, PlaygroundServerSession } from '../types'
+import type { PlaygroundMessageDelta } from '../api'
+import type {
+  Message,
+  PlaygroundSession,
+  PlaygroundServerSession,
+} from '../types'
 import { normalizeMessagesForStorage } from './storage/storage'
+
+/**
+ * Client-side view of what the server already stores: per canonical session id,
+ * the serialized form of every message the last acknowledged write persisted.
+ * It is rebuilt from the server snapshot on hydration, so a save only sends the
+ * messages that actually changed.
+ */
+export type PlaygroundSyncedMessages = Map<string, Map<string, string>>
+
+export function playgroundSyncedSnapshot(
+  messages: Message[]
+): Map<string, string> {
+  return new Map(
+    messages.map((message) => [message.key, JSON.stringify(message)])
+  )
+}
+
+/**
+ * The delta the server still needs: changed or new messages, plus the client
+ * keys it must remove. An empty delta means the stored snapshot already matches.
+ */
+export function playgroundMessageDelta(
+  synced: Map<string, string> | undefined,
+  messages: Message[]
+): PlaygroundMessageDelta {
+  const present = new Set<string>()
+  const upserts: Message[] = []
+  for (const message of messages) {
+    present.add(message.key)
+    if (synced?.get(message.key) !== JSON.stringify(message)) {
+      upserts.push(message)
+    }
+  }
+  const deletes = [...(synced?.keys() ?? [])].filter((key) => !present.has(key))
+  return { upserts, deletes }
+}
 
 export function assertPlaygroundOwner(
   owner: number,
@@ -51,7 +92,8 @@ export async function hydratePlaygroundWorkspace(
   remote: PlaygroundServerSession[],
   deleted: string[],
   owner: number,
-  signal: AbortSignal
+  signal: AbortSignal,
+  synced: PlaygroundSyncedMessages
 ): Promise<PlaygroundSession[]> {
   const result: PlaygroundSession[] = []
   const matched = new Set<string>()
@@ -65,6 +107,9 @@ export async function hydratePlaygroundWorkspace(
     )
     if (draft) matched.add(draft.id)
     if (draft?.syncPending) {
+      // The stored snapshot of a pending draft is unknown: the next save sends
+      // every local message and the server writes only the rows that differ.
+      synced.delete(session.id)
       result.push({
         ...draft,
         server: draft.server ?? {
@@ -76,6 +121,8 @@ export async function hydratePlaygroundWorkspace(
       continue
     }
     const snapshot = await getPlaygroundMessages(session.id, signal)
+    const messages = normalizeMessagesForStorage(snapshot.messages)
+    synced.set(session.id, playgroundSyncedSnapshot(messages))
     result.push({
       id: draft?.id ?? session.id,
       title: session.title,
@@ -83,7 +130,7 @@ export async function hydratePlaygroundWorkspace(
       updatedAt: session.updatedAt,
       config: session.config,
       parameterEnabled: session.parameterEnabled,
-      messages: normalizeMessagesForStorage(snapshot.messages),
+      messages,
       server: {
         id: session.id,
         revision: session.revision,
@@ -116,7 +163,8 @@ export async function savePlaygroundSession(
   draft: PlaygroundSession,
   owner: number,
   signal: AbortSignal,
-  acknowledge: (server: NonNullable<PlaygroundSession['server']>) => void
+  acknowledge: (server: NonNullable<PlaygroundSession['server']>) => void,
+  synced: PlaygroundSyncedMessages
 ): Promise<void> {
   assertPlaygroundOwner(owner, signal)
   const messages = normalizeMessagesForStorage(draft.messages)
@@ -133,6 +181,7 @@ export async function savePlaygroundSession(
     )
     assertPlaygroundOwner(owner, signal)
     if (created.created) {
+      synced.set(created.id, playgroundSyncedSnapshot(messages))
       acknowledge({
         id: created.id,
         revision: created.revision,
@@ -143,14 +192,14 @@ export async function savePlaygroundSession(
     // A lost create response can be retried safely: bind canonical state, then compare.
     const snapshot = await getPlaygroundMessages(created.id, signal)
     assertPlaygroundOwner(owner, signal)
+    const serverMessages = normalizeMessagesForStorage(snapshot.messages)
     const server = {
       id: created.id,
       revision: created.revision,
       messageRevision: snapshot.revision,
     }
     if (
-      JSON.stringify(normalizeMessagesForStorage(snapshot.messages)) !==
-        JSON.stringify(messages) ||
+      JSON.stringify(serverMessages) !== JSON.stringify(messages) ||
       created.title !== draft.title ||
       JSON.stringify(created.config) !== JSON.stringify(draft.config) ||
       JSON.stringify(created.parameterEnabled) !==
@@ -160,6 +209,7 @@ export async function savePlaygroundSession(
         'Playground changed on another device. Reload before saving.'
       )
     }
+    synced.set(created.id, playgroundSyncedSnapshot(serverMessages))
     acknowledge(server)
     return
   }
@@ -177,12 +227,20 @@ export async function savePlaygroundSession(
   // A metadata PATCH must not advance the message revision from another editor.
   const server = { ...draft.server, revision: updated.revision }
   acknowledge(server)
-  const saved = await replacePlaygroundMessages(
+  const delta = playgroundMessageDelta(synced.get(server.id), messages)
+  if (delta.upserts.length === 0 && delta.deletes.length === 0) {
+    // The stored snapshot already matches, so the revision stays where it is and
+    // no message row is written.
+    synced.set(server.id, playgroundSyncedSnapshot(messages))
+    return
+  }
+  const revision = await applyPlaygroundMessagesDelta(
     server.id,
-    messages,
+    delta,
     server.messageRevision,
     signal
   )
   assertPlaygroundOwner(owner, signal)
-  acknowledge({ ...server, messageRevision: saved.revision })
+  synced.set(server.id, playgroundSyncedSnapshot(messages))
+  acknowledge({ ...server, messageRevision: revision })
 }

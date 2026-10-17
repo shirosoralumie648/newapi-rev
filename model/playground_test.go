@@ -235,7 +235,7 @@ func TestPlaygroundRejectsInvalidSnapshotsWithoutReplacingHistory(t *testing.T) 
 	playgroundTestDB(t, "sqlite")
 	session := createPlayground(t, 9, "validation")
 	path := "/api/playground/sessions/" + session["id"].(string) + "/messages"
-	_, err := model.ReplacePlaygroundMessages(9, session["id"].(string), 0, []model.PlaygroundMessage{{ClientKey: "kept", Payload: `{"key":"kept","from":"user","versions":[{"id":"v","content":"Keep this history"}]}`}}, nil)
+	_, err := model.ReplacePlaygroundMessages(9, session["id"].(string), 0, []model.PlaygroundMessage{{ClientKey: "kept", Payload: `{"key":"kept","from":"user","versions":[{"id":"v","content":"Keep this history"}]}`}})
 	require.NoError(t, err)
 	tests := []struct {
 		name string
@@ -1513,7 +1513,7 @@ func TestPlaygroundMessageVersionBranches(t *testing.T) {
 			for index := range tooMany {
 				tooMany[index] = model.PlaygroundMessage{ClientKey: fmt.Sprintf("m%d", index), Payload: `{"key":"m","from":"user","versions":[{"id":"v","content":"x"}]}`}
 			}
-			_, err = model.ReplacePlaygroundMessages(7, id, 1, tooMany, nil)
+			_, err = model.ReplacePlaygroundMessages(7, id, 1, tooMany)
 			assert.Error(t, err)
 			messages, revision, err = model.ListPlaygroundMessages(7, id)
 			require.NoError(t, err)
@@ -1521,6 +1521,217 @@ func TestPlaygroundMessageVersionBranches(t *testing.T) {
 			require.Len(t, messages, 2)
 		})
 	}
+}
+
+// Incremental message writes touch only the rows a client changed: stored rows
+// keep their identity and position, new rows append after the highest position,
+// removed keys are deleted, an unchanged delta keeps the revision, and the
+// deprecated snapshot endpoint keeps its contract on top of the same path.
+func TestPlaygroundMessageDeltaWrites(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			session := createPlayground(t, 7, "message-delta")
+			id := session["id"].(string)
+			path := "/api/playground/sessions/" + id + "/messages"
+			userMessage := func(key string, content string) map[string]any {
+				return map[string]any{"client_key": key, "payload": map[string]any{
+					"key": key, "from": "user", "versions": []any{map[string]any{"id": key + "-v1", "content": content}},
+				}}
+			}
+			delta := func(body map[string]any) *httptest.ResponseRecorder {
+				t.Helper()
+				return playgroundRequest(t, 7, http.MethodPatch, path, body, controller.ApplyPlaygroundMessagesDelta)
+			}
+			revision := func(response *httptest.ResponseRecorder) int64 {
+				t.Helper()
+				require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+				var envelope struct {
+					Success bool
+					Data    struct {
+						Revision int64
+						Upserted []string
+						Deleted  []string
+					}
+				}
+				require.NoError(t, common.Unmarshal(response.Body.Bytes(), &envelope))
+				require.True(t, envelope.Success, response.Body.String())
+				return envelope.Data.Revision
+			}
+			rows := func() []model.PlaygroundMessage {
+				t.Helper()
+				stored := make([]model.PlaygroundMessage, 0)
+				require.NoError(t, db.Where("session_id = ?", id).Order("position").Order("id").Find(&stored).Error)
+				return stored
+			}
+
+			// The compatibility snapshot endpoint still accepts the complete
+			// message list; it is stored in order with sparse positions.
+			require.EqualValues(t, 1, revision(playgroundRequest(t, 7, http.MethodPut, path, map[string]any{
+				"revision": 0, "messages": []any{userMessage("m1", "first"), userMessage("m2", "second")},
+			}, controller.ReplacePlaygroundMessages)))
+			first := rows()
+			require.Len(t, first, 2)
+			assert.Equal(t, "m1", first[0].ClientKey)
+			assert.Equal(t, "m2", first[1].ClientKey)
+			assert.Less(t, first[0].Position, first[1].Position)
+			// Age the untouched row so a rewrite of it would be observable.
+			agedAt := first[0].UpdatedAt - 100000
+			require.NoError(t, db.Model(&model.PlaygroundMessage{}).Where("id = ?", first[0].ID).Update("updated_at", agedAt).Error)
+
+			// One changed and one new message: the untouched row keeps its
+			// identity, position and timestamp, the new row appends after the
+			// highest stored position.
+			require.EqualValues(t, 2, revision(delta(map[string]any{
+				"revision": 1, "upserts": []any{userMessage("m2", "second edited"), userMessage("m3", "third")},
+			})))
+			updated := rows()
+			require.Len(t, updated, 3)
+			assert.Equal(t, first[0].ID, updated[0].ID)
+			assert.Equal(t, first[0].Position, updated[0].Position)
+			assert.Equal(t, agedAt, updated[0].UpdatedAt, "an unchanged row is not rewritten")
+			assert.Contains(t, string(updated[0].Payload), "first")
+			assert.Equal(t, first[1].ID, updated[1].ID)
+			assert.Contains(t, string(updated[1].Payload), "second edited")
+			assert.Greater(t, updated[2].Position, updated[1].Position)
+			assert.Contains(t, string(updated[2].Payload), "third")
+
+			// Deleting one key removes exactly that row.
+			require.EqualValues(t, 3, revision(delta(map[string]any{"revision": 2, "deletes": []string{"m1"}})))
+			remaining := rows()
+			require.Len(t, remaining, 2)
+			assert.Equal(t, []string{"m2", "m3"}, []string{remaining[0].ClientKey, remaining[1].ClientKey})
+
+			// Re-sending an unchanged payload and re-deleting an absent key write
+			// nothing and keep the stored revision.
+			require.EqualValues(t, 3, revision(delta(map[string]any{
+				"revision": 3, "upserts": []any{userMessage("m2", "second edited")}, "deletes": []string{"m1"},
+			})))
+			unchanged := rows()
+			require.Len(t, unchanged, 2)
+			assert.Equal(t, remaining[0].UpdatedAt, unchanged[0].UpdatedAt)
+
+			// A stale revision conflicts without touching the snapshot, and
+			// another account cannot reach the conversation at all.
+			assert.Equal(t, http.StatusConflict, delta(map[string]any{"revision": 2, "upserts": []any{userMessage("m4", "late")}}).Code)
+			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 8, http.MethodPatch, path, map[string]any{
+				"revision": 3, "upserts": []any{userMessage("m4", "foreign")},
+			}, controller.ApplyPlaygroundMessagesDelta).Code)
+			assert.Len(t, rows(), 2)
+
+			// Malformed deltas are rejected before anything is written.
+			for name, body := range map[string]map[string]any{
+				"missing revision":  {"upserts": []any{userMessage("m4", "text")}},
+				"empty delta":       {"revision": 3, "upserts": []any{}, "deletes": []string{}},
+				"duplicate delete":  {"revision": 3, "deletes": []string{"m2", "m2"}},
+				"blank delete":      {"revision": 3, "deletes": []string{""}},
+				"upsert and delete": {"revision": 3, "upserts": []any{userMessage("m2", "text")}, "deletes": []string{"m2"}},
+				"mismatched key": {"revision": 3, "upserts": []any{map[string]any{"client_key": "m4", "payload": map[string]any{
+					"key": "other", "from": "user", "versions": []any{map[string]any{"id": "v", "content": "text"}},
+				}}}},
+			} {
+				assert.Equal(t, http.StatusBadRequest, delta(body).Code, name)
+			}
+			assert.Len(t, rows(), 2)
+
+			// The (session_id, client_key) unique index is part of the migrated
+			// schema, repeated startup migrations keep it, and it rejects a
+			// duplicate row.
+			require.True(t, db.Migrator().HasIndex(&model.PlaygroundMessage{}, "uk_playground_message_session_client"))
+			require.NoError(t, db.AutoMigrate(&model.PlaygroundMessage{}))
+			require.NoError(t, db.AutoMigrate(&model.PlaygroundMessage{}))
+			require.True(t, db.Migrator().HasIndex(&model.PlaygroundMessage{}, "uk_playground_message_session_client"))
+			assert.Error(t, db.Create(&model.PlaygroundMessage{
+				SessionID: id, UserID: 7, ClientKey: "m2", Position: 1 << 20,
+				Payload: `{"key":"m2","from":"user","versions":[{"id":"v","content":"duplicate"}]}`, CreatedAt: 1, UpdatedAt: 1,
+			}).Error)
+		})
+	}
+}
+
+// Two incremental writers that share one revision serialize on the session row:
+// exactly one applies and the loser is told to reload.
+func TestPlaygroundMessageDeltaConcurrentRevision(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			playgroundTestDB(t, dialect)
+			session := createPlayground(t, 7, "message-delta-concurrency")
+			id := session["id"].(string)
+			path := "/api/playground/sessions/" + id + "/messages"
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodPut, path, map[string]any{
+				"revision": 0, "messages": []any{map[string]any{"client_key": "m1", "payload": map[string]any{
+					"key": "m1", "from": "user", "versions": []any{map[string]any{"id": "v1", "content": "stored"}},
+				}}},
+			}, controller.ReplacePlaygroundMessages).Code)
+
+			start := make(chan struct{})
+			outcomes := make(chan error, 2)
+			for index := range 2 {
+				go func() {
+					<-start
+					key := fmt.Sprintf("c%d", index)
+					_, err := model.ApplyPlaygroundMessagesDelta(7, id, 1, model.PlaygroundMessageDelta{
+						Upserts: []model.PlaygroundMessage{{ClientKey: key, Payload: model.LongText(fmt.Sprintf(`{"key":%q,"from":"user","versions":[{"id":"v1","content":"concurrent"}]}`, key))}},
+					})
+					outcomes <- err
+				}()
+			}
+			close(start)
+			one, two := <-outcomes, <-outcomes
+			if one != nil {
+				one, two = two, one
+			}
+			require.NoError(t, one)
+			assert.ErrorIs(t, two, model.ErrPlaygroundConflict)
+
+			messages, revision, err := model.ListPlaygroundMessages(7, id)
+			require.NoError(t, err)
+			assert.EqualValues(t, 2, revision)
+			assert.Len(t, messages, 2, "only the winner's write is stored")
+		})
+	}
+}
+
+// A delta that would push the stored snapshot past the account's message budget
+// is rejected inside the write transaction: the revision and the stored rows
+// stay exactly as they were, and replacing a message fits the budget again.
+func TestPlaygroundMessageDeltaLimitRollback(t *testing.T) {
+	playgroundTestDB(t, "sqlite")
+	usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+		policy.MessageMaxCount = 2
+	})
+	session := createPlayground(t, 7, "message-delta-limit")
+	id := session["id"].(string)
+	path := "/api/playground/sessions/" + id + "/messages"
+	userMessage := func(key string) map[string]any {
+		return map[string]any{"client_key": key, "payload": map[string]any{
+			"key": key, "from": "user", "versions": []any{map[string]any{"id": key + "-v1", "content": "text"}},
+		}}
+	}
+	require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodPut, path, map[string]any{
+		"revision": 0, "messages": []any{userMessage("m1"), userMessage("m2")},
+	}, controller.ReplacePlaygroundMessages).Code)
+
+	overflow := playgroundRequest(t, 7, http.MethodPatch, path, map[string]any{
+		"revision": 1, "upserts": []any{userMessage("m3")},
+	}, controller.ApplyPlaygroundMessagesDelta)
+	assert.Equal(t, http.StatusUnprocessableEntity, overflow.Code, overflow.Body.String())
+	assert.Contains(t, overflow.Body.String(), "PLAYGROUND_MESSAGE_LIMIT_EXCEEDED")
+	messages, revision, err := model.ListPlaygroundMessages(7, id)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, revision)
+	require.Len(t, messages, 2)
+
+	response := playgroundRequest(t, 7, http.MethodPatch, path, map[string]any{
+		"revision": 1, "upserts": []any{userMessage("m3")}, "deletes": []string{"m1"},
+	}, controller.ApplyPlaygroundMessagesDelta)
+	assert.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	messages, revision, err = model.ListPlaygroundMessages(7, id)
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, revision)
+	require.Len(t, messages, 2)
+	assert.Contains(t, string(messages[0].Payload), "m2")
+	assert.Contains(t, string(messages[1].Payload), "m3")
 }
 
 // The Playground resource quota policy resolves an effective budget from the

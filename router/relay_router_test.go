@@ -306,12 +306,19 @@ func TestMjImageAccessModeOptionRoundTrip(t *testing.T) {
 
 	originalAccessMode := setting.MjImageAccessMode
 	t.Cleanup(func() { setting.MjImageAccessMode = originalAccessMode })
+	// UpdateOption publishes the normalized mode through common.OptionMap, which
+	// production initializes in model.InitOptionMap.
+	originalOptionMap := common.OptionMap
+	common.OptionMap = map[string]string{}
+	t.Cleanup(func() { common.OptionMap = originalOptionMap })
 
 	require.NoError(t, model.UpdateOption("MjImageAccessMode", setting.MjImageAccessLegacy))
 	require.Equal(t, setting.MjImageAccessLegacy, setting.MjImageAccessMode)
+	require.Equal(t, setting.MjImageAccessLegacy, common.OptionMap["MjImageAccessMode"])
 
 	require.NoError(t, model.UpdateOption("MjImageAccessMode", "unexpected"))
 	require.Equal(t, setting.MjImageAccessAuth, setting.MjImageAccessMode)
+	require.Equal(t, setting.MjImageAccessAuth, common.OptionMap["MjImageAccessMode"])
 }
 
 func setupRelayRouterTestDB(t *testing.T) {

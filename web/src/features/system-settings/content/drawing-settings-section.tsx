@@ -62,6 +62,14 @@ const drawingSchema = z.object({
 
 type DrawingFormValues = z.infer<typeof drawingSchema>
 
+// MjImageAccessMode is the only non-boolean field, so the switch list only
+// renders the boolean toggles of the drawing form.
+type DrawingSwitchField = {
+  [Key in keyof DrawingFormValues]: DrawingFormValues[Key] extends boolean
+    ? Key
+    : never
+}[keyof DrawingFormValues]
+
 type DrawingSettingsSectionProps = {
   defaultValues: DrawingFormValues
 }
@@ -103,7 +111,7 @@ export function DrawingSettingsSection({
   }
 
   const switches: Array<{
-    name: keyof DrawingFormValues
+    name: DrawingSwitchField
     label: string
     description: string
   }> = [

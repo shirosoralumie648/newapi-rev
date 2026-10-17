@@ -38,10 +38,10 @@ import { formatQuota, formatTimestampToDate } from '@/lib/format'
 import { handleServerError } from '@/lib/handle-server-error'
 import { cn } from '@/lib/utils'
 
-import { exportWalletLedgerCsv } from '../api'
-import { useWalletLedger } from '../hooks'
-import { getWalletLedgerKindLabel } from '../lib/ledger'
-import type { WalletLedgerEntry } from '../types'
+import { exportWalletLedgerCsv } from '../../api'
+import { useWalletLedger } from '../../hooks'
+import { getWalletLedgerKindLabel } from '../../lib/ledger'
+import type { WalletLedgerEntry } from '../../types'
 
 interface WalletLedgerDialogProps {
   open: boolean

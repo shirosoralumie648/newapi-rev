@@ -19,7 +19,9 @@ For commercial licensing, please contact support@quantumnous.com
 package model
 
 import (
+	"cmp"
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -35,7 +37,38 @@ var (
 	// capacity errors the resource quota policy produces for conversations.
 	ErrPlaygroundSessionLimit = errors.New("Playground conversation limit exceeded.")
 	ErrPlaygroundMessageLimit = errors.New("Playground message limit exceeded.")
+	// errPlaygroundMessageSequence only guards the internal ordering contract of
+	// the snapshot compatibility writer; request handlers validate their own
+	// input before reaching it.
+	errPlaygroundMessageSequence = errors.New("playground message sequence does not match the stored messages")
 )
+
+// playgroundMessagePositionStride spaces stored message positions so an
+// incremental write can append a message without renumbering the rows that
+// already exist. Only the snapshot compatibility path renumbers, and only when
+// the requested sequence no longer matches the stored one.
+const playgroundMessagePositionStride = 1024
+
+// PlaygroundMessageDelta is one incremental message write: Upserts carry the
+// canonical payloads the client added or changed, Deletes names the client keys
+// it removed, and Order optionally pins the complete resulting sequence (the
+// deprecated snapshot endpoint sets it).
+type PlaygroundMessageDelta struct {
+	Upserts []PlaygroundMessage
+	Deletes []string
+	Order   []string
+}
+
+// playgroundStoredMessageReferences decodes only the attachment references of a
+// stored payload. The message contract itself is validated on write, so the
+// recomputation of attachment reference state does not re-validate it.
+type playgroundStoredMessageReferences struct {
+	Versions []struct {
+		Attachments []struct {
+			ID string `json:"id"`
+		} `json:"attachments"`
+	} `json:"versions"`
+}
 
 type PlaygroundSession struct {
 	CreatedNow       bool    `json:"-" gorm:"-"`
@@ -53,9 +86,9 @@ type PlaygroundSession struct {
 
 type PlaygroundMessage struct {
 	ID        int64    `json:"id" gorm:"primaryKey"`
-	SessionID string   `json:"session_id" gorm:"size:128;not null;index:idx_playground_message_session_position,priority:1"`
+	SessionID string   `json:"session_id" gorm:"size:128;not null;index:idx_playground_message_session_position,priority:1;uniqueIndex:uk_playground_message_session_client,priority:1"`
 	UserID    int      `json:"user_id" gorm:"not null;index"`
-	ClientKey string   `json:"client_key" gorm:"size:200;not null"`
+	ClientKey string   `json:"client_key" gorm:"size:200;not null;uniqueIndex:uk_playground_message_session_client,priority:2"`
 	Position  int      `json:"position" gorm:"not null;index:idx_playground_message_session_position,priority:2"`
 	Payload   LongText `json:"payload" gorm:"not null"`
 	CreatedAt int64    `json:"created_at" gorm:"not null"`
@@ -239,7 +272,7 @@ func insertPlaygroundMessages(tx *gorm.DB, userID int, sessionID string, message
 		messages[index].ID = 0
 		messages[index].SessionID = sessionID
 		messages[index].UserID = userID
-		messages[index].Position = index
+		messages[index].Position = (index + 1) * playgroundMessagePositionStride
 		messages[index].CreatedAt = now
 		messages[index].UpdatedAt = now
 	}
@@ -249,9 +282,13 @@ func insertPlaygroundMessages(tx *gorm.DB, userID int, sessionID string, message
 	return tx.CreateInBatches(messages, 25).Error
 }
 
-// referencedAttachmentIDs are the attachment IDs the stored snapshot still
-// references; the same transaction recomputes attachment reference state.
-func ReplacePlaygroundMessages(userID int, sessionID string, revision int64, messages []PlaygroundMessage, referencedAttachmentIDs []string) (int64, error) {
+// ApplyPlaygroundMessagesDelta writes only the rows a client actually changed.
+// The session row is locked first and the caller's MessageRevision must still
+// match, so concurrent writers serialize: the winner bumps the revision and the
+// loser gets ErrPlaygroundConflict. A delta that changes nothing keeps the
+// revision and leaves every stored row untouched.
+func ApplyPlaygroundMessagesDelta(userID int, sessionID string, revision int64, delta PlaygroundMessageDelta) (int64, error) {
+	applied := revision
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var session PlaygroundSession
 		if err := lockForUpdate(tx).Where("id = ? AND user_id = ?", sessionID, userID).First(&session).Error; err != nil {
@@ -259,6 +296,17 @@ func ReplacePlaygroundMessages(userID int, sessionID string, revision int64, mes
 		}
 		if session.MessageRevision != revision {
 			return ErrPlaygroundConflict
+		}
+		policy, err := playgroundPolicyForUser(tx, userID)
+		if err != nil {
+			return err
+		}
+		changed, err := applyPlaygroundMessageDelta(tx, userID, sessionID, policy, delta)
+		if err != nil {
+			return err
+		}
+		if !changed {
+			return nil
 		}
 		result := tx.Model(&PlaygroundSession{}).Where("id = ? AND user_id = ? AND message_revision = ?", sessionID, userID, revision).
 			Updates(map[string]any{"updated_at": common.GetTimestamp(), "message_revision": revision + 1})
@@ -268,19 +316,228 @@ func ReplacePlaygroundMessages(userID int, sessionID string, revision int64, mes
 		if result.RowsAffected != 1 {
 			return ErrPlaygroundConflict
 		}
-		if err := tx.Where("session_id = ? AND user_id = ?", sessionID, userID).Delete(&PlaygroundMessage{}).Error; err != nil {
-			return err
-		}
-		policy, err := playgroundPolicyForUser(tx, userID)
-		if err != nil {
-			return err
-		}
-		if err := insertPlaygroundMessages(tx, userID, sessionID, messages, policy); err != nil {
-			return err
-		}
-		return syncPlaygroundAttachmentReferences(tx, userID, sessionID, referencedAttachmentIDs)
+		applied = revision + 1
+		return nil
 	})
-	return revision + 1, err
+	return applied, err
+}
+
+// ReplacePlaygroundMessages is the deprecated full-snapshot writer kept for one
+// release. It is translated into the incremental path, so a snapshot that
+// matches the stored rows writes nothing and only a changed sequence renumbers
+// positions. Callers should move to ApplyPlaygroundMessagesDelta.
+func ReplacePlaygroundMessages(userID int, sessionID string, revision int64, messages []PlaygroundMessage) (int64, error) {
+	order := make([]string, 0, len(messages))
+	for index := range messages {
+		order = append(order, messages[index].ClientKey)
+	}
+	return ApplyPlaygroundMessagesDelta(userID, sessionID, revision, PlaygroundMessageDelta{Upserts: messages, Order: order})
+}
+
+// applyPlaygroundMessageDelta reconciles the stored rows with one delta: stored
+// rows keep their identity and position, changed or new rows are written, keys
+// the client removed (or that the requested sequence no longer contains) are
+// deleted, and the attachment references of the resulting snapshot are
+// recomputed on the same connection. It reports whether anything was written.
+func applyPlaygroundMessageDelta(tx *gorm.DB, userID int, sessionID string, policy playground_setting.PlaygroundQuotaPolicy, delta PlaygroundMessageDelta) (bool, error) {
+	stored := make([]PlaygroundMessage, 0)
+	if err := tx.Where("session_id = ? AND user_id = ?", sessionID, userID).
+		Order(clause.OrderByColumn{Column: clause.Column{Name: "position"}}).
+		Order(clause.OrderByColumn{Column: clause.Column{Name: "id"}}).
+		Find(&stored).Error; err != nil {
+		return false, err
+	}
+	// byKey mirrors the stored rows. A database written before the unique index
+	// existed can still hold a duplicate (session_id, client_key); the migration
+	// removes it and the first row in sequence stays authoritative here.
+	byKey := make(map[string]*PlaygroundMessage, len(stored))
+	sequence := make([]*PlaygroundMessage, 0, len(stored))
+	for index := range stored {
+		message := &stored[index]
+		if _, duplicate := byKey[message.ClientKey]; duplicate {
+			continue
+		}
+		byKey[message.ClientKey] = message
+		sequence = append(sequence, message)
+	}
+
+	changed := false
+	if len(delta.Order) > 0 {
+		wanted := make(map[string]bool, len(delta.Order))
+		for _, key := range delta.Order {
+			if key == "" || wanted[key] {
+				return false, errPlaygroundMessageSequence
+			}
+			wanted[key] = true
+		}
+		for _, message := range sequence {
+			if wanted[message.ClientKey] {
+				continue
+			}
+			if err := deletePlaygroundMessageRow(tx, userID, sessionID, message); err != nil {
+				return false, err
+			}
+			delete(byKey, message.ClientKey)
+			changed = true
+		}
+	}
+	for _, key := range delta.Deletes {
+		message, ok := byKey[key]
+		if !ok {
+			// Removing an already absent key is a no-op, so a retried delta stays
+			// safe to replay.
+			continue
+		}
+		if err := deletePlaygroundMessageRow(tx, userID, sessionID, message); err != nil {
+			return false, err
+		}
+		delete(byKey, key)
+		changed = true
+	}
+
+	now := common.GetTimestamp()
+	nextPosition := playgroundNextMessagePosition(byKey)
+	for index := range delta.Upserts {
+		upsert := delta.Upserts[index]
+		if existing, ok := byKey[upsert.ClientKey]; ok {
+			if existing.Payload == upsert.Payload {
+				continue
+			}
+			if err := tx.Model(&PlaygroundMessage{}).
+				Where("id = ? AND session_id = ? AND user_id = ?", existing.ID, sessionID, userID).
+				Updates(map[string]any{"payload": string(upsert.Payload), "updated_at": now}).Error; err != nil {
+				return false, err
+			}
+			existing.Payload = upsert.Payload
+			existing.UpdatedAt = now
+			changed = true
+			continue
+		}
+		upsert.ID = 0
+		upsert.SessionID = sessionID
+		upsert.UserID = userID
+		upsert.Position = nextPosition
+		upsert.CreatedAt = now
+		upsert.UpdatedAt = now
+		nextPosition += playgroundMessagePositionStride
+		if err := tx.Create(&upsert).Error; err != nil {
+			return false, err
+		}
+		byKey[upsert.ClientKey] = &upsert
+		changed = true
+	}
+
+	// The stored snapshot is measured after the delta is applied, so a write
+	// that would exceed the budget rolls back as a whole.
+	if len(byKey) > policy.MessageMaxCount {
+		return false, ErrPlaygroundMessageLimit
+	}
+	var storedBytes int64
+	for _, message := range byKey {
+		storedBytes += int64(len(message.Payload))
+	}
+	if storedBytes > policy.MessageMaxBytes {
+		return false, ErrPlaygroundMessageLimit
+	}
+
+	if len(delta.Order) > 0 {
+		ordered := make([]*PlaygroundMessage, 0, len(delta.Order))
+		for _, key := range delta.Order {
+			message, ok := byKey[key]
+			if !ok {
+				return false, errPlaygroundMessageSequence
+			}
+			ordered = append(ordered, message)
+		}
+		if len(ordered) != len(byKey) {
+			return false, errPlaygroundMessageSequence
+		}
+		current := playgroundMessagesByPosition(byKey)
+		matches := true
+		for index, message := range current {
+			if message != ordered[index] {
+				matches = false
+				break
+			}
+		}
+		// Only a snapshot whose sequence actually changed is renumbered; a
+		// compatible client that repeats the stored order writes nothing.
+		if !matches {
+			for index, message := range ordered {
+				position := (index + 1) * playgroundMessagePositionStride
+				if message.Position == position {
+					continue
+				}
+				if err := tx.Model(&PlaygroundMessage{}).
+					Where("id = ? AND session_id = ? AND user_id = ?", message.ID, sessionID, userID).
+					Updates(map[string]any{"position": position, "updated_at": now}).Error; err != nil {
+					return false, err
+				}
+				message.Position = position
+				changed = true
+			}
+		}
+	}
+
+	referencesChanged, err := syncPlaygroundAttachmentReferences(tx, userID, sessionID, playgroundMessageAttachmentReferences(byKey))
+	if err != nil {
+		return false, err
+	}
+	return changed || referencesChanged, nil
+}
+
+// playgroundNextMessagePosition appends after the highest stored position so a
+// new message never has to renumber its neighbours.
+func playgroundNextMessagePosition(messages map[string]*PlaygroundMessage) int {
+	highest := 0
+	for _, message := range messages {
+		highest = max(highest, message.Position)
+	}
+	return highest + playgroundMessagePositionStride
+}
+
+// playgroundMessagesByPosition returns the stored rows in their persisted order.
+func playgroundMessagesByPosition(messages map[string]*PlaygroundMessage) []*PlaygroundMessage {
+	ordered := make([]*PlaygroundMessage, 0, len(messages))
+	for _, message := range messages {
+		ordered = append(ordered, message)
+	}
+	slices.SortFunc(ordered, func(a, b *PlaygroundMessage) int {
+		if a.Position != b.Position {
+			return cmp.Compare(a.Position, b.Position)
+		}
+		return cmp.Compare(a.ID, b.ID)
+	})
+	return ordered
+}
+
+func deletePlaygroundMessageRow(tx *gorm.DB, userID int, sessionID string, message *PlaygroundMessage) error {
+	return tx.Where("id = ? AND session_id = ? AND user_id = ?", message.ID, sessionID, userID).Delete(&PlaygroundMessage{}).Error
+}
+
+// playgroundMessageAttachmentReferences collects the attachment IDs the stored
+// snapshot still references. The result is ordered so the reference update is
+// deterministic.
+func playgroundMessageAttachmentReferences(messages map[string]*PlaygroundMessage) []string {
+	seen := make(map[string]bool)
+	references := make([]string, 0)
+	for _, message := range messages {
+		var stored playgroundStoredMessageReferences
+		if err := common.Unmarshal([]byte(message.Payload), &stored); err != nil {
+			continue
+		}
+		for _, version := range stored.Versions {
+			for _, attachment := range version.Attachments {
+				if attachment.ID == "" || seen[attachment.ID] {
+					continue
+				}
+				seen[attachment.ID] = true
+				references = append(references, attachment.ID)
+			}
+		}
+	}
+	slices.Sort(references)
+	return references
 }
 
 func ListPlaygroundMessages(userID int, sessionID string) ([]PlaygroundMessage, int64, error) {

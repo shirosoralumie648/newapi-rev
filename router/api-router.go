@@ -84,6 +84,9 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.PATCH("/sessions/:id", controller.UpdatePlaygroundSession)
 			playgroundRoute.DELETE("/sessions/:id", controller.DeletePlaygroundSession)
 			playgroundRoute.GET("/sessions/:id/messages", controller.ListPlaygroundMessages)
+			playgroundRoute.PATCH("/sessions/:id/messages", controller.ApplyPlaygroundMessagesDelta)
+			// Deprecated compatibility shim: the full snapshot endpoint is kept for
+			// one release and translated into incremental writes server-side.
 			playgroundRoute.PUT("/sessions/:id/messages", controller.ReplacePlaygroundMessages)
 			playgroundRoute.GET("/sessions/:id/artifacts", controller.ListPlaygroundArtifacts)
 			playgroundRoute.POST("/sessions/:id/artifacts", controller.CreatePlaygroundArtifact)

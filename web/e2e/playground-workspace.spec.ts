@@ -20,23 +20,20 @@ test('a renamed conversation survives a reload and a fresh sign-in', async ({
   const nameInput = page.getByRole('textbox', { name: 'Session name' })
   await nameInput.fill(title)
   // Wait for the write that persists the new title: either the create request
-  // already carries it, or the server-bound update finishes with its message
-  // write. Without this the reload can cut the debounced save short.
+  // already carries it, or the server-bound session update finishes with it.
+  // Without this the reload can cut the debounced save short.
   const persisted = page.waitForResponse((response) => {
     if (!response.ok()) return false
     const url = response.url()
     const method = response.request().method()
-    if (
-      method === 'PUT' &&
-      /\/api\/playground\/sessions\/[^/]+\/messages$/.test(url)
-    ) {
-      return true
+    const body = response.request().postData() ?? ''
+    if (method === 'POST' && url.endsWith('/api/playground/sessions')) {
+      return body.includes(title)
     }
-    return (
-      method === 'POST' &&
-      url.endsWith('/api/playground/sessions') &&
-      (response.request().postData() ?? '').includes(title)
-    )
+    if (method === 'PATCH' && /\/api\/playground\/sessions\/[^/]+$/.test(url)) {
+      return body.includes(title)
+    }
+    return false
   })
   await nameInput.press('Enter')
   await persisted
