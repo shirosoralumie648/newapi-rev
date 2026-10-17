@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { MESSAGE_ROLES, MESSAGE_STATUS } from '../../constants'
-import type { Message } from '../../types'
+import type { Message, MessageVersion } from '../../types'
 import { parseThinkTags } from './message-reasoning-utils'
 import { getCurrentVersion } from './message-utils'
 
@@ -57,13 +57,14 @@ function shouldShowMessageLoader(
 
 function shouldShowMessageContent(
   message: Message,
-  versionContent: string
+  versionContent: string,
+  version: MessageVersion
 ): boolean {
-  const hasAttachments =
-    (getCurrentVersion(message).attachments?.length ?? 0) > 0
+  const hasAttachments = (version.attachments?.length ?? 0) > 0
+  const hasToolCalls = (version.toolCalls?.length ?? 0) > 0
   return (
     (message.from === MESSAGE_ROLES.USER || !message.isReasoningStreaming) &&
-    (versionContent.length > 0 || hasAttachments)
+    (versionContent.length > 0 || hasAttachments || hasToolCalls)
   )
 }
 
@@ -79,9 +80,15 @@ function getDisplayContent(message: Message, versionContent: string): string {
   return parseThinkTags(versionContent).visibleContent
 }
 
+/**
+ * Resolve the display state for one rendered version. The version is looked up
+ * by default so plain callers stay on the active branch, while branch views
+ * pass the version they render: attachments and tool calls belong to a version.
+ */
 export function getMessageContentState(
   message: Message,
-  versionContent: string
+  versionContent: string,
+  version: MessageVersion = getCurrentVersion(message)
 ): MessageContentState {
   const isAssistant = message.from === MESSAGE_ROLES.ASSISTANT
   const sources = message.sources ?? []
@@ -91,7 +98,11 @@ export function getMessageContentState(
     isAssistant,
     versionContent
   )
-  const showMessageContent = shouldShowMessageContent(message, versionContent)
+  const showMessageContent = shouldShowMessageContent(
+    message,
+    versionContent,
+    version
+  )
 
   const baseState: MessageContentStateBase = {
     displayContent: getDisplayContent(message, versionContent),

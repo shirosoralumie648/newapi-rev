@@ -61,6 +61,7 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	// router/api-router.go: /api/playground
 	"GET /api/playground/usage":                                                  accessTokenSessionRule,
 	"GET /api/playground/assets":                                                 accessTokenSessionRule,
+	"POST /api/playground/tasks/:taskId/cancel":                                  accessTokenSessionRule,
 	"GET /api/playground/sessions":                                               accessTokenSessionRule,
 	"POST /api/playground/sessions":                                              accessTokenSessionRule,
 	"GET /api/playground/sessions/:id":                                           accessTokenSessionRule,
@@ -331,8 +332,13 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"POST /api/deployments/:id/extend":                  accessTokenScopeRule("deployment:write"),
 	"DELETE /api/deployments/:id":                       accessTokenScopeRule("deployment:write"),
 
-	// router/relay-router.go
-	"POST /pg/chat/completions": accessTokenSessionRule,
+	// router/relay-router.go: the Playground workspace, chat and media
+	// bridges alike, is session-only.
+	"POST /pg/chat/completions":   accessTokenSessionRule,
+	"POST /pg/images/generations": accessTokenSessionRule,
+	"POST /pg/images/edits":       accessTokenSessionRule,
+	"POST /pg/videos":             accessTokenSessionRule,
+	"POST /pg/audio/speech":       accessTokenSessionRule,
 }
 
 var (

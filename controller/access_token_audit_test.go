@@ -831,10 +831,15 @@ func (releasedAuditLog) TableName() string { return "logs" }
 func newAuditTestDatabase(t *testing.T, kind, dsn string) (*gorm.DB, string) {
 	t.Helper()
 	if kind == "sqlite" {
-		path := t.TempDir() + "/audit.db"
-		db, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+		// Mirror the production SQLite settings (see common.SQLitePath): WAL
+		// keeps readers from blocking the single writer, busy_timeout(30000)
+		// queues writers instead of failing them, and _txlock=immediate takes
+		// the write lock up front so concurrent transactions cannot hit
+		// SQLite's lock-promotion deadlock avoidance (SQLITE_BUSY).
+		sqliteDSN := t.TempDir() + "/audit.db?_pragma=busy_timeout(30000)&_pragma=journal_mode(WAL)&_txlock=immediate"
+		db, err := gorm.Open(sqlite.Open(sqliteDSN), &gorm.Config{})
 		require.NoError(t, err)
-		return db, path
+		return db, sqliteDSN
 	}
 	require.NotEmpty(t, dsn)
 	name := fmt.Sprintf("newapi_audit_%d", time.Now().UnixNano())

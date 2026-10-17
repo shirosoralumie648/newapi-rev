@@ -31,10 +31,31 @@ export interface MessageAttachment {
   byteSize?: number
 }
 
+/**
+ * Tool calls are never executed by the Playground. A pending call waits for the
+ * user to paste the result obtained elsewhere (or to deny the call), and the
+ * answer is only relayed to the model as a `tool` message.
+ */
+export type MessageToolCallStatus = 'pending' | 'completed' | 'denied' | 'error'
+
+export interface MessageToolCall {
+  id: string
+  name: string
+  /** Raw JSON arguments requested by the model; kept as text, never evaluated. */
+  arguments: string
+  status: MessageToolCallStatus
+  /** Result the user provided manually. */
+  result?: string
+  errorMessage?: string
+  createdAt?: number
+  completedAt?: number
+}
+
 export interface MessageVersion {
   id: string
   content: string
   attachments?: MessageAttachment[]
+  toolCalls?: MessageToolCall[]
 }
 
 export interface Message {
@@ -108,8 +129,19 @@ export interface PlaygroundInputMessage {
 }
 
 export interface ChatCompletionMessage {
-  role: MessageRole
+  role: MessageRole | 'tool'
   content: string | ContentPart[]
+  tool_calls?: ChatCompletionToolCall[]
+  tool_call_id?: string
+}
+
+export interface ChatCompletionToolCall {
+  id: string
+  type: 'function'
+  function: {
+    name: string
+    arguments: string
+  }
 }
 
 export interface ContentPart {
@@ -144,9 +176,23 @@ export interface ChatCompletionChunk {
       role?: MessageRole
       content?: string
       reasoning_content?: string
+      tool_calls?: ChatCompletionToolCallDelta[]
     }
     finish_reason: string | null
   }>
+}
+
+/**
+ * A streamed tool call fragment. Later chunks repeat the same `index` and only
+ * carry the missing part of `arguments` (and occasionally of `id`/`name`).
+ */
+export interface ChatCompletionToolCallDelta {
+  index: number
+  id?: string
+  function?: {
+    name?: string
+    arguments?: string
+  }
 }
 
 export interface ChatCompletionResponse {
@@ -160,6 +206,7 @@ export interface ChatCompletionResponse {
       role: MessageRole
       content: string
       reasoning_content?: string
+      tool_calls?: ChatCompletionToolCall[]
     }
     finish_reason: string
   }>

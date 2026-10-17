@@ -26,7 +26,7 @@ import {
   sanitizeMessagesOnLoad,
 } from '../message/message-streaming-utils'
 import { completeAssistantTiming } from '../message/message-timing-utils'
-import { hasMessageContent } from '../message/message-utils'
+import { hasMessageContent, hasToolCallPayload } from '../message/message-utils'
 import {
   MAX_LOADED_MESSAGE_CHARS,
   MAX_LOADED_MESSAGES_CHARS,
@@ -158,7 +158,17 @@ function getMessageSize(message: Message): number {
         (attachment.filename?.length ?? 0),
       0
     )
-    return total + version.content.length + attachmentsSize
+    const toolCallsSize = (version.toolCalls ?? []).reduce(
+      (toolCallTotal, toolCall) =>
+        toolCallTotal +
+        toolCall.id.length +
+        toolCall.name.length +
+        toolCall.arguments.length +
+        (toolCall.result?.length ?? 0) +
+        (toolCall.errorMessage?.length ?? 0),
+      0
+    )
+    return total + version.content.length + attachmentsSize + toolCallsSize
   }, 0)
   const reasoningSize = message.reasoning?.content.length ?? 0
 
@@ -292,8 +302,9 @@ function normalizeStoredMessageForLoad(message: Message): Message {
 
   const hasContent = hasMessageContent(normalized)
   const hasReasoning = normalized.reasoning?.content.trim()
+  const hasToolCalls = hasToolCallPayload(normalized)
 
-  if (!hasContent && !hasReasoning) {
+  if (!hasContent && !hasReasoning && !hasToolCalls) {
     return normalized
   }
 

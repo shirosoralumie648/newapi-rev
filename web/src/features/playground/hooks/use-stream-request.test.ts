@@ -73,6 +73,7 @@ const payload: ChatCompletionRequest = {
 
 const noopCallbacks = {
   onUpdate: () => undefined,
+  onToolCalls: () => undefined,
   onComplete: () => undefined,
   onError: () => undefined,
 }
@@ -175,6 +176,7 @@ describe('latest-wins stream request coordination', () => {
     const callbacks = {
       onUpdate: (_type: 'reasoning' | 'content', chunk: string) =>
         updates.push(chunk),
+      onToolCalls: () => undefined,
       onComplete: () => undefined,
       onError: () => undefined,
     }
@@ -195,5 +197,65 @@ describe('latest-wins stream request coordination', () => {
     )
 
     expect(updates).toEqual(['current'])
+  })
+
+  test('dispatches streamed tool call fragments separately from text updates', async () => {
+    const source = new FakeStreamSource()
+    const updates: string[] = []
+    const toolCallDeltas: unknown[] = []
+    const controller = createStreamRequestController({
+      getHeaders: () => Promise.resolve({ Authorization: 'Bearer test' }),
+      createSource: () => source,
+      setStreaming: () => undefined,
+    })
+
+    await controller.send(payload, {
+      onUpdate: (_type, chunk) => updates.push(chunk),
+      onToolCalls: (deltas) => toolCallDeltas.push(...deltas),
+      onComplete: () => undefined,
+      onError: () => undefined,
+    })
+
+    source.emit(
+      'message',
+      JSON.stringify({
+        choices: [
+          {
+            delta: {
+              content: 'checking',
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'call_1',
+                  function: { name: 'get_weather', arguments: '{"city"' },
+                },
+              ],
+            },
+          },
+        ],
+      })
+    )
+    source.emit(
+      'message',
+      JSON.stringify({
+        choices: [
+          {
+            delta: {
+              tool_calls: [{ index: 0, function: { arguments: ':"Paris"}' } }],
+            },
+          },
+        ],
+      })
+    )
+
+    expect(updates).toEqual(['checking'])
+    expect(toolCallDeltas).toEqual([
+      {
+        index: 0,
+        id: 'call_1',
+        function: { name: 'get_weather', arguments: '{"city"' },
+      },
+      { index: 0, function: { arguments: ':"Paris"}' } },
+    ])
   })
 })

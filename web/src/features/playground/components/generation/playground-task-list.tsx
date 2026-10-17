@@ -16,10 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Send, Sparkles } from 'lucide-react'
+import { Send, Sparkles, X } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { EmptyState } from '@/components/empty-state'
 import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
@@ -37,8 +39,15 @@ import {
   translateServerText,
 } from '@/lib/server-error-message'
 
-import { PLAYGROUND_GENERATION_ERRORS } from '../../constants'
-import { usePlaygroundTasks, useTaskArtifactsRequest } from '../../hooks'
+import {
+  PLAYGROUND_GENERATION_ERRORS,
+  PLAYGROUND_TASK_TERMINAL_STATUSES,
+} from '../../constants'
+import {
+  useCancelPlaygroundTask,
+  usePlaygroundTasks,
+  useTaskArtifactsRequest,
+} from '../../hooks'
 
 interface PlaygroundTaskListProps {
   active: boolean
@@ -57,7 +66,9 @@ export function PlaygroundTaskList(props: PlaygroundTaskListProps) {
   const { t } = useTranslation()
   const tasksQuery = usePlaygroundTasks(props.active)
   const artifactsRequest = useTaskArtifactsRequest()
+  const cancelTask = useCancelPlaygroundTask()
   const [pendingTaskId, setPendingTaskId] = useState<string | null>(null)
+  const [taskToCancel, setTaskToCancel] = useState<TaskLog | null>(null)
   const [artifactsByTask, setArtifactsByTask] = useState<
     Record<string, TaskArtifact[]>
   >({})
@@ -95,6 +106,21 @@ export function PlaygroundTaskList(props: PlaygroundTaskListProps) {
       )
     } finally {
       setPendingTaskId(null)
+    }
+  }
+
+  const handleCancel = async () => {
+    if (!taskToCancel) return
+    try {
+      await cancelTask.mutateAsync(taskToCancel.task_id)
+      toast.success(t('Task canceled'))
+    } catch (error) {
+      handleServerError(
+        error,
+        t(PLAYGROUND_GENERATION_ERRORS.TASK_CANCEL_FAILED)
+      )
+    } finally {
+      setTaskToCancel(null)
     }
   }
 
@@ -152,62 +178,93 @@ export function PlaygroundTaskList(props: PlaygroundTaskListProps) {
   }
 
   return (
-    <ul aria-label={t('Generation tasks')} className='grid gap-2'>
-      {tasks.map((task) => {
-        const isSuccessful = task.status === 'SUCCESS'
-        const isPending = pendingTaskId === task.task_id
-        const failure = task.fail_reason?.trim()
-        return (
-          <li
-            className='rounded-lg border p-2.5'
-            key={task.task_id || String(task.id)}
-          >
-            <div className='flex items-center justify-between gap-2'>
-              <StatusBadge
-                copyable={false}
-                label={t(
-                  taskStatusMapper.getLabel(
-                    task.status,
-                    task.status || 'Submitting'
-                  )
-                )}
-                variant={taskStatusMapper.getVariant(task.status)}
-              />
-              <span className='text-muted-foreground truncate text-xs'>
-                {task.properties?.origin_model_name || task.platform}
-              </span>
-            </div>
-            <p className='text-muted-foreground mt-1 truncate text-xs'>
-              {[task.action, task.progress].filter(Boolean).join(' · ')}
-            </p>
-            {failure ? (
-              <p className='text-destructive mt-1 text-xs break-words'>
-                {translateServerText(t, failure)}
-              </p>
-            ) : null}
-            {isSuccessful ? (
-              <div className='mt-2 flex flex-wrap items-center gap-1.5'>
-                <TaskArtifactsCell log={task} />
-                <Button
-                  aria-label={t('Send to canvas')}
-                  disabled={isPending}
-                  onClick={() => void handleSendToCanvas(task)}
-                  size='xs'
-                  type='button'
-                  variant='outline'
-                >
-                  {isPending ? (
-                    <Spinner data-icon='inline-start' />
-                  ) : (
-                    <Send aria-hidden='true' data-icon='inline-start' />
+    <>
+      <ul aria-label={t('Generation tasks')} className='grid gap-2'>
+        {tasks.map((task) => {
+          const isSuccessful = task.status === 'SUCCESS'
+          const isPending = pendingTaskId === task.task_id
+          const failure = task.fail_reason?.trim()
+          const isTerminal = PLAYGROUND_TASK_TERMINAL_STATUSES.includes(
+            task.status
+          )
+          return (
+            <li
+              className='rounded-lg border p-2.5'
+              key={task.task_id || String(task.id)}
+            >
+              <div className='flex items-center justify-between gap-2'>
+                <StatusBadge
+                  copyable={false}
+                  label={t(
+                    taskStatusMapper.getLabel(
+                      task.status,
+                      task.status || 'Submitting'
+                    )
                   )}
-                  {t('Send to canvas')}
-                </Button>
+                  variant={taskStatusMapper.getVariant(task.status)}
+                />
+                <span className='text-muted-foreground truncate text-xs'>
+                  {task.properties?.origin_model_name || task.platform}
+                </span>
               </div>
-            ) : null}
-          </li>
-        )
-      })}
-    </ul>
+              <p className='text-muted-foreground mt-1 truncate text-xs'>
+                {[task.action, task.progress].filter(Boolean).join(' · ')}
+              </p>
+              {failure ? (
+                <p className='text-destructive mt-1 text-xs break-words'>
+                  {translateServerText(t, failure)}
+                </p>
+              ) : null}
+              {isSuccessful ? (
+                <div className='mt-2 flex flex-wrap items-center gap-1.5'>
+                  <TaskArtifactsCell log={task} />
+                  <Button
+                    aria-label={t('Send to canvas')}
+                    disabled={isPending}
+                    onClick={() => void handleSendToCanvas(task)}
+                    size='xs'
+                    type='button'
+                    variant='outline'
+                  >
+                    {isPending ? (
+                      <Spinner data-icon='inline-start' />
+                    ) : (
+                      <Send aria-hidden='true' data-icon='inline-start' />
+                    )}
+                    {t('Send to canvas')}
+                  </Button>
+                </div>
+              ) : null}
+              {isTerminal ? null : (
+                <div className='mt-2 flex flex-wrap items-center gap-1.5'>
+                  <Button
+                    aria-label={t('Cancel task')}
+                    onClick={() => setTaskToCancel(task)}
+                    size='xs'
+                    type='button'
+                    variant='outline'
+                  >
+                    <X aria-hidden='true' data-icon='inline-start' />
+                    {t('Cancel task')}
+                  </Button>
+                </div>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+      <ConfirmDialog
+        confirmText={t('Cancel task')}
+        desc={t('The task will be canceled and its reserved quota refunded.')}
+        destructive
+        handleConfirm={() => void handleCancel()}
+        isLoading={cancelTask.isPending}
+        onOpenChange={(open) => {
+          if (!open) setTaskToCancel(null)
+        }}
+        open={taskToCancel !== null}
+        title={t('Cancel this task?')}
+      />
+    </>
   )
 }

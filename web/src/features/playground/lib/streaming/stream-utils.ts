@@ -17,7 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { ERROR_MESSAGES } from '../../constants'
-import type { ChatCompletionChunk } from '../../types'
+import type {
+  ChatCompletionChunk,
+  ChatCompletionToolCallDelta,
+} from '../../types'
 
 const STREAM_DONE_MESSAGE = '[DONE]'
 const STREAM_CLOSED_READY_STATE = 2
@@ -27,6 +30,11 @@ export type StreamUpdateType = 'reasoning' | 'content'
 export type StreamMessageUpdate = {
   type: StreamUpdateType
   chunk: string
+}
+
+export type StreamChunkParseResult = {
+  updates: StreamMessageUpdate[]
+  toolCalls: ChatCompletionToolCallDelta[]
 }
 
 type StreamErrorPayload = {
@@ -64,12 +72,17 @@ export function parseStreamErrorDetails(data?: string): StreamErrorDetails {
   }
 }
 
-export function parseStreamMessageUpdates(data: string): StreamMessageUpdate[] {
+/**
+ * Parse one SSE chunk. Text and reasoning updates flow into the assistant
+ * content; tool call fragments are kept separate because they are merged by
+ * stream index before they become stored calls.
+ */
+export function parseStreamChunk(data: string): StreamChunkParseResult {
   const chunk = JSON.parse(data) as ChatCompletionChunk
   const delta = chunk.choices?.[0]?.delta
 
   if (!delta) {
-    return []
+    return { updates: [], toolCalls: [] }
   }
 
   const updates: StreamMessageUpdate[] = []
@@ -82,7 +95,7 @@ export function parseStreamMessageUpdates(data: string): StreamMessageUpdate[] {
     updates.push({ type: 'content', chunk: delta.content })
   }
 
-  return updates
+  return { updates, toolCalls: delta.tool_calls ?? [] }
 }
 
 export function isStreamDoneMessage(data: string): boolean {

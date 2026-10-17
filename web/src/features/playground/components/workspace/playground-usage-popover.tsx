@@ -84,6 +84,12 @@ function PlaygroundUsageSummary(props: { userId: number | null }) {
       metric: usage.canvas,
       bytes: true,
     },
+    {
+      key: 'tasks',
+      label: t('Tasks'),
+      metric: usage.tasks,
+      bytes: true,
+    },
   ] as const
 
   return (

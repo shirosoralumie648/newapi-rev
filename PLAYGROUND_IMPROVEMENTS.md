@@ -171,10 +171,10 @@ Playground
 
 - [x] 将图片、视频、音频生成任务映射到 `new-api` 现有 Relay、渠道和 task plugin（新增 `/pg/images/generations`、`/pg/images/edits`、`/pg/videos`、`/pg/audio/speech` 媒体路由：`middleware.PlaygroundRelayBridge` 在任务插件 pin 与渠道选择之前把路径重写为对应 `/v1` 规范路径，并按 `PlaygroundRequest.group` 复用账号可用用户组覆盖校验；随后沿用既有 `PinTaskPluginEndpoint`/`PrepareTaskPluginEndpoint`/`Distribute`，图片/视频由 `controller.RelayTaskPluginEndpoint` 分流到插件协议桥或内置 `Relay`/`RelayTask`，语音为同步 `Relay(RelayFormatOpenAIAudio)`；渠道、权限和计费仍由原管线处理，前端 `playground-generation-panel.tsx` 只调用 `/pg`；`playground-generation-panel.test.tsx` 断言图片/视频提交到正确路由与请求体；无新依赖；本地未运行测试/typecheck/lint/build（CI-only））；
 - [x] 复用现有任务状态、错误、权限和计费链路（任务列表与状态轮询直接复用 `/api/task/self` 与会话日志的 `taskStatusMapper`/`StatusBadge`，结果预览与展示复用 `TaskArtifactsCell`，结果字节仅经受控的 `/api/task/:task_id/artifacts` capability 接口读取；Q-01 的 `TaskMaxConcurrency` 在 `controller/playground_generation.go` 内以 `model.CountActivePlaygroundTasks` 按账号 durable task 行强制，独立于 `User.Quota` 与 token 计费，超限返回稳定错误码 `PLAYGROUND_TASK_LIMIT_EXCEEDED` 并登记七语言文案与 `server-error-message` 映射；画布任务结果节点只保存 `taskId`/`taskArtifactKey` 引用，保存时按 `(user_id, task_id)` 校验归属，跨账号引用返回 400、失效任务在读取时标记不可用；`model/playground_test.go` 的 `TestPlaygroundTaskConcurrencyCount` 覆盖全局/用户组并发预算与终态释放，`model/playground_canvas_test.go` 的 `TestPlaygroundCanvasTaskReferences` 覆盖归属/缺 key/删除容忍，`playground-generation-panel.test.tsx` 覆盖任务状态渲染与「发送到画布」引用种子；本地未运行测试/typecheck/lint/build（CI-only））；
-- [ ] 设计 Agent/工具调用状态，但不默认允许任意代码执行；
+- [x] 设计 Agent/工具调用状态，但不默认允许任意代码执行（消息版本新增 `toolCalls` 快照，每条调用记录 `id`/`name`/`arguments`/`status`（pending·completed·denied·error）/`result`/`errorMessage` 与时间戳：流式回复按 index 增量合并（`applyToolCallDelta` 丢弃乱序/跳号 index，保证已存数组稠密、绝不会保存稀疏快照），非流式回复整体写入（`applyResponseToolCalls`）；Playground 从不执行工具——`message-tool-calls.tsx` 复用 ai-elements `Tool`/`Confirmation` 展示四种状态，用户通过「提供结果」对话框粘贴外部获得的结果（`PLAYGROUND_TOOL_CALL_RESULT_MAX_CHARS` 本地上限）或「拒绝」，`pending` 调用存在时输入框禁用并提示，全部答复或拒绝后才显示「继续生成」；请求 payload 把助手消息展开为 `tool_calls` + 每条已答复调用一个 `tool` 消息（拒绝/失败使用固定协议文案），`pending` 调用不发送；服务端 `validatePlaygroundToolCalls` 严格要求仅助手消息、每版最多 16 条调用、`id`/`name` 非空且 `id` 唯一、参数 64 KiB/结果 256 KiB 上限、状态枚举，违规 400 且事务回滚保留既有快照；策略字段 `tool_call_max_count`/`tool_call_arguments_max_bytes`/`tool_call_result_max_bytes` 支持全局默认与按用户组覆盖（管理端「Tool calls」分组），`tool_calls` 仅按版本存取、`getMessageContentState` 按被渲染版本判断可见性以在分支视图正确显示；前端 `tool-call-state.test.ts`（增量合并与跳号丢弃、状态流转与响应内容、pending 门禁与继续生成、payload 展开与 pending 排除、存储往返、分支版本可见性）与 `message-tool-calls.test.tsx`（待办动作与拒绝、结果对话框提交、已拒绝/已提供展示、继续生成仅最后版本可见），后端 `TestPlaygroundToolCallSnapshots`（SQLite/MySQL/PostgreSQL 往返 + 非助手/超量/重复·空 id/超长参数·结果/未知状态拒绝且保留历史）；补 19 个新键的七语言翻译（`i18n:sync` missingCount=0、extrasCount=0）；无新依赖；本地未运行测试/typecheck/lint/build（CI-only））；
 - [ ] 设计工作流节点、输入输出、失败重试和任务取消；
 - [x] 支持素材库、任务结果和 Artifact/Canvas 的安全关联（新增只读 `GET /api/playground/assets`：`UserAuth` + owner 过滤，`kind=attachment|artifact` 必填，非法 kind、非法分页或超 100 字符的搜索返回 400 `PLAYGROUND_INVALID_REQUEST`，内部错误返回 `PLAYGROUND_STORAGE_ERROR`；`model/playground_assets.go` 的 `ListPlaygroundAssets` 附件按 `created_at DESC, id DESC`、Artifact 按 `updated_at DESC, id DESC` 排序，搜索为大小写不敏感的字面子串（转义 `%`/`_`/`!`，`LOWER(...) LIKE ? ESCAPE '!'` 跨 SQLite/MySQL/PostgreSQL），附件 `in_use` 取消息引用（`referenced_at > 0`）或画布 pin，Artifact 排除墓碑（`deleted_at = 0`），分页沿用 `playgroundStrictPage`（page_size ≤ 50）；任务结果不进入该接口，继续经 owner 隔离的 `/api/task/self` 与 `TaskArtifactsCell` 复用既有任务链路，Artifact/画布关联沿用 P5-04 的 pin 与归属校验；前端工作区 Inspector 新增「素材库」视图（`components/asset/playground-asset-library.tsx`、`playground-asset-card.tsx`、`playground-asset-preview-dialog.tsx`；`asset-api.ts` 做 snake→camel 映射，`use-playground-assets` 提供素材库/任务结果查询，`use-attachment-preview-url` 由画布节点与素材卡共用），素材卡复用 `ArtifactAction` 与 `ConfirmDialog`，`in_use` 的附件禁用删除并提示；「发送到聊天」把附件经受控内容接口取回为 `File` 注入输入框待发送列表、Artifact 正文追加到草稿（`playground-input.tsx` 的 `pendingFiles`/`pendingText` 只消费一次），「发送到画布」沿用 `buildAttachmentCanvasSeeds` 只保存引用；`model/playground_test.go` 的 `TestPlaygroundAssetLibraryListing` 覆盖 SQLite/MySQL/PostgreSQL 矩阵（in_use、墓碑排除、跨用户隔离、分页、搜索转义、非法查询 400），真实 router 鉴权用例新增 `/api/playground/assets?kind=attachment`，该路由同时声明于 `middleware/access_token_routes.go`（会话级访问令牌规则，与其余 Playground 路由一致）；前端新增 `playground-asset-library.test.tsx`（8 用例）并扩展 `canvas-send.test.ts`、`playground-input-attachments.test.tsx`；补 17 个新键的七语言翻译（`i18n:sync` missingCount=0、extrasCount=0）；无新依赖；本地未运行测试/typecheck/lint/build（CI-only））；
-- [ ] 为长任务设置并发、存储和生命周期限制；
+- [x] 为长任务设置并发、存储和生命周期限制（任务行新增 `TaskPrivateData.PlaygroundOrigin` 来源标记：`controller/playground_generation.go` 在调用中继前写入 `constant.ContextKeyPlaygroundOrigin`，`controller/relay.go` 的任务创建沿用同一标记，并发/存储/清理/取消策略只作用于工作区来源任务，不读取也不改写 `User.Quota` 或 token 计费；提交预算统一由 `controller/playground_generation.go` 的 `enforcePlaygroundTaskBudget`（原 `enforcePlaygroundTaskConcurrency`）在 Relay 前强制——并发沿用 `model.CountActivePlaygroundTasks`（`TaskMaxConcurrency`），新增独立账户级结果存储预算 `TaskUserResultMaxBytes`（默认 64 MiB，零/负值继承，支持全局与用户组覆盖），`model.PlaygroundTaskResultStorageBytes` 按方言统计工作区任务结果快照字节（SQLite `json_extract(private_data,'$.playground_origin')=1` + `LENGTH(CAST(data AS BLOB))`、MySQL `JSON_UNQUOTE(JSON_EXTRACT(...))='true'` + `OCTET_LENGTH(CAST(data AS CHAR))`、PostgreSQL `private_data->>'playground_origin'='true'` + `OCTET_LENGTH(CAST(data AS TEXT))`），超限返回 429 `PLAYGROUND_TASK_STORAGE_LIMIT_EXCEEDED` 与七语言文案；生命周期新增调度任务 `playground_task_cleanup`（`service/playground_task_cleanup.go`，7 天 TTL、每 6 小时、每批 200，`model.DeleteExpiredPlaygroundTasks` 只硬删除 `finish_time` 已过期的终态工作区任务行，轮询沿用状态 CAS 不会复活）；取消新增 `POST /api/playground/tasks/:taskId/cancel`（`UserAuth` + `accessTokenSessionRule`）与 `model.CancelPlaygroundTask`：按 `(user_id, task_id, playground_origin)` 过滤并用状态 CAS 转 FAILURE（进度 100%、`FailReason="Task canceled"`），成功后 `service.RefundTaskQuota` 退还预留额度，404/409/500 稳定错误码；工作区任务列表新增取消按钮 + `ConfirmDialog` + `useCancelPlaygroundTask`（结算后同时刷新任务列表与用量），`GET /api/playground/usage` 新增 `tasks` 指标（活跃并发 vs `TaskMaxConcurrency`、快照字节 vs `TaskUserResultMaxBytes`）并在用量弹层展示，管理端配额新增字段 `task_user_result_max_bytes`；`model/playground_test.go` 新增 `TestPlaygroundTaskStorageBudget`（SQLite/MySQL/PostgreSQL 矩阵，含控制器 429 路径）、`TestPlaygroundTaskExpiryCleanup`（矩阵）、`TestPlaygroundTaskCancellation`（owner 作用域、404/409、CAS、成功与退款守卫），扩展 `TestPlaygroundUsageForUserReportsOwnerTotals` 与真实路由鉴权用例；前端扩展 `playground-generation-panel.test.tsx`（取消确认）与 `playground-usage-popover.test.tsx`（Tasks 指标）；补 10 个新键的七语言翻译（`i18n:sync` missingCount=0、extrasCount=0）；无新依赖；本地未运行测试/typecheck/lint/build（CI-only））；
 - [ ] 不复制参考项目的 Provider、浏览器 API Key 或独立后端。
 
 ### Phase 7：跨设备、协作和分享 — 延期/另行设计
@@ -271,7 +271,7 @@ Playground
 4. ~~清理或明确 `.claude-flow/`、`.swarm/`、`graphify-out/` 等生成目录是否进入提交范围；~~ 已完成（已加入 `.gitignore`）；
 5. ~~补齐端到端的账号隔离、迟到请求和删除回退测试。~~ 已完成（`model/playground_test.go` 跨用户/并发/真实 router 鉴权 + 前端同步层测试）。
 
-剩余待办：Inspector/Canvas 面板边界、Phase 5 Infinite Canvas 剩余项（画布与 session 引用生命周期收尾）、Phase 6 其余项（Agent/工具调用状态、工作流节点与失败重试/任务取消、长任务生命周期限制）。
+剩余待办：Inspector/Canvas 面板边界、Phase 5 Infinite Canvas 剩余项（画布与 session 引用生命周期收尾）、Phase 6 其余项（Agent/工具调用状态、工作流节点与失败重试/任务取消）。
 
 ### P1：聊天工作区稳定后实施
 
@@ -286,6 +286,163 @@ Playground
 2. 图片、视频、音频任务；
 3. Agent 和工作流；
 4. 跨设备、分享和协作。
+
+## 9. 第二阶段追加计划：存储、计费与参考项目功能补齐（2026-10-17 调研）
+
+> 来源：2026-10-17 对 `newapi-rev` main @ `4870c3057`、`lobehub/lobehub` @ `78979e4d`（LobeHub Community License，只参考交互与数据边界，不复制代码）、`basketikun/infinite-canvas` @ `3a6b64b`（MIT）的源码调研。本节所列 27 个 Step 已经用户确认，全部排在当前 Phase 6（P6-02/P6-04/P6-05，画布相关 Step 另依赖 P6-03）之后执行；各 Step 仍遵守第 2 节边界与第 5 节要求，下文“已批准例外”除外。
+
+### 9.1 参考项目调研结论
+
+- 第 1 节的“类 LobeHub 聊天工作区”“Infinite Canvas 风格画布”在本计划中只有工程约束，没有展开产品功能。对照源码，以下刚需功能计划和代码都没有：系统提示词与助手预设（LobeHub `agents` 表）、上下文窗口管理与摘要压缩（LobeHub `message_groups.type='compression'`；本仓库 `payload-builder.ts` 每次发送全部历史，直接影响用户 token 花费）、每条消息用量与费用展示（LobeHub `messages.usage`；本仓库只显示耗时）、画布内直接生成并记录参数一键重试（infinite-canvas 核心玩法）、画布基础编辑（复制粘贴、Ctrl+G 分组、拖拽上传、视频/音频节点）、多模型并行对比（LobeHub `message_groups.type='parallel'`，与多模型网关定位契合）。
+- 数据存储两个硬伤：附件以 base64 存在 `playground_attachments.Data LongText`（膨胀约 33%）；`ReplacePlaygroundMessages` 每次保存整会话删除重插（写放大与会话长度成正比）。另有 3 处写路径 `SELECT ... FOR UPDATE` 锁 `users` 行，与 relay 扣费争抢。
+- `service/task_artifact_store.go` 已有 `TaskArtifactStore` 接口与 `TASK_ARTIFACT_STORE_MODE=s3` 配置骨架，但固定返回 disabled 实现，生成结果依赖会过期的上游 URL。
+
+### 9.2 数据与多媒体存储决策
+
+1. **字节与元数据分离**：新增可插拔 `ObjectStore`（`service/objectstore/`：Put/Get/Head/Delete/PresignPut/PresignGet/Backend），后端 `local`（默认，自托管零依赖）、`s3`（任何 S3 兼容端点：AWS S3、Cloudflare R2、MinIO、Backblaze B2、阿里云 OSS 兼容端点）、`db`（只读兼容旧附件）。附件、任务生成结果、大 Artifact 版本与画布快照都进 ObjectStore；数据库只存 backend/object_key/byte_size/content_hash/media_type 与归属。Key 布局 `pg/{user_id}/{kind}/{yyyy}/{mm}/{id}`，去重仅限同一用户内。
+2. **下载**仍由 new-api 做归属校验：s3 返回 5–15 分钟预签名 GET 的 302，local 流式输出；消息和画布节点只存 ID，不存预签名 URL。大文件走预签名直传（事务内预占配额 → 直传 → complete 时 HEAD 校验大小 + magic bytes 嗅探）。
+3. **云端推荐 R2**（出流量免费，$0.015/GB-月）；不推荐“Workers 代理 AWS S3”（S3 → Cloudflare 仍按 S3 出流量 $0.09/GB 计费）。R2 预签名 URL 不能用自定义域名/CDN，只有需要“鉴权 + 边缘缓存”时才在 R2 前加 Worker 校验 HMAC 令牌。中国大陆用户可选 OSS/COS + CDN。
+4. **消息增量写**：保留会话 `MessageRevision` CAS，按 `(session_id, client_key)` upsert 变化行；同步协议发送增量，旧全量接口保留一个版本兼容。
+5. **配额计数器**：新表 `playground_user_usage`，写事务锁该行，不再锁 `users`、不再 SUM，每日对账。
+6. **拆库**仅在主库约 500 GB 以上或 Playground 写入明显影响扣费延迟时考虑，仿 `LOG_SQL_DSN` 增加可选 `PLAYGROUND_SQL_DSN`（DB-04 只出设计文档）。规模估算：1 万活跃用户时附件存 DB（base64）约 270 GB，而消息约 63 GB——最先压垮单库的是字节数据。
+
+### 9.3 计费决策
+
+- **生成类不另造计费**：聊天、摘要、多模型对比、图片/视频/音频生成与工作流节点调用全部走现有 Relay 预扣 + 结算（模型价格、表达式计费、`image_count`、task `u("seconds")`、groupRatio）。工作流编排本身免费，运行前估价、可设单次预算上限，取消时已完成节点照常计费、未开始的不扣。
+- **存储第一档（默认）权益制**：用户组资源配额（Q-01/Q-02）+ 订阅套餐 `UpgradeGroup`/`DowngradeGroup` 售卖更大空间；超额拒绝新写入，旧数据可读。
+- **存储第二档（可选开关）计量制**：每日按峰值字节计 GB-day，`common.QuotaFromDecimalChecked` 换算后从 `User.Quota` 扣费并写消费日志（ledger `(user_id,date)` 唯一、幂等）；余额不足进入只读宽限，**绝不静默删除用户数据**。资源配额仍独立于 `User.Quota`（第 2.4 节），只有管理员开启计量时才把存储占用换算成钱。
+- **出流量**：R2/本地不计费只限速；S3/OSS 由管理员选择是否按 GB 计费。
+
+### 9.4 已批准的例外（用户 2026-10-17 确认）
+
+1. **ST-02** 允许新增 Go 依赖 `github.com/aws/aws-sdk-go-v2/service/s3` 及必需的 aws-sdk-go-v2 核心模块，允许修改 go.mod/go.sum（仅限该 Step）。
+2. **SEC-02** 允许放宽第 5 节“不执行 Artifact HTML/JS”，但只能在严格沙箱内：独立 origin + `sandbox` iframe（绝不含 `allow-same-origin`）+ 严格 CSP + postMessage 白名单，默认关闭、管理员开关；主站页面仍绝不执行 Artifact 内容。
+3. **BL-02** 涉及计费：必须先读 `.agents/rules/billing.md`；“真实数据库验证”改为编写/扩展由 CI 在真实数据库上运行的测试（必要时新增带 MySQL/PostgreSQL services 的 CI job），不在本地测试。
+4. **DB-01** 改变同步协议：旧端点作为兼容垫片保留一个版本，标注 deprecated。
+
+### 9.5 新增 Step 与依赖
+
+执行顺序：第一批 ST-01、DB-01、CH-01、BL-04 → 第二批 ST-02、ST-03、CH-02、CV-01、CV-02 → 第三批 DB-02、ST-05、BL-01 → 其余按依赖。所有 Step 均在 P6-02、P6-04、P6-05 之后；CV-* 在 P6-03 工作流节点基础上细化，不重复实现。
+
+| ID | 标题 | 依赖 | 优先级 |
+| --- | --- | --- | --- |
+| ST-01 | ObjectStore 抽象 + 本地磁盘后端（默认） | P6-05, P6-02, P6-04 | 刚需 |
+| DB-01 | 消息增量持久化（替代整会话删除重插） | P6-02, P6-04, P6-05 | 刚需 |
+| CH-01 | 系统提示词与助手预设 | UX-01, P6-02, P6-04, P6-05 | 刚需 |
+| BL-04 | 每消息/会话用量与费用展示 | S00, P6-02, P6-04, P6-05 | 刚需 |
+| ST-02 | S3 兼容后端（AWS S3/R2/MinIO/B2/OSS）并实现 TaskArtifactStore | ST-01 | 刚需 |
+| ST-03 | Playground 附件迁出数据库 | ST-01, P6-04 | 刚需 |
+| CH-02 | 上下文管理与摘要压缩 | CH-01 | 刚需 |
+| CV-01 | 画布基础编辑能力 | P6-03, P6-04, P6-05 | 刚需 |
+| CV-02 | 画布内生成：配置节点 + 元数据重试 + @引用 | P6-03, P6-04, P6-05 | 刚需 |
+| DB-02 | playground_user_usage 计数器与锁行 | ST-03 | 刚需 |
+| ST-05 | 生成结果持久化到 ObjectStore | ST-02, P6-05 | 刚需 |
+| BL-01 | 存储权益与订阅套餐挂钩 | ST-03 | 刚需 |
+| DB-03 | 大 JSON 压缩/外置 + 画布快照历史 | ST-01, P6-03 | 推荐 |
+| CH-03 | 多模型并行对比 | CH-01 | 推荐 |
+| CH-04 | 会话导出 + 回收站 | DB-01 | 推荐 |
+| CH-07 | 推理参数、草稿与输入历史、提示词片段 | CH-01 | 推荐 |
+| CH-06 | 聊天内 TTS 朗读与 STT 听写 | P6-01, P6-02, P6-04, P6-05 | 推荐 |
+| SEC-02 | HTML/SVG/Mermaid Artifact 沙箱预览（需先决策） | SEC-01, P6-02, P6-04, P6-05 | 可选 |
+| ST-04 | 大文件预签名直传 + 扩展类型（视频/音频/PDF） | ST-02, ST-03 | 推荐 |
+| BL-03 | 工作流运行预算 | P6-03, CV-02 | 推荐 |
+| CV-03 | 图片工具：裁剪/遮罩重绘/本地放大 | CV-02, ST-03 | 推荐 |
+| CV-04 | 画布助手侧栏 | CV-02, CH-01 | 推荐 |
+| CV-05 | 含资源导出与快照恢复 | DB-03 | 推荐 |
+| ST-06 | 删除 outbox 与对象存储对账 | ST-03, DB-02 | 推荐 |
+| DB-04 | 设计文档：PLAYGROUND_SQL_DSN 独立库/分区/归档 | DB-02 | 可选 |
+| BL-02 | 存储计量计费（可选开关） | DB-02, ST-05 | 推荐 |
+| CH-05 | 文档附件文本抽取 | ST-04 | 推荐 |
+
+每个 Step 的详细范围与完成标准见编排器 `steps.json`（与调研报告 `proposed-steps.json` 一致，并嵌入了 9.4 的例外）。完成后在本节表格对应行后注明进展，并在第 8 节变更记录追加一行。
+
+## 10. 上游同步策略与上游借鉴 Step（2026-10-17）
+
+> 来源：对上游 QuantumNous/new-api（本仓库的 fork 源）近 12 个月 issue / PR 与 fork 缺失提交的调研。fork 当时落后上游 54 个提交（merge base `42e694eb6`）；在临时克隆中试合并，冲突集中在 `.github/workflows/ci.yml`、7 个语言包、`web/src/i18n/static-keys.ts`，主要是两边都在追加 i18n key（随后 main 新增的 Playground 改动另带来 `playground/types.ts`、`message-streaming-utils.ts` 两处代码冲突）。
+
+### 10.1 同步策略
+
+1. **merge，不 rebase**：用 `git merge upstream/main` 把上游并入本仓库 main，保留 fork 历史；merge commit 以仓库维护者身份提交，正文列出同步的上游提交与行为变化，然后 fast-forward 推送 main。
+2. **独占执行**：同步期间不并行任何 roadmap Step（每个 Step 都会改 i18n 文件，并行会反复冲突），编排器先等所有槽位空闲；CI 修复通道暂停，期间不推送。
+3. **冲突处理约定**：语言包按 key 三方合并取并集（两边都改同一 key 时保留 fork 值）；`ci.yml` 冲突段保留 fork 的 push 触发与 checkout 写法，吸收上游的其余改动；`static-keys.ts` 两边新增的 key 都保留；其余代码冲突语义合并，同时保留 fork 功能与上游修复；本地不运行测试，交给 CI。
+4. **频率**：首次同步（UP-00）在 P6-02/P6-03/P6-04/P6-05 完成后执行；之后**每 7 天**检查一次，上游有新提交就排一次独占同步（编排器 `KO_UPSTREAM_SYNC_DAYS`，0 为关闭）。
+5. **行为变化须记录**：首次同步包含上游 `4013729f6`（#7814）“敏感词过滤默认关闭并清空默认词表”，已接受，在第 8 节变更记录中注明。
+6. **借鉴上游未合并 PR**：只借鉴思路由本仓库自行实现，不 cherry-pick 代码；提交信息注明 `Inspired-by: QuantumNous/new-api#<编号>`。两边均为 AGPL-3.0。
+7. **计费策略**：流式请求被客户端中断且零输出时，prompt 照常收费（保持现有 client_gone 结算），UP-01 不改变该策略。涉及计费/额度/订阅的 UP-01、UP-03、UP-05、UP-06、UP-07、UP-08 须先读 `.agents/rules/billing.md`，并沿用 9.4 节规则，用 CI 在真实数据库上测试。
+
+### 10.2 上游借鉴 Step
+
+所有 UP Step 以及第 9 节的 27 个 Step 都依赖 UP-00，在同步后的代码上实施。优先顺序：UP-01（断开即取消上游）、UP-09（`/mj/image/:id` 访问控制）、UP-08（管理员改额度竞态）与第 9 节第一批并列最先执行。
+
+| ID | 标题 | 依赖 | 优先级 |
+| --- | --- | --- | --- |
+| UP-00 | 同步上游 main（54 个提交，merge base 42e694eb6 @ 2026-10-11） | P6-02, P6-03, P6-04, P6-05 | 必做 |
+| UP-01 | 客户端断开时取消上游请求并停止重试 | UP-00 | 必做 |
+| UP-02 | 流式首字（TTFB）超时 + 自动切换渠道 | UP-01, UP-00 | 推荐 |
+| UP-03 | 渠道/令牌级 RPM、TPM 与并发准入限制 | UP-00 | 推荐 |
+| UP-04 | /v1/messages/count_tokens 本地估算 | UP-00 | 推荐 |
+| UP-05 | 兑换码兑换订阅套餐 | UP-00 | 推荐 |
+| UP-06 | 订阅套餐的分组/模型限制与多窗口额度 | UP-05, UP-00 | 推荐 |
+| UP-07 | 令牌周期额度（日/周/月自动重置） | UP-00 | 可选 |
+| UP-08 | 管理员修改用户/令牌额度改为增量更新 | UP-00 | 推荐 |
+| UP-09 | /mj/image/:id 访问控制 | UP-00 | 推荐 |
+| UP-10 | 日志记录请求阶段耗时拆分 | UP-00 | 推荐 |
+| UP-11 | Playground 切换模型时清理不兼容的历史内容 | UP-00, CH-02 | 推荐 |
+| UP-12 | /v1/images/generations 异步任务模式（提交 + 查询） | UP-00, P6-01 | 推荐 |
+| UP-13 | 稳定分组标识（改名不使令牌失效） | UP-00 | 可选 |
+| UP-14 | Responses → ChatCompletions 协议降级 | UP-00 | 可选 |
+
+## 11. 钱包（2026-10-17 调研与决策）
+
+> 来源：对 newapi-rev 钱包、计费与支付代码的只读调研（main @ `2cbfb4f`），对照 OpenRouter、LobeHub Cloud、one-api 的做法。用户已批准下列 8 项推荐方案。所有钱包 Step 都要先读 `.agents/rules/billing.md`，沿用 9.4 节规则：在 CI 的真实数据库（MySQL、PostgreSQL、SQLite）上测试，本地不跑测试。所有钱包 Step 都排在 UP-00 之后，正确性修复优先。
+
+### 11.1 现状中的主要问题
+
+- **没有账本**：余额是可变整数，变动只在 `logs` 留痕（可能在独立库或 ClickHouse，会被清理，写入失败不回滚），无法从流水重算余额或对账。
+- **钱包预扣不持久**：预扣直接扣余额，状态只在内存；进程在结算/退款前崩溃会丢钱；退款是异步 goroutine 且不幂等。关机时也不 flush `BATCH_UPDATE_ENABLED` 的内存队列（上游 #7657）。
+- **可无限透支**：信任旁路不预扣，结算补扣不检查余额（上游 #6609）。
+- **订阅 bug**：退款改金额与改状态不在同一事务、可能重复退款（#5556）；结算超出订阅剩余额度时只扣了预扣部分，`AllowWalletOverflow` 只在预扣阶段生效（#6911）。
+- **quota 列类型**：struct tag 是 32 位 `int`，启动检查却要求 64 位且跑在 AutoMigrate 之前（上游未合并 PR #5136）。
+- 另有：令牌额度绝对值写入覆盖并发扣费、支付侧无退款/拒付/发票且 `Money` 为 float64、币种口径混乱（#3206）、额度无来源与有效期、4 位 `aff_code` 碰撞（#6215）。
+
+### 11.2 已批准的决策
+
+1. **账本（Q1=B）**：新建 append-only `wallet_ledger`，放在**主库**，和余额变更在同一事务内写入；资金类事件（充值、兑换、调整、退款、订阅余额支付、签到、邀请转入、存储日结、拒付冲正）每笔一行，API 消费按用户每小时聚合一行（明细仍查 logs）。每日对账 `Σledger = 当前余额`，偏差告警，不自动改余额。
+2. **计量单位（Q2=A）**：继续用整数 quota（1 USD = 500000），把列真正迁到 64 位并修启动检查顺序（参考 #5136，CI 真库验证）；支付金额改为精确十进制并带币种。
+3. **额度分桶（Q3=B，账本之后）**：`credit_grants` 存放赠送、签到、邀请、兑换、促销额度，可设有效期；扣费顺序：订阅 → 赠送额度（先到期先用）→ 充值余额；充值余额永不过期。
+4. **持久化预扣（Q4=B）**：`wallet_holds` 记录每笔钱包预扣，结算/退款时关闭且幂等，超时未关闭自动退款（修崩溃丢钱）；关机时 flush 批量队列（#7657）；BL-03 工作流预算挂在父 hold 上。可用余额仍等于 quota，不做真冻结。
+5. **透支（Q5=B）**：按用户组配置透支上限，默认 0；信任旁路收紧；超限部分记欠款，用户只读直到充值（修 #6609）。同时修订阅退款事务（#5556）与超额转扣钱包（#6911）。
+6. **存储费用（Q6=A）**：存储日结从同一钱包扣，写入统一账本；`playground_storage_ledger` 只保留日明细，不做第二本账。
+7. **团队（Q7=C）**：现阶段用“一个账号 + 多令牌 + 令牌周期额度（UP-07）”做成员预算；账本和额度分桶落地后再做组织钱包。
+8. **退款、拒付与支付渠道（Q8=B）**：处理各支付商退款/拒付 webhook，订单标 refunded/disputed，在账本冲正（最多扣到 0，余下记欠款），支持管理员退回未用余额；可选开启 Stripe 自动开发票（#3204）；可选支付宝/微信支付官方直连适配器（统一 `PaymentProvider` 接口）；订阅按套餐原币收款，不做汇率换算（#3206）。
+
+另外：UP-08 缩小为令牌侧额度的增量更新（用户侧 fork 已修）；`aff_code` 加长并碰撞重试（#6215）。
+
+### 11.3 与已有 Step 的协调
+
+- UP-05：兑换写入账本；兑换额度在 WL-07 后进入 grant 桶。依赖 WL-05。
+- UP-06：订阅扣费复用 WL-03、WL-07 的实现。依赖 WL-03。
+- UP-07：令牌周期额度即“成员预算”，不写钱包账本。
+- UP-03：限流可降低并发透支，透支控制归 WL-06。
+- BL-02：存储日结写统一账本，只读宽限与 WL-06 欠款规则统一。依赖 WL-05、WL-06。
+- BL-03：工作流预算挂在 WL-04 的父 hold 上。依赖 WL-04。
+- DB-02：只是非货币资源计数器，不涉及钱包。
+
+### 11.4 钱包 Step
+
+执行优先级：UP-00 之后先做 UP-01，以及 WL-05（账本）、WL-01（64 位 quota）、WL-02（关机 flush），随后 UP-09、UP-08、WL-03（订阅 bug）、WL-04（持久化预扣）、WL-06（透支上限），再进入第 9 节第一批；WL-07、WL-08、WL-09 排在中后段。
+
+| ID | 标题 | 依赖 | 优先级 |
+| --- | --- | --- | --- |
+| WL-05 | wallet_ledger 追加式钱包账本 + 每日对账 | UP-00 | 刚需 |
+| WL-01 | quota 列迁移到真正的 64 位 + 启动检查顺序修复 | UP-00 | 刚需 |
+| WL-02 | 关机时清空批量额度队列与在途退款 | UP-00 | 刚需 |
+| WL-03 | 订阅退款改为单一事务 + 结算超额转扣钱包 | UP-00, WL-05 | 刚需 |
+| WL-04 | wallet_holds 持久化钱包预扣 + 超时回收 + 幂等退款 | WL-05 | 刚需 |
+| WL-06 | 按用户组透支上限 + 信任旁路收紧 + 欠款只读 | WL-04 | 刚需 |
+| WL-07 | credit_grants 额度来源与有效期（分桶） | WL-04, WL-03 | 推荐 |
+| WL-08 | 支付退款/拒付 webhook、订单状态扩展、金额精确十进制与支付渠道 | WL-06 | 推荐 |
+| WL-09 | aff_code 加长 + 碰撞重试（可选按充值比例返利） | UP-00 | 推荐 |
 
 ## 8. 变更记录
 
@@ -308,4 +465,9 @@ Playground
 | 2026-10-17 | Q-02：让 Playground 资源配额可管理并暴露统一用量视图——管理端「安全与限制」新增「Playground 资源配额」分组（全局默认 + 按用户组覆盖，`playground-quota-section.tsx`/`quota-fields.ts` 读写 `playground_setting.defaults`/`playground_setting.group_overrides`，基线差分保存、正整数校验）；策略新增账户级 Artifact 上限 `ArtifactUserMaxCount`/`ArtifactUserMaxBytes`，`checkPlaygroundArtifactCapacity` 在创建时校验账户活跃数量、始终校验账户字节（默认取既有会话级上限的理论上界，不拒绝此前已接受的写入）；新增只读 `GET /api/playground/usage`（`UserAuth` + owner 过滤，`model/playground_usage.go` 的 `PlaygroundUsageForUser` 复用 `GetPlaygroundQuotaPolicy`，返回会话/附件/Artifact/画布的 used/limit 与字节）；用户端工作区新增资源用量弹层（`playground-usage-popover.tsx`，仅打开时挂载查询）；补 41 个新键的七语言翻译（`i18n:sync` missingCount=0、extrasCount=0）；新增 `TestPlaygroundUsageForUserReportsOwnerTotals`、`TestPlaygroundArtifactAccountLimit` 与前端 `playground-quota-section.test.tsx`、`playground-usage-popover.test.tsx`；无新依赖；本地未运行测试/typecheck/lint/build（CI-only）。 |
 | 2026-10-17 | UX-02：统一 Playground 右侧 Inspector 并打通聊天↔画布双向跳转——新增共享 `components/workspace-inspector.tsx`（桌面 `ResizablePanelGroup` 并排、移动端右侧 Sheet，复用 Base UI 焦点陷阱与既有未保存草稿保护），Playground 头部按钮在「Artifacts」与「Canvases」两个视图间切换同一面板（`playground-canvas-panel.tsx` 用 `listCanvasProjects`/`getCanvasProject` + `fromServerDocument` 只读预览节点并可「打开画布」，`canvas-editor.tsx` 的节点详情复用同一外壳）；路由新增 `validateSearch` 深链：`/playground?session&message&artifact` 切换到对应会话并打开制品（等待 `sync.isLoading` 结束、按 `session.server.id` 匹配、切换后 `selectArtifact`），`/playground/canvas?project` 打开指定画布；画布节点详情新增「来源」区，经 `lib/canvas-navigation.ts` 生成跳转参数回到源会话/制品（`CanvasNodeInspector` 只暴露 `onOpenSource` 回调，由 `CanvasWorkspace` 用 `useNavigate` 接线，组件不依赖路由、可测试；`canvas-send-dialog.tsx` 的 `onSent` 改为回传 `CanvasServerProject`，发送后打开对应画布预览）；扩展 `workspace-layout.test.tsx`（桌面并排/隐藏与视图切换、移动 Sheet 关闭、会话列表入口），新增 `playground-canvas-panel.test.tsx`、`canvas-navigation.test.ts`、`canvas-node-inspector.test.tsx`，扩展 `canvas-send-dialog.test.tsx` 断言 `onSent(project)`；补 5 个新键的七语言翻译（`i18n:sync` missingCount=0、extrasCount=0）；仅前端改动，无新依赖；本地未运行测试/typecheck/lint/build（CI-only）。 |
 | 2026-10-17 | P6-01：将 Playground 图片/视频/音频生成映射到现有 Relay、渠道与 task plugin 并复用任务状态/错误/权限/计费链路——新增 `/pg/images/generations`、`/pg/images/edits`、`/pg/videos`、`/pg/audio/speech` 路由（`middleware.PlaygroundRelayBridge` 在任务插件 pin 与渠道选择前将路径重写为 `/v1` 规范路径并校验用户组覆盖，`PinTaskPluginEndpoint`/`PrepareTaskPluginEndpoint`/`Distribute` 与 `controller.PlaygroundImageGeneration`/`PlaygroundImageEdit`/`PlaygroundVideoTask`/`PlaygroundAudioSpeech` 复用 `RelayTaskPluginEndpoint`/`Relay`/`RelayTask`）；Q-01 的 `TaskMaxConcurrency` 在控制层经 `model.CountActivePlaygroundTasks`（按账号 durable task 行，独立于 `User.Quota`/token 计费）强制，超限返回 `PLAYGROUND_TASK_LIMIT_EXCEEDED`（七语言文案 + `server-error-message` 映射）；任务列表/轮询复用 `/api/task/self`、`taskStatusMapper`/`StatusBadge` 与 `TaskArtifactsCell`；画布任务结果节点只保存 `taskId`/`taskArtifactKey` 引用，保存时按 `(user_id, task_id)` 校验归属（`TestPlaygroundCanvasTaskReferences`）；新增 `TestPlaygroundTaskConcurrencyCount`、`playground-generation-panel.test.tsx`，扩展 `canvas-send.test.ts`；补 20 个新键的七语言翻译（`i18n:sync` missingCount=0、extrasCount=0）；无新依赖；本地未运行测试/typecheck/lint/build（CI-only）。 |
+| 2026-10-17 | P6-02：设计 Agent/工具调用状态但绝不执行工具——消息版本新增 `toolCalls` 快照（流式增量合并 `applyToolCallDelta` 丢弃乱序/跳号 index 保证数组稠密、`applyResponseToolCalls` 整体写入、`setToolCallStatus` 用户手动提供结果或拒绝、`getToolCallResponseContent` 生成 `tool` 消息内容）；`message-tool-calls.tsx` 复用 ai-elements `Tool`/`Confirmation` 展示 pending/completed/denied/error，提供「提供结果」对话框、「拒绝」与「继续生成」（仅最后版本、待办全部答复后），待办期间禁用输入并提示；请求 payload 把助手消息展开为 `tool_calls` + 每条已答复调用一个 `tool` 消息，`pending` 调用不发送；服务端新增 `playgroundMessageToolCall` + `validatePlaygroundToolCalls`（仅助手消息、每版最多 16 条、`id`/`name` 非空且 `id` 唯一、参数 64 KiB/结果 256 KiB、状态枚举，违规 400 且事务回滚保留既有快照）与策略字段 `tool_call_max_count`/`tool_call_arguments_max_bytes`/`tool_call_result_max_bytes`（管理端「Tool calls」分组可按用户组覆盖）；`getMessageContentState` 改为按被渲染版本判断可见性，分支视图正确显示各版本工具调用；新增 `tool-call-state.test.ts`、`message-tool-calls.test.tsx`、`TestPlaygroundToolCallSnapshots`（SQLite/MySQL/PostgreSQL 矩阵），扩展 `use-stream-request.test.ts`（流式片段分发）与 `model/playground_test.go`；补 19 个新键的七语言翻译（`i18n:sync` missingCount=0、extrasCount=0）；无新依赖；本地未运行测试/typecheck/lint/build（CI-only）。 |
 | 2026-10-17 | P6-04：实现用户素材库与任务结果/Artifact/Canvas 的安全关联——新增只读 `GET /api/playground/assets`（`kind=attachment|artifact` 必填，owner 过滤；附件按 `created_at DESC`、Artifact 按 `updated_at DESC`，搜索为大小写不敏感字面子串并转义 `%`/`_`/`!`、≤100 字符，附件 `in_use` 取消息引用或画布 pin，Artifact 排除墓碑；非法查询 400 `PLAYGROUND_INVALID_REQUEST`、内部错误 `PLAYGROUND_STORAGE_ERROR`）；任务结果继续经 owner 隔离的 `/api/task/self` 与 `TaskArtifactsCell` 复用，Artifact/画布关联沿用 P5-04 的 pin 与归属校验；前端 Inspector 新增素材库视图（`asset-api.ts`、`use-playground-assets`、`use-attachment-preview-url` 由画布节点与素材卡共用；卡片复用 `ArtifactAction` + `ConfirmDialog`，`in_use` 附件禁删；发送到聊天把附件经受控内容接口注入待发送 `File`、Artifact 正文追加草稿，`playground-input.tsx` 的 `pendingFiles`/`pendingText` 只消费一次）；新增 `TestPlaygroundAssetLibraryListing`（SQLite/MySQL/PostgreSQL 矩阵：in_use、墓碑排除、跨用户隔离、分页、搜索转义、非法查询）并扩展真实 router 鉴权用例，前端新增 `playground-asset-library.test.tsx`（8 用例）、扩展 `canvas-send.test.ts` 与 `playground-input-attachments.test.tsx`；`middleware/access_token_routes.go` 声明 `GET /api/playground/assets` 的会话级访问令牌规则（通过路由覆盖检查）；补 17 个新键的七语言翻译（`i18n:sync` missingCount=0、extrasCount=0）；无新依赖；本地未运行测试/typecheck/lint/build（CI-only）。 |
+| 2026-10-17 | P6-05：为长任务设置并发、存储和生命周期限制——任务行新增 `TaskPrivateData.PlaygroundOrigin` 来源标记（`controller/playground_generation.go` 写入 `constant.ContextKeyPlaygroundOrigin`，`controller/relay.go` 创建任务时沿用），生命周期策略只作用于工作区来源任务且不触碰 `User.Quota`/token 计费；`enforcePlaygroundTaskBudget` 在 Relay 前同时强制并发（沿用 `model.CountActivePlaygroundTasks` 与 `TaskMaxConcurrency`）与新增的账户级结果存储预算 `TaskUserResultMaxBytes`（默认 64 MiB，零/负值继承，全局与用户组可覆盖），`model.PlaygroundTaskResultStorageBytes` 按方言 SQL（SQLite `json_extract` + `LENGTH(CAST(data AS BLOB))`、MySQL `JSON_UNQUOTE(JSON_EXTRACT(...))` + `OCTET_LENGTH(CAST(data AS CHAR))`、PostgreSQL `private_data->>'playground_origin'` + `OCTET_LENGTH(CAST(data AS TEXT))`）统计工作区任务结果快照字节，超限返回 429 `PLAYGROUND_TASK_STORAGE_LIMIT_EXCEEDED`；新增调度清理 `service/playground_task_cleanup.go`（`playground_task_cleanup`，7 天 TTL、每 6 小时、每批 200）与 `model.DeleteExpiredPlaygroundTasks`（只硬删除 `finish_time` 已过期的终态工作区任务行）；新增 `POST /api/playground/tasks/:taskId/cancel`（`UserAuth` + `accessTokenSessionRule`）与 `model.CancelPlaygroundTask`（owner+origin 过滤、状态 CAS 转 FAILURE、`FailReason="Task canceled"`，成功后 `service.RefundTaskQuota` 退还预留额度，404/409/500 稳定错误码），前端任务列表新增取消按钮 + `ConfirmDialog` + `useCancelPlaygroundTask`；`GET /api/playground/usage` 新增 `tasks` 指标（活跃并发 vs `TaskMaxConcurrency`、快照字节 vs `TaskUserResultMaxBytes`）并在用量弹层展示，管理端配额新增 `task_user_result_max_bytes` 字段；`model/playground_test.go` 新增 `TestPlaygroundTaskStorageBudget`（SQLite/MySQL/PostgreSQL 矩阵 + 控制器 429）、`TestPlaygroundTaskExpiryCleanup`（矩阵）、`TestPlaygroundTaskCancellation`（owner 作用域/404/409/CAS/退款守卫），扩展 `TestPlaygroundUsageForUserReportsOwnerTotals` 与真实路由鉴权；前端扩展 `playground-generation-panel.test.tsx`、`playground-usage-popover.test.tsx`，`static-keys.ts` 登记新常量键；补 10 个新键的七语言翻译（`i18n:sync` missingCount=0、extrasCount=0）；无新依赖；本地未运行测试/typecheck/lint/build（CI-only，本地未运行测试）。 |
+| 2026-10-17 | 计划：新增第 9 节“第二阶段追加计划”——根据对 lobehub/lobehub 与 basketikun/infinite-canvas 的源码调研，追加 27 个 Step（ST-01..06 对象存储、DB-01..04 数据存储、CH-01..07 聊天工作区、CV-01..05 画布、BL-01..04 计费、SEC-02 沙箱预览），记录存储（ObjectStore + R2 推荐）、计费（权益制默认 + 可选 GB-月计量）决策与 4 项用户批准的例外；全部排在 P6-02/P6-04/P6-05 之后。 |
+| 2026-10-17 | 计划：新增第 10 节“上游同步策略与上游借鉴 Step”——确定以 merge 方式独占同步上游 QuantumNous/new-api（UP-00，P6 完成后执行，之后每 7 天一次），追加 UP-01..UP-14（断开取消上游、首字超时换渠道、RPM/TPM 准入、count_tokens、兑换码兑换订阅、套餐分组限制与多窗口额度、令牌周期额度、管理员额度增量更新、/mj/image 访问控制、请求阶段耗时、切换模型清理历史、生图异步模式、稳定分组标识、Responses→Chat 降级）；第 9 节 27 个 Step 改为依赖 UP-00；接受上游敏感词默认关闭；零输出中断流照常收 prompt 费用。 |
+| 2026-10-17 | 计划：新增第 11 节“钱包”——批准 8 项钱包方案（主库 append-only 账本 + 每日对账、64 位 quota、额度分桶与有效期、持久化钱包预扣 + 关机 flush、按组透支上限与欠款只读、存储日结入统一账本、团队预算暂用令牌周期额度、退款/拒付 webhook 冲正与原币收款），追加 WL-01..WL-09，正确性修复排在 UP-00 之后最先执行；UP-08 缩小为令牌侧，UP-05/UP-06/BL-02/BL-03 改为复用钱包账本与预扣。 |

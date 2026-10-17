@@ -38,6 +38,12 @@ export const STATIC_I18N_KEYS = [
   'Attachment is too large.',
   'Attachment data could not be read.',
   'Attachment upload failed. Your message was not sent.',
+  // Playground generation task server messages and client feedback.
+  'Failed to cancel the task',
+  'Task not found.',
+  'Only a running task can be canceled.',
+  'Unable to cancel the task.',
+  'Playground task result storage limit reached. Wait for old task results to expire.',
 
   'Authentication required.',
   'Invalid Playground configuration.',
@@ -959,4 +965,5 @@ export const STATIC_I18N_KEYS = [
   'Node data size limit',
   'Canvas storage per user',
   'Concurrent Playground tasks',
+  'Task result storage per user',
 ] as const

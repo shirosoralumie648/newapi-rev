@@ -32,6 +32,24 @@ export const MESSAGE_STATUS = {
   ERROR: 'error',
 } as const
 
+// Tool call states. A call stays pending until the user provides a result (or
+// denies it); Playground never executes a tool on its own.
+export const TOOL_CALL_STATUS = {
+  PENDING: 'pending',
+  COMPLETED: 'completed',
+  DENIED: 'denied',
+  ERROR: 'error',
+} as const
+
+// Protocol content sent to the model for calls the user answered outside the
+// Playground. These sentences are model input, not user interface text.
+export const TOOL_CALL_DENIED_CONTENT = 'The user denied this tool call.'
+export const TOOL_CALL_FAILED_CONTENT = 'The tool call failed.'
+
+// Local input caps for the manual result dialog. The server policy keeps the
+// authoritative argument/result byte limits.
+export const PLAYGROUND_TOOL_CALL_RESULT_MAX_CHARS = 64_000
+
 // API endpoints
 export const API_ENDPOINTS = {
   CHAT_COMPLETIONS: '/pg/chat/completions',
@@ -43,6 +61,7 @@ export const API_ENDPOINTS = {
   PLAYGROUND_SESSIONS: '/api/playground/sessions',
   PLAYGROUND_USAGE: '/api/playground/usage',
   PLAYGROUND_ASSETS: '/api/playground/assets',
+  PLAYGROUND_TASKS: '/api/playground/tasks',
 } as const
 
 // Default group — uses 'default' as the safe fallback; auto-group is
@@ -125,6 +144,7 @@ export const PLAYGROUND_GENERATION_ERRORS = {
   VIDEO_FAILED: 'Video generation failed',
   AUDIO_FAILED: 'Audio generation failed',
   TASK_LIST_FAILED: 'Failed to load the generation tasks',
+  TASK_CANCEL_FAILED: 'Failed to cancel the task',
   CANVAS_SEND_FAILED: 'Unable to send the result to the canvas',
 } as const
 

@@ -65,6 +65,13 @@ interface PlaygroundChatProps {
   onCreateArtifact?: (message: MessageType) => void
   onSendToCanvas?: (message: MessageType) => void
   onSelectPrompt?: (prompt: string) => void
+  onProvideToolResult?: (
+    message: MessageType,
+    toolCallId: string,
+    result: string
+  ) => void
+  onDenyToolCall?: (message: MessageType, toolCallId: string) => void
+  onContinueToolCalls?: (message: MessageType) => void
   isGenerating?: boolean
   isLoadingMessages?: boolean
   editingKey?: string | null
@@ -84,6 +91,9 @@ export function PlaygroundChat({
   onCreateArtifact,
   onSendToCanvas,
   onSelectPrompt,
+  onProvideToolResult,
+  onDenyToolCall,
+  onContinueToolCalls,
   isGenerating = false,
   isLoadingMessages = false,
   editingKey,
@@ -141,6 +151,7 @@ export function PlaygroundChat({
       : null
     const alignment = getMessageAlignment(message, messageLayoutMode)
     const isSourceVisible = sourceMessageKeys.has(message.key)
+    const isLastMessage = messageIndex === messages.length - 1
     const messageActions = (
       <MessageActions
         message={message}
@@ -168,9 +179,7 @@ export function PlaygroundChat({
             ? () => onEditMessage(previousUserMessage)
             : undefined
         }
-        onDelete={
-          onDeleteMessage ? () => onDeleteMessage(message) : undefined
-        }
+        onDelete={onDeleteMessage ? () => onDeleteMessage(message) : undefined}
       />
     ) : undefined
 
@@ -205,10 +214,15 @@ export function PlaygroundChat({
                     actions={messageActions}
                     alignment={alignment}
                     errorActions={errorActions}
+                    isGenerating={isGenerating}
+                    isLastMessage={isLastMessage}
                     isSourceVisible={isSourceVisible}
                     key={`${version.id}-${versionIndex}`}
                     message={message}
-                    versionContent={version.content}
+                    onContinueToolCalls={onContinueToolCalls}
+                    onDenyToolCall={onDenyToolCall}
+                    onProvideToolResult={onProvideToolResult}
+                    version={version}
                   />
                 ))}
               </BranchMessages>

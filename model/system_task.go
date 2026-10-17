@@ -23,6 +23,8 @@ const (
 	SystemTaskTypeAsyncTaskPoll  = "async_task_poll"
 	// SystemTaskTypePlaygroundAttachmentCleanup deletes long-orphaned Playground attachments.
 	SystemTaskTypePlaygroundAttachmentCleanup = "playground_attachment_cleanup"
+	// SystemTaskTypePlaygroundTaskCleanup deletes expired terminal Playground task rows.
+	SystemTaskTypePlaygroundTaskCleanup = "playground_task_cleanup"
 )
 
 var ErrSystemTaskLockLost = errors.New("system task lock lost")

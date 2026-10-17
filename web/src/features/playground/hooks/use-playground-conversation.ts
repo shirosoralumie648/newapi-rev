@@ -18,12 +18,16 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useCallback, useRef, useState } from 'react'
 
+import { TOOL_CALL_STATUS } from '../constants'
 import {
   appendUserMessagePair,
   applyMessageEdit,
+  canContinueToolCalls,
   createRegeneratedMessages,
+  createToolContinuationMessages,
   removeMessageByKey,
   setActiveMessageVersion,
+  updateMessageToolCallStatus,
 } from '../lib'
 import type { Message, MessageAttachment } from '../types'
 
@@ -126,6 +130,47 @@ export function usePlaygroundConversation({
     [updateMessages]
   )
 
+  // Record the result the user obtained elsewhere. The Playground never runs
+  // the tool; the payload builder turns answered calls into `tool` messages.
+  const handleProvideToolResult = useCallback(
+    (message: Message, toolCallId: string, result: string) => {
+      updateMessages((previousMessages) =>
+        updateMessageToolCallStatus(
+          previousMessages,
+          message.key,
+          toolCallId,
+          TOOL_CALL_STATUS.COMPLETED,
+          result
+        )
+      )
+    },
+    [updateMessages]
+  )
+
+  const handleDenyToolCall = useCallback(
+    (message: Message, toolCallId: string) => {
+      updateMessages((previousMessages) =>
+        updateMessageToolCallStatus(
+          previousMessages,
+          message.key,
+          toolCallId,
+          TOOL_CALL_STATUS.DENIED
+        )
+      )
+    },
+    [updateMessages]
+  )
+
+  // Once every call is answered, the model can continue in a fresh reply.
+  const handleContinueToolCalls = useCallback(() => {
+    const lastMessage = messagesRef.current.at(-1)
+    if (!lastMessage || !canContinueToolCalls(lastMessage)) return
+
+    const nextMessages = createToolContinuationMessages(messagesRef.current)
+    updateMessages(nextMessages)
+    sendChat(nextMessages)
+  }, [updateMessages, sendChat])
+
   return {
     editingMessageKey,
     handleSendMessage,
@@ -135,5 +180,8 @@ export function usePlaygroundConversation({
     applyEdit,
     handleDeleteMessage,
     handleSelectMessageVersion,
+    handleProvideToolResult,
+    handleDenyToolCall,
+    handleContinueToolCalls,
   }
 }

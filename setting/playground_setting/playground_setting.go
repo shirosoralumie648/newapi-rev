@@ -15,6 +15,9 @@ type PlaygroundQuotaPolicy struct {
 	MessageMaxCount           int   `json:"message_max_count"`
 	MessageMaxVersions        int   `json:"message_max_versions"`
 	MessageMaxBytes           int64 `json:"message_max_bytes"`
+	ToolCallMaxCount          int   `json:"tool_call_max_count"`
+	ToolCallArgumentsMaxBytes int64 `json:"tool_call_arguments_max_bytes"`
+	ToolCallResultMaxBytes    int64 `json:"tool_call_result_max_bytes"`
 	AttachmentMaxCount        int   `json:"attachment_max_count"`
 	AttachmentMaxFileBytes    int64 `json:"attachment_max_file_bytes"`
 	AttachmentUserMaxBytes    int64 `json:"attachment_user_max_bytes"`
@@ -34,6 +37,7 @@ type PlaygroundQuotaPolicy struct {
 	CanvasNodeDataMaxBytes    int64 `json:"canvas_node_data_max_bytes"`
 	CanvasUserMaxBytes        int64 `json:"canvas_user_max_bytes"`
 	TaskMaxConcurrency        int   `json:"task_max_concurrency"`
+	TaskUserResultMaxBytes    int64 `json:"task_user_result_max_bytes"`
 }
 
 // PlaygroundSetting is the persisted configuration. Defaults is the global
@@ -64,6 +68,9 @@ func builtinPlaygroundQuotaPolicy() PlaygroundQuotaPolicy {
 		MessageMaxCount:           100,
 		MessageMaxVersions:        100,
 		MessageMaxBytes:           1 << 20,
+		ToolCallMaxCount:          16,
+		ToolCallArgumentsMaxBytes: 64 << 10,
+		ToolCallResultMaxBytes:    256 << 10,
 		AttachmentMaxCount:        8,
 		AttachmentMaxFileBytes:    8 << 20,
 		AttachmentUserMaxBytes:    64 << 20,
@@ -88,6 +95,10 @@ func builtinPlaygroundQuotaPolicy() PlaygroundQuotaPolicy {
 		CanvasNodeDataMaxBytes: 64 << 10,
 		CanvasUserMaxBytes:     16 << 20,
 		TaskMaxConcurrency:     3,
+		// The account-level result storage budget for Playground-origin async
+		// tasks. Scheduled expiry frees finished task rows after the retention
+		// window, so a healthy workspace stays far below this ceiling.
+		TaskUserResultMaxBytes: 64 << 20,
 	}
 }
 
@@ -123,6 +134,15 @@ func applyPlaygroundQuotaOverrides(policy *PlaygroundQuotaPolicy, override *Play
 	}
 	if override.MessageMaxBytes > 0 {
 		policy.MessageMaxBytes = override.MessageMaxBytes
+	}
+	if override.ToolCallMaxCount > 0 {
+		policy.ToolCallMaxCount = override.ToolCallMaxCount
+	}
+	if override.ToolCallArgumentsMaxBytes > 0 {
+		policy.ToolCallArgumentsMaxBytes = override.ToolCallArgumentsMaxBytes
+	}
+	if override.ToolCallResultMaxBytes > 0 {
+		policy.ToolCallResultMaxBytes = override.ToolCallResultMaxBytes
 	}
 	if override.AttachmentMaxCount > 0 {
 		policy.AttachmentMaxCount = override.AttachmentMaxCount
@@ -180,5 +200,8 @@ func applyPlaygroundQuotaOverrides(policy *PlaygroundQuotaPolicy, override *Play
 	}
 	if override.TaskMaxConcurrency > 0 {
 		policy.TaskMaxConcurrency = override.TaskMaxConcurrency
+	}
+	if override.TaskUserResultMaxBytes > 0 {
+		policy.TaskUserResultMaxBytes = override.TaskUserResultMaxBytes
 	}
 }

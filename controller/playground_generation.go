@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 package controller
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
@@ -26,6 +27,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -35,6 +37,10 @@ import (
 // comes from the independent Playground resource policy, never from
 // User.Quota or token billing.
 const PlaygroundTaskLimitErrorCode = "PLAYGROUND_TASK_LIMIT_EXCEEDED"
+
+// PlaygroundTaskStorageLimitErrorCode is the stable error code for an exceeded
+// account-level async task result storage budget.
+const PlaygroundTaskStorageLimitErrorCode = "PLAYGROUND_TASK_STORAGE_LIMIT_EXCEEDED"
 
 // playgroundGenerationHandler establishes the Playground account context and
 // runs the canonical relay or task handler. The request path was already
@@ -49,6 +55,7 @@ func playgroundGenerationHandler(c *gin.Context, handler gin.HandlerFunc) {
 		})
 		return
 	}
+	c.Set(string(constant.ContextKeyPlaygroundOrigin), true)
 	handler(c)
 }
 
@@ -63,13 +70,13 @@ func playgroundTaskCreatesTask(c *gin.Context) bool {
 	return pinned
 }
 
-// enforcePlaygroundTaskConcurrency applies the Q-01 account task concurrency
-// budget to one async generation submission. The check is intentionally
-// advisory: task rows are the durable record and their state is re-read from
-// the database on every poll, so a small race between two concurrent submits
-// never bypasses quota in a compounding way, and the settled billing of an
-// already accepted task is never touched here.
-func enforcePlaygroundTaskConcurrency(c *gin.Context) bool {
+// enforcePlaygroundTaskBudget applies the Q-01 account task concurrency and
+// result storage budgets to one async generation submission. The checks are
+// intentionally advisory: task rows are the durable record and their state is
+// re-read from the database on every poll, so a small race between two
+// concurrent submits never bypasses quota in a compounding way, and the
+// settled billing of an already accepted task is never touched here.
+func enforcePlaygroundTaskBudget(c *gin.Context) bool {
 	if !playgroundTaskCreatesTask(c) {
 		return true
 	}
@@ -79,17 +86,27 @@ func enforcePlaygroundTaskConcurrency(c *gin.Context) bool {
 		writePlaygroundGenerationError(c, http.StatusInternalServerError, "PLAYGROUND_TASK_LIMIT_UNAVAILABLE", "Unable to check the account task budget.")
 		return false
 	}
-	if policy.TaskMaxConcurrency <= 0 {
-		return true
+	if policy.TaskMaxConcurrency > 0 {
+		active, err := model.CountActivePlaygroundTasks(userID)
+		if err != nil {
+			writePlaygroundGenerationError(c, http.StatusInternalServerError, "PLAYGROUND_TASK_LIMIT_UNAVAILABLE", "Unable to check the account task budget.")
+			return false
+		}
+		if active >= int64(policy.TaskMaxConcurrency) {
+			writePlaygroundGenerationError(c, http.StatusTooManyRequests, PlaygroundTaskLimitErrorCode, "Playground task concurrency limit reached. Wait for a running task to finish.")
+			return false
+		}
 	}
-	active, err := model.CountActivePlaygroundTasks(userID)
-	if err != nil {
-		writePlaygroundGenerationError(c, http.StatusInternalServerError, "PLAYGROUND_TASK_LIMIT_UNAVAILABLE", "Unable to check the account task budget.")
-		return false
-	}
-	if active >= int64(policy.TaskMaxConcurrency) {
-		writePlaygroundGenerationError(c, http.StatusTooManyRequests, PlaygroundTaskLimitErrorCode, "Playground task concurrency limit reached. Wait for a running task to finish.")
-		return false
+	if policy.TaskUserResultMaxBytes > 0 {
+		stored, err := model.PlaygroundTaskResultStorageBytes(userID)
+		if err != nil {
+			writePlaygroundGenerationError(c, http.StatusInternalServerError, "PLAYGROUND_TASK_LIMIT_UNAVAILABLE", "Unable to check the account task budget.")
+			return false
+		}
+		if stored >= policy.TaskUserResultMaxBytes {
+			writePlaygroundGenerationError(c, http.StatusTooManyRequests, PlaygroundTaskStorageLimitErrorCode, "Playground task result storage limit reached. Wait for old task results to expire.")
+			return false
+		}
 	}
 	return true
 }
@@ -110,7 +127,7 @@ func writePlaygroundGenerationError(c *gin.Context, status int, code, message st
 // enters the generation-pinned protocol bridge, everything else falls back to
 // the ordinary image relay.
 func PlaygroundImageGeneration(c *gin.Context) {
-	if !enforcePlaygroundTaskConcurrency(c) {
+	if !enforcePlaygroundTaskBudget(c) {
 		return
 	}
 	playgroundGenerationHandler(c, func(c *gin.Context) {
@@ -121,7 +138,7 @@ func PlaygroundImageGeneration(c *gin.Context) {
 // PlaygroundImageEdit serves image edits from the workspace through the
 // canonical /v1/images/edits pipeline.
 func PlaygroundImageEdit(c *gin.Context) {
-	if !enforcePlaygroundTaskConcurrency(c) {
+	if !enforcePlaygroundTaskBudget(c) {
 		return
 	}
 	playgroundGenerationHandler(c, func(c *gin.Context) {
@@ -132,7 +149,7 @@ func PlaygroundImageEdit(c *gin.Context) {
 // PlaygroundVideoTask submits a video or other async generation task from the
 // workspace through the canonical /v1/videos pipeline.
 func PlaygroundVideoTask(c *gin.Context) {
-	if !enforcePlaygroundTaskConcurrency(c) {
+	if !enforcePlaygroundTaskBudget(c) {
 		return
 	}
 	playgroundGenerationHandler(c, func(c *gin.Context) {
@@ -145,4 +162,27 @@ func PlaygroundVideoTask(c *gin.Context) {
 // consume the async task concurrency budget.
 func PlaygroundAudioSpeech(c *gin.Context) {
 	playgroundGenerationHandler(c, func(c *gin.Context) { Relay(c, types.RelayFormatOpenAIAudio) })
+}
+
+// PlaygroundTaskCancel cancels one unfinished workspace generation task with a
+// status CAS and refunds the quota reserved at submission. Only tasks created
+// from the Playground workspace are visible here; a direct API task id returns
+// 404 even when it belongs to the caller.
+func PlaygroundTaskCancel(c *gin.Context) {
+	task, err := model.CancelPlaygroundTask(c.GetInt("id"), c.Param("taskId"))
+	if err != nil {
+		status, code, message := http.StatusInternalServerError, "PLAYGROUND_TASK_CANCEL_FAILED", "Unable to cancel the task."
+		switch {
+		case errors.Is(err, model.ErrPlaygroundTaskNotFound):
+			status, code, message = http.StatusNotFound, "PLAYGROUND_TASK_NOT_FOUND", "Task not found."
+		case errors.Is(err, model.ErrPlaygroundTaskNotCancelable):
+			status, code, message = http.StatusConflict, "PLAYGROUND_TASK_NOT_CANCELABLE", "Only a running task can be canceled."
+		}
+		common.ApiErrorStatus(c, status, common.NewMessage(message), gin.H{"code": code})
+		return
+	}
+	if task.Quota != 0 {
+		service.RefundTaskQuota(c.Request.Context(), task, model.PlaygroundTaskCanceledReason)
+	}
+	common.ApiSuccess(c, gin.H{"task_id": task.TaskID, "status": task.Status})
 }

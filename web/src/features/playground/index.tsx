@@ -65,6 +65,7 @@ import {
   getCurrentVersion,
   getMessageContent,
   getMessageContentState,
+  hasPendingToolCalls,
   loadPlaygroundAttachment,
   PLAYGROUND_ATTACHMENT_ERRORS,
   uploadPlaygroundAttachments,
@@ -167,11 +168,16 @@ function PlaygroundContent(props: {
     applyEdit,
     handleDeleteMessage,
     handleSelectMessageVersion,
+    handleProvideToolResult,
+    handleDenyToolCall,
+    handleContinueToolCalls,
   } = usePlaygroundConversation({
     messages,
     updateMessages,
     sendChat,
   })
+
+  const pendingToolCalls = hasPendingToolCalls(messages)
 
   const handleInputSubmit = useCallback(
     async (text: string, files: (FileUIPart & { id?: string })[] = []) => {
@@ -744,6 +750,9 @@ function PlaygroundContent(props: {
               onDeleteMessage={handleDeleteMessage}
               onSelectVersion={handleSelectMessageVersion}
               onSelectPrompt={handleSendMessage}
+              onProvideToolResult={handleProvideToolResult}
+              onDenyToolCall={handleDenyToolCall}
+              onContinueToolCalls={handleContinueToolCalls}
               onCreateArtifact={
                 artifactCreationEnabled ? openArtifactSource : undefined
               }
@@ -759,9 +768,17 @@ function PlaygroundContent(props: {
           </div>
 
           <div className='mx-auto w-full max-w-4xl'>
+            {pendingToolCalls && (
+              <p
+                role='status'
+                className='text-muted-foreground px-1 pb-1 text-xs'
+              >
+                {t('Answer or deny the requested tool calls to continue.')}
+              </p>
+            )}
             <PlaygroundInput
               config={config}
-              disabled={isGenerating || sync.isLoading}
+              disabled={isGenerating || sync.isLoading || pendingToolCalls}
               groups={groups}
               groupValue={config.group}
               isGenerating={isGenerating}

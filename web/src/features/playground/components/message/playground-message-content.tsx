@@ -48,30 +48,45 @@ import {
   type MessageAlignment,
 } from '../../lib'
 import { getMessageContentStyles } from '../../lib/message/message-styles'
-import { getCurrentVersion } from '../../lib/message/message-utils'
-import type { Message } from '../../types'
+import type { Message, MessageVersion } from '../../types'
 import { MessageAttachmentList } from './message-attachment-list'
 import { MessageError } from './message-error'
 import { MessageMetadata } from './message-metadata'
+import { MessageToolCalls } from './message-tool-calls'
 
 type PlaygroundMessageContentProps = {
   actions: ReactNode
   alignment: MessageAlignment
   errorActions?: ReactNode
+  isGenerating?: boolean
+  isLastMessage?: boolean
   isSourceVisible?: boolean
   message: Message
-  versionContent: string
+  onContinueToolCalls?: (message: Message) => void
+  onDenyToolCall?: (message: Message, toolCallId: string) => void
+  onProvideToolResult?: (
+    message: Message,
+    toolCallId: string,
+    result: string
+  ) => void
+  version: MessageVersion
 }
 
 export function PlaygroundMessageContent({
   actions,
   alignment,
   errorActions,
+  isGenerating = false,
+  isLastMessage = false,
   isSourceVisible = false,
   message,
-  versionContent,
+  onContinueToolCalls,
+  onDenyToolCall,
+  onProvideToolResult,
+  version,
 }: PlaygroundMessageContentProps) {
   const { t } = useTranslation()
+  const versionContent = version.content
   const {
     displayContent,
     hasReasoning,
@@ -80,11 +95,13 @@ export function PlaygroundMessageContent({
     showLoader,
     showMessageContent,
     sources,
-  } = getMessageContentState(message, versionContent)
+  } = getMessageContentState(message, versionContent, version)
   const isError = isErrorMessage(message)
   const isMessageFinal =
     message.status !== MESSAGE_STATUS.LOADING &&
     message.status !== MESSAGE_STATUS.STREAMING
+  const hasAttachments = (version.attachments?.length ?? 0) > 0
+  const hasVisibleContent = versionContent.length > 0 || hasAttachments
 
   return (
     <div
@@ -138,31 +155,42 @@ export function PlaygroundMessageContent({
 
       {!isError && showMessageContent && (
         <>
-          <MessageAttachmentList
-            attachments={getCurrentVersion(message).attachments ?? []}
-          />
-          {isSourceVisible ? (
-            <CodeBlock
-              code={versionContent}
-              className='my-0 group-[.is-assistant]:w-full group-[.is-assistant]:max-w-[78ch]'
-              collapsedLines={24}
-              defaultCollapsed={false}
-              language='markdown'
-              maxExpandedLines={48}
-              showLineNumbers
-              showToolbar
-              title={t('Raw response')}
-            >
-              <CodeBlockCopyButton />
-            </CodeBlock>
-          ) : (
-            <MessageContent
-              variant='flat'
-              className={cn(getMessageContentStyles())}
-            >
-              <Response final={isMessageFinal}>{displayContent}</Response>
-            </MessageContent>
+          {hasVisibleContent && (
+            <>
+              <MessageAttachmentList attachments={version.attachments ?? []} />
+              {isSourceVisible ? (
+                <CodeBlock
+                  code={versionContent}
+                  className='my-0 group-[.is-assistant]:w-full group-[.is-assistant]:max-w-[78ch]'
+                  collapsedLines={24}
+                  defaultCollapsed={false}
+                  language='markdown'
+                  maxExpandedLines={48}
+                  showLineNumbers
+                  showToolbar
+                  title={t('Raw response')}
+                >
+                  <CodeBlockCopyButton />
+                </CodeBlock>
+              ) : (
+                <MessageContent
+                  variant='flat'
+                  className={cn(getMessageContentStyles())}
+                >
+                  <Response final={isMessageFinal}>{displayContent}</Response>
+                </MessageContent>
+              )}
+            </>
           )}
+          <MessageToolCalls
+            isGenerating={isGenerating}
+            isLastMessage={isLastMessage}
+            message={message}
+            onContinue={onContinueToolCalls}
+            onDeny={onDenyToolCall}
+            onProvideResult={onProvideToolResult}
+            version={version}
+          />
           <MessageMetadata alignment={alignment} message={message} />
           {actions}
         </>

@@ -80,4 +80,10 @@ const (
 	ContextKeyTokenAuditParams ContextKey = "token_audit_params"
 	// ContextKeyTokenAuditSucceeded disambiguates token responses that exceed the audit buffer.
 	ContextKeyTokenAuditSucceeded ContextKey = "token_audit_succeeded"
+
+	// ContextKeyPlaygroundOrigin marks a relay request that the Playground
+	// workspace submitted, so the durable task row can carry the same origin
+	// marker. It only scopes Playground lifecycle policies (result storage
+	// budget, expiry cleanup, cancellation) and never touches billing.
+	ContextKeyPlaygroundOrigin ContextKey = "playground_origin"
 )

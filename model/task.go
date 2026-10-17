@@ -136,6 +136,10 @@ type TaskPrivateData struct {
 	// and every retrieval surface treats the task as not found. The zero
 	// value keeps historical rows retained and retrievable.
 	ResultDiscarded bool `json:"result_discarded,omitempty"`
+	// PlaygroundOrigin marks rows submitted from the Playground workspace, so
+	// Playground lifecycle policies (result storage budget, expiry cleanup,
+	// cancellation) can scope themselves to workspace tasks only.
+	PlaygroundOrigin bool `json:"playground_origin,omitempty"`
 }
 
 type TaskExecutionSnapshot struct {
@@ -214,7 +218,7 @@ func (p TaskPrivateData) Value() (driver.Value, error) {
 		p.Execution == nil && p.BillingSource == "" && p.SubscriptionId == 0 &&
 		p.TokenId == 0 && p.NodeName == "" && p.BillingContext == nil &&
 		!p.ResponsesBackground && len(p.PluginState) == 0 && p.PollFailures == 0 &&
-		!p.ResultDiscarded {
+		!p.ResultDiscarded && !p.PlaygroundOrigin {
 		return nil, nil
 	}
 	// 同 Properties.Value:string 避免 PG simple protocol 的 bytea 编码。
