@@ -71,7 +71,12 @@ type PlaygroundParameterContentProps = PlaygroundParameterPanelProps & {
   compact?: boolean
 }
 
-function PlaygroundParameterContent({
+/**
+ * The parameter controls shared by the composer panel and the assistant preset
+ * editor. It owns no state: callers pass the draft configuration and receive
+ * every change, so a preset editor can reuse the exact same controls.
+ */
+export function PlaygroundParameterContent({
   compact = false,
   config,
   disabled,

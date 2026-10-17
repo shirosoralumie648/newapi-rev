@@ -51,6 +51,8 @@ import { useStreamRequest } from './use-stream-request'
 interface UseChatHandlerOptions {
   config: PlaygroundConfig
   parameterEnabled: ParameterEnabled
+  /** Conversation-level instruction injected as the first request message. */
+  systemPrompt: string
   onMessageUpdate: (
     updater: (prev: Message[]) => Message[],
     sessionId?: string | null
@@ -85,6 +87,7 @@ function mergePendingStreamChunk(
 export function useChatHandler({
   config,
   parameterEnabled,
+  systemPrompt,
   onMessageUpdate,
   sessionId,
 }: UseChatHandlerOptions) {
@@ -333,7 +336,8 @@ export function useChatHandler({
       const payload = buildChatCompletionPayload(
         messages,
         config,
-        parameterEnabled
+        parameterEnabled,
+        systemPrompt
       )
       void sendStreamRequest(payload, {
         onUpdate: (type, chunk) => handleStreamUpdate(generation, type, chunk),
@@ -349,6 +353,7 @@ export function useChatHandler({
     [
       config,
       parameterEnabled,
+      systemPrompt,
       sendStreamRequest,
       discardPendingStreamUpdates,
       handleStreamUpdate,
@@ -367,7 +372,8 @@ export function useChatHandler({
       const payload = buildChatCompletionPayload(
         messages,
         config,
-        parameterEnabled
+        parameterEnabled,
+        systemPrompt
       )
       const generation = requestGenerationRef.current + 1
       const abortController = new AbortController()
@@ -440,6 +446,7 @@ export function useChatHandler({
     [
       config,
       parameterEnabled,
+      systemPrompt,
       stopStream,
       discardPendingStreamUpdates,
       onMessageUpdate,

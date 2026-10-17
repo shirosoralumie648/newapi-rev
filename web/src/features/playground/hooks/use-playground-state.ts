@@ -261,6 +261,19 @@ export function usePlaygroundState() {
     [updateSession]
   )
 
+  const updateSystemPrompt = useCallback(
+    (value: string) => {
+      const currentActiveSessionId = latestActiveSessionIdRef.current
+      if (!currentActiveSessionId) return
+
+      updateSession(currentActiveSessionId, (session) => ({
+        ...session,
+        systemPrompt: value,
+      }))
+    },
+    [updateSession]
+  )
+
   const updateMessages = useCallback<MessageUpdate>(
     (updater, sessionId = latestActiveSessionIdRef.current) => {
       if (!sessionId) return
@@ -275,20 +288,56 @@ export function usePlaygroundState() {
 
   const clearMessages = useCallback(() => updateMessages([]), [updateMessages])
 
-  const createSession = useCallback(() => {
-    const currentSession = latestSessionsRef.current.find(
-      (session) => session.id === latestActiveSessionIdRef.current
-    )
-    const nextSession = createEmptySession(
-      currentSession?.config ?? DEFAULT_CONFIG,
-      currentSession?.parameterEnabled ?? DEFAULT_PARAMETER_ENABLED
-    )
-    const nextSessions = [
-      { ...nextSession, syncPending: true },
-      ...latestSessionsRef.current,
-    ]
-    applySessionState(nextSessions, nextSession.id)
-  }, [applySessionState])
+  /**
+   * Applies a complete settings bundle (for example an assistant preset) to the
+   * active conversation, replacing configuration, parameter flags and prompt in
+   * one write so a sync save observes a consistent snapshot.
+   */
+  const applySessionSettings = useCallback(
+    (settings: {
+      config: PlaygroundConfig
+      parameterEnabled: ParameterEnabled
+      systemPrompt: string
+    }) => {
+      const currentActiveSessionId = latestActiveSessionIdRef.current
+      if (!currentActiveSessionId) return
+
+      updateSession(currentActiveSessionId, (session) => ({
+        ...session,
+        ...settings,
+      }))
+    },
+    [updateSession]
+  )
+
+  /**
+   * Creates a conversation. A caller may pass the settings a preset supplies;
+   * otherwise the new conversation inherits the active one's configuration.
+   */
+  const createSession = useCallback(
+    (overrides?: {
+      config?: PlaygroundConfig
+      parameterEnabled?: ParameterEnabled
+      systemPrompt?: string
+    }) => {
+      const currentSession = latestSessionsRef.current.find(
+        (session) => session.id === latestActiveSessionIdRef.current
+      )
+      const nextSession = createEmptySession(
+        overrides?.config ?? currentSession?.config ?? DEFAULT_CONFIG,
+        overrides?.parameterEnabled ??
+          currentSession?.parameterEnabled ??
+          DEFAULT_PARAMETER_ENABLED,
+        overrides?.systemPrompt ?? ''
+      )
+      const nextSessions = [
+        { ...nextSession, syncPending: true },
+        ...latestSessionsRef.current,
+      ]
+      applySessionState(nextSessions, nextSession.id)
+    },
+    [applySessionState]
+  )
 
   const renameSession = useCallback(
     (sessionId: string, title: string) => {
@@ -314,7 +363,8 @@ export function usePlaygroundState() {
         remaining[0] ??
         createEmptySession(
           currentSession?.config ?? DEFAULT_CONFIG,
-          currentSession?.parameterEnabled ?? DEFAULT_PARAMETER_ENABLED
+          currentSession?.parameterEnabled ?? DEFAULT_PARAMETER_ENABLED,
+          currentSession?.systemPrompt ?? ''
         )
       const nextSessions = remaining.length > 0 ? remaining : [fallback]
       const nextActiveSessionId =
@@ -361,6 +411,7 @@ export function usePlaygroundState() {
     config: activeSession?.config ?? DEFAULT_CONFIG,
     parameterEnabled:
       activeSession?.parameterEnabled ?? DEFAULT_PARAMETER_ENABLED,
+    systemPrompt: activeSession?.systemPrompt ?? '',
     messages: activeSession?.messages ?? [],
     isLoadingMessages: !isHydrated,
     models,
@@ -372,6 +423,8 @@ export function usePlaygroundState() {
     setGroups,
     updateConfig,
     updateParameterEnabled,
+    updateSystemPrompt,
+    applySessionSettings,
     updateMessages,
     clearMessages,
     resetConfig,

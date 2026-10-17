@@ -67,22 +67,30 @@ function formatMessageForRequest(message: Message): ChatCompletionMessage[] {
 }
 
 /**
- * Build API request payload from messages and config
+ * Build API request payload from messages and config. A conversation-level
+ * system prompt is injected as the first `system` message; an empty or
+ * whitespace-only prompt adds nothing.
  */
 export function buildChatCompletionPayload(
   messages: Message[],
   config: PlaygroundConfig,
-  parameterEnabled: ParameterEnabled
+  parameterEnabled: ParameterEnabled,
+  systemPrompt = ''
 ): ChatCompletionRequest {
   // Filter and format valid messages
   const processedMessages = messages
     .filter(isValidMessage)
     .flatMap(formatMessageForRequest)
 
+  const prompt = systemPrompt.trim()
+  const requestMessages: ChatCompletionMessage[] = prompt
+    ? [{ role: 'system', content: prompt }, ...processedMessages]
+    : processedMessages
+
   const payload: ChatCompletionRequest = {
     model: config.model,
     group: config.group,
-    messages: processedMessages,
+    messages: requestMessages,
     stream: config.stream,
   }
 

@@ -353,20 +353,22 @@ func TaskArtifactContent(c *gin.Context) {
 		writeTaskArtifactProjectionError(c, err)
 		return
 	}
-	found := false
-	for _, artifact := range artifacts {
+	matched := -1
+	for index, artifact := range artifacts {
 		if artifact.Key == artifactKey {
-			found = true
+			matched = index
 			break
 		}
 	}
-	if !found {
+	if matched < 0 {
 		writeTaskArtifactError(c, http.StatusNotFound, "artifact_not_found", "Task or artifact not found")
 		return
 	}
 	artifactStore := service.GetTaskArtifactStore()
-	if ref, resolveErr := artifactStore.Resolve(task, artifactKey); resolveErr == nil && ref != nil {
-		_ = artifactStore.Serve(c, task, ref)
+	if ref, resolveErr := artifactStore.Resolve(c.Request.Context(), task, artifacts[matched]); resolveErr == nil && ref != nil {
+		if serveErr := artifactStore.Serve(c, task, ref); serveErr != nil {
+			logger.LogWarn(c.Request.Context(), fmt.Sprintf("Failed to serve stored artifact %s for task %s: %v", artifactKey, task.TaskID, serveErr))
+		}
 		return
 	}
 

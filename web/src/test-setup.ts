@@ -114,6 +114,16 @@ if (typeof Element.prototype.getAnimations !== 'function') {
   })
 }
 
+// With `getAnimations` defined, Base UI defers the end of an exit transition to
+// an animation frame and the microtask queue, so a popup that just closed stays
+// in the DOM while a test synchronously opens the next one and finds its stale
+// options. This flag makes Base UI finish transitions synchronously, which is
+// how it behaved while the method was missing.
+Object.defineProperty(globalThis, 'BASE_UI_ANIMATIONS_DISABLED', {
+  configurable: true,
+  value: true,
+})
+
 // Node.js 25+ defines `localStorage`/`sessionStorage` accessors on the global
 // object that resolve to `undefined` unless `--localstorage-file` is set, and
 // vitest's jsdom environment does not replace globals that already exist.

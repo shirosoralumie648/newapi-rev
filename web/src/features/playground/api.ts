@@ -33,6 +33,7 @@ import {
   parameterEnabledSchema,
 } from './lib/storage/storage-schema'
 import type {
+  AssistantPreset,
   ChatCompletionRequest,
   ChatCompletionResponse,
   ModelOption,
@@ -131,6 +132,7 @@ const serverSessionSchema = z.object({
   title: z.string(),
   config: playgroundConfigSchema,
   parameter_enabled: parameterEnabledSchema,
+  system_prompt: z.string().optional(),
   created_at: z.number().int().nonnegative(),
   updated_at: z.number().int().nonnegative(),
   revision: z.number().int().nonnegative(),
@@ -142,6 +144,7 @@ export interface PlaygroundSessionInput {
   client_id?: string
   config?: PlaygroundConfig
   parameter_enabled?: ParameterEnabled
+  system_prompt?: string
   revision?: number
   messages?: Message[]
 }
@@ -257,6 +260,7 @@ function mapServerSession(value: unknown): PlaygroundServerSession {
       ...DEFAULT_PARAMETER_ENABLED,
       ...session.parameter_enabled,
     },
+    systemPrompt: session.system_prompt ?? '',
     createdAt: session.created_at * 1000,
     updatedAt: session.updated_at * 1000,
     revision: session.revision,
@@ -584,4 +588,105 @@ export async function getPlaygroundUsage(
     canvas: toMetric(metrics.canvas),
     tasks: toMetric(metrics.tasks),
   }
+}
+
+const serverPresetSchema = z.object({
+  id: z.string().min(1),
+  name: z.string(),
+  avatar: z.string(),
+  config: playgroundConfigSchema,
+  parameter_enabled: parameterEnabledSchema,
+  system_prompt: z.string(),
+  created_at: z.number().int().nonnegative(),
+  updated_at: z.number().int().nonnegative(),
+})
+
+export interface PlaygroundPresetInput {
+  name: string
+  avatar: string
+  /** Model and sampling parameters the preset applies; routing stays with the conversation. */
+  config: Partial<PlaygroundConfig>
+  parameter_enabled?: ParameterEnabled
+  system_prompt: string
+}
+
+export type PlaygroundPresetUpdateInput = Partial<PlaygroundPresetInput>
+
+export interface PlaygroundPresetListing {
+  items: AssistantPreset[]
+  total: number
+  /** Per-account preset budget the server enforces for the owner's group. */
+  limit: number
+}
+
+function mapServerPreset(value: unknown): AssistantPreset {
+  const preset = serverPresetSchema.parse(value)
+  return {
+    id: preset.id,
+    name: preset.name,
+    avatar: preset.avatar,
+    config: { ...DEFAULT_CONFIG, ...preset.config },
+    parameterEnabled: {
+      ...DEFAULT_PARAMETER_ENABLED,
+      ...preset.parameter_enabled,
+    },
+    systemPrompt: preset.system_prompt,
+    createdAt: preset.created_at * 1000,
+    updatedAt: preset.updated_at * 1000,
+  }
+}
+
+export async function getPlaygroundPresets(
+  signal?: AbortSignal
+): Promise<PlaygroundPresetListing> {
+  const response = await api.get(API_ENDPOINTS.PLAYGROUND_PRESETS, { signal })
+  requireServerSuccess(response.data)
+  const data = z
+    .object({
+      items: z.array(z.unknown()),
+      total: z.number().nonnegative(),
+      limit: z.number().int().nonnegative(),
+    })
+    .parse(response.data.data)
+  return {
+    items: data.items.map(mapServerPreset),
+    total: data.total,
+    limit: data.limit,
+  }
+}
+
+export async function createPlaygroundPreset(
+  input: PlaygroundPresetInput,
+  signal?: AbortSignal
+): Promise<AssistantPreset> {
+  const response = await api.post(API_ENDPOINTS.PLAYGROUND_PRESETS, input, {
+    signal,
+  })
+  requireServerSuccess(response.data)
+  return mapServerPreset(response.data.data)
+}
+
+export async function updatePlaygroundPreset(
+  presetId: string,
+  input: PlaygroundPresetUpdateInput,
+  signal?: AbortSignal
+): Promise<AssistantPreset> {
+  const response = await api.patch(
+    `${API_ENDPOINTS.PLAYGROUND_PRESETS}/${encodeURIComponent(presetId)}`,
+    input,
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  return mapServerPreset(response.data.data)
+}
+
+export async function deletePlaygroundPreset(
+  presetId: string,
+  signal?: AbortSignal
+): Promise<void> {
+  const response = await api.delete(
+    `${API_ENDPOINTS.PLAYGROUND_PRESETS}/${encodeURIComponent(presetId)}`,
+    { signal }
+  )
+  requireServerSuccess(response.data)
 }

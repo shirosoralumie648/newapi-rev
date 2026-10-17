@@ -199,7 +199,10 @@ func TestLocalStorePresignIsUnsupported(t *testing.T) {
 	assert.ErrorIs(t, err, ErrPresignUnsupported)
 	_, err = store.PresignGet(t.Context(), "pg/1/item", time.Minute)
 	assert.ErrorIs(t, err, ErrPresignUnsupported)
+	// A non-positive TTL falls back to the configured default.
 	_, err = store.PresignGet(t.Context(), "pg/1/item", 0)
+	assert.ErrorIs(t, err, ErrPresignUnsupported)
+	_, err = store.PresignGet(t.Context(), "pg/1/item", maxPresignTTL+time.Second)
 	assert.ErrorContains(t, err, "TTL")
 }
 

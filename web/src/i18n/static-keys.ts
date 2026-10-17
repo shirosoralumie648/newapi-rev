@@ -65,6 +65,17 @@ export const STATIC_I18N_KEYS = [
   'Enter a group name',
   'Save wallet overdraft',
 
+  // Playground assistant preset server messages and client feedback.
+  'Failed to load assistant presets',
+  'Failed to save the assistant preset',
+  'Failed to delete the assistant preset',
+  'Assistant preset not found.',
+  'Assistant preset limit exceeded.',
+  'Playground system prompt limit exceeded.',
+  'Assistant preset name must contain 1 to 100 characters.',
+  'Assistant preset avatar must be an emoji or an http(s) image URL.',
+  'Invalid assistant preset.',
+
   'Authentication required.',
   'Invalid Playground configuration.',
   'Invalid Playground message.',
@@ -990,6 +1001,9 @@ export const STATIC_I18N_KEYS = [
   'Canvas storage per user',
   'Concurrent Playground tasks',
   'Task result storage per user',
+  'Presets',
+  'Presets per user',
+  'System prompt size limit',
   // Channel priority ordering API errors.
   'Channel priorities changed. Refresh and try again.',
   'Invalid channel priority move',

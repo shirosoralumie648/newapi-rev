@@ -123,9 +123,28 @@ export interface PlaygroundSession {
   updatedAt: number
   config: PlaygroundConfig
   parameterEnabled: ParameterEnabled
+  /** Conversation-level instruction injected as the first `system` message. */
+  systemPrompt: string
   messages: Message[]
   server?: { id: string; revision: number; messageRevision: number }
   syncPending?: boolean
+}
+
+/**
+ * A reusable assistant definition owned by the account: a name and avatar, the
+ * model and sampling parameters it applies, and a system prompt. Applying one
+ * copies these fields into a conversation; presets never carry credentials or
+ * provider addresses.
+ */
+export interface AssistantPreset {
+  id: string
+  name: string
+  avatar: string
+  config: PlaygroundConfig
+  parameterEnabled: ParameterEnabled
+  systemPrompt: string
+  createdAt: number
+  updatedAt: number
 }
 
 /**

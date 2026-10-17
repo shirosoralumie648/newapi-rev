@@ -46,7 +46,9 @@ function buildInputElement(
       onModelChange={() => undefined}
       onParameterEnabledChange={() => undefined}
       onSubmit={onSubmit}
+      onSystemPromptChange={() => undefined}
       parameterEnabled={DEFAULT_PARAMETER_ENABLED}
+      systemPrompt=''
       {...overrides}
     />
   )
