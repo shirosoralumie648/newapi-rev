@@ -7698,6 +7698,16 @@
     "The canvas is full; the run could not add a result node.": "Le canevas est plein ; l'exécution n'a pas pu ajouter de nœud de résultat.",
     "The step that produced this result is no longer on the canvas.": "L'étape qui a produit ce résultat n'est plus sur le canevas.",
     "A connected reference image could not be read.": "Une image de référence connectée n'a pas pu être lue.",
-    "A connected reference image is larger than the 8 MiB limit.": "Une image de référence connectée dépasse la limite de 8 Mio."
+    "A connected reference image is larger than the 8 MiB limit.": "Une image de référence connectée dépasse la limite de 8 Mio.",
+    "Same as identifier": "Identique à l'identifiant",
+    "A row without an identifier is not saved until it has one.": "Une ligne sans identifiant n'est pas enregistrée tant qu'elle n'en a pas.",
+    "Group display names must be unique: {{names}}": "Les noms d'affichage des groupes doivent être uniques : {{names}}",
+    "A display name must not repeat another group identifier: {{names}}": "Un nom d'affichage ne doit pas reprendre l'identifiant d'un autre groupe : {{names}}",
+    "Group display names": "Noms d'affichage des groupes",
+    "Search groups by identifier, display name or description": "Rechercher des groupes par identifiant, nom d'affichage ou description",
+    "Expected a JSON object mapping group identifiers to unique display names": "Un objet JSON associant les identifiants de groupe à des noms d'affichage uniques est attendu",
+    "Each group has a stable identifier and an editable display name. The identifier is stored on tokens, subscription plans and quotas and cannot be changed after saving; the display name is what users see.": "Chaque groupe possède un identifiant stable et un nom d'affichage modifiable. L'identifiant est stocké sur les jetons, les forfaits d'abonnement et les quotas et ne peut plus être modifié après l'enregistrement ; le nom d'affichage est ce que voient les utilisateurs.",
+    "JSON map of group identifier → display name shown in the console. A group without an entry keeps its identifier as the display name.": "Correspondance JSON identifiant de groupe → nom d'affichage utilisé dans la console. Un groupe sans entrée conserve son identifiant comme nom d'affichage.",
+    "Every stored reference uses the group identifier. The identifier is fixed once the group is saved and only the display name can change, so renaming a group never invalidates existing API keys or subscriptions.": "Toutes les références enregistrées utilisent l'identifiant du groupe. Une fois le groupe enregistré, l'identifiant est figé et seul le nom d'affichage peut changer : renommer un groupe n'invalide donc jamais les clés API ni les abonnements existants."
   }
 }

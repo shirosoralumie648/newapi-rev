@@ -7,11 +7,15 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/group_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 )
 
 func GetUserUsableGroups(userGroup string) map[string]string {
+	// A user group reference may still use an editable display name; resolve it
+	// so the special-visibility lookup and the returned map use identifiers.
+	userGroup = group_setting.ResolveGroupID(userGroup)
 	groupsCopy := setting.GetUserUsableGroupsCopy()
 	if userGroup != "" {
 		specialSettings, b := ratio_setting.GetGroupRatioSetting().GroupSpecialUsableGroup.Get(userGroup)
@@ -42,11 +46,15 @@ func GetUserUsableGroups(userGroup string) map[string]string {
 }
 
 func GroupInUserUsableGroups(userGroup, groupName string) bool {
+	// Stored or submitted references accept an editable display name and are
+	// resolved to the stable identifier before the permission check.
+	groupName = group_setting.ResolveGroupID(groupName)
 	_, ok := GetUserUsableGroups(userGroup)[groupName]
 	return ok
 }
 
 func IsUserSelectableGroup(userGroup, groupName string) bool {
+	groupName = group_setting.ResolveGroupID(groupName)
 	if groupName == "" || groupName == "auto" {
 		return false
 	}
@@ -58,6 +66,9 @@ func GetUserAutoGroup(userGroup string) []string {
 	autoGroups := make([]string, 0)
 	seen := make(map[string]struct{})
 	for _, group := range setting.GetAutoGroups() {
+		// Channel selection and billing consume the returned values, so resolve
+		// any editable display name to its stable identifier first.
+		group = group_setting.ResolveGroupID(group)
 		if !IsUserSelectableGroup(userGroup, group) {
 			continue
 		}
@@ -77,6 +88,9 @@ func FilterUserTokenAutoGroups(userGroup string, groups []string) []string {
 	filtered := make([]string, 0, min(len(groups), maxCount))
 	seen := make(map[string]struct{})
 	for _, group := range groups {
+		// An older snapshot may still store a display name; normalize it so the
+		// value used for channel selection is always the stable identifier.
+		group = group_setting.ResolveGroupID(group)
 		if !IsUserSelectableGroup(userGroup, group) {
 			continue
 		}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/pkg/cachex"
+	"github.com/QuantumNous/new-api/setting/group_setting"
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/samber/hot"
 	"github.com/shopspring/decimal"
@@ -442,8 +443,10 @@ func downgradeUserGroupForSubscriptionTx(tx *gorm.DB, sub *UserSubscription, now
 	if tx == nil || sub == nil {
 		return "", errors.New("invalid downgrade args")
 	}
-	downgradeGroup := strings.TrimSpace(sub.DowngradeGroup)
-	upgradeGroup := strings.TrimSpace(sub.UpgradeGroup)
+	// Stored references may predate a display-name change; resolve them to the
+	// stable identifier before comparing or applying.
+	downgradeGroup := group_setting.ResolveGroupID(sub.DowngradeGroup)
+	upgradeGroup := group_setting.ResolveGroupID(sub.UpgradeGroup)
 	// Nothing to do if neither an explicit downgrade target nor an upgrade snapshot exists.
 	if downgradeGroup == "" && upgradeGroup == "" {
 		return "", nil
@@ -470,7 +473,7 @@ func downgradeUserGroupForSubscriptionTx(tx *gorm.DB, sub *UserSubscription, now
 		if currentGroup != upgradeGroup {
 			return "", nil
 		}
-		target = strings.TrimSpace(sub.PrevUserGroup)
+		target = group_setting.ResolveGroupID(sub.PrevUserGroup)
 	}
 	if target == "" || target == currentGroup {
 		return "", nil
@@ -515,7 +518,7 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 	if nextReset > 0 {
 		lastReset = now.Unix()
 	}
-	upgradeGroup := strings.TrimSpace(plan.UpgradeGroup)
+	upgradeGroup := group_setting.ResolveGroupID(plan.UpgradeGroup)
 	prevGroup := ""
 	if upgradeGroup != "" {
 		currentGroup, err := getUserGroupByIdTx(tx, userId)
@@ -547,7 +550,7 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 		NextResetTime:       nextReset,
 		UpgradeGroup:        upgradeGroup,
 		PrevUserGroup:       prevGroup,
-		DowngradeGroup:      strings.TrimSpace(plan.DowngradeGroup),
+		DowngradeGroup:      group_setting.ResolveGroupID(plan.DowngradeGroup),
 		AllowWalletOverflow: allowWalletOverflow,
 		CreatedAt:           common.GetTimestamp(),
 		UpdatedAt:           common.GetTimestamp(),
@@ -612,7 +615,7 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 			return err
 		}
 		if subscription.PrevUserGroup != "" {
-			upgradeGroup = strings.TrimSpace(subscription.UpgradeGroup)
+			upgradeGroup = group_setting.ResolveGroupID(subscription.UpgradeGroup)
 		}
 		if err := upsertSubscriptionTopUpTx(tx, &order); err != nil {
 			return err
@@ -847,7 +850,7 @@ func PurchaseSubscriptionWithBalance(userId int, planId int) error {
 		logMoney = plan.PriceAmount
 		chargedQuota = requiredQuota
 		if subscription.PrevUserGroup != "" {
-			upgradeGroup = strings.TrimSpace(subscription.UpgradeGroup)
+			upgradeGroup = group_setting.ResolveGroupID(subscription.UpgradeGroup)
 		}
 		return nil
 	})
@@ -1229,10 +1232,10 @@ func ExpireDueSubscriptions(limit int) (int, error) {
 			// An explicit downgrade group takes precedence; otherwise revert to the
 			// group held before purchase (legacy behavior, only when the subscription
 			// actually elevated the user).
-			target := strings.TrimSpace(lastExpired.DowngradeGroup)
+			target := group_setting.ResolveGroupID(lastExpired.DowngradeGroup)
 			if target == "" {
-				upgradeGroup := strings.TrimSpace(lastExpired.UpgradeGroup)
-				prevGroup := strings.TrimSpace(lastExpired.PrevUserGroup)
+				upgradeGroup := group_setting.ResolveGroupID(lastExpired.UpgradeGroup)
+				prevGroup := group_setting.ResolveGroupID(lastExpired.PrevUserGroup)
 				if upgradeGroup == "" || prevGroup == "" {
 					return nil
 				}

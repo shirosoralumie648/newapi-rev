@@ -119,12 +119,14 @@ export async function getUserGroups(): Promise<GroupOption[]> {
 
   const groupData = data.data as Record<
     string,
-    { desc: string; ratio: number | string }
+    { desc: string; ratio: number | string; name?: string }
   >
 
-  // label is for button display (name only); desc is for dropdown content
+  // value is the stable identifier submitted with the request; the label is the
+  // editable display name (falling back to the identifier) and desc is for
+  // dropdown content.
   return Object.entries(groupData).map(([group, info]) => ({
-    label: group,
+    label: info.name?.trim() || group,
     value: group,
     ratio: info.ratio,
     desc: info.desc,

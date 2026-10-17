@@ -69,6 +69,7 @@ type GroupFormValues = {
   GroupRatio: string
   TopupGroupRatio: string
   UserUsableGroups: string
+  GroupDisplayNames: string
   GroupGroupRatio: string
   AutoGroups: string
   MaxTokenAutoGroups: number
@@ -80,18 +81,21 @@ type GroupRatioFormProps = {
   form: UseFormReturn<GroupFormValues>
   onSave: (values: GroupFormValues) => Promise<void>
   isSaving: boolean
+  savedRevision: number
 }
 
 export const GroupRatioForm = memo(function GroupRatioForm({
   form,
   onSave,
   isSaving,
+  savedRevision,
 }: GroupRatioFormProps) {
   const { t } = useTranslation()
   const values = useWatch({ control: form.control })
   const [editMode, setEditMode] = useState<'visual' | 'json'>('visual')
   const [guideOpen, setGuideOpen] = useState(false)
   const [section, setSection] = useState<GroupSettingsSection>('pricing')
+  const [visualEditorValid, setVisualEditorValid] = useState(true)
 
   const handleFieldChange = useCallback(
     (field: keyof GroupFormValues, value: string) => {
@@ -158,7 +162,7 @@ export const GroupRatioForm = memo(function GroupRatioForm({
                 requestAnimationFrame(() => form.setFocus('MaxTokenAutoGroups'))
               }
             })}
-            disabled={isSaving}
+            disabled={isSaving || (editMode === 'visual' && !visualEditorValid)}
           >
             {isSaving ? t('Saving...') : t('Save group settings')}
           </Button>
@@ -225,6 +229,9 @@ export const GroupRatioForm = memo(function GroupRatioForm({
               />
             }
             groupSpecialUsableGroup={values.GroupSpecialUsableGroup ?? ''}
+            groupDisplayNames={values.GroupDisplayNames ?? ''}
+            savedRevision={savedRevision}
+            onValidationChange={setVisualEditorValid}
             onChange={(field, value) =>
               handleFieldChange(field as keyof GroupFormValues, value)
             }
@@ -302,6 +309,32 @@ export const GroupRatioForm = memo(function GroupRatioForm({
                   <FormDescription>
                     {t(
                       'JSON map of group → description exposed when users create API keys.'
+                    )}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='GroupDisplayNames'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Group display names')}</FormLabel>
+                  <FormControl>
+                    <JsonCodeEditor
+                      value={field.value}
+                      onChange={field.onChange}
+                      name={field.name}
+                      onBlur={field.onBlur}
+                      textareaRef={field.ref}
+                      heightClassName='h-40 min-h-40 max-h-40'
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'JSON map of group identifier → display name shown in the console. A group without an entry keeps its identifier as the display name.'
                     )}
                   </FormDescription>
                   <FormMessage />
@@ -574,7 +607,7 @@ function GroupPricingGuide({ open, onOpenChange }: GroupPricingGuideProps) {
                 <thead>
                   <tr className='text-muted-foreground border-b text-xs'>
                     <th className='px-3 py-1.5 text-left font-medium'>
-                      {t('Group name')}
+                      {t('Group identifier')}
                     </th>
                     <th className='px-3 py-1.5 text-right font-medium'>
                       {t('Ratio')}
@@ -701,14 +734,19 @@ function GroupPricingGuide({ open, onOpenChange }: GroupPricingGuideProps) {
                   )}
                 </p>
                 <GuideCodeBlock>
-                  {`${t('Group name')}   ${t('Ratio')}   ${t('User selectable')}   ${t('Description')}
-standard     1.0     ${t('Yes')}               ${t('Standard price')}
-premium      0.5     ${t('Yes')}               ${t('Premium plan, half price')}
-vip          0.5     ${t('No')}                ${t('Assigned by administrator only')}`}
+                  {`${t('Group identifier')}   ${t('Display name')}   ${t('Ratio')}   ${t('User selectable')}   ${t('Description')}
+standard      Standard      1.0     ${t('Yes')}               ${t('Standard price')}
+premium       Premium       0.5     ${t('Yes')}               ${t('Premium plan, half price')}
+vip           VIP           0.5     ${t('No')}                ${t('Assigned by administrator only')}`}
                 </GuideCodeBlock>
                 <p className='text-muted-foreground text-sm leading-6'>
                   {t(
                     'Users only see groups marked as user selectable. Non-selectable groups can still be assigned by administrators.'
+                  )}
+                </p>
+                <p className='text-muted-foreground text-sm leading-6'>
+                  {t(
+                    'Every stored reference uses the group identifier. The identifier is fixed once the group is saved and only the display name can change, so renaming a group never invalidates existing API keys or subscriptions.'
                   )}
                 </p>
               </AccordionContent>
