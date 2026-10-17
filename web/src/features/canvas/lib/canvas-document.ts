@@ -235,9 +235,16 @@ export function fromServerDocument(document: CanvasServerDocument): {
   edges: CanvasFlowEdge[]
   viewport?: CanvasViewport
 } {
+  // A stored document may name a parent that is gone (a hand-edited import);
+  // such a node is read as a root node instead of a dangling child, and the
+  // next save drops the stale parent.
+  const known = new Set(document.nodes.map((node) => node.id))
   const nodes = document.nodes.map((node) => {
     const data = { kind: node.type, ...node.data } as CanvasNodeData
-    const parentId = typeof data.parentId === 'string' ? data.parentId : ''
+    const parentId =
+      typeof data.parentId === 'string' && known.has(data.parentId)
+        ? data.parentId
+        : ''
     return {
       id: node.id,
       type: node.type,

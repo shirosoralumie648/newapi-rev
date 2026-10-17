@@ -260,4 +260,19 @@ test('a group round-trips through the server contract in parent-first order', ()
   expect(child?.parentId).toBe('group')
   expect(child?.extent).toBe('parent')
   expect(child?.data.parentId).toBe('group')
+
+  // A parent that is not part of the document is not attached at all, so a
+  // hand-edited import cannot produce a dangling child.
+  const dangling = fromServerDocument({
+    nodes: [
+      {
+        id: 'lost',
+        type: 'text',
+        position: { x: 0, y: 0 },
+        data: { parentId: 'gone' },
+      },
+    ],
+    edges: [],
+  })
+  expect(dangling.nodes[0].parentId).toBeUndefined()
 })
