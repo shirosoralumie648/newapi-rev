@@ -9,6 +9,8 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 
+	"github.com/go-sql-driver/mysql"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -294,6 +296,209 @@ func TestInsertKeepsBlankPasswordForPasswordlessUser(t *testing.T) {
 	var stored User
 	require.NoError(t, DB.Where("username = ?", user.Username).First(&stored).Error)
 	assert.Empty(t, stored.Password)
+}
+
+// useAffCodeSequence makes generateAvailableAffCode return the given codes in
+// order; the last code repeats once the sequence is exhausted.
+func useAffCodeSequence(t *testing.T, codes ...string) {
+	t.Helper()
+	original := affCodeGenerator
+	next := 0
+	affCodeGenerator = func() string {
+		code := codes[next]
+		if next < len(codes)-1 {
+			next++
+		}
+		return code
+	}
+	t.Cleanup(func() {
+		affCodeGenerator = original
+	})
+}
+
+// runAffCodeDialectMatrix runs the affiliate-code scenarios on SQLite, MySQL,
+// and PostgreSQL. Dialects without a configured test DSN are skipped, matching
+// the other model matrices.
+func runAffCodeDialectMatrix(t *testing.T, scenario func(t *testing.T)) {
+	t.Helper()
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			isolatedAccountingTestDB(t, dialect)
+			previousRedis, previousBatchUpdate := common.RedisEnabled, common.BatchUpdateEnabled
+			common.RedisEnabled = false
+			common.BatchUpdateEnabled = false
+			t.Cleanup(func() {
+				common.RedisEnabled = previousRedis
+				common.BatchUpdateEnabled = previousBatchUpdate
+			})
+			scenario(t)
+		})
+	}
+}
+
+// clearAffCodeTestUsers empties the isolated users table so every scenario
+// starts without leftover accounts.
+func clearAffCodeTestUsers(t *testing.T) {
+	t.Helper()
+	require.NoError(t, DB.Unscoped().Where("1 = 1").Delete(&User{}).Error)
+}
+
+func TestAffCodeGenerationMatrix(t *testing.T) {
+	runAffCodeDialectMatrix(t, func(t *testing.T) {
+		t.Run("skips codes held by active or deleted users", func(t *testing.T) {
+			clearAffCodeTestUsers(t)
+
+			// Soft-deleted accounts keep their code reserved through the unique index.
+			deleted := User{Username: "deleted-aff-owner", Password: "password", AffCode: "TakenAAA", Status: common.UserStatusEnabled}
+			require.NoError(t, DB.Create(&deleted).Error)
+			require.NoError(t, DB.Delete(&deleted).Error)
+			require.NoError(t, DB.Create(&User{Username: "active-aff-owner", Password: "password", AffCode: "TakenBBB", Status: common.UserStatusEnabled}).Error)
+			useAffCodeSequence(t, "TakenAAA", "TakenBBB", "FreshCCC")
+
+			user := User{Username: "aff-collision-user", Password: "password", Status: common.UserStatusEnabled}
+			require.NoError(t, user.Insert(0))
+
+			var stored User
+			require.NoError(t, DB.Where("username = ?", user.Username).First(&stored).Error)
+			assert.Equal(t, "FreshCCC", stored.AffCode)
+			assert.Equal(t, "FreshCCC", user.AffCode)
+		})
+
+		t.Run("generates 8-12 character alphanumeric codes", func(t *testing.T) {
+			clearAffCodeTestUsers(t)
+
+			seen := map[string]bool{}
+			for i := range 5 {
+				user := User{Username: "aff-length-user-" + strconv.Itoa(i), Password: "password", Status: common.UserStatusEnabled}
+				require.NoError(t, user.Insert(0))
+				assert.GreaterOrEqual(t, len(user.AffCode), 8, "new affiliate codes must have at least 8 characters")
+				assert.LessOrEqual(t, len(user.AffCode), 12, "new affiliate codes must have at most 12 characters")
+				assert.Regexp(t, `^[A-Za-z0-9]{8,12}$`, user.AffCode)
+				seen[user.AffCode] = true
+			}
+			assert.Len(t, seen, 5, "every new account must receive a distinct code")
+		})
+
+		t.Run("InsertWithTx skips claimed codes", func(t *testing.T) {
+			clearAffCodeTestUsers(t)
+
+			require.NoError(t, DB.Create(&User{Username: "oauth-aff-owner", Password: "password", AffCode: "TakenDDD", Status: common.UserStatusEnabled}).Error)
+			useAffCodeSequence(t, "TakenDDD", "FreshEEE")
+
+			user := User{Username: "oauth-aff-user", Status: common.UserStatusEnabled}
+			require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+				return user.InsertWithTx(tx, 0)
+			}))
+
+			var stored User
+			require.NoError(t, DB.Where("username = ?", user.Username).First(&stored).Error)
+			assert.Equal(t, "FreshEEE", stored.AffCode)
+		})
+
+		t.Run("fails when every generated code is taken", func(t *testing.T) {
+			clearAffCodeTestUsers(t)
+
+			require.NoError(t, DB.Create(&User{Username: "aff-exhaustion-owner", Password: "password", AffCode: "TakenFFF", Status: common.UserStatusEnabled}).Error)
+			useAffCodeSequence(t, "TakenFFF")
+
+			user := User{Username: "aff-exhaustion-user", Password: "password", Status: common.UserStatusEnabled}
+			err := user.Insert(0)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "affiliate code")
+
+			var count int64
+			require.NoError(t, DB.Model(&User{}).Where("username = ?", user.Username).Count(&count).Error)
+			assert.Zero(t, count, "an account whose every generated code collided must not be created")
+		})
+
+		t.Run("classifies a real unique index rejection", func(t *testing.T) {
+			clearAffCodeTestUsers(t)
+
+			require.NoError(t, DB.Create(&User{Username: "aff-index-owner", Password: "password", AffCode: "IndexTaken", Status: common.UserStatusEnabled}).Error)
+			err := DB.Create(&User{Username: "aff-index-dupe", Password: "password", AffCode: "IndexTaken", Status: common.UserStatusEnabled}).Error
+			require.Error(t, err, "the aff_code unique index must reject a duplicate code")
+			assert.True(t, isAffCodeDuplicateError(err), "unique index rejection %q must classify as an aff_code conflict", err.Error())
+		})
+	})
+}
+
+func TestAffCodeBackfillMatrix(t *testing.T) {
+	runAffCodeDialectMatrix(t, func(t *testing.T) {
+		t.Run("backfills empty codes and keeps existing codes", func(t *testing.T) {
+			clearAffCodeTestUsers(t)
+
+			legacy := User{Username: "legacy-empty-aff", Password: "password", Status: common.UserStatusEnabled}
+			require.NoError(t, DB.Create(&legacy).Error)
+			require.Empty(t, legacy.AffCode)
+
+			require.NoError(t, legacy.EnsureAffCode())
+			assert.Regexp(t, `^[A-Za-z0-9]{8,12}$`, legacy.AffCode)
+
+			var stored User
+			require.NoError(t, DB.Where("username = ?", legacy.Username).First(&stored).Error)
+			assert.Equal(t, legacy.AffCode, stored.AffCode)
+
+			assigned := legacy.AffCode
+			require.NoError(t, legacy.EnsureAffCode())
+			assert.Equal(t, assigned, legacy.AffCode, "an assigned code must never be replaced")
+
+			// Historical 4-character codes stay resolvable and are never replaced.
+			short := User{Username: "legacy-short-aff", Password: "password", AffCode: "a1B2", Status: common.UserStatusEnabled}
+			require.NoError(t, DB.Create(&short).Error)
+			require.NoError(t, short.EnsureAffCode())
+			assert.Equal(t, "a1B2", short.AffCode)
+			id, err := GetUserIdByAffCode("a1B2")
+			require.NoError(t, err)
+			assert.Equal(t, short.Id, id)
+			_, err = GetUserIdByAffCode("missing00")
+			require.ErrorIs(t, err, gorm.ErrRecordNotFound)
+		})
+
+		t.Run("skips claimed codes and returns a raced assignment", func(t *testing.T) {
+			clearAffCodeTestUsers(t)
+
+			require.NoError(t, DB.Create(&User{Username: "aff-backfill-owner", Password: "password", AffCode: "TakenGGG", Status: common.UserStatusEnabled}).Error)
+			stale := User{Username: "legacy-aff-raced", Password: "password", Status: common.UserStatusEnabled}
+			require.NoError(t, DB.Create(&stale).Error)
+			useAffCodeSequence(t, "TakenGGG", "FreshHHH")
+
+			require.NoError(t, stale.EnsureAffCode())
+			assert.Equal(t, "FreshHHH", stale.AffCode)
+			var stored User
+			require.NoError(t, DB.Where("username = ?", stale.Username).First(&stored).Error)
+			assert.Equal(t, "FreshHHH", stored.AffCode)
+
+			// A stale copy without a code must return the code stored by the
+			// request that won the race instead of overwriting it.
+			require.NoError(t, DB.Model(&User{}).Where("id = ?", stale.Id).Update("aff_code", "WinnerIII").Error)
+			raced := User{Id: stale.Id, Username: stale.Username}
+			require.NoError(t, raced.EnsureAffCode())
+			assert.Equal(t, "WinnerIII", raced.AffCode)
+		})
+	})
+}
+
+func TestAffCodeDuplicateErrorClassification(t *testing.T) {
+	require.False(t, isAffCodeDuplicateError(nil))
+	require.False(t, isAffCodeDuplicateError(errors.New("connection refused")))
+	require.True(t, isAffCodeDuplicateError(&mysql.MySQLError{
+		Number:  1062,
+		Message: "Duplicate entry 'TakenAAA' for key 'idx_users_aff_code'",
+	}))
+	require.False(t, isAffCodeDuplicateError(&mysql.MySQLError{
+		Number:  1062,
+		Message: "Duplicate entry 'existing' for key 'username'",
+	}))
+	require.True(t, isAffCodeDuplicateError(&pgconn.PgError{
+		Code:     "23505",
+		Severity: "ERROR",
+		Message:  `duplicate key value violates unique constraint "idx_users_aff_code"`,
+	}))
+	require.False(t, isAffCodeDuplicateError(&pgconn.PgError{
+		Code:     "23505",
+		Severity: "ERROR",
+		Message:  `duplicate key value violates unique constraint "users_username_key"`,
+	}))
 }
 
 func TestUpdateUserBindColumnOnlyTouchesTheBindingColumn(t *testing.T) {
