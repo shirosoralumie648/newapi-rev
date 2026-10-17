@@ -225,9 +225,12 @@ test('ungrouping a single child leaves the group box in place', () => {
   )
   const released = canvasUngroupSelection(oneChild, [])
 
-  expect(released!.nodes.map((item) => item.id)).toEqual([groupId, 'b'])
-  const child = released!.nodes.find((item) => item.id === 'b')
-  expect(child?.parentId).toBe(groupId)
+  expect(released!.nodes.map((item) => item.id)).toEqual([groupId, 'a', 'b'])
+  const detached = released!.nodes.find((item) => item.id === 'a')
+  expect(detached?.parentId).toBeUndefined()
+  expect(detached?.position).toEqual({ x: 100, y: 100 })
+  const kept = released!.nodes.find((item) => item.id === 'b')
+  expect(kept?.parentId).toBe(groupId)
 })
 
 test('ungroup returns null when nothing grouped is selected', () => {
