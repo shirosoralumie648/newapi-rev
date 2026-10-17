@@ -2,6 +2,7 @@ package model
 
 import (
 	"math/rand"
+	"strconv"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -99,9 +100,8 @@ func userCheckinWithTransaction(checkin *Checkin, userId int, quotaAwarded int) 
 			return common.NewMessage("Check-in failed, please try again later")
 		}
 
-		// 步骤2: 在事务中增加用户额度
-		if err := tx.Model(&User{}).Where("id = ?", userId).
-			Update("quota", gorm.Expr("quota + ?", quotaAwarded)).Error; err != nil {
+		// 步骤2: 在事务中增加用户额度（账本行与余额变更同一事务）
+		if _, err := ApplyWalletLedgerDelta(tx, userId, WalletLedgerKindCheckin, int64(quotaAwarded), WalletLedgerRefCheckin, strconv.Itoa(checkin.Id), ""); err != nil {
 			return common.NewMessage("Check-in failed: quota update error")
 		}
 
@@ -128,12 +128,16 @@ func userCheckinWithoutTransaction(checkin *Checkin, userId int, quotaAwarded in
 		return nil, common.NewMessage("Check-in failed, please try again later")
 	}
 
-	// 步骤2: 增加用户额度
-	// 使用 db=true 强制直接写入数据库，不使用批量更新
-	if err := IncreaseUserQuota(userId, quotaAwarded, true); err != nil {
+	// 步骤2: 增加用户额度（SQLite 无嵌套事务，账本应用使用独立事务）
+	// 账本应用失败时回滚签到记录，保持余额与账本一致。
+	applied, err := ApplyWalletLedgerDeltaDB(userId, WalletLedgerKindCheckin, int64(quotaAwarded), WalletLedgerRefCheckin, strconv.Itoa(checkin.Id), "")
+	if err != nil {
 		// 如果增加额度失败，需要回滚签到记录
 		DB.Delete(checkin)
 		return nil, common.NewMessage("Check-in failed: quota update error")
+	}
+	if applied {
+		syncCreditUserQuotaCache(userId, quotaAwarded, "checkin")
 	}
 
 	return checkin, nil

@@ -39,6 +39,7 @@ import type {
   WaffoPaymentResponse,
   WaffoPancakePaymentRequest,
   WaffoPancakePaymentResponse,
+  WalletLedgerPage,
 } from './types'
 
 // ============================================================================
@@ -245,4 +246,53 @@ export async function completeOrder(
 ): Promise<ApiResponse> {
   const res = await api.post('/api/user/topup/complete', request)
   return res.data
+}
+
+// ============================================================================
+// Wallet Ledger API Functions
+// ============================================================================
+
+/**
+ * Get the caller's own wallet ledger entries
+ */
+export async function getSelfWalletLedger(
+  page: number,
+  pageSize: number
+): Promise<ApiResponse<WalletLedgerPage>> {
+  const params = new URLSearchParams({
+    p: page.toString(),
+    page_size: pageSize.toString(),
+  })
+  const res = await api.get(`/api/user/self/wallet/ledger?${params.toString()}`)
+  return res.data
+}
+
+/**
+ * Get one user's wallet ledger entries (admin only)
+ */
+export async function getUserWalletLedger(
+  userId: number,
+  page: number,
+  pageSize: number
+): Promise<ApiResponse<WalletLedgerPage>> {
+  const params = new URLSearchParams({
+    p: page.toString(),
+    page_size: pageSize.toString(),
+  })
+  const res = await api.get(
+    `/api/user/${userId}/wallet/ledger?${params.toString()}`
+  )
+  return res.data
+}
+
+/**
+ * Fetch the wallet ledger as a CSV blob; the caller's own ledger when userId
+ * is omitted. The caller decides when to save the blob.
+ */
+export async function exportWalletLedgerCsv(userId?: number): Promise<Blob> {
+  const path = userId
+    ? `/api/user/${userId}/wallet/ledger/export`
+    : '/api/user/self/wallet/ledger/export'
+  const res = await api.get(path, { responseType: 'blob' })
+  return res.data as Blob
 }

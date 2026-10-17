@@ -71,6 +71,76 @@ jobs:
       - name: Test root, relaykit, and tokenkit modules
         run: make test
 
+  # The wallet ledger contract (same-transaction rollback, idempotent replay,
+  # hourly consumption aggregation, reconciliation) is verified on real MySQL
+  # and PostgreSQL. The model tests skip the dialects whose DSN is unset, and
+  # the SQLite subtests still run in the backend job.
+  backend-real-db:
+    name: Backend wallet ledger on real databases (${{ matrix.db }})
+    if: github.event_name == 'push' || github.event.action != 'closed' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GOWORK: 'off'
+      TEST_MYSQL_DSN: ${{ matrix.mysql_dsn }}
+      TEST_POSTGRES_DSN: ${{ matrix.postgres_dsn }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - db: mysql
+            image: mysql:8.0
+            port: 3306
+            health_cmd: mysqladmin ping -h 127.0.0.1 -uroot -proot
+            mysql_dsn: root:root@tcp(127.0.0.1:3306)/new_api_wallet_ledger?charset=utf8mb4&parseTime=True&loc=Local
+            postgres_dsn: ''
+          - db: postgres
+            image: postgres:16
+            port: 5432
+            health_cmd: pg_isready -U root -d new_api_wallet_ledger
+            mysql_dsn: ''
+            postgres_dsn: host=127.0.0.1 port=5432 user=root password=root dbname=new_api_wallet_ledger sslmode=disable
+    services:
+      database:
+        image: ${{ matrix.image }}
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: new_api_wallet_ledger
+          POSTGRES_USER: root
+          POSTGRES_PASSWORD: root
+          POSTGRES_DB: new_api_wallet_ledger
+        ports:
+          - ${{ matrix.port }}:${{ matrix.port }}
+        options: >-
+          --health-cmd "${{ matrix.health_cmd }}"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ${{ github.event.pull_request.base.repo.full_name || github.repository }}
+          ref: ${{ github.event.action == 'closed' && github.event.pull_request.base.ref || github.event_name == 'push' && github.sha || github.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            relaykit/go.sum
+            tokenkit/go.sum
+
+      - name: Create frontend embed placeholder
+        run: |
+          mkdir -p web/dist
+          touch web/dist/index.html
+
+      - name: Test wallet ledger on ${{ matrix.db }}
+        run: go test ./model/ -run 'TestWallet' -count=1 -v
+
   frontend:
     name: Frontend typecheck and test
     if: github.event_name == 'push' || github.event.action != 'closed' || github.event.pull_request.merged == true

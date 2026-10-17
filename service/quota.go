@@ -459,6 +459,7 @@ func postConsumeQuotaWithResult(relayInfo *relaycommon.RelayInfo, quota int, pre
 		if err != nil {
 			return result, err
 		}
+		model.RecordWalletConsumeDelta(relayInfo.UserId, -int64(quota))
 	}
 	result.FundingApplied = true
 

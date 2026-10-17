@@ -63,7 +63,7 @@ func addNewRecord(type_ int, id int, value int) {
 
 func batchUpdate() {
 	// check if there's any data to update
-	hasData := false
+	hasData := walletConsumeLedgerPending()
 	for i := range BatchUpdateTypeCount {
 		batchUpdateLocks[i].Lock()
 		if len(batchUpdateStores[i]) > 0 {
@@ -121,7 +121,17 @@ func batchUpdate() {
 	for key := range userIDs {
 		updateUserQuotaUsedQuotaAndRequestCount(key, userQuotaStore[key], usedQuotaStore[key], requestCountStore[key])
 	}
+	// Consumption buckets are flushed after the wallet balances so each
+	// consume_hourly row records the balance the flushed consumption implies.
+	flushWalletConsumeLedgers()
 	common.SysLog(common.LogText("batch update finished"))
+}
+
+// FlushBatchUpdates applies every queued batch update immediately. Callers that
+// need a committed snapshot (wallet reconciliation, shutdown) use it instead of
+// waiting for the periodic batch updater.
+func FlushBatchUpdates() {
+	batchUpdate()
 }
 
 func RecordExist(err error) (bool, error) {

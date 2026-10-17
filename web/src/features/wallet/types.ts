@@ -282,6 +282,31 @@ export interface BillingHistoryResponse {
 }
 
 /**
+ * One append-only wallet ledger entry. `amount` is positive for credits and
+ * negative for debits; `balance_after` is the wallet balance after the row
+ * was applied.
+ */
+export interface WalletLedgerEntry {
+  id: number
+  user_id: number
+  kind: string
+  amount: number
+  balance_after: number
+  ref_type: string
+  ref_id: string
+  created_at: number
+  meta?: string
+}
+
+/**
+ * Paginated wallet ledger response
+ */
+export interface WalletLedgerPage {
+  items: WalletLedgerEntry[]
+  total: number
+}
+
+/**
  * Complete order request (admin only)
  */
 export interface CompleteOrderRequest {

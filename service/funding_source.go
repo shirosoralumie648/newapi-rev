@@ -35,6 +35,8 @@ var ErrInsufficientWalletQuota = errors.New("wallet quota insufficient")
 type WalletFunding struct {
 	userId   int
 	consumed int // 实际预扣的用户额度
+	// requestId 是钱包退款的幂等引用（relay 请求 ID）。
+	requestId string
 }
 
 func (w *WalletFunding) Source() string { return BillingSourceWallet }
@@ -51,6 +53,7 @@ func (w *WalletFunding) PreConsume(amount int) error {
 		return ErrInsufficientWalletQuota
 	}
 	w.consumed = amount
+	model.RecordWalletConsumeDelta(w.userId, -int64(amount))
 	return nil
 }
 
@@ -59,18 +62,32 @@ func (w *WalletFunding) Settle(delta int) error {
 		return nil
 	}
 	if delta > 0 {
-		return model.DecreaseUserQuota(w.userId, delta, false)
+		if err := model.DecreaseUserQuota(w.userId, delta, false); err != nil {
+			return err
+		}
+	} else {
+		if err := model.IncreaseUserQuota(w.userId, -delta, false); err != nil {
+			return err
+		}
 	}
-	return model.IncreaseUserQuota(w.userId, -delta, false)
+	model.RecordWalletConsumeDelta(w.userId, -int64(delta))
+	return nil
 }
 
 func (w *WalletFunding) Refund() error {
 	if w.consumed <= 0 {
 		return nil
 	}
-	// IncreaseUserQuota 是 quota += N 的非幂等操作，不能重试，否则会多退额度。
-	// 订阅的 RefundSubscriptionPreConsume 有 requestId 幂等保护所以可以重试。
-	return model.IncreaseUserQuota(w.userId, w.consumed, false)
+	// 账本引用让退款幂等：重复调用同一 requestId 不会二次退款。
+	if w.requestId != "" {
+		return model.RefundWalletQuota(w.userId, w.consumed, model.WalletLedgerRefRequestRefund, w.requestId)
+	}
+	// 没有稳定引用时退回普通额度返还，并作为消费差额入账。
+	if err := model.IncreaseUserQuota(w.userId, w.consumed, false); err != nil {
+		return err
+	}
+	model.RecordWalletConsumeDelta(w.userId, int64(w.consumed))
+	return nil
 }
 
 // ---------------------------------------------------------------------------

@@ -617,6 +617,23 @@ func (user *User) TransferAffQuotaToQuota(quota int) error {
 		return err
 	}
 
+	// 邀请额度转入钱包：账本行与余额变更同一事务。
+	applied, err := AppendWalletLedgerTx(tx, &WalletLedgerEntry{
+		UserId:       user.Id,
+		Kind:         WalletLedgerKindAffiliateTransfer,
+		Amount:       int64(quota),
+		BalanceAfter: int64(user.Quota),
+		RefType:      WalletLedgerRefAffiliate,
+		RefId:        fmt.Sprintf("%d-%d-%s", user.Id, common.GetTimestamp(), common.GetRandomString(8)),
+		CreatedAt:    common.GetTimestamp(),
+	})
+	if err != nil {
+		return err
+	}
+	if !applied {
+		return errors.New("wallet ledger reference conflict")
+	}
+
 	// 提交事务
 	return tx.Commit().Error
 }
@@ -688,7 +705,12 @@ func (user *User) Insert(inviterId int) error {
 				user.SetSetting(defaultSetting)
 			}
 
-			return tx.Create(user).Error
+			if err := tx.Create(user).Error; err != nil {
+				return err
+			}
+			// The sign-up bonus is the wallet's opening balance: it is recorded
+			// in the same transaction as the user row.
+			return insertSignupOpeningBalance(tx, user)
 		})
 	}); err != nil {
 		return err
@@ -719,7 +741,9 @@ func (user *User) finishInsert(inviterId int) {
 	}
 	if inviterId != 0 && operation_setting.IsPaymentComplianceConfirmed() {
 		if common.QuotaForInvitee > 0 {
-			_ = IncreaseUserQuota(user.Id, common.QuotaForInvitee, true)
+			if err := GrantWalletQuota(user.Id, common.QuotaForInvitee, WalletLedgerRefInviteeBonus, strconv.Itoa(user.Id)); err != nil {
+				common.SysLog(common.LogText("failed to grant invitee bonus to user %d: %s", user.Id, err.Error()))
+			}
 			RecordLog(user.Id, LogTypeSystem, common.NewMessage("Invitation code bonus {{quota}}", map[string]any{"quota": logger.FormatQuota(common.QuotaForInvitee)}))
 		}
 		if common.QuotaForInviter > 0 {
@@ -751,7 +775,10 @@ func (user *User) InsertWithTx(tx *gorm.DB, inviterId int) error {
 			user.SetSetting(defaultSetting)
 		}
 
-		return tx.Create(user).Error
+		if err := tx.Create(user).Error; err != nil {
+			return err
+		}
+		return insertSignupOpeningBalance(tx, user)
 	})
 }
 
@@ -776,7 +803,9 @@ func (user *User) FinalizeOAuthUserCreation(inviterId int) {
 	}
 	if inviterId != 0 && operation_setting.IsPaymentComplianceConfirmed() {
 		if common.QuotaForInvitee > 0 {
-			_ = IncreaseUserQuota(user.Id, common.QuotaForInvitee, true)
+			if err := GrantWalletQuota(user.Id, common.QuotaForInvitee, WalletLedgerRefInviteeBonus, strconv.Itoa(user.Id)); err != nil {
+				common.SysLog(common.LogText("failed to grant invitee bonus to user %d: %s", user.Id, err.Error()))
+			}
 			RecordLog(user.Id, LogTypeSystem, common.NewMessage("Invitation code bonus {{quota}}", map[string]any{"quota": logger.FormatQuota(common.QuotaForInvitee)}))
 		}
 		if common.QuotaForInviter > 0 {

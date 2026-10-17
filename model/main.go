@@ -383,9 +383,13 @@ func migrateDB() error {
 		&PlaygroundAttachment{},
 		&PlaygroundCanvasProject{},
 		&PlaygroundCanvasAsset{},
+		&WalletLedgerEntry{},
 	)
 	if err != nil {
 		return err
+	}
+	if _, err := EnsureWalletLedgerOpeningBalances(); err != nil {
+		return fmt.Errorf("seed wallet ledger opening balances: %w", err)
 	}
 	if err := InitializeUserAuthVersions(); err != nil {
 		return err
