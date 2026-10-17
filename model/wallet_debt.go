@@ -393,7 +393,8 @@ func ListWalletDebtors(pageInfo *common.PageInfo) ([]WalletDebtor, int64, error)
 		userIds = append(userIds, debt.UserId)
 	}
 	var users []User
-	if err := DB.Select("id", "username", commonGroupCol, "quota").Where("id IN ?", userIds).Find(&users).Error; err != nil {
+	// Select the group by model field name so the dialect quotes it correctly.
+	if err := DB.Select("id", "username", "group", "quota").Where("id IN ?", userIds).Find(&users).Error; err != nil {
 		return nil, total, err
 	}
 	byId := make(map[int]User, len(users))

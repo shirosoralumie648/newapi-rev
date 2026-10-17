@@ -615,10 +615,12 @@ func GetUserConsumeLogsByRequestIds(userId int, requestIds []string) ([]Log, err
 	if userId <= 0 || len(requestIds) == 0 {
 		return logs, nil
 	}
+	// The conditions stay unqualified on purpose: the log table name may carry
+	// a naming prefix, so a hard-coded `logs.` alias would not match it.
 	err := LOG_DB.Model(&Log{}).
 		Select("request_id", "quota", "prompt_tokens", "completion_tokens", "model_name", "created_at").
-		Where("logs.user_id = ? AND logs.type = ?", userId, LogTypeConsume).
-		Where("logs.request_id IN ?", requestIds).
+		Where("user_id = ? AND type = ?", userId, LogTypeConsume).
+		Where("request_id IN ?", requestIds).
 		Find(&logs).Error
 	return logs, err
 }

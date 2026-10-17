@@ -1320,7 +1320,9 @@ func GetUserGroup(id int, fromDB bool) (group string, err error) {
 		// Don't return error - fall through to DB
 	}
 	fromDB = true
-	err = DB.Model(&User{}).Where("id = ?", id).Select(commonGroupCol).Find(&group).Error
+	// Select the column by model field name so GORM quotes it for the active
+	// dialect instead of relying on the identifier cached at startup.
+	err = DB.Model(&User{}).Where("id = ?", id).Select("group").Find(&group).Error
 	if err != nil {
 		return "", err
 	}
