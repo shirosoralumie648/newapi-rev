@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -60,7 +61,7 @@ func walletLedgerTestDB(t *testing.T, dialect string) *gorm.DB {
 	DB = db
 	LOG_DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&WalletLedgerEntry{}, &User{}))
+		require.NoError(t, db.Migrator().DropTable(&WalletLedgerEntry{}, &WalletHold{}, &User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
@@ -72,9 +73,9 @@ func walletLedgerTestDB(t *testing.T, dialect string) *gorm.DB {
 	})
 
 	// A fresh migration and a repeated migration both succeed, so the new
-	// table is created idempotently on every engine.
-	require.NoError(t, db.AutoMigrate(&User{}, &WalletLedgerEntry{}))
-	require.NoError(t, db.AutoMigrate(&User{}, &WalletLedgerEntry{}))
+	// tables are created idempotently on every engine.
+	require.NoError(t, db.AutoMigrate(&User{}, &WalletLedgerEntry{}, &WalletHold{}))
+	require.NoError(t, db.AutoMigrate(&User{}, &WalletLedgerEntry{}, &WalletHold{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -240,4 +241,352 @@ func TestWalletReconcileReportsDeviationWithoutChangingBalance(t *testing.T) {
 		require.NoError(t, db.Select("quota").First(&stored, 62).Error)
 		assert.Equal(t, 650, stored.Quota, "reconciliation must not modify balances")
 	})
+}
+
+// A wallet pre-consume persists an active hold next to the deduction, an extra
+// reservation extends that hold instead of opening a second one, and settlement
+// closes it while charging exactly the difference.
+func TestWalletHoldReserveExtendsAndSettles(t *testing.T) {
+	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
+		require.NoError(t, db.Create(&User{Id: 71, Username: "hold-settle", Quota: 1000, Status: common.UserStatusEnabled}).Error)
+		startedAt := common.GetTimestamp()
+
+		reserved, err := TryReserveUserQuota(71, 300, "hold-settle-a")
+		require.NoError(t, err)
+		require.True(t, reserved)
+		var user User
+		require.NoError(t, db.Select("quota").First(&user, 71).Error)
+		assert.Equal(t, 700, user.Quota)
+
+		hold, err := GetWalletHoldByRequestId("hold-settle-a")
+		require.NoError(t, err)
+		assert.Equal(t, WalletHoldStatusActive, hold.Status)
+		assert.EqualValues(t, 300, hold.Amount)
+		assert.Equal(t, 71, hold.UserId)
+		assert.Nil(t, hold.ParentId)
+		assert.Greater(t, hold.ExpiresAt, startedAt)
+
+		// Insufficient balance neither deducts nor leaves a hold behind.
+		reserved, err = TryReserveUserQuota(71, 701, "hold-settle-b")
+		require.NoError(t, err)
+		assert.False(t, reserved)
+		require.NoError(t, db.Select("quota").First(&user, 71).Error)
+		assert.Equal(t, 700, user.Quota)
+		_, err = GetWalletHoldByRequestId("hold-settle-b")
+		assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+
+		// A mid-flight reserve (channel switch, image override) extends the same
+		// hold and can admit wallet debt.
+		require.NoError(t, ReserveUserQuotaWithDebt(71, 150, "hold-settle-a"))
+		hold, err = GetWalletHoldByRequestId("hold-settle-a")
+		require.NoError(t, err)
+		assert.EqualValues(t, 450, hold.Amount)
+		var holdCount int64
+		require.NoError(t, db.Model(&WalletHold{}).Where("user_id = ?", 71).Count(&holdCount).Error)
+		assert.EqualValues(t, 1, holdCount, "one request keeps exactly one hold")
+		require.NoError(t, db.Select("quota").First(&user, 71).Error)
+		assert.Equal(t, 550, user.Quota)
+
+		// Settling below the reservation returns the difference and closes the hold.
+		charged, err := SettleWalletHold(71, "hold-settle-a", -50)
+		require.NoError(t, err)
+		assert.EqualValues(t, -50, charged)
+		require.NoError(t, db.Select("quota").First(&user, 71).Error)
+		assert.Equal(t, 600, user.Quota)
+		hold, err = GetWalletHoldByRequestId("hold-settle-a")
+		require.NoError(t, err)
+		assert.Equal(t, WalletHoldStatusSettled, hold.Status)
+
+		// Replaying the settlement never charges again.
+		charged, err = SettleWalletHold(71, "hold-settle-a", -50)
+		require.NoError(t, err)
+		assert.Zero(t, charged)
+		require.NoError(t, db.Select("quota").First(&user, 71).Error)
+		assert.Equal(t, 600, user.Quota)
+
+		// A reservation for a request whose hold is closed is refused.
+		_, err = TryReserveUserQuota(71, 10, "hold-settle-a")
+		assert.ErrorIs(t, err, ErrWalletHoldClosed)
+		require.NoError(t, db.Select("quota").First(&user, 71).Error)
+		assert.Equal(t, 600, user.Quota)
+
+		// Settling above the reservation charges the difference.
+		reserved, err = TryReserveUserQuota(71, 50, "hold-settle-c")
+		require.NoError(t, err)
+		require.True(t, reserved)
+		charged, err = SettleWalletHold(71, "hold-settle-c", 30)
+		require.NoError(t, err)
+		assert.EqualValues(t, 30, charged)
+		require.NoError(t, db.Select("quota").First(&user, 71).Error)
+		assert.Equal(t, 520, user.Quota)
+	})
+}
+
+// Refunds are idempotent through the hold status and the wallet ledger, and a
+// settlement that arrives after a refund still pays the full actual charge
+// because the pre-consume is no longer held.
+func TestWalletHoldRefundIsIdempotent(t *testing.T) {
+	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
+		require.NoError(t, db.Create(&User{Id: 81, Username: "hold-refund", Quota: 1000, Status: common.UserStatusEnabled}).Error)
+		var user User
+
+		reserved, err := TryReserveUserQuota(81, 200, "hold-refund-a")
+		require.NoError(t, err)
+		require.True(t, reserved)
+		RecordWalletConsumeDelta(81, -200)
+
+		applied, err := RefundWalletHold(81, "hold-refund-a", 0)
+		require.NoError(t, err)
+		assert.True(t, applied)
+		require.NoError(t, db.Select("quota").First(&user, 81).Error)
+		assert.Equal(t, 1000, user.Quota)
+		hold, err := GetWalletHoldByRequestId("hold-refund-a")
+		require.NoError(t, err)
+		assert.Equal(t, WalletHoldStatusRefunded, hold.Status)
+
+		// Replaying the refund is a no-op: no second credit, no second ledger row.
+		applied, err = RefundWalletHold(81, "hold-refund-a", 0)
+		require.NoError(t, err)
+		assert.False(t, applied)
+		require.NoError(t, db.Select("quota").First(&user, 81).Error)
+		assert.Equal(t, 1000, user.Quota)
+		var refundRows int64
+		require.NoError(t, db.Model(&WalletLedgerEntry{}).
+			Where("ref_type = ? AND ref_id = ?", WalletLedgerRefRequestRefund, "hold-refund-a").
+			Count(&refundRows).Error)
+		assert.EqualValues(t, 1, refundRows)
+
+		// The reservation and its refund cancel out in the ledger.
+		reconciliation, err := ReconcileWalletLedgerForUser(81)
+		require.NoError(t, err)
+		assert.True(t, reconciliation.Reconciled, "deviation=%d", reconciliation.Deviation)
+
+		// A request whose process died after the refund was already returned is
+		// charged the full actual amount when it settles late.
+		reserved, err = TryReserveUserQuota(81, 300, "hold-refund-b")
+		require.NoError(t, err)
+		require.True(t, reserved)
+		RecordWalletConsumeDelta(81, -300)
+		applied, err = RefundWalletHold(81, "hold-refund-b", 0)
+		require.NoError(t, err)
+		require.True(t, applied)
+		charged, err := SettleWalletHold(81, "hold-refund-b", 0)
+		require.NoError(t, err)
+		assert.EqualValues(t, 300, charged, "a refunded reservation must still pay the full actual charge")
+		RecordWalletConsumeDelta(81, -charged)
+		require.NoError(t, db.Select("quota").First(&user, 81).Error)
+		assert.Equal(t, 700, user.Quota)
+
+		reconciliation, err = ReconcileWalletLedgerForUser(81)
+		require.NoError(t, err)
+		assert.True(t, reconciliation.Reconciled, "deviation=%d", reconciliation.Deviation)
+	})
+}
+
+// A process that stops between the pre-consume and the settlement leaves an
+// active hold behind; the recovery sweep returns that quota exactly once, and
+// settled or fresh reservations are never touched.
+func TestWalletHoldExpiryRecoveryRefundsCrashedReservations(t *testing.T) {
+	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
+		require.NoError(t, db.Create(&User{Id: 91, Username: "hold-expiry", Quota: 1000, Status: common.UserStatusEnabled}).Error)
+		var user User
+
+		reserved, err := TryReserveUserQuota(91, 250, "hold-expiry-a")
+		require.NoError(t, err)
+		require.True(t, reserved)
+		RecordWalletConsumeDelta(91, -250)
+		hold, err := GetWalletHoldByRequestId("hold-expiry-a")
+		require.NoError(t, err)
+
+		// A reservation inside its lifetime is left alone.
+		result, err := RefundExpiredWalletHolds(hold.ExpiresAt-1, 200)
+		require.NoError(t, err)
+		assert.Zero(t, result.ExpiredCount)
+		require.NoError(t, db.Select("quota").First(&user, 91).Error)
+		assert.Equal(t, 750, user.Quota)
+
+		// Once the lifetime elapsed the sweep returns the reservation.
+		result, err = RefundExpiredWalletHolds(hold.ExpiresAt, 200)
+		require.NoError(t, err)
+		assert.Equal(t, 1, result.ScannedCount)
+		assert.Equal(t, 1, result.ExpiredCount)
+		assert.Zero(t, result.FailedCount)
+		assert.EqualValues(t, 250, result.RefundedQuota)
+		require.NoError(t, db.Select("quota").First(&user, 91).Error)
+		assert.Equal(t, 1000, user.Quota)
+		expiredHold, err := GetWalletHoldByRequestId("hold-expiry-a")
+		require.NoError(t, err)
+		assert.Equal(t, WalletHoldStatusExpired, expiredHold.Status)
+
+		// Replaying the sweep and a late normal refund never refund twice.
+		result, err = RefundExpiredWalletHolds(hold.ExpiresAt+3600, 200)
+		require.NoError(t, err)
+		assert.Zero(t, result.ExpiredCount)
+		applied, err := RefundWalletHold(91, "hold-expiry-a", 250)
+		require.NoError(t, err)
+		assert.False(t, applied)
+		require.NoError(t, db.Select("quota").First(&user, 91).Error)
+		assert.Equal(t, 1000, user.Quota)
+
+		// A settled reservation is never refunded by the sweep.
+		reserved, err = TryReserveUserQuota(91, 100, "hold-expiry-b")
+		require.NoError(t, err)
+		require.True(t, reserved)
+		RecordWalletConsumeDelta(91, -100)
+		charged, err := SettleWalletHold(91, "hold-expiry-b", 0)
+		require.NoError(t, err)
+		assert.Zero(t, charged)
+		settled, err := GetWalletHoldByRequestId("hold-expiry-b")
+		require.NoError(t, err)
+		result, err = RefundExpiredWalletHolds(settled.ExpiresAt+3600, 200)
+		require.NoError(t, err)
+		assert.Zero(t, result.ExpiredCount)
+		require.NoError(t, db.Select("quota").First(&user, 91).Error)
+		assert.Equal(t, 900, user.Quota)
+
+		reconciliation, err := ReconcileWalletLedgerForUser(91)
+		require.NoError(t, err)
+		assert.True(t, reconciliation.Reconciled, "deviation=%d", reconciliation.Deviation)
+
+		// A normal refund racing the sweep returns the reservation exactly once.
+		require.NoError(t, db.Create(&User{Id: 92, Username: "hold-race", Quota: 1000, Status: common.UserStatusEnabled}).Error)
+		reserved, err = TryReserveUserQuota(92, 400, "hold-race-a")
+		require.NoError(t, err)
+		require.True(t, reserved)
+		raceHold, err := GetWalletHoldByRequestId("hold-race-a")
+		require.NoError(t, err)
+		var race sync.WaitGroup
+		race.Add(2)
+		go func() {
+			defer race.Done()
+			_, _ = RefundWalletHold(92, "hold-race-a", 0)
+		}()
+		go func() {
+			defer race.Done()
+			_, _ = RefundExpiredWalletHolds(raceHold.ExpiresAt, 200)
+		}()
+		race.Wait()
+		var raced User
+		require.NoError(t, db.Select("quota").First(&raced, 92).Error)
+		assert.Equal(t, 1000, raced.Quota, "exactly one path may return the reservation")
+		var raceRefundRows int64
+		require.NoError(t, db.Model(&WalletLedgerEntry{}).
+			Where("ref_type = ? AND ref_id = ?", WalletLedgerRefRequestRefund, "hold-race-a").
+			Count(&raceRefundRows).Error)
+		assert.EqualValues(t, 1, raceRefundRows)
+	})
+}
+
+// A workflow run budget (BL-03) is one root hold per run; per-step child holds
+// mount on it without deducting quota again and are closed with their parent.
+func TestWalletHoldBudgetParentMountsChildren(t *testing.T) {
+	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
+		require.NoError(t, db.Create(&User{Id: 101, Username: "hold-budget", Quota: 1000, Status: common.UserStatusEnabled}).Error)
+		var user User
+
+		parent, err := CreateWalletBudgetHold(101, "workflow-run-1", 400)
+		require.NoError(t, err)
+		assert.EqualValues(t, 400, parent.Amount)
+		assert.Nil(t, parent.ParentId)
+		require.NoError(t, db.Select("quota").First(&user, 101).Error)
+		assert.Equal(t, 600, user.Quota)
+
+		child, err := MountWalletBudgetChild("workflow-run-1", "workflow-run-1-node-1", 101, 120)
+		require.NoError(t, err)
+		require.NotNil(t, child.ParentId)
+		assert.Equal(t, parent.Id, *child.ParentId)
+		require.NoError(t, db.Select("quota").First(&user, 101).Error)
+		assert.Equal(t, 600, user.Quota, "a budget child allocates inside the parent reservation")
+
+		// The same step reporting again extends its allocation.
+		child, err = MountWalletBudgetChild("workflow-run-1", "workflow-run-1-node-1", 101, 30)
+		require.NoError(t, err)
+		assert.EqualValues(t, 150, child.Amount)
+
+		// A budget hold belongs to its owner and needs a root parent.
+		_, err = MountWalletBudgetChild("workflow-run-1", "workflow-run-1-node-2", 102, 10)
+		assert.Error(t, err)
+		_, err = MountWalletBudgetChild("workflow-run-missing", "workflow-run-1-node-3", 101, 10)
+		assert.ErrorIs(t, err, ErrWalletHoldNotFound)
+		_, err = MountWalletBudgetChild("workflow-run-1-node-1", "workflow-run-1-node-4", 101, 10)
+		assert.Error(t, err)
+
+		// The sweep owns the money on the parent and closes the children with it.
+		expired, err := RefundExpiredWalletHolds(parent.ExpiresAt, 200)
+		require.NoError(t, err)
+		assert.Equal(t, 1, expired.ExpiredCount)
+		assert.EqualValues(t, 400, expired.RefundedQuota)
+		require.NoError(t, db.Select("quota").First(&user, 101).Error)
+		assert.Equal(t, 1000, user.Quota)
+		closedChild, err := GetWalletHoldByRequestId("workflow-run-1-node-1")
+		require.NoError(t, err)
+		assert.Equal(t, WalletHoldStatusExpired, closedChild.Status)
+		closedParent, err := GetWalletHoldByRequestId("workflow-run-1")
+		require.NoError(t, err)
+		assert.Equal(t, WalletHoldStatusExpired, closedParent.Status)
+
+		// A closed parent accepts no further mounts, and a budget the wallet
+		// cannot cover is refused without deducting.
+		_, err = MountWalletBudgetChild("workflow-run-1", "workflow-run-1-node-5", 101, 10)
+		assert.ErrorIs(t, err, ErrWalletHoldClosed)
+		_, err = CreateWalletBudgetHold(101, "workflow-run-2", 2000)
+		assert.ErrorIs(t, err, ErrWalletHoldInsufficientQuota)
+		require.NoError(t, db.Select("quota").First(&user, 101).Error)
+		assert.Equal(t, 1000, user.Quota)
+
+		// Settling the parent closes active children as settled as well.
+		parent, err = CreateWalletBudgetHold(101, "workflow-run-3", 200)
+		require.NoError(t, err)
+		_, err = MountWalletBudgetChild("workflow-run-3", "workflow-run-3-node-1", 101, 60)
+		require.NoError(t, err)
+		charged, err := SettleWalletHold(101, "workflow-run-3", -50)
+		require.NoError(t, err)
+		assert.EqualValues(t, -50, charged)
+		settledChild, err := GetWalletHoldByRequestId("workflow-run-3-node-1")
+		require.NoError(t, err)
+		assert.Equal(t, WalletHoldStatusSettled, settledChild.Status)
+	})
+}
+
+// The Redis Lua reservation path persists its hold before returning, so a
+// cache-authorized reservation is recoverable after a crash exactly like the
+// conditional update path even with batch updates enabled.
+func TestWalletHoldRedisReserveWritesHold(t *testing.T) {
+	truncateTables(t)
+	resetBatchUpdateTestState(t)
+	useUserCacheMiniRedis(t)
+	common.BatchUpdateEnabled = true
+
+	user := createReserveTestUser(t, 10)
+	reserved, err := TryReserveUserQuota(user.Id, 8, "hold-redis-a")
+	require.NoError(t, err)
+	require.True(t, reserved)
+
+	assert.Equal(t, 2, getUserQuotaFromDB(t, user.Id), "a hold-bearing reservation is never deferred to the batch queue")
+	hold, err := GetWalletHoldByRequestId("hold-redis-a")
+	require.NoError(t, err)
+	assert.Equal(t, WalletHoldStatusActive, hold.Status)
+	assert.EqualValues(t, 8, hold.Amount)
+	cached, err := GetUserCache(user.Id)
+	require.NoError(t, err)
+	assert.Equal(t, 2, cached.Quota)
+
+	// The cache stays authoritative for the next reservation and the same hold
+	// grows with it.
+	require.NoError(t, ReserveUserQuotaWithDebt(user.Id, 1, "hold-redis-a"))
+	assert.Equal(t, 1, getUserQuotaFromDB(t, user.Id))
+	hold, err = GetWalletHoldByRequestId("hold-redis-a")
+	require.NoError(t, err)
+	assert.EqualValues(t, 9, hold.Amount)
+	cached, err = GetUserCache(user.Id)
+	require.NoError(t, err)
+	assert.Equal(t, 1, cached.Quota)
+
+	charged, err := SettleWalletHold(user.Id, "hold-redis-a", -1)
+	require.NoError(t, err)
+	assert.EqualValues(t, -1, charged)
+	assert.Equal(t, 2, getUserQuotaFromDB(t, user.Id))
+	cached, err = GetUserCache(user.Id)
+	require.NoError(t, err)
+	assert.Equal(t, 2, cached.Quota)
 }
