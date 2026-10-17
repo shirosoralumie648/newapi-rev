@@ -74,3 +74,63 @@ func TestLoadTaskArtifactStoreConfigFallsBackToUpstream(t *testing.T) {
 	assert.Equal(t, "https://objects.example.com", config.S3Endpoint)
 	assert.Equal(t, 600, config.S3PresignTTLSeconds)
 }
+
+func TestValidateObjectStoreConfig(t *testing.T) {
+	valid := ObjectStoreConfig{
+		Backend:           ObjectStoreBackendLocal,
+		LocalDir:          "data/objectstore",
+		Prefix:            "pg/v1",
+		PresignTTLSeconds: DefaultTaskArtifactStorePresignTTLSeconds,
+	}
+	require.NoError(t, ValidateObjectStoreConfig(valid))
+
+	tests := []struct {
+		name   string
+		mutate func(*ObjectStoreConfig)
+		match  string
+	}{
+		{name: "empty backend", mutate: func(config *ObjectStoreConfig) { config.Backend = "" }, match: "unsupported object store backend"},
+		{name: "unknown backend", mutate: func(config *ObjectStoreConfig) { config.Backend = "ftp" }, match: "unsupported object store backend"},
+		{name: "reserved s3 backend", mutate: func(config *ObjectStoreConfig) { config.Backend = ObjectStoreBackendS3 }, match: "not implemented"},
+		{name: "reserved db backend", mutate: func(config *ObjectStoreConfig) { config.Backend = ObjectStoreBackendDB }, match: "not implemented"},
+		{name: "missing directory", mutate: func(config *ObjectStoreConfig) { config.LocalDir = "" }, match: "directory is required"},
+		{name: "padded directory", mutate: func(config *ObjectStoreConfig) { config.LocalDir = " data/objects " }, match: "directory syntax"},
+		{name: "control directory", mutate: func(config *ObjectStoreConfig) { config.LocalDir = "data\nobjects" }, match: "control characters"},
+		{name: "traversal directory", mutate: func(config *ObjectStoreConfig) { config.LocalDir = "data/../objects" }, match: "dot segments"},
+		{name: "windows traversal directory", mutate: func(config *ObjectStoreConfig) { config.LocalDir = `data\..\objects` }, match: "dot segments"},
+		{name: "prefix root", mutate: func(config *ObjectStoreConfig) { config.Prefix = "/objects" }, match: "prefix syntax"},
+		{name: "prefix backslash", mutate: func(config *ObjectStoreConfig) { config.Prefix = `objects\v1` }, match: "prefix syntax"},
+		{name: "prefix traversal", mutate: func(config *ObjectStoreConfig) { config.Prefix = "objects/../private" }, match: "dot segments"},
+		{name: "TTL zero", mutate: func(config *ObjectStoreConfig) { config.PresignTTLSeconds = 0 }, match: "presign TTL"},
+		{name: "TTL too long", mutate: func(config *ObjectStoreConfig) {
+			config.PresignTTLSeconds = MaxTaskArtifactStorePresignTTLSeconds + 1
+		}, match: "presign TTL"},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			config := valid
+			testCase.mutate(&config)
+			assert.ErrorContains(t, ValidateObjectStoreConfig(config), testCase.match)
+		})
+	}
+}
+
+func TestLoadObjectStoreConfigDefaultsAndFallback(t *testing.T) {
+	t.Setenv(ObjectStoreBackendEnv, ObjectStoreBackendLocal)
+	t.Setenv(ObjectStoreLocalDirEnv, "data/custom-objects")
+	t.Setenv(ObjectStorePrefixEnv, "pg/v1")
+	t.Setenv(ObjectStorePresignTTLEnv, "600")
+	config := LoadObjectStoreConfig()
+	assert.Equal(t, ObjectStoreBackendLocal, config.Backend)
+	assert.Equal(t, "data/custom-objects", config.LocalDir)
+	assert.Equal(t, "pg/v1", config.Prefix)
+	assert.Equal(t, 600, config.PresignTTLSeconds)
+
+	t.Setenv(ObjectStoreBackendEnv, "ftp")
+	t.Setenv(ObjectStoreLocalDirEnv, "data/custom-objects")
+	config = LoadObjectStoreConfig()
+	assert.Equal(t, ObjectStoreBackendLocal, config.Backend)
+	assert.Equal(t, DefaultObjectStoreLocalDir, config.LocalDir)
+	assert.Equal(t, "", config.Prefix)
+	assert.Equal(t, DefaultTaskArtifactStorePresignTTLSeconds, config.PresignTTLSeconds)
+}
