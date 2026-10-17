@@ -28,8 +28,8 @@ import { LoadingState } from '@/components/loading-state'
 import { Button } from '@/components/ui/button'
 import { formatQuota, formatTimestampToDate } from '@/lib/format'
 
-import { useWalletDebtors } from '../hooks'
-import type { WalletDebtor } from '../types'
+import { useWalletDebtors } from '../../hooks'
+import type { WalletDebtor } from '../../types'
 
 interface WalletDebtDialogProps {
   open: boolean
