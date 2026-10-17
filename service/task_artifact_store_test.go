@@ -135,6 +135,12 @@ func (f *fakeArtifactS3) object(key string) ([]byte, bool) {
 	return body, ok
 }
 
+func (f *fakeArtifactS3) lastRequestPath() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lastPath
+}
+
 func (f *fakeArtifactS3) requestCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -206,6 +212,8 @@ func TestS3TaskArtifactStorePersistResolveAndServe(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, []byte("video-bytes"), body)
 	assert.Equal(t, "video/mp4", server.contentType("tasks/v1/"+ref.ObjectKey))
+	// The bucket path carries the configured prefix and the deterministic key.
+	assert.Equal(t, "tasks/v1/"+ref.ObjectKey, server.lastRequestPath())
 
 	resolved, err := store.Resolve(t.Context(), task, artifact)
 	require.NoError(t, err)
