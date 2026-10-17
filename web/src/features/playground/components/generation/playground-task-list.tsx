@@ -52,6 +52,8 @@ import {
 interface PlaygroundTaskListProps {
   active: boolean
   onSendToCanvas: (seeds: CanvasSendSeed[]) => void
+  /** Case-insensitive client-side filter used by the asset library. */
+  search?: string
 }
 
 /**
@@ -150,10 +152,35 @@ export function PlaygroundTaskList(props: PlaygroundTaskListProps) {
     )
   }
 
+  const term = props.search?.trim().toLowerCase() ?? ''
+  const tasks = (tasksQuery.data ?? []).filter((task) => {
+    if (!term) return true
+    return [
+      task.task_id,
+      task.action,
+      task.platform,
+      task.properties?.origin_model_name,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+      .includes(term)
+  })
+
+  if (tasks.length === 0) {
+    return (
+      <EmptyState
+        className='min-h-32'
+        icon={Sparkles}
+        title={t('No results found')}
+      />
+    )
+  }
+
   return (
     <>
       <ul aria-label={t('Generation tasks')} className='grid gap-2'>
-        {(tasksQuery.data ?? []).map((task) => {
+        {tasks.map((task) => {
           const isSuccessful = task.status === 'SUCCESS'
           const isPending = pendingTaskId === task.task_id
           const failure = task.fail_reason?.trim()

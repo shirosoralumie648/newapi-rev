@@ -1037,6 +1037,150 @@ func TestPlaygroundAttachmentOrphanCleanup(t *testing.T) {
 	assert.ErrorIs(t, err, model.ErrPlaygroundAttachmentNotFound)
 }
 
+// The asset library lists the owner's attachments and artifacts with a kind
+// filter, literal filename/title search and pagination. Responses carry
+// metadata only, and in_use mirrors the deletion guards the server enforces.
+func TestPlaygroundAssetLibraryListing(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			session := createPlayground(t, 7, "asset-library")
+			sessionID := session["id"].(string)
+			png := playgroundPNGFixture(64)
+			referenced := playgroundUploadAttachment(t, 7, sessionID, "asset-ref", "image/png", png)
+			pinned := playgroundUploadAttachment(t, 7, sessionID, "asset-pin", "image/png", png)
+			free := playgroundUploadAttachment(t, 7, sessionID, "asset-free", "image/png", png)
+			referencedID, pinnedID, freeID := referenced["id"].(string), pinned["id"].(string), free["id"].(string)
+
+			// Distinct filenames and upload times keep search and pagination
+			// deterministic even when the uploads share one timestamp.
+			require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("id = ?", referencedID).
+				Updates(map[string]any{"filename": "Studio Sunset.PNG", "created_at": 100, "updated_at": 100}).Error)
+			require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("id = ?", pinnedID).
+				Updates(map[string]any{"filename": "campaign-map.png", "created_at": 200, "updated_at": 200}).Error)
+			require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("id = ?", freeID).
+				Updates(map[string]any{"filename": "notes.png", "created_at": 300, "updated_at": 300}).Error)
+
+			// A message reference and a canvas pin each mark one attachment in
+			// use; the third attachment stays deletable.
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodPut, "/api/playground/sessions/"+sessionID+"/messages", map[string]any{
+				"revision": 0, "messages": []any{map[string]any{"client_key": "m1", "payload": map[string]any{
+					"key": "m1", "from": "user", "versions": []any{map[string]any{"id": "v1", "content": "see image", "attachments": []any{map[string]any{"id": referencedID}}}},
+				}}},
+			}, controller.ReplacePlaygroundMessages).Code)
+			canvasEnvelope(t, playgroundRequest(t, 7, http.MethodPost, "/api/playground/canvases", map[string]any{
+				"title":    "Pins",
+				"document": canvasDocument([]any{canvasRefNode("a1", "attachment", map[string]any{"sessionId": sessionID, "attachmentId": pinnedID})}, nil),
+			}, controller.CreatePlaygroundCanvasProject).Body.Bytes())
+
+			// One live artifact and one tombstone: only the live one is listable.
+			artifactSession, artifactInput := playgroundArtifactSourceFixture(t, 7, "asset-artifact")
+			artifactPath := "/api/playground/sessions/" + artifactSession + "/artifacts"
+			live := artifactInput
+			live.Title = "Sunset Report"
+			liveArtifact := artifactResult(t, playgroundRequest(t, 7, http.MethodPost, artifactPath, live, controller.CreatePlaygroundArtifact))
+			tombstone := artifactInput
+			tombstone.RequestID, tombstone.Title = "create_2", "Chart"
+			tombstoneArtifact := artifactResult(t, playgroundRequest(t, 7, http.MethodPost, artifactPath, tombstone, controller.CreatePlaygroundArtifact))
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodDelete, artifactPath+"/"+tombstoneArtifact.Artifact.ID+"?expected_revision=1", nil, controller.DeletePlaygroundArtifact).Code)
+
+			// Another account's assets never appear in this account's library.
+			foreignSession := createPlayground(t, 8, "asset-library-foreign")
+			foreignUpload := playgroundUploadAttachment(t, 8, foreignSession["id"].(string), "asset-foreign", "image/png", png)
+			foreignArtifactSession, foreignArtifactInput := playgroundArtifactSourceFixture(t, 8, "asset-artifact-foreign")
+			artifactResult(t, playgroundRequest(t, 8, http.MethodPost, "/api/playground/sessions/"+foreignArtifactSession+"/artifacts", foreignArtifactInput, controller.CreatePlaygroundArtifact))
+
+			type assetListing struct {
+				Data struct {
+					Items []map[string]any
+					Total int
+				}
+			}
+			list := func(user int, query string) assetListing {
+				t.Helper()
+				response := playgroundRequest(t, user, http.MethodGet, "/api/playground/assets?"+query, nil, controller.ListPlaygroundAssets)
+				require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+				var listing assetListing
+				require.NoError(t, common.Unmarshal(response.Body.Bytes(), &listing))
+				return listing
+			}
+
+			attachments := list(7, "kind=attachment&page_size=50")
+			require.Equal(t, 3, attachments.Data.Total)
+			require.Len(t, attachments.Data.Items, 3)
+			byID := map[string]map[string]any{}
+			for _, item := range attachments.Data.Items {
+				byID[item["id"].(string)] = item
+				assert.NotContains(t, item, "data")
+			}
+			assert.Equal(t, true, byID[referencedID]["in_use"])
+			assert.Equal(t, true, byID[pinnedID]["in_use"])
+			assert.Equal(t, false, byID[freeID]["in_use"])
+			assert.Equal(t, "notes.png", byID[freeID]["title"])
+			assert.EqualValues(t, len(png), byID[freeID]["byte_size"])
+			rawAttachments := playgroundRequest(t, 7, http.MethodGet, "/api/playground/assets?kind=attachment&page_size=50", nil, controller.ListPlaygroundAssets)
+			assert.NotContains(t, rawAttachments.Body.String(), base64.StdEncoding.EncodeToString(png))
+			assert.NotContains(t, rawAttachments.Body.String(), foreignUpload["id"].(string))
+
+			firstPage := list(7, "kind=attachment&page_size=2&p=1")
+			assert.Equal(t, 3, firstPage.Data.Total)
+			require.Len(t, firstPage.Data.Items, 2)
+			assert.Equal(t, freeID, firstPage.Data.Items[0]["id"])
+			assert.Equal(t, pinnedID, firstPage.Data.Items[1]["id"])
+			secondPage := list(7, "kind=attachment&page_size=2&p=2")
+			assert.Equal(t, 3, secondPage.Data.Total)
+			require.Len(t, secondPage.Data.Items, 1)
+			assert.Equal(t, referencedID, secondPage.Data.Items[0]["id"])
+
+			// Search is a case-insensitive literal substring, so wildcards do
+			// not turn a keyword into a match-everything pattern.
+			assert.Equal(t, 1, list(7, "kind=attachment&search=sunset").Data.Total)
+			assert.Equal(t, 1, list(7, "kind=attachment&search=MAP").Data.Total)
+			assert.Equal(t, 1, list(7, "kind=attachment&search=studio%20sunset").Data.Total)
+			assert.Zero(t, list(7, "kind=attachment&search=missing").Data.Total)
+			assert.Zero(t, list(7, "kind=attachment&search=%25").Data.Total)
+			assert.Zero(t, list(7, "kind=attachment&search=_").Data.Total)
+
+			artifacts := list(7, "kind=artifact&page_size=50")
+			require.Equal(t, 1, artifacts.Data.Total)
+			require.Len(t, artifacts.Data.Items, 1)
+			liveItem := artifacts.Data.Items[0]
+			assert.Equal(t, liveArtifact.Artifact.ID, liveItem["id"])
+			assert.Equal(t, "Sunset Report", liveItem["title"])
+			assert.Equal(t, "markdown", liveItem["language"])
+			assert.EqualValues(t, 1, liveItem["revision"])
+			assert.Equal(t, false, liveItem["in_use"])
+			assert.NotContains(t, liveItem, "content")
+			assert.NotContains(t, liveItem, "source")
+			assert.NotContains(t, liveItem, "request_id")
+			rawArtifacts := playgroundRequest(t, 7, http.MethodGet, "/api/playground/assets?kind=artifact&page_size=50", nil, controller.ListPlaygroundAssets)
+			assert.NotContains(t, rawArtifacts.Body.String(), "Visible document")
+			assert.NotContains(t, rawArtifacts.Body.String(), "Private reasoning")
+			assert.Equal(t, 1, list(7, "kind=artifact&search=report").Data.Total)
+			assert.Zero(t, list(7, "kind=artifact&search=CHART").Data.Total)
+
+			// The same owner scoping applies to every page and kind.
+			foreignList := list(8, "kind=attachment&page_size=50")
+			require.Equal(t, 1, foreignList.Data.Total)
+			assert.Equal(t, foreignUpload["id"], foreignList.Data.Items[0]["id"])
+			assert.Equal(t, false, foreignList.Data.Items[0]["in_use"])
+			assert.Equal(t, 1, list(8, "kind=artifact&page_size=50").Data.Total)
+
+			// Malformed or out-of-range queries are rejected, and generation
+			// results are not an asset kind: they stay behind /api/task/self.
+			for name, query := range map[string]string{
+				"kind is required":      "page_size=50",
+				"task results stay out": "kind=task",
+				"page size over cap":    "kind=attachment&page_size=100",
+				"search over cap":       "kind=attachment&search=" + strings.Repeat("a", 101),
+			} {
+				response := playgroundRequest(t, 7, http.MethodGet, "/api/playground/assets?"+query, nil, controller.ListPlaygroundAssets)
+				assert.Equal(t, http.StatusBadRequest, response.Code, name)
+			}
+		})
+	}
+}
+
 func playgroundAuthenticatedRequest(t *testing.T, engine *gin.Engine, token, method, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	encoded, err := common.Marshal(body)
@@ -1079,6 +1223,7 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	attachmentBase := "/api/playground/sessions/" + sessionID + "/attachments"
 	for _, route := range []struct{ method, path string }{
 		{http.MethodGet, "/api/playground/usage"},
+		{http.MethodGet, "/api/playground/assets?kind=attachment"},
 		{http.MethodPost, "/api/playground/tasks/missing/cancel"},
 		{http.MethodGet, attachmentBase}, {http.MethodPost, attachmentBase},
 		{http.MethodGet, attachmentBase + "/missing"}, {http.MethodGet, attachmentBase + "/missing/content"},

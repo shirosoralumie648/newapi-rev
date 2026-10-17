@@ -30,22 +30,10 @@ import {
 } from '@/components/ui/popover'
 import { Progress } from '@/components/ui/progress'
 import { toIntlLocale } from '@/i18n/languages'
-import { formatNumber } from '@/lib/format'
+import { formatBytes, formatNumber } from '@/lib/format'
 
 import type { PlaygroundUsageMetric } from '../../api'
 import { usePlaygroundUsage } from '../../hooks'
-
-const BYTE_UNITS = ['B', 'KiB', 'MiB', 'GiB'] as const
-
-function formatBytes(value: number, locale?: Intl.LocalesArgument): string {
-  let amount = value
-  let unit = 0
-  while (amount >= 1024 && unit < BYTE_UNITS.length - 1) {
-    amount /= 1024
-    unit += 1
-  }
-  return `${formatNumber(amount, locale)} ${BYTE_UNITS[unit]}`
-}
 
 function usedPercent(metric: PlaygroundUsageMetric): number {
   if (metric.limit <= 0) return 0
