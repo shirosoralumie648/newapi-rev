@@ -50,7 +50,8 @@ type Store interface {
 type ObjectStore = Store
 
 // ServeOptions controls the response headers used when Serve streams an
-// object. Filename is escaped before it is written to Content-Disposition.
+// object. Filename is sanitized and escaped before it is written to
+// Content-Disposition.
 type ServeOptions struct {
 	Filename    string
 	ContentType string
@@ -77,7 +78,16 @@ func Serve(ctx context.Context, store Store, w http.ResponseWriter, key string, 
 		disposition = "attachment"
 	}
 	if options.Filename != "" {
-		disposition = mime.FormatMediaType(disposition, map[string]string{"filename": options.Filename})
+		// An untrusted filename must never carry a control character into the
+		// header: truncate at the first one so a CR/LF payload cannot split the
+		// response headers or smuggle extra parameters into the disposition.
+		filename := options.Filename
+		if index := strings.IndexFunc(filename, unicode.IsControl); index >= 0 {
+			filename = strings.TrimSpace(filename[:index])
+		}
+		if filename != "" {
+			disposition = mime.FormatMediaType(disposition, map[string]string{"filename": filename})
+		}
 	}
 
 	w.Header().Set("Content-Type", contentType)

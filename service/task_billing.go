@@ -113,9 +113,25 @@ func taskIsSubscription(task *model.Task) bool {
 }
 
 // taskAdjustFunding 调整任务的资金来源（钱包或订阅），delta > 0 表示扣费，delta < 0 表示退还。
-func taskAdjustFunding(task *model.Task, delta int) error {
+// 订阅结算超额时按套餐 AllowWalletOverflow 把超出剩余额度的部分转扣钱包（同事务写钱包账本）。
+func taskAdjustFunding(ctx context.Context, task *model.Task, delta int) error {
+	if delta == 0 {
+		return nil
+	}
 	if taskIsSubscription(task) {
-		return model.PostConsumeUserSubscriptionDelta(task.PrivateData.SubscriptionId, int64(delta))
+		result, err := model.SettleUserSubscriptionDelta(task.PrivateData.SubscriptionId, int64(delta))
+		if err != nil {
+			return err
+		}
+		if result.WalletUncovered > 0 {
+			logger.LogWarn(ctx, common.LogText("task %s subscription settlement overflow is not fully covered (subscription_applied=%s wallet_charged=%s uncovered=%s)",
+				task.TaskID,
+				logger.FormatQuota(int(result.SubscriptionDelta)),
+				logger.FormatQuota(int(result.WalletDelta)),
+				logger.FormatQuota(int(result.WalletUncovered)),
+			))
+		}
+		return nil
 	}
 	if delta > 0 {
 		return model.DecreaseUserQuota(task.UserId, delta, false)
@@ -269,7 +285,7 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 	// 1. 退还资金来源（钱包或订阅）
 	// 钱包退款以 task_id 为账本引用，重复退款调用是幂等的。
 	if taskIsSubscription(task) {
-		if err := taskAdjustFunding(task, -quota); err != nil {
+		if err := taskAdjustFunding(ctx, task, -quota); err != nil {
 			logger.LogWarn(ctx, common.LogText("failed to refund the funding source, task %s: %s", task.TaskID, err.Error()))
 			return false
 		}
@@ -335,7 +351,7 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	))
 
 	// 调整资金来源
-	if err := taskAdjustFunding(task, quotaDelta); err != nil {
+	if err := taskAdjustFunding(ctx, task, quotaDelta); err != nil {
 		logger.LogError(ctx, common.LogText("failed to adjust funding for the difference, task %s: %s", task.TaskID, err.Error()))
 		return
 	}

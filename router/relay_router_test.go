@@ -118,11 +118,13 @@ func TestMidjourneyImageAccessControl(t *testing.T) {
 	originalAccessMode := setting.MjImageAccessMode
 	t.Cleanup(func() { setting.MjImageAccessMode = originalAccessMode })
 
-	owner := model.User{Username: "mj-image-owner", Status: common.UserStatusEnabled, Group: "default", Quota: 100}
+	// users.aff_code carries a unique index, so every fixture user needs its own
+	// code; an empty one only fits the first row.
+	owner := model.User{Username: "mj-image-owner", AffCode: "mj-image-owner", Status: common.UserStatusEnabled, Group: "default", Quota: 100}
 	require.NoError(t, model.DB.Create(&owner).Error)
-	stranger := model.User{Username: "mj-image-stranger", Status: common.UserStatusEnabled, Group: "default", Quota: 100}
+	stranger := model.User{Username: "mj-image-stranger", AffCode: "mj-image-stranger", Status: common.UserStatusEnabled, Group: "default", Quota: 100}
 	require.NoError(t, model.DB.Create(&stranger).Error)
-	admin := model.User{Username: "mj-image-admin", Status: common.UserStatusEnabled, Group: "default", Quota: 100, Role: common.RoleAdminUser}
+	admin := model.User{Username: "mj-image-admin", AffCode: "mj-image-admin", Status: common.UserStatusEnabled, Group: "default", Quota: 100, Role: common.RoleAdminUser}
 	require.NoError(t, model.DB.Create(&admin).Error)
 
 	ownerToken, strangerToken, adminToken := "mjimageownertoken", "mjimagestrangerkey", "mjimageadmintoken"
@@ -306,12 +308,19 @@ func TestMjImageAccessModeOptionRoundTrip(t *testing.T) {
 
 	originalAccessMode := setting.MjImageAccessMode
 	t.Cleanup(func() { setting.MjImageAccessMode = originalAccessMode })
+	// UpdateOption publishes the normalized mode through common.OptionMap, which
+	// production initializes in model.InitOptionMap.
+	originalOptionMap := common.OptionMap
+	common.OptionMap = map[string]string{}
+	t.Cleanup(func() { common.OptionMap = originalOptionMap })
 
 	require.NoError(t, model.UpdateOption("MjImageAccessMode", setting.MjImageAccessLegacy))
 	require.Equal(t, setting.MjImageAccessLegacy, setting.MjImageAccessMode)
+	require.Equal(t, setting.MjImageAccessLegacy, common.OptionMap["MjImageAccessMode"])
 
 	require.NoError(t, model.UpdateOption("MjImageAccessMode", "unexpected"))
 	require.Equal(t, setting.MjImageAccessAuth, setting.MjImageAccessMode)
+	require.Equal(t, setting.MjImageAccessAuth, common.OptionMap["MjImageAccessMode"])
 }
 
 func setupRelayRouterTestDB(t *testing.T) {

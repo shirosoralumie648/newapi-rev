@@ -118,6 +118,9 @@ type SubscriptionFunding struct {
 	amount         int64 // 预扣的订阅额度（subConsume）
 	subscriptionId int
 	preConsumed    int64
+	// lastSettlement 记录最近一次结算如何分配 delta（订阅承担 / 钱包承担超额）。
+	// BillingSession 据此写入 relayInfo 的日志字段。
+	lastSettlement *model.SubscriptionSettlementResult
 	// 以下字段在 PreConsume 成功后填充，供 RelayInfo 同步使用
 	AmountTotal     int64
 	AmountUsedAfter int64
@@ -149,7 +152,14 @@ func (s *SubscriptionFunding) Settle(delta int) error {
 	if delta == 0 {
 		return nil
 	}
-	return model.PostConsumeUserSubscriptionDelta(s.subscriptionId, int64(delta))
+	// 单一事务内结算：订阅额度用尽时按套餐 AllowWalletOverflow 把超额转扣钱包，
+	// 并向钱包账本写入对应的消费行。
+	result, err := model.SettleUserSubscriptionDelta(s.subscriptionId, int64(delta))
+	if err != nil {
+		return err
+	}
+	s.lastSettlement = result
+	return nil
 }
 
 func (s *SubscriptionFunding) Refund() error {

@@ -71,12 +71,13 @@ jobs:
       - name: Test root, relaykit, and tokenkit modules
         run: make test
 
-  # The wallet ledger contract (same-transaction rollback, idempotent replay,
-  # hourly consumption aggregation, reconciliation) is verified on real MySQL
-  # and PostgreSQL. The model tests skip the dialects whose DSN is unset, and
-  # the SQLite subtests still run in the backend job.
+  # The wallet ledger and subscription settlement contracts (same-transaction
+  # rollback, idempotent replay, hourly consumption aggregation, refund
+  # idempotency, settlement overflow charged to the wallet, reconciliation) are
+  # verified on real MySQL and PostgreSQL. The model tests skip the dialects
+  # whose DSN is unset, and the SQLite subtests still run in the backend job.
   backend-real-db:
-    name: Backend wallet ledger on real databases (${{ matrix.db }})
+    name: Backend wallet and subscription settlement on real databases (${{ matrix.db }})
     if: github.event_name == 'push' || github.event.action != 'closed' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -138,8 +139,8 @@ jobs:
           mkdir -p web/dist
           touch web/dist/index.html
 
-      - name: Test wallet ledger on ${{ matrix.db }}
-        run: go test ./model/ -run 'TestWallet' -count=1 -v
+      - name: Test wallet ledger and subscription settlement on ${{ matrix.db }}
+        run: go test ./model/ -run 'TestWallet|TestSubscriptionPreConsumeRefund|TestSubscriptionSettlement' -count=1 -v
 
   backend-databases:
     name: Backend quota schema on MySQL and PostgreSQL

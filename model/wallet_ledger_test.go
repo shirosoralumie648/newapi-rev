@@ -19,11 +19,12 @@ import (
 	"gorm.io/gorm/schema"
 )
 
-// walletLedgerTestDB opens a dedicated database for one dialect: in-memory
+// accountingTestDB opens a dedicated database for one dialect: in-memory
 // SQLite by default, or the external test database from TEST_MYSQL_DSN /
-// TEST_POSTGRES_DSN so the wallet ledger contract is verified on every
-// supported engine. Table names are prefixed so concurrent runs cannot clash.
-func walletLedgerTestDB(t *testing.T, dialect string) *gorm.DB {
+// TEST_POSTGRES_DSN so the wallet ledger and subscription settlement contracts
+// are verified on every supported engine. Table names are prefixed so
+// concurrent runs cannot clash.
+func accountingTestDB(t *testing.T, dialect string) *gorm.DB {
 	t.Helper()
 	var driver gorm.Dialector
 	switch dialect {
@@ -62,7 +63,7 @@ func walletLedgerTestDB(t *testing.T, dialect string) *gorm.DB {
 	DB = db
 	LOG_DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&WalletLedgerEntry{}, &WalletHold{}, &WalletDebt{}, &User{}))
+		require.NoError(t, db.Migrator().DropTable(&WalletLedgerEntry{}, &WalletHold{}, &WalletDebt{}, &SubscriptionPreConsumeRecord{}, &UserSubscription{}, &SubscriptionPlan{}, &User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
@@ -75,31 +76,42 @@ func walletLedgerTestDB(t *testing.T, dialect string) *gorm.DB {
 
 	// A fresh migration and a repeated migration both succeed, so the new
 	// tables are created idempotently on every engine.
-	require.NoError(t, db.AutoMigrate(&User{}, &WalletLedgerEntry{}, &WalletHold{}, &WalletDebt{}))
-	require.NoError(t, db.AutoMigrate(&User{}, &WalletLedgerEntry{}, &WalletHold{}, &WalletDebt{}))
+	require.NoError(t, db.AutoMigrate(&User{}, &WalletLedgerEntry{}, &WalletHold{}, &WalletDebt{}, &SubscriptionPlan{}, &UserSubscription{}, &SubscriptionPreConsumeRecord{}))
+	require.NoError(t, db.AutoMigrate(&User{}, &WalletLedgerEntry{}, &WalletHold{}, &WalletDebt{}, &SubscriptionPlan{}, &UserSubscription{}, &SubscriptionPreConsumeRecord{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
 		versionQuery = "SELECT sqlite_version()"
 	}
 	require.NoError(t, db.Raw(versionQuery).Scan(&version).Error)
-	t.Logf("wallet ledger database: %s %s", dialect, version)
+	t.Logf("accounting database: %s %s", dialect, version)
 	return db
 }
 
-func forEachWalletLedgerDialect(t *testing.T, run func(t *testing.T, db *gorm.DB)) {
+func forEachAccountingDialect(t *testing.T, run func(t *testing.T, db *gorm.DB)) {
 	t.Helper()
 	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
 		t.Run(dialect, func(t *testing.T) {
-			run(t, walletLedgerTestDB(t, dialect))
+			run(t, accountingTestDB(t, dialect))
 		})
 	}
+}
+
+// createWalletLedgerWallet creates one fixture wallet and seeds its opening
+// balance. A wallet's starting quota is funded outside the ledger, so
+// reconciliation can only explain it through the opening_balance row that
+// production writes on user creation and seeds at startup.
+func createWalletLedgerWallet(t *testing.T, db *gorm.DB, user *User) {
+	t.Helper()
+	require.NoError(t, db.Create(user).Error)
+	_, err := EnsureWalletLedgerOpeningBalances()
+	require.NoError(t, err)
 }
 
 // The ledger row and the balance update must commit or roll back together, and
 // replaying the same reference must never move the balance twice.
 func TestWalletLedgerApplyDeltaIsAtomicAndReplaySafe(t *testing.T) {
-	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
+	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
 		require.NoError(t, db.Create(&User{Id: 41, Username: "ledger-atomic", AffCode: "ledger-atomic", Quota: 1000, Status: common.UserStatusEnabled}).Error)
 
 		require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
@@ -145,7 +157,7 @@ func TestWalletLedgerApplyDeltaIsAtomicAndReplaySafe(t *testing.T) {
 // Consumption must converge on exactly one consume_hourly row per user and
 // hour in both the batch-update and the direct-write mode.
 func TestWalletLedgerAggregatesConsumptionPerUserHour(t *testing.T) {
-	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
+	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
 		require.NoError(t, db.Create(&User{Id: 42, Username: "ledger-consume", AffCode: "ledger-consume", Quota: 1000, Status: common.UserStatusEnabled}).Error)
 
 		RecordWalletConsumeDelta(42, -100)
@@ -174,7 +186,7 @@ func TestWalletLedgerAggregatesConsumptionPerUserHour(t *testing.T) {
 // The first launch writes one opening_balance baseline per user and repeating
 // the seed neither duplicates rows nor touches balances.
 func TestWalletLedgerOpeningBalanceSeedsOncePerUser(t *testing.T) {
-	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
+	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
 		require.NoError(t, db.Create(&User{Id: 51, Username: "ledger-opening-a", AffCode: "ledger-opening-a", Quota: 700, Status: common.UserStatusEnabled}).Error)
 		require.NoError(t, db.Create(&User{Id: 52, Username: "ledger-opening-b", AffCode: "ledger-opening-b", Quota: 0, Status: common.UserStatusEnabled}).Error)
 
@@ -205,7 +217,7 @@ func TestWalletLedgerOpeningBalanceSeedsOncePerUser(t *testing.T) {
 // A wallet that no longer matches its ledger sum is reported as a deviation,
 // and reconciliation never repairs the balance by itself.
 func TestWalletReconcileReportsDeviationWithoutChangingBalance(t *testing.T) {
-	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
+	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
 		require.NoError(t, db.Create(&User{Id: 61, Username: "ledger-ok", AffCode: "ledger-ok", Quota: 0, Status: common.UserStatusEnabled}).Error)
 		applied, err := ApplyWalletLedgerDeltaDB(61, WalletLedgerKindTopUp, 1000, WalletLedgerRefTopUp, "reconcile-ok", "")
 		require.NoError(t, err)
@@ -248,8 +260,8 @@ func TestWalletReconcileReportsDeviationWithoutChangingBalance(t *testing.T) {
 // reservation extends that hold instead of opening a second one, and settlement
 // closes it while charging exactly the difference.
 func TestWalletHoldReserveExtendsAndSettles(t *testing.T) {
-	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
-		require.NoError(t, db.Create(&User{Id: 71, Username: "hold-settle", Quota: 1000, Status: common.UserStatusEnabled}).Error)
+	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
+		require.NoError(t, db.Create(&User{Id: 71, Username: "hold-settle", AffCode: "hold-settle", Quota: 1000, Status: common.UserStatusEnabled}).Error)
 		startedAt := common.GetTimestamp()
 
 		reserved, err := TryReserveUserQuota(71, 300, "hold-settle-a")
@@ -329,8 +341,8 @@ func TestWalletHoldReserveExtendsAndSettles(t *testing.T) {
 // settlement that arrives after a refund still pays the full actual charge
 // because the pre-consume is no longer held.
 func TestWalletHoldRefundIsIdempotent(t *testing.T) {
-	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
-		require.NoError(t, db.Create(&User{Id: 81, Username: "hold-refund", Quota: 1000, Status: common.UserStatusEnabled}).Error)
+	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
+		createWalletLedgerWallet(t, db, &User{Id: 81, Username: "hold-refund", AffCode: "hold-refund", Quota: 1000, Status: common.UserStatusEnabled})
 		var user User
 
 		reserved, err := TryReserveUserQuota(81, 200, "hold-refund-a")
@@ -390,8 +402,8 @@ func TestWalletHoldRefundIsIdempotent(t *testing.T) {
 // active hold behind; the recovery sweep returns that quota exactly once, and
 // settled or fresh reservations are never touched.
 func TestWalletHoldExpiryRecoveryRefundsCrashedReservations(t *testing.T) {
-	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
-		require.NoError(t, db.Create(&User{Id: 91, Username: "hold-expiry", Quota: 1000, Status: common.UserStatusEnabled}).Error)
+	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
+		createWalletLedgerWallet(t, db, &User{Id: 91, Username: "hold-expiry", AffCode: "hold-expiry", Quota: 1000, Status: common.UserStatusEnabled})
 		var user User
 
 		reserved, err := TryReserveUserQuota(91, 250, "hold-expiry-a")
@@ -452,7 +464,7 @@ func TestWalletHoldExpiryRecoveryRefundsCrashedReservations(t *testing.T) {
 		assert.True(t, reconciliation.Reconciled, "deviation=%d", reconciliation.Deviation)
 
 		// A normal refund racing the sweep returns the reservation exactly once.
-		require.NoError(t, db.Create(&User{Id: 92, Username: "hold-race", Quota: 1000, Status: common.UserStatusEnabled}).Error)
+		createWalletLedgerWallet(t, db, &User{Id: 92, Username: "hold-race", AffCode: "hold-race", Quota: 1000, Status: common.UserStatusEnabled})
 		reserved, err = TryReserveUserQuota(92, 400, "hold-race-a")
 		require.NoError(t, err)
 		require.True(t, reserved)
@@ -491,8 +503,8 @@ func TestWalletHoldExpiryRecoveryRefundsCrashedReservations(t *testing.T) {
 // A workflow run budget (BL-03) is one root hold per run; per-step child holds
 // mount on it without deducting quota again and are closed with their parent.
 func TestWalletHoldBudgetParentMountsChildren(t *testing.T) {
-	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
-		require.NoError(t, db.Create(&User{Id: 101, Username: "hold-budget", Quota: 1000, Status: common.UserStatusEnabled}).Error)
+	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
+		require.NoError(t, db.Create(&User{Id: 101, Username: "hold-budget", AffCode: "hold-budget", Quota: 1000, Status: common.UserStatusEnabled}).Error)
 		var user User
 
 		parent, err := CreateWalletBudgetHold(101, "workflow-run-1", 400)
@@ -627,7 +639,7 @@ func useWalletOverdraftLimit(t *testing.T, usd float64, groupOverrides map[strin
 // growing. Debt rows live in the ledger next to the wallet rows, so both
 // accounts reconcile.
 func TestWalletDebtSettleRespectsOverdraftLimit(t *testing.T) {
-	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
+	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
 		useWalletOverdraftLimit(t, 0.02, nil)
 		require.NoError(t, db.Create(&User{Id: 201, Username: "debt-settle", AffCode: "debt-settle", Quota: 5_000, Group: "default", Status: common.UserStatusEnabled}).Error)
 
@@ -681,7 +693,7 @@ func TestWalletDebtSettleRespectsOverdraftLimit(t *testing.T) {
 // matter how many requests settle at the same time the wallet balance never
 // goes below its credit line; the rest is recorded as debt.
 func TestWalletDebtConcurrentChargesStayWithinOverdraftLimit(t *testing.T) {
-	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
+	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
 		useWalletOverdraftLimit(t, 0.02, nil) // 10_000 quota
 		require.NoError(t, db.Create(&User{Id: 211, Username: "debt-concurrent", AffCode: "debt-concurrent", Quota: 0, Group: "default", Status: common.UserStatusEnabled}).Error)
 
@@ -713,7 +725,7 @@ func TestWalletDebtConcurrentChargesStayWithinOverdraftLimit(t *testing.T) {
 // without an administrator, and a partial recharge still leaves the account
 // locked until the debt is covered.
 func TestWalletDebtReadOnlyRecoversAfterRecharge(t *testing.T) {
-	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
+	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
 		useWalletOverdraftLimit(t, 0, nil)
 		require.NoError(t, db.Create(&User{Id: 221, Username: "debt-readonly", AffCode: "debt-readonly", Quota: 1_000, Group: "default", Status: common.UserStatusEnabled}).Error)
 
@@ -761,7 +773,7 @@ func TestWalletDebtReadOnlyRecoversAfterRecharge(t *testing.T) {
 // The overdraft credit line is usable for new requests: a pre-consume may debit
 // the wallet down to it, and it blocks exactly at the line.
 func TestWalletDebtPreConsumeUsesOverdraftLimit(t *testing.T) {
-	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
+	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
 		useWalletOverdraftLimit(t, 0.02, nil) // 10_000 quota
 		require.NoError(t, db.Create(&User{Id: 231, Username: "debt-preconsume", AffCode: "debt-preconsume", Quota: 0, Group: "default", Status: common.UserStatusEnabled}).Error)
 
@@ -791,7 +803,7 @@ func TestWalletDebtPreConsumeUsesOverdraftLimit(t *testing.T) {
 // Administrators can list every account with outstanding debt together with the
 // owed amount; settled accounts stay out of the list.
 func TestWalletDebtorsListOutstandingAccounts(t *testing.T) {
-	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
+	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
 		useWalletOverdraftLimit(t, 0, nil)
 		require.NoError(t, db.Create(&User{Id: 241, Username: "debtor-a", AffCode: "debtor-a", Quota: 1_000, Group: "vip", Status: common.UserStatusEnabled}).Error)
 		require.NoError(t, db.Create(&User{Id: 242, Username: "debtor-b", AffCode: "debtor-b", Quota: 0, Group: "default", Status: common.UserStatusEnabled}).Error)
@@ -824,7 +836,7 @@ func TestWalletDebtorsListOutstandingAccounts(t *testing.T) {
 // A legacy settlement without a request id follows the same credit line: the
 // uncovered part becomes debt instead of a negative balance.
 func TestWalletDebtLegacySettlementClampsAtCreditLine(t *testing.T) {
-	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
+	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
 		useWalletOverdraftLimit(t, 0, nil)
 		require.NoError(t, db.Create(&User{Id: 251, Username: "debt-legacy", AffCode: "debt-legacy", Quota: 700, Group: "default", Status: common.UserStatusEnabled}).Error)
 

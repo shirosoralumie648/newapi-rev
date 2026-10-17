@@ -256,7 +256,7 @@ func RecordWalletConsumeDelta(userId int, delta int64) {
 	if userId <= 0 || delta == 0 {
 		return
 	}
-	hour := common.GetTimestamp() / walletLedgerConsumeHourSeconds * walletLedgerConsumeHourSeconds
+	hour := walletConsumeHourBucket(common.GetTimestamp())
 	if !common.BatchUpdateEnabled {
 		if err := upsertWalletConsumeLedger(userId, hour, delta); err != nil {
 			common.SysError(common.LogText("failed to write wallet consume ledger for user %d: %s", userId, err.Error()))
@@ -306,12 +306,27 @@ func flushWalletConsumeLedgers() {
 	}
 }
 
+// walletConsumeHourBucket returns the aggregation window (hour start) of a
+// timestamp for the per-user consumption row.
+func walletConsumeHourBucket(timestamp int64) int64 {
+	return timestamp / walletLedgerConsumeHourSeconds * walletLedgerConsumeHourSeconds
+}
+
 func upsertWalletConsumeLedger(userId int, hour int64, delta int64) error {
+	return upsertWalletConsumeLedgerTx(DB, userId, hour, delta)
+}
+
+// upsertWalletConsumeLedgerTx accumulates delta into the user's hourly
+// consumption row through tx, so a wallet movement committed inside an outer
+// transaction records its ledger row in that same transaction. balance_after
+// is read through tx and therefore reflects any balance change the caller
+// already applied.
+func upsertWalletConsumeLedgerTx(tx *gorm.DB, userId int, hour int64, delta int64) error {
 	if delta == 0 {
 		return nil
 	}
 	var quota int64
-	if err := DB.Model(&User{}).Where("id = ?", userId).Pluck("quota", &quota).Error; err != nil {
+	if err := tx.Model(&User{}).Where("id = ?", userId).Pluck("quota", &quota).Error; err != nil {
 		return err
 	}
 	entry := &WalletLedgerEntry{
@@ -323,7 +338,7 @@ func upsertWalletConsumeLedger(userId int, hour int64, delta int64) error {
 		RefId:        fmt.Sprintf("%d:%d", userId, hour),
 		CreatedAt:    common.GetTimestamp(),
 	}
-	return DB.Clauses(clause.OnConflict{
+	return tx.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "ref_type"}, {Name: "ref_id"}},
 		DoUpdates: clause.Assignments(map[string]any{
 			// Qualify the accumulated column: PostgreSQL reports an unqualified
