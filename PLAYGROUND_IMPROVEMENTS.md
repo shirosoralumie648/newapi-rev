@@ -2,7 +2,7 @@
 
 > 这是一份持续维护的 Playground 产品与技术改进清单，用来固化历史讨论中的目标、边界、决策和验收标准，避免计划只存在于聊天记录中。
 
-- **最后更新**：2026-10-15
+- **最后更新**：2026-10-17
 - **适用范围**：`web/src/features/playground/`、Playground 相关 Go controller/model/router/middleware，以及后续资源配额、附件和画布能力
 - **当前原则**：保留 `new-api` 的认证、Relay、模型分组、计费和权限体系；Playground 只在此基础上扩展产品能力
 
@@ -118,7 +118,7 @@ Playground
 - [x] 明确右侧 Inspector/Artifact 面板与全局导航侧栏的边界（Artifact 面板属于 Playground 工作区内部，由聊天头部按钮切换，不占用全局导航侧栏；移动端为右侧 Sheet）；
 - [x] 完善桌面、移动、窄屏、暗色模式和嵌套滚动的真实浏览器验收（Playwright E2E：桌面与移动视口、暗色模式跨刷新持久化、会话列表嵌套滚动不带动页面）。
 
-### Phase 2：服务端会话和消息同步 — 进行中
+### Phase 2：服务端会话和消息同步 — 已完成
 
 - [x] 建立 Playground session 的后端模型和管理接口基础；
 - [x] 建立消息快照/同步接口基础；
@@ -129,7 +129,7 @@ Playground
 - [x] 通过 SQLite、MySQL、PostgreSQL 的新库和升级库验证迁移幂等性；
 - [x] 增加服务端所有者、跨用户、跨 session 和并发更新测试。
 
-### Phase 3：Artifact 和安全预览 — 进行中
+### Phase 3：Artifact 和安全预览 — 已完成
 
 - [x] 支持从完成的助手正文显式创建 Markdown Artifact；
 - [x] 支持从选中的代码块显式创建 Code Artifact；
@@ -142,17 +142,17 @@ Playground
 - [x] 完成 Artifact 数量、版本数量、单版本大小和 session 总容量限制（事务内校验：32 个活跃 Artifact、256 条创建记录、单 Artifact 100 版本并 8 MiB、单版本 256 KiB、会话总计 32 MiB；`TestPlaygroundArtifactCapacity` 覆盖，超限返回 422 且保留既有快照）；
 - [x] 完成桌面并排面板、移动端 Sheet、焦点和未保存离开保护（`ResizablePanelGroup` 桌面并排、移动端左右 Sheet、Base UI Sheet 焦点陷阱与恢复、`beforeunload` 与确认对话框保护草稿；`workspace-layout.test.tsx` 与 artifact panel 测试覆盖）。
 
-### Phase 4：附件和多模态消息 — 待实施
+### Phase 4：附件和多模态消息 — 已完成
 
-- [ ] 明确允许的文件类型、单文件大小、数量和总容量；
-- [ ] 复用 `PromptInput` 的附件入口、拖放和粘贴能力；
-- [ ] 建立服务端附件对象和用户/会话归属；
-- [ ] 使用受控下载地址或访问接口，不能把任意 URL 当作永久附件；
-- [ ] 让消息模型支持文本、图片和受支持的 content parts；
-- [ ] 在 payload builder 中正确构造 OpenAI 多模态消息；
-- [ ] 对不支持视觉或不支持指定附件的模型返回可理解的错误；
-- [ ] 附件上传、读取、删除和过期清理都执行服务端权限校验；
-- [ ] 覆盖类型、大小、数量、权限、过期、失败重试和跨账号访问测试。
+- [x] 明确允许的文件类型、单文件大小、数量和总容量（PNG/JPEG/WebP/GIF；单文件 8 MiB、单条消息最多 8 个、每用户 64 MiB，服务端事务内校验并按所有者行锁保证并发准确）；
+- [x] 复用 `PromptInput` 的附件入口、拖放和粘贴能力（选择/拖放/粘贴沿用现有组件，入口改为直接打开文件选择器，接线 `accept`/`maxFiles`/`maxFileSize` 与附件预览、移除）；
+- [x] 建立服务端附件对象和用户/会话归属（`playground_attachments` 表：ID/UserID/SessionID/ClientKeyHash/MediaType/Filename/ByteSize/ContentHash/Data/ReferencedAt，client key 幂等重放；跨用户/跨会话一律 404）；
+- [x] 使用受控下载地址或访问接口，不能把任意 URL 当作永久附件（`GET .../attachments/:id/content` 需会话鉴权，owner+session 过滤后按存储 media type 输出，附 nosniff/CSP/no-referrer；消息快照只存附件引用不存 URL）；
+- [x] 让消息模型支持文本、图片和受支持的 content parts（消息版本引用附件并存储规范化元数据；仅用户消息允许引用；替换快照时同一事务重算引用状态，被引用附件禁止删除）；
+- [x] 在 payload builder 中正确构造 OpenAI 多模态消息（`formatMessageForAPI` 由附件缓存构造 `[{type:'text'},{type:'image_url',image_url:{url:dataURL}}]`；发送前按需加载历史附件字节，缺失时保留文本降级）；
+- [x] 对不支持视觉或不支持指定附件的模型返回可理解的错误（客户端不静默丢弃附件；上游拒绝时错误按现有链路原样呈现，消息进入错误态）；
+- [x] 附件上传、读取、删除和过期清理都执行服务端权限校验（上传/列表/详情/内容/删除全走 `UserAuth` + owner/session 过滤；清理为 master 定时系统任务，删除超过 48 小时未被引用的附件）；
+- [x] 覆盖类型、大小、数量、权限、过期、失败重试和跨账号访问测试（`model/playground_test.go` 附件矩阵：幂等重放/冲突、签名与类型校验、单文件与每用户预算边界、引用与解除引用、孤儿清理、会话级联、真实路由 401/PAT 403/内容读取；前端 `attachment-flow`、`playground-input-attachments`、`message-attachment-list`、`server-api` 与 E2E `playground-attachments.spec.ts`）。
 
 ### Phase 5：Infinite Canvas — 待实施
 
@@ -224,20 +224,20 @@ Playground
 
 ### 会话和状态
 
-- [ ] 新用户可以创建、切换、重命名、删除和清空会话；
-- [ ] 账号 A 无法读取账号 B 的 session、消息、附件、Artifact 或画布；
-- [ ] 切换或删除会话后，旧请求的迟到 chunk 不会写入新会话；
+- [x] 新用户可以创建、切换、重命名、删除和清空会话（`use-playground-state.test.tsx` 会话 CRUD 与切换、E2E 桌面/移动端创建/重命名/删除、`playground-input-tools.test.tsx` 清空确认流程）；
+- [ ] 账号 A 无法读取账号 B 的 session、消息、附件、Artifact 或画布（session/消息/附件/Artifact 已有跨用户 404 测试；画布尚未实现）；
+- [x] 切换或删除会话后，旧请求的迟到 chunk 不会写入新会话（`use-stream-request.test.ts` latest-wins 与旧 source 事件忽略；会话切换与账号切换的 generation/session 守卫由同步层测试覆盖；已有检查项记录见 Phase 2）；
 - [x] 浏览器刷新、重新登录和跨设备加载不会产生错误归属（E2E：重命名后刷新以及全新浏览器上下文重新登录都从服务端加载正确会话，且不出现同步错误提示）；
-- [ ] 损坏、过大和旧版本数据可以安全迁移或降级。
+- [x] 损坏、过大和旧版本数据可以安全迁移或降级（`storage.test.ts`/`session-storage.test.ts` 的 schema 校验、超限裁剪与旧版本迁移，Phase 0 检查项记录）。
 
 ### 聊天、附件和 Artifact
 
-- [ ] 文本请求行为与现有 Playground 保持兼容；
-- [ ] 编辑和重新生成不会丢失历史版本或分支；
-- [ ] 附件类型、大小、数量、权限和生命周期均由服务端控制；
-- [ ] Markdown 和 Code Artifact 可以创建、编辑、保存版本、恢复、复制、下载和删除；
-- [ ] Artifact 不会执行原始 HTML、JavaScript 或代码；
-- [ ] 网络失败、冲突和响应丢失时草稿不会被静默覆盖。
+- [x] 文本请求行为与现有 Playground 保持兼容（纯文本提交路径与请求体形状不变，`playground-input-attachments` 与既有聊天/同步测试覆盖）；
+- [ ] 编辑和重新生成不会丢失历史版本或分支（历史版本/分支尚未实现：编辑替换当前版本，重新生成替换其后消息）；
+- [x] 附件类型、大小、数量、权限和生命周期均由服务端控制（媒体类型白名单与签名校验、单文件/每用户预算、所有者与会话过滤、孤儿 TTL 清理均为服务端行为）；
+- [ ] Markdown 和 Code Artifact 可以创建、编辑、保存版本、恢复、复制、下载和删除（后端矩阵覆盖创建/保存/恢复/删除；复制与下载的浏览器验收未专项覆盖）；
+- [ ] Artifact 不会执行原始 HTML、JavaScript 或代码（沿用现有安全渲染链路，未做专项安全验收）；
+- [x] 网络失败、冲突和响应丢失时草稿不会被静默覆盖（`server-sync.test.tsx` 冲突保留草稿与重试、取消写入重试；附件上传失败时输入保留文本与附件供重发）。
 
 ### 画布和资源限制
 
@@ -256,6 +256,7 @@ Playground
 - [x] 后端相关测试通过（`go test ./model/ -run TestPlayground`）；
 - [x] SQLite、MySQL、PostgreSQL 新库和升级库迁移均通过（SQLite 3.50.4 / MySQL 8.0.46 / PostgreSQL 16.15，新库 ×2 + v1.0.0-rc.43 升级库 ×2；MySQL 5.7.44 最低版本验证通过）；
 - [x] 真实浏览器覆盖桌面、移动端、暗色模式、键盘操作和失败路径（Playwright + Chromium 7 个用例：桌面/移动工作区、会话 Sheet 键盘操作与 Escape、暗色持久化、失败列表重试恢复、刷新/重登录同步；冷启动与复用实例两种运行方式均通过）；
+- [x] 真实浏览器覆盖附件与多模态链路（Playwright：选择图片→服务端上传→SSE 回复→请求体含 `image_url` data URL→刷新后消息与附件从服务端恢复并经内容接口加载）；
 - [x] 最终 diff 不包含无关生成文件、密钥、直接上游调用或许可证遗漏（`.claude-flow/`、`.swarm/`、`graphify-out/` 已加入 `.gitignore`；新增 Go/TS 文件无密钥、无直连上游调用、许可证头齐全，提交前复查）。
 
 ## 7. 当前待办优先级
@@ -268,13 +269,13 @@ Playground
 4. ~~清理或明确 `.claude-flow/`、`.swarm/`、`graphify-out/` 等生成目录是否进入提交范围；~~ 已完成（已加入 `.gitignore`）；
 5. ~~补齐端到端的账号隔离、迟到请求和删除回退测试。~~ 已完成（`model/playground_test.go` 跨用户/并发/真实 router 鉴权 + 前端同步层测试）。
 
-剩余待办：统一资源配额（P1 的附件与生命周期），Inspector/Canvas 面板边界。
+剩余待办：按用户组配置的资源配额（当前为服务端硬上限）、Inspector/Canvas 面板边界、Phase 5 Infinite Canvas。
 
 ### P1：聊天工作区稳定后实施
 
-1. 附件对象存储和多模态 payload；
-2. 独立的用户/用户组资源配额；
-3. Artifact 和附件与 session 的统一资源生命周期；
+1. ~~附件对象存储和多模态 payload；~~ 已完成（服务端附件表、受控内容接口、消息引用与多模态 payload 全链路，含 E2E 验收）；
+2. 独立的用户/用户组资源配额（附件已有每文件 8 MiB、每用户 64 MiB 的服务端硬上限；管理端/用户组可配置尚未实现）；
+3. Artifact 和附件与 session 的统一资源生命周期（会话删除级联与附件孤儿 TTL 清理已实现；Artifact 与附件的统一配额视图尚未实现）；
 4. 桌面/移动端 Inspector、Artifact 和 Canvas 面板。
 
 ### P2：产品能力扩展
@@ -292,3 +293,5 @@ Playground
 | 2026-10-16 | 完成 P0 全部五项：同步契约评估、三数据库迁移矩阵（含 rc.43 升级与 MySQL 5.7）、Artifact 失败恢复/冲突/草稿保护与测试、生成目录加入 `.gitignore`、账号隔离与迟到请求测试；Playground 测试 49/49、typecheck、lint、格式、生产构建通过。 |
 | 2026-10-16 | 复核 Phase 3：Artifact 容量限制（数量/版本/单版本/会话容量）与桌面并排面板、移动 Sheet、草稿保护均已实现；补充 `workspace-layout.test.tsx`（桌面/移动布局与关闭回调，4 个用例），Playground 测试 53/53、lint 通过；完成 diff 安全扫描（无密钥、无直连上游、许可证头齐全）。 |
 | 2026-10-16 | 引入 Playwright E2E 真实浏览器验收（`web/e2e/`：globalSetup 初始化实例、每用例 UI 登录规避一次性刷新令牌、后端 harness 关闭登录限频、桌面/移动双 project；`bun run test:e2e`，7 用例全通过，冷启动与复用实例各跑一遍）。E2E 暴露并修复两处同步缺陷：主动取消的读写不再污染同步错误态，并通过 settle 计数与取消过滤自动重试（`server-sync.test.tsx` 新增两个用例）；自行处理失败的 Playground 查询通过 `keepPageOnInternalServerError` meta 保留页面错误态，不再触发全局 500 跳转（`server-error-notifications.test.ts` 覆盖）。全量前端测试 2260/2260、typecheck、oxlint 通过。 |
+| 2026-10-17 | 完成 Phase 4 附件与多模态消息：服务端 `playground_attachments` 表（base64 LongText 存储、媒体签名校验、单文件 8 MiB/每用户 64 MiB 预算、client key 幂等重放、会话级联删除、引用状态与孤儿 TTL 清理系统任务）；受控内容接口（`UserAuth` + owner/session 过滤、nosniff/沙箱 CSP、字节精确输出）；消息快照接受附件引用（仅用户消息、事务内重算引用、被引用禁止删除）；前端 `PromptInput` 附件入口/预览/限制、上传→消息→多模态 payload 全链路与消息附件预览；E2E 新增附件用例（上传→SSE→请求体 `image_url`→刷新恢复）。后端矩阵在 SQLite 3.50.4 / MySQL 8.0.46 / MySQL 5.7.44 / PostgreSQL 16.15 全部通过（期间清理了 PG 测试库中旧迁移遗留表导致的索引同名冲突）。 |
+| 2026-10-17 | 更新验收清单：勾选会话创建/切换/重命名/删除/清空、迟到 chunk 隔离、损坏数据降级、文本请求兼容、附件服务端控制、网络失败草稿保护，以及附件多模态的真实浏览器验收项；补齐附件相关 11 个新键与既有缺失键的七语言翻译（`i18n:sync` missingCount=0）。 |
