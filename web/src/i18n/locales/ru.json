@@ -7706,6 +7706,16 @@
     "A connected reference image could not be read.": "Не удалось прочитать подключённое референсное изображение.",
     "A connected reference image is larger than the 8 MiB limit.": "Подключённое референсное изображение превышает лимит 8 MiB.",
     "First Token Timeout": "Тайм-аут первого токена",
-    "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch.": "Сколько секунд ждать первый блок потоковых данных после ответа вышестоящего сервиса. Если данные не приходят вовремя, запрос переключается на другой канал; 0 — использовать глобальное значение по умолчанию. Потоки, которые уже отправили данные, не переключаются."
+    "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch.": "Сколько секунд ждать первый блок потоковых данных после ответа вышестоящего сервиса. Если данные не приходят вовремя, запрос переключается на другой канал; 0 — использовать глобальное значение по умолчанию. Потоки, которые уже отправили данные, не переключаются.",
+    "Same as identifier": "Совпадает с идентификатором",
+    "A row without an identifier is not saved until it has one.": "Строка без идентификатора не сохраняется, пока он не указан.",
+    "Group display names must be unique: {{names}}": "Отображаемые имена групп должны быть уникальными: {{names}}",
+    "A display name must not repeat another group identifier: {{names}}": "Отображаемое имя не должно совпадать с идентификатором другой группы: {{names}}",
+    "Group display names": "Отображаемые имена групп",
+    "Search groups by identifier, display name or description": "Поиск групп по идентификатору, отображаемому имени или описанию",
+    "Expected a JSON object mapping group identifiers to unique display names": "Ожидается объект JSON, сопоставляющий идентификаторы групп с уникальными отображаемыми именами",
+    "Each group has a stable identifier and an editable display name. The identifier is stored on tokens, subscription plans and quotas and cannot be changed after saving; the display name is what users see.": "У каждой группы есть постоянный идентификатор и изменяемое отображаемое имя. Идентификатор сохраняется в токенах, тарифах подписки и квотах и не может быть изменён после сохранения; отображаемое имя видят пользователи.",
+    "JSON map of group identifier → display name shown in the console. A group without an entry keeps its identifier as the display name.": "Сопоставление JSON «идентификатор группы → отображаемое имя» для консоли. Группа без записи использует идентификатор как отображаемое имя.",
+    "Every stored reference uses the group identifier. The identifier is fixed once the group is saved and only the display name can change, so renaming a group never invalidates existing API keys or subscriptions.": "Все сохранённые ссылки используют идентификатор группы. После сохранения группы идентификатор фиксирован, изменить можно только отображаемое имя, поэтому переименование группы никогда не делает существующие API-ключи или подписки недействительными."
   }
 }

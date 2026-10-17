@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/group_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -231,4 +232,39 @@ func TestGetTokenAutoGroupsReturnsFullFilteredGlobalOrderAndLimit(t *testing.T) 
 	require.NoError(t, common.Unmarshal(response.Data, &data))
 	assert.Equal(t, []string{"vip", "default"}, data.Groups)
 	assert.Equal(t, 1, data.MaxCount)
+}
+
+// Tokens always store stable group identifiers: a client that still submits an
+// editable display name is translated on create, both for the token group and
+// for an Auto snapshot, so a later rename cannot invalidate the token.
+func TestTokenGroupsStoreStableIdentifiers(t *testing.T) {
+	configureTokenAutoGroupsTest(t, "5", `["default","vip"]`)
+	originalNames := group_setting.GroupDisplayNames2JSONString()
+	require.NoError(t, group_setting.UpdateGroupDisplayNamesByJSONString(`{"vip":"VIP 会员"}`))
+	t.Cleanup(func() {
+		require.NoError(t, group_setting.UpdateGroupDisplayNamesByJSONString(originalNames))
+	})
+	user := setupTokenAutoGroupsControllerTest(t)
+
+	request := baseAutoTokenRequest("stable-token-group")
+	request["group"] = "VIP 会员"
+	ctx, recorder := newTokenAutoGroupsAuthenticatedContext(t, http.MethodPost, "/api/token/", request, user.Id)
+	AddToken(ctx)
+	require.True(t, decodeAPIResponse(t, recorder).Success)
+
+	var token model.Token
+	require.NoError(t, model.DB.Where("name = ?", "stable-token-group").First(&token).Error)
+	assert.Equal(t, "vip", token.Group)
+	assert.Empty(t, token.AutoGroups)
+
+	request = baseAutoTokenRequest("stable-auto-groups")
+	request["auto_groups"] = []string{"VIP 会员", "default"}
+	ctx, recorder = newTokenAutoGroupsAuthenticatedContext(t, http.MethodPost, "/api/token/", request, user.Id)
+	AddToken(ctx)
+	require.True(t, decodeAPIResponse(t, recorder).Success)
+
+	var autoToken model.Token
+	require.NoError(t, model.DB.Where("name = ?", "stable-auto-groups").First(&autoToken).Error)
+	assert.Equal(t, "auto", autoToken.Group)
+	assert.JSONEq(t, `["vip","default"]`, autoToken.AutoGroups)
 }

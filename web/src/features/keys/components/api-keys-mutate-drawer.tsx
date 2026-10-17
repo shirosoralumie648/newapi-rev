@@ -165,8 +165,10 @@ export function ApiKeysMutateDrawer({
   const groups = useMemo<ApiKeyGroupOption[]>(
     () =>
       Object.entries(groupsData?.data || {}).map(([key, info]) => ({
+        // The stable identifier is submitted and stored; the editable display
+        // name is only shown.
         value: key,
-        label: key,
+        label: info.name?.trim() || key,
         desc: info.desc ? translateServerText(t, info.desc) : key,
         ratio: info.ratio,
       })),

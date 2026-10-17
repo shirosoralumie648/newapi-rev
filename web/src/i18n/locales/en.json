@@ -7706,6 +7706,16 @@
     "A connected reference image could not be read.": "A connected reference image could not be read.",
     "A connected reference image is larger than the 8 MiB limit.": "A connected reference image is larger than the 8 MiB limit.",
     "First Token Timeout": "First Token Timeout",
-    "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch.": "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch."
+    "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch.": "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch.",
+    "Same as identifier": "Same as identifier",
+    "A row without an identifier is not saved until it has one.": "A row without an identifier is not saved until it has one.",
+    "Group display names must be unique: {{names}}": "Group display names must be unique: {{names}}",
+    "A display name must not repeat another group identifier: {{names}}": "A display name must not repeat another group identifier: {{names}}",
+    "Group display names": "Group display names",
+    "Search groups by identifier, display name or description": "Search groups by identifier, display name or description",
+    "Expected a JSON object mapping group identifiers to unique display names": "Expected a JSON object mapping group identifiers to unique display names",
+    "Each group has a stable identifier and an editable display name. The identifier is stored on tokens, subscription plans and quotas and cannot be changed after saving; the display name is what users see.": "Each group has a stable identifier and an editable display name. The identifier is stored on tokens, subscription plans and quotas and cannot be changed after saving; the display name is what users see.",
+    "JSON map of group identifier → display name shown in the console. A group without an entry keeps its identifier as the display name.": "JSON map of group identifier → display name shown in the console. A group without an entry keeps its identifier as the display name.",
+    "Every stored reference uses the group identifier. The identifier is fixed once the group is saved and only the display name can change, so renaming a group never invalidates existing API keys or subscriptions.": "Every stored reference uses the group identifier. The identifier is fixed once the group is saved and only the display name can change, so renaming a group never invalidates existing API keys or subscriptions."
   }
 }

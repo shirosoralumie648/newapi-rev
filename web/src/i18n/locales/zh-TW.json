@@ -7706,6 +7706,16 @@
     "A connected reference image could not be read.": "無法讀取已連接的參考圖片。",
     "A connected reference image is larger than the 8 MiB limit.": "已連接的參考圖片超過 8 MiB 上限。",
     "First Token Timeout": "首字逾時",
-    "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch.": "收到上游回應後等待第一個串流資料區塊的秒數；逾時未收到資料時會切換到其他管道；0 表示使用全域預設值。已開始向客戶端輸出的串流不會再切換。"
+    "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch.": "收到上游回應後等待第一個串流資料區塊的秒數；逾時未收到資料時會切換到其他管道；0 表示使用全域預設值。已開始向客戶端輸出的串流不會再切換。",
+    "Same as identifier": "與識別碼相同",
+    "A row without an identifier is not saved until it has one.": "沒有識別碼的分組不會被儲存，請先填寫識別碼。",
+    "Group display names must be unique: {{names}}": "分組顯示名稱必須唯一：{{names}}",
+    "A display name must not repeat another group identifier: {{names}}": "顯示名稱不能與其他分組的識別碼相同：{{names}}",
+    "Group display names": "分組顯示名稱",
+    "Search groups by identifier, display name or description": "依識別碼、顯示名稱或描述搜尋分組",
+    "Expected a JSON object mapping group identifiers to unique display names": "應為「分組識別碼 → 唯一顯示名稱」的 JSON 物件",
+    "Each group has a stable identifier and an editable display name. The identifier is stored on tokens, subscription plans and quotas and cannot be changed after saving; the display name is what users see.": "每個分組都有一個穩定識別碼和一個可編輯的顯示名稱。識別碼會寫入權杖、訂閱方案和配額，儲存後不可更改；顯示名稱是使用者看到的內容。",
+    "JSON map of group identifier → display name shown in the console. A group without an entry keeps its identifier as the display name.": "分組識別碼 → 顯示名稱的 JSON 對應，用於主控台顯示。未設定的分組仍以識別碼作為顯示名稱。",
+    "Every stored reference uses the group identifier. The identifier is fixed once the group is saved and only the display name can change, so renaming a group never invalidates existing API keys or subscriptions.": "所有已儲存的引用都使用分組識別碼。分組儲存後識別碼固定不變，只有顯示名稱可以修改，因此改名不會使既有的 API 金鑰或訂閱失效。"
   }
 }

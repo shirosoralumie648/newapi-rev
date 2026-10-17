@@ -6,11 +6,23 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/group_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
+
+// resolveSubscriptionPlanGroup maps a submitted group reference to its stable
+// identifier and reports whether it names an existing pricing group. An empty
+// reference is valid and means "no change".
+func resolveSubscriptionPlanGroup(group string) (string, bool) {
+	resolved := group_setting.ResolveGroupID(strings.TrimSpace(group))
+	if resolved == "" {
+		return "", true
+	}
+	return resolved, ratio_setting.ContainsGroupRatio(resolved)
+}
 
 // ---- Shared types ----
 
@@ -184,20 +196,18 @@ func AdminCreateSubscriptionPlan(c *gin.Context) {
 		common.ApiErrorT(c, "Total quota cannot be negative")
 		return
 	}
-	req.Plan.UpgradeGroup = strings.TrimSpace(req.Plan.UpgradeGroup)
-	if req.Plan.UpgradeGroup != "" {
-		if _, ok := ratio_setting.GetGroupRatioCopy()[req.Plan.UpgradeGroup]; !ok {
-			common.ApiErrorT(c, "Upgrade group does not exist")
-			return
-		}
+	upgradeGroup, ok := resolveSubscriptionPlanGroup(req.Plan.UpgradeGroup)
+	if !ok {
+		common.ApiErrorT(c, "Upgrade group does not exist")
+		return
 	}
-	req.Plan.DowngradeGroup = strings.TrimSpace(req.Plan.DowngradeGroup)
-	if req.Plan.DowngradeGroup != "" {
-		if _, ok := ratio_setting.GetGroupRatioCopy()[req.Plan.DowngradeGroup]; !ok {
-			common.ApiErrorT(c, "Downgrade group does not exist")
-			return
-		}
+	req.Plan.UpgradeGroup = upgradeGroup
+	downgradeGroup, ok := resolveSubscriptionPlanGroup(req.Plan.DowngradeGroup)
+	if !ok {
+		common.ApiErrorT(c, "Downgrade group does not exist")
+		return
 	}
+	req.Plan.DowngradeGroup = downgradeGroup
 	req.Plan.QuotaResetPeriod = model.NormalizeResetPeriod(req.Plan.QuotaResetPeriod)
 	if req.Plan.QuotaResetPeriod == model.SubscriptionResetCustom && req.Plan.QuotaResetCustomSeconds <= 0 {
 		common.ApiErrorT(c, "Custom reset cycle must be greater than 0 seconds")
@@ -258,20 +268,18 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 		common.ApiErrorT(c, "Total quota cannot be negative")
 		return
 	}
-	req.Plan.UpgradeGroup = strings.TrimSpace(req.Plan.UpgradeGroup)
-	if req.Plan.UpgradeGroup != "" {
-		if _, ok := ratio_setting.GetGroupRatioCopy()[req.Plan.UpgradeGroup]; !ok {
-			common.ApiErrorT(c, "Upgrade group does not exist")
-			return
-		}
+	upgradeGroup, ok := resolveSubscriptionPlanGroup(req.Plan.UpgradeGroup)
+	if !ok {
+		common.ApiErrorT(c, "Upgrade group does not exist")
+		return
 	}
-	req.Plan.DowngradeGroup = strings.TrimSpace(req.Plan.DowngradeGroup)
-	if req.Plan.DowngradeGroup != "" {
-		if _, ok := ratio_setting.GetGroupRatioCopy()[req.Plan.DowngradeGroup]; !ok {
-			common.ApiErrorT(c, "Downgrade group does not exist")
-			return
-		}
+	req.Plan.UpgradeGroup = upgradeGroup
+	downgradeGroup, ok := resolveSubscriptionPlanGroup(req.Plan.DowngradeGroup)
+	if !ok {
+		common.ApiErrorT(c, "Downgrade group does not exist")
+		return
 	}
+	req.Plan.DowngradeGroup = downgradeGroup
 	req.Plan.QuotaResetPeriod = model.NormalizeResetPeriod(req.Plan.QuotaResetPeriod)
 	if req.Plan.QuotaResetPeriod == model.SubscriptionResetCustom && req.Plan.QuotaResetCustomSeconds <= 0 {
 		common.ApiErrorT(c, "Custom reset cycle must be greater than 0 seconds")

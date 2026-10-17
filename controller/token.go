@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/group_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/gin-gonic/gin"
@@ -109,8 +110,12 @@ func setTokenAutoGroups(c *gin.Context, token *model.Token, groups []string) boo
 		common.ApiError(c, err)
 		return false
 	}
+	// Store the stable identifiers: a submitted display name is translated so a
+	// later rename can never invalidate the snapshot.
+	resolved := make([]string, 0, len(groups))
 	seen := make(map[string]struct{}, len(groups))
 	for _, group := range groups {
+		group = group_setting.ResolveGroupID(group)
 		if _, ok := seen[group]; ok {
 			common.ApiErrorT(c, "Auto group {{group}} is duplicated", map[string]any{"group": group})
 			return false
@@ -120,9 +125,10 @@ func setTokenAutoGroups(c *gin.Context, token *model.Token, groups []string) boo
 			common.ApiErrorT(c, "Auto group {{group}} is unavailable or unauthorized", map[string]any{"group": group})
 			return false
 		}
+		resolved = append(resolved, group)
 	}
 
-	if err := token.SetAutoGroups(groups); err != nil {
+	if err := token.SetAutoGroups(resolved); err != nil {
 		common.ApiError(c, err)
 		return false
 	}
@@ -333,6 +339,9 @@ func AddToken(c *gin.Context) {
 		common.ApiErrorT(c, "Maximum number of tokens reached ({{max}})", map[string]any{"max": maxTokens})
 		return
 	}
+	// Store the stable identifier so a display-name change cannot invalidate the
+	// token; an already-stored legacy reference keeps its original value.
+	token.Group = group_setting.ResolveGroupID(token.Group)
 	if token.Group == "auto" {
 		if !setTokenAutoGroups(c, &token, request.AutoGroups.Groups) {
 			return
@@ -462,9 +471,11 @@ func UpdateToken(c *gin.Context) {
 		if request.AllowUserQuotaQuery != nil {
 			cleanToken.AllowUserQuotaQuery = *request.AllowUserQuotaQuery
 		}
-		cleanToken.Group = token.Group
+		// Store the stable identifier: a submitted display name is translated so
+		// the token keeps working after the display name changes again.
+		cleanToken.Group = group_setting.ResolveGroupID(token.Group)
 		cleanToken.CrossGroupRetry = token.CrossGroupRetry
-		if token.Group != "auto" {
+		if cleanToken.Group != "auto" {
 			cleanToken.CrossGroupRetry = false
 			_ = cleanToken.SetAutoGroups(nil)
 		} else if request.AutoGroups.Set {

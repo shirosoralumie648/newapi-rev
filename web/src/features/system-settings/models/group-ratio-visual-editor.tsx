@@ -98,24 +98,32 @@ type GroupRatioVisualEditorProps = {
   groupRatio: string
   topupGroupRatio: string
   userUsableGroups: string
+  groupDisplayNames: string
   groupGroupRatio: string
   autoGroups: string
   maxTokenAutoGroupsField: ReactNode
   groupSpecialUsableGroup: string
+  savedRevision: number
+  onValidationChange?: (valid: boolean) => void
   onChange: (field: string, value: string) => void
 }
 
 type GroupPricingRow = {
   _id: string
   name: string
+  displayName: string
   ratio: string
   topupRatio: string
   selectable: boolean
   description: string
+  // Saved identifiers are immutable; only a row added in this session can
+  // still be renamed, and saving locks it.
+  locked: boolean
 }
 
 type RegistryEntry = {
   name: string
+  displayName: string
   ratio: number
 }
 
@@ -140,7 +148,7 @@ function parseRatioMap(value: string): Record<string, number> {
   })
 }
 
-function parseUsableMap(value: string): Record<string, string> {
+function parseStringMap(value: string): Record<string, string> {
   return safeJsonParse<Record<string, string>>(value, {
     fallback: {},
     silent: true,
@@ -159,11 +167,13 @@ function parseNestedRatioMap(
 function buildGroupPricingRows(
   groupRatio: string,
   userUsableGroups: string,
-  topupGroupRatio: string
+  topupGroupRatio: string,
+  groupDisplayNames: string
 ): GroupPricingRow[] {
   const ratioMap = parseRatioMap(groupRatio)
-  const usableMap = parseUsableMap(userUsableGroups)
+  const usableMap = parseStringMap(userUsableGroups)
   const topupMap = parseRatioMap(topupGroupRatio)
+  const displayNameMap = parseStringMap(groupDisplayNames)
   const names = new Set([
     ...Object.keys(ratioMap),
     ...Object.keys(usableMap),
@@ -173,10 +183,12 @@ function buildGroupPricingRows(
   return [...names].map((name) => ({
     _id: createGroupPricingId(),
     name,
+    displayName: String(displayNameMap[name] ?? ''),
     ratio: String(normalizeRatio(ratioMap[name])),
     topupRatio: Object.hasOwn(topupMap, name) ? String(topupMap[name]) : '',
     selectable: Object.hasOwn(usableMap, name),
     description: String(usableMap[name] ?? ''),
+    locked: true,
   }))
 }
 
@@ -184,6 +196,7 @@ function serializeGroupPricingRows(rows: GroupPricingRow[]) {
   const groupRatio: Record<string, number> = {}
   const userUsableGroups: Record<string, string> = {}
   const topupGroupRatio: Record<string, number> = {}
+  const groupDisplayNames: Record<string, string> = {}
 
   for (const row of rows) {
     const name = row.name.trim()
@@ -196,12 +209,17 @@ function serializeGroupPricingRows(rows: GroupPricingRow[]) {
     if (topup !== '' && Number.isFinite(Number(topup))) {
       topupGroupRatio[name] = Number(topup)
     }
+    const displayName = row.displayName.trim()
+    if (displayName && displayName !== name) {
+      groupDisplayNames[name] = displayName
+    }
   }
 
   return {
     GroupRatio: JSON.stringify(groupRatio, null, 2),
     UserUsableGroups: JSON.stringify(userUsableGroups, null, 2),
     TopupGroupRatio: JSON.stringify(topupGroupRatio, null, 2),
+    GroupDisplayNames: JSON.stringify(groupDisplayNames, null, 2),
   }
 }
 
@@ -209,21 +227,102 @@ function groupPricingSignature(rows: GroupPricingRow[]): string {
   const serialized = serializeGroupPricingRows(rows)
   return JSON.stringify({
     groupRatio: parseRatioMap(serialized.GroupRatio),
-    userUsableGroups: parseUsableMap(serialized.UserUsableGroups),
+    userUsableGroups: parseStringMap(serialized.UserUsableGroups),
     topupGroupRatio: parseRatioMap(serialized.TopupGroupRatio),
+    groupDisplayNames: parseStringMap(serialized.GroupDisplayNames),
   })
 }
 
 function sourceGroupPricingSignature(
   groupRatio: string,
   userUsableGroups: string,
-  topupGroupRatio: string
+  topupGroupRatio: string,
+  groupDisplayNames: string
 ): string {
   return JSON.stringify({
     groupRatio: parseRatioMap(groupRatio),
-    userUsableGroups: parseUsableMap(userUsableGroups),
+    userUsableGroups: parseStringMap(userUsableGroups),
     topupGroupRatio: parseRatioMap(topupGroupRatio),
+    groupDisplayNames: parseStringMap(groupDisplayNames),
   })
+}
+
+type GroupIdentifierIssue = {
+  key:
+    | 'duplicate-identifiers'
+    | 'blank-identifier'
+    | 'duplicate-display-names'
+    | 'display-name-shadows-identifier'
+  values: string[]
+}
+
+// Identifier and display-name problems that must block a save: a duplicate or
+// shadowing display name is ambiguous for the resolver, and a duplicate
+// identifier would silently replace a group's configuration.
+function collectGroupIdentifierIssues(
+  rows: GroupPricingRow[]
+): GroupIdentifierIssue[] {
+  const issues: GroupIdentifierIssue[] = []
+  const identifierCounts = new Map<string, number>()
+  const displayNameCounts = new Map<string, number>()
+  const knownIdentifiers = new Set<string>()
+  let blankIdentifier = false
+
+  for (const row of rows) {
+    const identifier = row.name.trim()
+    if (!identifier) {
+      blankIdentifier = true
+      continue
+    }
+    knownIdentifiers.add(identifier)
+    identifierCounts.set(
+      identifier,
+      (identifierCounts.get(identifier) ?? 0) + 1
+    )
+  }
+  for (const row of rows) {
+    const displayName = row.displayName.trim()
+    if (!displayName) continue
+    displayNameCounts.set(
+      displayName,
+      (displayNameCounts.get(displayName) ?? 0) + 1
+    )
+  }
+
+  const duplicateIdentifiers = [...identifierCounts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([name]) => name)
+  if (duplicateIdentifiers.length > 0) {
+    issues.push({ key: 'duplicate-identifiers', values: duplicateIdentifiers })
+  }
+  if (blankIdentifier) {
+    issues.push({ key: 'blank-identifier', values: [] })
+  }
+  const duplicateDisplayNames = [...displayNameCounts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([name]) => name)
+  if (duplicateDisplayNames.length > 0) {
+    issues.push({
+      key: 'duplicate-display-names',
+      values: duplicateDisplayNames,
+    })
+  }
+  const shadowed = new Set<string>()
+  for (const row of rows) {
+    const identifier = row.name.trim()
+    const displayName = row.displayName.trim()
+    if (!identifier || !displayName || displayName === identifier) continue
+    if (knownIdentifiers.has(displayName)) {
+      shadowed.add(displayName)
+    }
+  }
+  if (shadowed.size > 0) {
+    issues.push({
+      key: 'display-name-shadows-identifier',
+      values: [...shadowed],
+    })
+  }
+  return issues
 }
 
 function UnknownGroupBadge() {
@@ -273,10 +372,13 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
   groupRatio,
   topupGroupRatio,
   userUsableGroups,
+  groupDisplayNames,
   groupGroupRatio,
   autoGroups,
   maxTokenAutoGroupsField,
   groupSpecialUsableGroup,
+  savedRevision,
+  onValidationChange,
   onChange,
 }: GroupRatioVisualEditorProps) {
   const { t, i18n } = useTranslation()
@@ -285,8 +387,9 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
 
   const registry = useMemo<RegistryEntry[]>(() => {
     const ratioMap = parseRatioMap(groupRatio)
-    const usableMap = parseUsableMap(userUsableGroups)
+    const usableMap = parseStringMap(userUsableGroups)
     const topupMap = parseRatioMap(topupGroupRatio)
+    const displayNameMap = parseStringMap(groupDisplayNames)
     const names = new Set([
       ...Object.keys(ratioMap),
       ...Object.keys(usableMap),
@@ -294,9 +397,10 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
     ])
     return [...names].map((name) => ({
       name,
+      displayName: displayNameMap[name] ?? name,
       ratio: normalizeRatio(ratioMap[name]),
     }))
-  }, [groupRatio, userUsableGroups, topupGroupRatio])
+  }, [groupRatio, userUsableGroups, topupGroupRatio, groupDisplayNames])
 
   const registryNames = useMemo(
     () => registry.map((entry) => entry.name),
@@ -370,6 +474,9 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
           groupRatio={groupRatio}
           userUsableGroups={userUsableGroups}
           topupGroupRatio={topupGroupRatio}
+          groupDisplayNames={groupDisplayNames}
+          savedRevision={savedRevision}
+          onValidationChange={onValidationChange}
           onChange={onChange}
           onShowDetail={setDetailGroup}
         />
@@ -475,6 +582,9 @@ type GroupPricingTableProps = {
   groupRatio: string
   userUsableGroups: string
   topupGroupRatio: string
+  groupDisplayNames: string
+  savedRevision: number
+  onValidationChange?: (valid: boolean) => void
   onChange: (field: string, value: string) => void
   onShowDetail: (name: string) => void
 }
@@ -483,20 +593,29 @@ function GroupPricingTable({
   groupRatio,
   userUsableGroups,
   topupGroupRatio,
+  groupDisplayNames,
+  savedRevision,
+  onValidationChange,
   onChange,
   onShowDetail,
 }: GroupPricingTableProps) {
   const { t } = useTranslation()
   const [search, setSearch] = useState('')
   const [rows, setRows] = useState<GroupPricingRow[]>(() =>
-    buildGroupPricingRows(groupRatio, userUsableGroups, topupGroupRatio)
+    buildGroupPricingRows(
+      groupRatio,
+      userUsableGroups,
+      topupGroupRatio,
+      groupDisplayNames
+    )
   )
 
   useEffect(() => {
     const incomingSignature = sourceGroupPricingSignature(
       groupRatio,
       userUsableGroups,
-      topupGroupRatio
+      topupGroupRatio,
+      groupDisplayNames
     )
     setRows((currentRows) => {
       if (groupPricingSignature(currentRows) === incomingSignature) {
@@ -505,10 +624,31 @@ function GroupPricingTable({
       return buildGroupPricingRows(
         groupRatio,
         userUsableGroups,
-        topupGroupRatio
+        topupGroupRatio,
+        groupDisplayNames
       )
     })
-  }, [groupRatio, userUsableGroups, topupGroupRatio])
+  }, [groupRatio, userUsableGroups, topupGroupRatio, groupDisplayNames])
+
+  // Every identifier that has been saved is immutable: the parent bumps the
+  // revision after a successful save, which locks the drafts added since.
+  useEffect(() => {
+    setRows((currentRows) =>
+      currentRows.every((row) => row.locked)
+        ? currentRows
+        : currentRows.map((row) => ({ ...row, locked: true }))
+    )
+  }, [savedRevision])
+
+  const identifierIssues = useMemo(
+    () => collectGroupIdentifierIssues(rows),
+    [rows]
+  )
+
+  useEffect(() => {
+    onValidationChange?.(identifierIssues.length === 0)
+    return () => onValidationChange?.(true)
+  }, [identifierIssues, onValidationChange])
 
   const emitRows = useCallback(
     (nextRows: GroupPricingRow[]) => {
@@ -517,6 +657,7 @@ function GroupPricingTable({
       onChange('GroupRatio', serialized.GroupRatio)
       onChange('UserUsableGroups', serialized.UserUsableGroups)
       onChange('TopupGroupRatio', serialized.TopupGroupRatio)
+      onChange('GroupDisplayNames', serialized.GroupDisplayNames)
     },
     [onChange]
   )
@@ -547,10 +688,12 @@ function GroupPricingTable({
       {
         _id: createGroupPricingId(),
         name,
+        displayName: '',
         ratio: '1',
         topupRatio: '',
         selectable: true,
         description: '',
+        locked: false,
       },
       ...rows,
     ])
@@ -563,7 +706,7 @@ function GroupPricingTable({
     [emitRows, rows]
   )
 
-  const duplicateNames = useMemo(() => {
+  const duplicateIdentifiers = useMemo(() => {
     const counts = new Map<string, number>()
     for (const row of rows) {
       const name = row.name.trim()
@@ -575,11 +718,40 @@ function GroupPricingTable({
       .map(([name]) => name)
   }, [rows])
 
+  const duplicateDisplayNames = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const row of rows) {
+      const displayName = row.displayName.trim()
+      if (!displayName) continue
+      counts.set(displayName, (counts.get(displayName) ?? 0) + 1)
+    }
+    return [...counts.entries()]
+      .filter(([, count]) => count > 1)
+      .map(([name]) => name)
+  }, [rows])
+
+  const shadowedDisplayNames = useMemo(() => {
+    const knownIdentifiers = new Set(
+      rows.map((row) => row.name.trim()).filter(Boolean)
+    )
+    const shadowed = new Set<string>()
+    for (const row of rows) {
+      const identifier = row.name.trim()
+      const displayName = row.displayName.trim()
+      if (!identifier || !displayName || displayName === identifier) continue
+      if (knownIdentifiers.has(displayName)) {
+        shadowed.add(displayName)
+      }
+    }
+    return [...shadowed]
+  }, [rows])
+
   const query = search.trim().toLowerCase()
   const visibleRows = rows.filter(
     (row) =>
       !query ||
       row.name.toLowerCase().includes(query) ||
+      row.displayName.toLowerCase().includes(query) ||
       row.description.toLowerCase().includes(query)
   )
 
@@ -591,7 +763,7 @@ function GroupPricingTable({
             <CardTitle>{t('Pricing groups')}</CardTitle>
             <CardDescription>
               {t(
-                'All group names live here. Ratio applies when calls are billed as this group; top-up ratio applies to users whose account is in this group.'
+                'Each group has a stable identifier and an editable display name. The identifier is stored on tokens, subscription plans and quotas and cannot be changed after saving; the display name is what users see.'
               )}
             </CardDescription>
           </div>
@@ -610,8 +782,12 @@ function GroupPricingTable({
             <InputGroupInput
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              aria-label={t('Search groups by name or description')}
-              placeholder={t('Search groups by name or description')}
+              aria-label={t(
+                'Search groups by identifier, display name or description'
+              )}
+              placeholder={t(
+                'Search groups by identifier, display name or description'
+              )}
             />
             {search && (
               <InputGroupAddon align='inline-end'>
@@ -654,17 +830,41 @@ function GroupPricingTable({
             }
             columns={[
               {
-                id: 'group',
-                header: t('Group name'),
+                id: 'identifier',
+                header: t('Group identifier'),
                 className: 'min-w-40',
                 cell: (row) => (
                   <Input
                     value={row.name}
-                    aria-label={t('Group name')}
+                    readOnly={row.locked}
+                    aria-readonly={row.locked}
+                    aria-label={t('Group identifier')}
+                    className={row.locked ? 'bg-muted/50' : undefined}
                     onChange={(event) =>
                       updateRow(row._id, 'name', event.target.value)
                     }
-                    aria-invalid={duplicateNames.includes(row.name.trim())}
+                    aria-invalid={duplicateIdentifiers.includes(
+                      row.name.trim()
+                    )}
+                  />
+                ),
+              },
+              {
+                id: 'display-name',
+                header: t('Display name'),
+                className: 'min-w-40',
+                cell: (row) => (
+                  <Input
+                    value={row.displayName}
+                    aria-label={t('Display name')}
+                    placeholder={row.name.trim() || t('Same as identifier')}
+                    onChange={(event) =>
+                      updateRow(row._id, 'displayName', event.target.value)
+                    }
+                    aria-invalid={
+                      duplicateDisplayNames.includes(row.displayName.trim()) ||
+                      shadowedDisplayNames.includes(row.displayName.trim())
+                    }
                   />
                 ),
               },
@@ -769,12 +969,46 @@ function GroupPricingTable({
             ]}
           />
 
-          {duplicateNames.length > 0 && (
-            <p className='text-destructive text-sm'>
-              {t('Duplicate group names: {{names}}', {
-                names: duplicateNames.join(', '),
+          {identifierIssues.length > 0 && (
+            <div className='space-y-1'>
+              {identifierIssues.map((issue) => {
+                if (issue.key === 'blank-identifier') {
+                  return (
+                    <p key={issue.key} className='text-destructive text-sm'>
+                      {t(
+                        'A row without an identifier is not saved until it has one.'
+                      )}
+                    </p>
+                  )
+                }
+                if (issue.key === 'duplicate-identifiers') {
+                  return (
+                    <p key={issue.key} className='text-destructive text-sm'>
+                      {t('Duplicate group names: {{names}}', {
+                        names: issue.values.join(', '),
+                      })}
+                    </p>
+                  )
+                }
+                if (issue.key === 'duplicate-display-names') {
+                  return (
+                    <p key={issue.key} className='text-destructive text-sm'>
+                      {t('Group display names must be unique: {{names}}', {
+                        names: issue.values.join(', '),
+                      })}
+                    </p>
+                  )
+                }
+                return (
+                  <p key={issue.key} className='text-destructive text-sm'>
+                    {t(
+                      'A display name must not repeat another group identifier: {{names}}',
+                      { names: issue.values.join(', ') }
+                    )}
+                  </p>
+                )
               })}
-            </p>
+            </div>
           )}
         </div>
       </CardContent>
@@ -1293,7 +1527,7 @@ function GroupDetailSheet(props: GroupDetailSheetProps) {
 
     const entry = props.registry.find((item) => item.name === name)
     const topupMap = parseRatioMap(props.topupGroupRatio)
-    const usableMap = parseUsableMap(props.userUsableGroups)
+    const usableMap = parseStringMap(props.userUsableGroups)
     const overrideMap = parseNestedRatioMap(props.groupGroupRatio)
     const specialMap = safeJsonParse<Record<string, Record<string, string>>>(
       props.groupSpecialUsableGroup,
@@ -1331,6 +1565,7 @@ function GroupDetailSheet(props: GroupDetailSheetProps) {
     const autoIndex = props.autoGroups.indexOf(name)
 
     return {
+      displayName: entry?.displayName ?? name,
       ratio: entry?.ratio,
       topupRatio: Object.hasOwn(topupMap, name) ? String(topupMap[name]) : null,
       selectable: Object.hasOwn(usableMap, name),
@@ -1371,6 +1606,14 @@ function GroupDetailSheet(props: GroupDetailSheetProps) {
             <section className='space-y-2'>
               <h3 className='text-sm font-semibold'>{t('Overview')}</h3>
               <dl className='space-y-1.5 text-sm'>
+                <div className='flex justify-between'>
+                  <dt className='text-muted-foreground'>{t('Display name')}</dt>
+                  <dd className='font-medium'>
+                    {detail.displayName === name
+                      ? t('Same as identifier')
+                      : detail.displayName}
+                  </dd>
+                </div>
                 <div className='flex justify-between'>
                   <dt className='text-muted-foreground'>{t('Ratio')}</dt>
                   <dd className='font-medium'>{detail.ratio ?? '-'}</dd>
