@@ -217,7 +217,8 @@ export function PlaygroundQuotaSection(props: PlaygroundQuotaSectionProps) {
     const nextOverrideErrors: Record<number, QuotaDraftErrors> = {}
     let hasError = false
     for (const key of PLAYGROUND_QUOTA_FIELD_KEYS) {
-      if (!isPositiveInteger(defaults[key])) {
+      const raw = defaults[key]
+      if (raw !== '' && !isPositiveInteger(raw)) {
         nextDefaultErrors[key] = t('Enter a positive whole number.')
         hasError = true
       }
