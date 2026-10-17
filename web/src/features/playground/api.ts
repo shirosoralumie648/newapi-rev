@@ -346,6 +346,47 @@ export async function getPlaygroundMessages(
   return mapMessageSnapshot(response.data.data, sessionId)
 }
 
+/**
+ * One incremental message write: the messages that changed or were added plus
+ * the client keys that were removed. The server writes only those rows and uses
+ * `revision` as the CAS token, so a stale revision fails with 409.
+ */
+export interface PlaygroundMessageDelta {
+  upserts: Message[]
+  deletes: string[]
+}
+
+export async function applyPlaygroundMessagesDelta(
+  sessionId: string,
+  delta: PlaygroundMessageDelta,
+  revision: number,
+  signal?: AbortSignal
+): Promise<number> {
+  const response = await api.patch(
+    `${API_ENDPOINTS.PLAYGROUND_SESSIONS}/${encodeURIComponent(sessionId)}/messages`,
+    {
+      revision,
+      upserts: delta.upserts.map((message) => ({
+        client_key: message.key,
+        payload: message,
+      })),
+      deletes: delta.deletes,
+    },
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  const data = z
+    .object({ revision: z.number().int().nonnegative() })
+    .parse(response.data.data)
+  return data.revision
+}
+
+/**
+ * @deprecated Compatibility shim for one release: the full snapshot endpoint
+ * stays available and the server translates it into incremental writes, but new
+ * clients must use {@link applyPlaygroundMessagesDelta}. It will be removed in
+ * the next version.
+ */
 export async function replacePlaygroundMessages(
   sessionId: string,
   messages: Message[],

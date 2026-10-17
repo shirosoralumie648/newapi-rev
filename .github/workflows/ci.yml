@@ -274,8 +274,8 @@ jobs:
           mkdir -p web/dist
           touch web/dist/index.html
 
-      - name: Test batch update flush and token quota adjustments on SQLite, MySQL, and PostgreSQL
-        run: go test ./model/ -run 'TestBatchUpdateShutdownFlushMatrix|TestFlushBatchUpdateTimeoutLogsAndRetainsDeltas|TestTokenQuotaUpdatePreservesConcurrentDeductions' -count=1 -v
+      - name: Test batch update flush, token quota adjustments, and Playground message deltas on SQLite, MySQL, and PostgreSQL
+        run: go test ./model/ -run 'TestBatchUpdateShutdownFlushMatrix|TestFlushBatchUpdateTimeoutLogsAndRetainsDeltas|TestTokenQuotaUpdatePreservesConcurrentDeductions|TestPlaygroundMessageDelta|TestPlaygroundMessageUniquenessMigration' -count=1 -v
 
   frontend:
     name: Frontend typecheck and test

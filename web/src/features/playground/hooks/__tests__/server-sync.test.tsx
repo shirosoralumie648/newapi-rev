@@ -192,18 +192,14 @@ test('server failure leaves the local draft available and retry hydrates without
 
 test('generation coalesces edits and saves only after the response settles', async () => {
   mockServer()
-  const patch = vi.spyOn(api, 'patch').mockResolvedValue({
-    data: { success: true, data: { ...remote, revision: 1 } },
+  const patch = vi.spyOn(api, 'patch').mockImplementation(async (url) => {
+    if (String(url).endsWith('/messages')) {
+      return {
+        data: { success: true, data: { revision: 1, upserted: ['m'] } },
+      }
+    }
+    return { data: { success: true, data: { ...remote, revision: 1 } } }
   })
-  const put = vi.spyOn(api, 'put').mockImplementation(async (_url, body) => ({
-    data: {
-      success: true,
-      data: {
-        revision: 1,
-        messages: (body as { messages: unknown[] }).messages,
-      },
-    },
-  }))
   const hook = mount(true)
   await waitFor(() =>
     expect(hook.result.current.local.activeSessionId).toBe(remote.id)
@@ -215,18 +211,22 @@ test('generation coalesces edits and saves only after the response settles', asy
   )
   expect(patch).not.toHaveBeenCalled()
   hook.rerender({ generating: false })
-  await waitFor(() => expect(put).toHaveBeenCalledTimes(1))
+  await waitFor(() => expect(patch).toHaveBeenCalledTimes(2))
   await waitFor(() =>
     expect(hook.result.current.local.sessions[0].syncPending).toBe(false)
   )
-  expect(put.mock.calls[0][1]).toMatchObject({
+  const messageCall = patch.mock.calls.find(([url]) =>
+    String(url).endsWith('/messages')
+  )
+  expect(messageCall?.[1]).toMatchObject({
     revision: 0,
-    messages: [
+    upserts: [
       {
         client_key: 'm',
         payload: { versions: [{ id: 'v', content: 'Final answer' }] },
       },
     ],
+    deletes: [],
   })
 })
 
@@ -241,15 +241,6 @@ test('edits made while a save is pending remain dirty for the next serialized wr
         })
     )
     .mockRejectedValue(new Error('Next write held'))
-  vi.spyOn(api, 'put').mockImplementation(async (_url, body) => ({
-    data: {
-      success: true,
-      data: {
-        revision: 1,
-        messages: (body as { messages: unknown[] }).messages,
-      },
-    },
-  }))
   const hook = mount()
   await waitFor(() =>
     expect(hook.result.current.local.activeSessionId).toBe(remote.id)
@@ -294,15 +285,6 @@ test('a canceled write is retried without surfacing a sync failure', async () =>
         data: { ...remote, title: 'Edited', revision: 1 },
       },
     })
-  vi.spyOn(api, 'put').mockImplementation(async (_url, body) => ({
-    data: {
-      success: true,
-      data: {
-        revision: 1,
-        messages: (body as { messages: unknown[] }).messages,
-      },
-    },
-  }))
   const hook = mount()
   await waitFor(() =>
     expect(hook.result.current.local.activeSessionId).toBe(remote.id)
@@ -348,7 +330,6 @@ test('an account change aborts outstanding writes before they can continue under
       finish = resolve
     })
   })
-  const put = vi.spyOn(api, 'put')
   const hook = mount()
   await waitFor(() =>
     expect(hook.result.current.local.activeSessionId).toBe(remote.id)
@@ -363,7 +344,8 @@ test('an account change aborts outstanding writes before they can continue under
   await act(async () =>
     finish({ data: { success: true, data: { ...remote, revision: 1 } } })
   )
-  expect(put).not.toHaveBeenCalled()
+  // The aborted write stays the only one: no message delta follows it.
+  expect(patch).toHaveBeenCalledTimes(1)
 })
 
 test('a failed remote deletion remains queued rather than resurrecting a deleted conversation', async () => {
@@ -467,5 +449,96 @@ test('a lost creation acknowledgement does not replace newer unsynced browser ed
   expect(hook.result.current.local.sessions[0]).toMatchObject({
     syncPending: true,
     server: { id: remote.id, revision: 0, messageRevision: 0 },
+  })
+})
+
+test('an incremental save sends only the changed messages and the removed keys', async () => {
+  const history: Message[] = [
+    { key: 'm1', from: 'user', versions: [{ id: 'v1', content: 'First' }] },
+    {
+      key: 'm2',
+      from: 'assistant',
+      versions: [{ id: 'v2', content: 'Second' }],
+    },
+  ]
+  vi.spyOn(api, 'get').mockImplementation(async (url) => ({
+    data: {
+      success: true,
+      data: url.endsWith('/messages')
+        ? {
+            revision: 2,
+            messages: history.map((payload) => ({
+              client_key: payload.key,
+              payload,
+            })),
+          }
+        : { items: [{ ...remote, message_revision: 2 }], total: 1 },
+    },
+  }))
+  const patch = vi.spyOn(api, 'patch').mockImplementation(async (url) => {
+    if (String(url).endsWith('/messages')) {
+      return {
+        data: { success: true, data: { revision: 3, upserted: ['m1', 'm3'] } },
+      }
+    }
+    return { data: { success: true, data: { ...remote, revision: 1 } } }
+  })
+  const hook = mount()
+  await waitFor(() =>
+    expect(hook.result.current.local.activeSessionId).toBe(remote.id)
+  )
+
+  act(() =>
+    hook.result.current.local.updateMessages([
+      { ...history[0], versions: [{ id: 'v1', content: 'First edited' }] },
+      { key: 'm3', from: 'user', versions: [{ id: 'v3', content: 'Third' }] },
+    ])
+  )
+  await waitFor(() =>
+    expect(hook.result.current.local.sessions[0].syncPending).toBe(false)
+  )
+
+  const messageCall = patch.mock.calls.find(([url]) =>
+    String(url).endsWith('/messages')
+  )
+  const body = messageCall?.[1] as {
+    revision: number
+    upserts: { client_key: string }[]
+    deletes: string[]
+  }
+  expect(body.revision).toBe(2)
+  expect(body.upserts.map((item) => item.client_key)).toEqual(['m1', 'm3'])
+  expect(body.deletes).toEqual(['m2'])
+  expect(hook.result.current.local.sessions[0].server?.messageRevision).toBe(3)
+})
+
+test('a save without message changes skips the message write and keeps the revision', async () => {
+  mockServer()
+  const patch = vi.spyOn(api, 'patch').mockImplementation(async (url) => {
+    if (String(url).endsWith('/messages')) {
+      throw new Error('The stored snapshot already matches')
+    }
+    return {
+      data: {
+        success: true,
+        data: { ...remote, title: 'Renamed', revision: 1 },
+      },
+    }
+  })
+  const hook = mount()
+  await waitFor(() =>
+    expect(hook.result.current.local.activeSessionId).toBe(remote.id)
+  )
+
+  act(() => hook.result.current.local.renameSession(remote.id, 'Renamed'))
+  await waitFor(() =>
+    expect(hook.result.current.local.sessions[0].syncPending).toBe(false)
+  )
+
+  expect(patch).toHaveBeenCalledTimes(1)
+  expect(hook.result.current.local.sessions[0].server).toEqual({
+    id: remote.id,
+    revision: 1,
+    messageRevision: 0,
   })
 })

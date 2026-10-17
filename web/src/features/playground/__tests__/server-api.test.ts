@@ -20,7 +20,12 @@ import { afterEach, expect, test, vi } from 'vitest'
 
 import { api } from '@/lib/api'
 
-import { getPlaygroundSessions, getPlaygroundMessages } from '../api'
+import {
+  applyPlaygroundMessagesDelta,
+  getPlaygroundSessions,
+  getPlaygroundMessages,
+  replacePlaygroundMessages,
+} from '../api'
 
 const wireSession = {
   id: 'pgs_one',
@@ -119,4 +124,59 @@ test('message snapshots derive attachment urls from stored references', async ()
       byteSize: 8,
     },
   ])
+})
+
+test('an incremental delta is written through PATCH with only the changed rows', async () => {
+  const patch = vi.spyOn(api, 'patch').mockResolvedValue({
+    data: {
+      success: true,
+      data: { revision: 4, upserted: ['m2'], deleted: ['m1'] },
+    },
+  })
+  const message = {
+    key: 'm2',
+    from: 'user',
+    versions: [{ id: 'v2', content: 'Edited' }],
+  }
+
+  const revision = await applyPlaygroundMessagesDelta(
+    'pgs_one',
+    { upserts: [message], deletes: ['m1'] },
+    3
+  )
+
+  expect(revision).toBe(4)
+  expect(patch).toHaveBeenCalledTimes(1)
+  expect(patch.mock.calls[0][0]).toBe(
+    '/api/playground/sessions/pgs_one/messages'
+  )
+  expect(patch.mock.calls[0][1]).toEqual({
+    revision: 3,
+    upserts: [{ client_key: 'm2', payload: message }],
+    deletes: ['m1'],
+  })
+})
+
+test('the deprecated snapshot endpoint still sends the complete ordered list', async () => {
+  const message = {
+    key: 'm',
+    from: 'user',
+    versions: [{ id: 'v', content: 'Private text' }],
+  }
+  const put = vi.spyOn(api, 'put').mockResolvedValue({
+    data: {
+      success: true,
+      data: { revision: 2, messages: [{ client_key: 'm', payload: message }] },
+    },
+  })
+
+  const snapshot = await replacePlaygroundMessages('pgs_one', [message], 1)
+
+  expect(snapshot).toEqual({ revision: 2, messages: [message] })
+  expect(put).toHaveBeenCalledTimes(1)
+  expect(put.mock.calls[0][0]).toBe('/api/playground/sessions/pgs_one/messages')
+  expect(put.mock.calls[0][1]).toEqual({
+    revision: 1,
+    messages: [{ client_key: 'm', payload: message }],
+  })
 })

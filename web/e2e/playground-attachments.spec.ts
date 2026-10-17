@@ -54,7 +54,7 @@ test('an attached image reaches the model request and survives a reload', async 
 
   const saved = page.waitForResponse((response) => {
     if (
-      response.request().method() !== 'PUT' ||
+      response.request().method() !== 'PATCH' ||
       !/\/api\/playground\/sessions\/[^/]+\/messages$/.test(response.url()) ||
       !response.ok()
     ) {

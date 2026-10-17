@@ -34,6 +34,7 @@ import {
   playgroundSnapshot,
   savePlaygroundSession,
 } from '../lib/server-sync'
+import type { PlaygroundSyncedMessages } from '../lib/server-sync'
 import type { PlaygroundSession, PlaygroundServerSession } from '../types'
 import type { usePlaygroundState } from './use-playground-state'
 
@@ -71,6 +72,10 @@ export function usePlaygroundServer(
   const [cacheError, setCacheError] = useState(false)
   const latest = useRef(local)
   const deletedRef = useRef(deleted)
+  // Per canonical session id: what the last acknowledged write persisted, so a
+  // save only sends the messages that changed. The hook is mounted per account,
+  // and hydration rebuilds the entries from the server snapshot.
+  const syncedMessages = useRef<PlaygroundSyncedMessages>(new Map())
   const requestRef = useRef<AbortController | null>(null)
   const mounted = useRef(true)
   const inFlight = useRef(false)
@@ -142,7 +147,8 @@ export function usePlaygroundServer(
           operation.remote,
           deletedRef.current,
           owner,
-          signal
+          signal,
+          syncedMessages.current
         )
       }
       if (operation.type === 'delete') {
@@ -152,23 +158,30 @@ export function usePlaygroundServer(
           if (getServerErrorStatus(error) !== 404) throw error
         }
         assertPlaygroundOwner(owner, signal)
+        syncedMessages.current.delete(operation.id)
         return null
       }
-      await savePlaygroundSession(operation.draft, owner, signal, (server) => {
-        if (!mounted.current) return
-        latest.current.reconcileSession(operation.draft.id, (current) => ({
-          ...current,
-          server,
-        }))
-        // If the draft was deleted while creation was in flight, queue the new server ID.
-        if (
-          !latest.current.sessions.some(
-            (session) => session.id === operation.draft.id
-          )
-        ) {
-          rememberDeletions([...new Set([...deletedRef.current, server.id])])
-        }
-      })
+      await savePlaygroundSession(
+        operation.draft,
+        owner,
+        signal,
+        (server) => {
+          if (!mounted.current) return
+          latest.current.reconcileSession(operation.draft.id, (current) => ({
+            ...current,
+            server,
+          }))
+          // If the draft was deleted while creation was in flight, queue the new server ID.
+          if (
+            !latest.current.sessions.some(
+              (session) => session.id === operation.draft.id
+            )
+          ) {
+            rememberDeletions([...new Set([...deletedRef.current, server.id])])
+          }
+        },
+        syncedMessages.current
+      )
       assertPlaygroundOwner(owner, signal)
       return null
     },
@@ -294,6 +307,11 @@ export function usePlaygroundServer(
     const operation = mutation.variables
     if (!conflict || operation?.type !== 'save' || isGenerating) return
     const replacementId = nanoid()
+    // The failed snapshot is not the stored one any more: forget what the server
+    // was believed to hold so the copy is created from the full local history.
+    if (operation.draft.server) {
+      syncedMessages.current.delete(operation.draft.server.id)
+    }
     local.hydrateSessions(
       local.sessions.map((session) =>
         session.id === operation.draft.id

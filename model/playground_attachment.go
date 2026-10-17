@@ -316,21 +316,39 @@ func DeletePlaygroundAttachment(userID int, sessionID, id string) error {
 }
 
 // syncPlaygroundAttachmentReferences recomputes which attachments the stored
-// message snapshot references. Already-unreferenced rows keep their timestamp
-// so the orphan countdown is not reset by unrelated message writes.
-func syncPlaygroundAttachmentReferences(tx *gorm.DB, userID int, sessionID string, referencedIDs []string) error {
+// message snapshot references. Only rows whose reference state actually changes
+// are written, so an unrelated message save never resets the orphan countdown of
+// an attachment it still (or still does not) reference. It reports whether any
+// row changed.
+func syncPlaygroundAttachmentReferences(tx *gorm.DB, userID int, sessionID string, referencedIDs []string) (bool, error) {
+	var attachments []PlaygroundAttachment
+	if err := tx.Select("id", "referenced_at").
+		Where("user_id = ? AND session_id = ?", userID, sessionID).Find(&attachments).Error; err != nil {
+		return false, err
+	}
+	wanted := make(map[string]bool, len(referencedIDs))
+	for _, id := range referencedIDs {
+		wanted[id] = true
+	}
+	changed := false
 	now := common.GetTimestamp()
-	if err := tx.Model(&PlaygroundAttachment{}).
-		Where("user_id = ? AND session_id = ? AND referenced_at <> 0", userID, sessionID).
-		Updates(map[string]any{"referenced_at": 0, "updated_at": now}).Error; err != nil {
-		return err
+	for index := range attachments {
+		attachment := &attachments[index]
+		if wanted[attachment.ID] == (attachment.ReferencedAt > 0) {
+			continue
+		}
+		referencedAt := int64(0)
+		if wanted[attachment.ID] {
+			referencedAt = now
+		}
+		if err := tx.Model(&PlaygroundAttachment{}).
+			Where("id = ? AND user_id = ?", attachment.ID, userID).
+			Updates(map[string]any{"referenced_at": referencedAt, "updated_at": now}).Error; err != nil {
+			return false, err
+		}
+		changed = true
 	}
-	if len(referencedIDs) == 0 {
-		return nil
-	}
-	return tx.Model(&PlaygroundAttachment{}).
-		Where("user_id = ? AND session_id = ? AND id IN ?", userID, sessionID, referencedIDs).
-		Updates(map[string]any{"referenced_at": now, "updated_at": now}).Error
+	return changed, nil
 }
 
 // DeleteOrphanedPlaygroundAttachments removes unreferenced attachments whose
