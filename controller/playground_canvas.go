@@ -37,6 +37,11 @@ import (
 // stored document is capped by the owner's canvas document byte budget.
 const playgroundCanvasRequestMaxBytes = 2 << 20
 
+// playgroundCanvasNodeTypes is the node-kind contract the editor stores. A
+// workflow board chains a producer (prompt/message/attachment/artifact/image or
+// a text/note) into a step (`model` chat call, `task` generation submission)
+// and out to a `task-result`. None of these kinds carries executable code; the
+// data payload is display configuration plus ID references only.
 var playgroundCanvasNodeTypes = map[string]bool{
 	"text":        true,
 	"note":        true,
@@ -45,6 +50,7 @@ var playgroundCanvasNodeTypes = map[string]bool{
 	"attachment":  true,
 	"artifact":    true,
 	"message":     true,
+	"model":       true,
 	"task":        true,
 	"task-result": true,
 }

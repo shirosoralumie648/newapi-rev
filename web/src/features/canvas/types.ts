@@ -26,8 +26,58 @@ export type CanvasNodeKind =
   | 'attachment'
   | 'image'
   | 'artifact'
+  | 'model'
   | 'task'
   | 'task-result'
+
+/**
+ * Workflow steps are the nodes a run executes: a `model` chat completion and a
+ * `task` generation submission. Producers (prompt/text/message/...) only feed
+ * text into the chain, and `task-result` is the terminal node that receives the
+ * durable task reference.
+ */
+export type CanvasWorkflowNodeStatus =
+  | 'idle'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'canceled'
+
+export type CanvasWorkflowGenerationKind = 'image' | 'video'
+
+/**
+ * The workflow configuration and last-run state of one step node. Only
+ * configuration and ID references live here: a model id, generation parameters,
+ * the resolved input text, a bounded output/error summary and the public id of
+ * the durable generation task. No code and no provider URL is stored, so a
+ * saved board can only describe requests through the account's own /pg routes.
+ */
+export type CanvasNodeWorkflowState = {
+  /** Step state; absent means the step never ran. */
+  status?: CanvasWorkflowNodeStatus
+  /** Model id the step calls through the Playground relay. */
+  model?: string
+  /** Generation kind of a `task` step; defaults to image. */
+  generation?: CanvasWorkflowGenerationKind
+  /** Image size used by an image generation step. */
+  size?: string
+  /** Video duration in seconds used by a video generation step. */
+  duration?: number
+  /** Input text resolved on the last attempt, reused by retry. */
+  inputText?: string
+  /** Bounded text output of a model call. */
+  output?: string
+  /** Number of images the last image generation returned. */
+  imageCount?: number
+  /** Public id of the durable generation task the step submitted. */
+  taskId?: string
+  /** Bounded failure message of the last attempt. */
+  error?: string
+  /** Attempts made so far, so a retry keeps its history count. */
+  attempts?: number
+  /** Timestamp (ms) of the last state change. */
+  updatedAt?: number
+}
 
 export type CanvasMessageSnapshot = {
   sessionId: string
@@ -56,6 +106,9 @@ export type CanvasNodeData = {
   snapshot?: CanvasMessageSnapshot
   ref?: CanvasNodeRef
   label?: string
+  // Workflow configuration and last-run state of a `model`/`task` step and the
+  // filled-in state of a `task-result` node.
+  workflow?: CanvasNodeWorkflowState
   // Set by the read path when the node's referenced resource was deleted. The
   // node keeps its snapshot/label so the content stays visible.
   sourceDeleted?: boolean

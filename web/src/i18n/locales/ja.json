@@ -7507,6 +7507,25 @@
     "Only a running task can be canceled.": "実行中のタスクのみキャンセルできます。",
     "Unable to cancel the task.": "タスクをキャンセルできません。",
     "Playground task result storage limit reached. Wait for old task results to expire.": "Playground タスク結果のストレージ上限に達しました。古いタスク結果の期限切れをお待ちください。",
-    "Task result storage per user": "ユーザーごとのタスク結果ストレージ"
+    "Task result storage per user": "ユーザーごとのタスク結果ストレージ",
+    "Model call": "モデル呼び出し",
+    "Run workflow": "ワークフローを実行",
+    "Cancel run": "実行をキャンセル",
+    "Retry step": "ステップを再試行",
+    "Workflow": "ワークフロー",
+    "Workflow output": "ワークフロー出力",
+    "Attempts: {{count}}": "試行回数: {{count}}",
+    "Not started": "未開始",
+    "Succeeded": "成功",
+    "Canceled": "キャンセル済み",
+    "Add a model call or generation step to run the workflow.": "ワークフローを実行するには、モデル呼び出しまたは生成ステップを追加してください。",
+    "Workflow connections must not form a cycle.": "ワークフローの接続が循環してはいけません。",
+    "Choose a model for every workflow step.": "各ワークフローステップのモデルを選択してください。",
+    "Connect a prompt or an upstream step before this workflow step.": "このワークフローステップの前にプロンプトまたは上流ステップを接続してください。",
+    "The workflow needs an available user group.": "ワークフローには利用可能なユーザーグループが必要です。",
+    "The model returned no text.": "モデルがテキストを返しませんでした。",
+    "The generation task did not return a task id.": "生成タスクがタスクIDを返しませんでした。",
+    "The generation task returned no image.": "生成タスクが画像を返しませんでした。",
+    "The workflow step failed.": "ワークフローステップが失敗しました。"
   }
 }

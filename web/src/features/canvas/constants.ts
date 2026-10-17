@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { CanvasNodeKind } from './types'
+import type { CanvasNodeKind, CanvasWorkflowGenerationKind } from './types'
 
 // Mirror of the server-side canvas document contract. The server validates
 // the same bounds again; the client copy keeps import and edit feedback local.
@@ -38,6 +38,7 @@ export const CANVAS_NODE_KINDS = [
   'attachment',
   'image',
   'artifact',
+  'model',
   'task',
   'task-result',
 ] as const
@@ -53,9 +54,33 @@ export const CANVAS_NODE_KIND_LABELS: Record<CanvasNodeKind, string> = {
   attachment: 'Attachment',
   image: 'Image',
   artifact: 'Artifact',
+  model: 'Model call',
   task: 'Task',
   'task-result': 'Task result',
 }
+
+// Workflow run bounds. The resolved input, model output and failure summary a
+// node stores stay small so a board with workflow steps keeps far below the
+// server's per-node data budget; the full result bytes stay behind the relay
+// and task artifact endpoints.
+export const CANVAS_WORKFLOW_INPUT_MAX_CHARS = 4000
+export const CANVAS_WORKFLOW_OUTPUT_MAX_CHARS = 4000
+export const CANVAS_WORKFLOW_ERROR_MAX_CHARS = 500
+
+// The media kinds a generation step can submit through the Playground relay.
+export const CANVAS_WORKFLOW_GENERATIONS = ['image', 'video'] as const
+
+export const CANVAS_WORKFLOW_GENERATION_LABELS: Record<
+  CanvasWorkflowGenerationKind,
+  string
+> = {
+  image: 'Image',
+  video: 'Video',
+}
+
+// Async generation steps poll the owner-scoped durable task row; terminal
+// states stop the loop.
+export const CANVAS_WORKFLOW_TASK_POLL_INTERVAL_MS = 5000
 
 export const CANVAS_DEFAULT_TITLE = 'New canvas'
 

@@ -94,8 +94,72 @@ test('does not offer source navigation for a content-only node', () => {
     />
   )
 
-  expect(
-    screen.queryByRole('button', { name: 'Open conversation' })
-  ).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Open conversation' })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Open artifact' })).toBeNull()
+})
+
+test('configures a workflow step and retries a failed attempt', async () => {
+  const user = userEvent.setup()
+  const onRetry = vi.fn()
+  const onUpdateData = vi.fn()
+  render(
+    <CanvasNodeInspector
+      models={[
+        { label: 'gpt-4o', value: 'gpt-4o' },
+        { label: 'gpt-4o-mini', value: 'gpt-4o-mini' },
+      ]}
+      node={makeNode({
+        kind: 'model',
+        workflow: {
+          status: 'failed',
+          model: 'gpt-4o',
+          attempts: 2,
+          error: 'upstream exploded',
+        },
+      })}
+      onDelete={vi.fn()}
+      onRetry={onRetry}
+      onUpdateData={onUpdateData}
+      runPhase='idle'
+    />
+  )
+
+  expect(screen.getByText('Workflow')).toBeInTheDocument()
+  expect(screen.getByText('Failed')).toBeInTheDocument()
+  expect(screen.getByText('upstream exploded')).toBeInTheDocument()
+
+  await user.selectOptions(screen.getByRole('combobox'), 'gpt-4o-mini')
+  expect(onUpdateData).toHaveBeenCalledWith('n1', expect.any(Function))
+  const update = onUpdateData.mock.calls[0][1] as (
+    data: CanvasNodeData
+  ) => Partial<CanvasNodeData>
+  expect(update({ kind: 'model', workflow: { model: 'gpt-4o' } })).toEqual({
+    workflow: { model: 'gpt-4o-mini' },
+  })
+
+  await user.click(screen.getByRole('button', { name: 'Retry step' }))
+  expect(onRetry).toHaveBeenCalledWith('n1')
+})
+
+test('hides the retry action while the workflow is running', () => {
+  render(
+    <CanvasNodeInspector
+      models={[{ label: 'gpt-4o', value: 'gpt-4o' }]}
+      node={makeNode({
+        kind: 'task',
+        workflow: {
+          status: 'canceled',
+          model: 'gpt-image-1',
+          generation: 'image',
+        },
+      })}
+      onDelete={vi.fn()}
+      onRetry={vi.fn()}
+      onUpdateData={vi.fn()}
+      runPhase='running'
+    />
+  )
+
+  expect(screen.getByText('Canceled')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Retry step' })).toBeNull()
 })

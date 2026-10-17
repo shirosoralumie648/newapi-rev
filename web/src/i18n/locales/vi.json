@@ -7507,6 +7507,25 @@
     "Only a running task can be canceled.": "Chỉ có thể hủy tác vụ đang chạy.",
     "Unable to cancel the task.": "Không thể hủy tác vụ.",
     "Playground task result storage limit reached. Wait for old task results to expire.": "Đã đạt giới hạn lưu trữ kết quả tác vụ Playground. Vui lòng chờ kết quả cũ hết hạn.",
-    "Task result storage per user": "Lưu trữ kết quả tác vụ mỗi người dùng"
+    "Task result storage per user": "Lưu trữ kết quả tác vụ mỗi người dùng",
+    "Model call": "Gọi mô hình",
+    "Run workflow": "Chạy quy trình",
+    "Cancel run": "Hủy chạy",
+    "Retry step": "Thử lại bước",
+    "Workflow": "Quy trình",
+    "Workflow output": "Kết quả quy trình",
+    "Attempts: {{count}}": "Số lần thử: {{count}}",
+    "Not started": "Chưa bắt đầu",
+    "Succeeded": "Thành công",
+    "Canceled": "Đã hủy",
+    "Add a model call or generation step to run the workflow.": "Thêm bước gọi mô hình hoặc tạo nội dung để chạy quy trình.",
+    "Workflow connections must not form a cycle.": "Các kết nối trong quy trình không được tạo thành vòng lặp.",
+    "Choose a model for every workflow step.": "Chọn mô hình cho mỗi bước của quy trình.",
+    "Connect a prompt or an upstream step before this workflow step.": "Kết nối lời nhắc hoặc bước phía trước vào bước quy trình này.",
+    "The workflow needs an available user group.": "Quy trình cần một nhóm người dùng khả dụng.",
+    "The model returned no text.": "Mô hình không trả về văn bản.",
+    "The generation task did not return a task id.": "Tác vụ tạo nội dung không trả về mã tác vụ.",
+    "The generation task returned no image.": "Tác vụ tạo nội dung không trả về hình ảnh.",
+    "The workflow step failed.": "Bước quy trình đã thất bại."
   }
 }

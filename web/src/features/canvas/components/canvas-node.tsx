@@ -28,14 +28,20 @@ import {
 } from '@/components/ai-elements/node'
 import { Badge } from '@/components/ui/badge'
 import { useAttachmentPreviewUrl } from '@/features/playground/hooks/use-attachment-preview-url'
+import { translateServerText } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
 import { CANVAS_NODE_KIND_LABELS } from '../constants'
 import type { CanvasNodeData, CanvasNodeKind } from '../types'
+import { CanvasWorkflowStatusBadge } from './canvas-workflow-status-badge'
 
 function readNodePreview(data: CanvasNodeData): string {
   return (
-    data.text?.trim() || data.snapshot?.text?.trim() || data.label?.trim() || ''
+    data.text?.trim() ||
+    data.snapshot?.text?.trim() ||
+    data.workflow?.output?.trim() ||
+    data.label?.trim() ||
+    ''
   )
 }
 
@@ -45,6 +51,7 @@ export function CanvasFlowNodeView(props: NodeProps) {
   const kind: CanvasNodeKind = data.kind ?? 'text'
   const preview = readNodePreview(data)
   const reference = data.ref
+  const workflow = data.workflow
   const sourceDeleted = data.sourceDeleted === true
   const isAttachmentNode =
     (kind === 'attachment' || kind === 'image') &&
@@ -66,12 +73,17 @@ export function CanvasFlowNodeView(props: NodeProps) {
         <NodeTitle className='text-xs font-medium'>
           {t(CANVAS_NODE_KIND_LABELS[kind])}
         </NodeTitle>
-        {sourceDeleted ? (
-          <Badge variant='warning'>
-            <Unlink aria-hidden='true' />
-            {t('Source deleted')}
-          </Badge>
-        ) : null}
+        <div className='flex items-center gap-1'>
+          {workflow?.status ? (
+            <CanvasWorkflowStatusBadge status={workflow.status} />
+          ) : null}
+          {sourceDeleted ? (
+            <Badge variant='warning'>
+              <Unlink aria-hidden='true' />
+              {t('Source deleted')}
+            </Badge>
+          ) : null}
+        </div>
       </NodeHeader>
       <NodeContent className='grid gap-2 p-2'>
         {isAttachmentNode ? (
@@ -100,6 +112,16 @@ export function CanvasFlowNodeView(props: NodeProps) {
         {!isAttachmentNode && !preview ? (
           <p className='text-muted-foreground text-xs italic'>
             {t('Empty node')}
+          </p>
+        ) : null}
+        {workflow?.error ? (
+          <p className='text-destructive line-clamp-4 text-xs break-words whitespace-pre-wrap'>
+            {translateServerText(t, workflow.error)}
+          </p>
+        ) : null}
+        {workflow?.taskId ? (
+          <p className='text-muted-foreground truncate font-mono text-xs'>
+            {t('Task ID')}: {workflow.taskId}
           </p>
         ) : null}
         {sourceDeleted ? (
