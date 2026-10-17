@@ -80,8 +80,11 @@ func (s *BillingSession) Settle(actualQuota int) error {
 		}
 	}
 	// 3) 更新 relayInfo 上的订阅 PostDelta（用于日志）
-	if s.funding.Source() == BillingSourceSubscription {
-		s.relayInfo.SubscriptionPostDelta += int64(delta)
+	// 结算可能被拆分：订阅承担 SubscriptionDelta，超额部分由钱包承担。
+	if sub, ok := s.funding.(*SubscriptionFunding); ok && sub.lastSettlement != nil {
+		s.relayInfo.SubscriptionPostDelta += sub.lastSettlement.SubscriptionDelta
+		s.relayInfo.SubscriptionWalletOverflow += sub.lastSettlement.WalletDelta
+		s.relayInfo.SubscriptionOverflowUncovered += sub.lastSettlement.WalletUncovered
 	}
 	s.settled = true
 	return tokenErr

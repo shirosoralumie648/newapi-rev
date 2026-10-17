@@ -1149,3 +1149,96 @@ func TestSamePriceCacheReadsRemainInInput(t *testing.T) {
 		})
 	}
 }
+
+// A subscription settlement that exceeds the plan total must not silently
+// under-charge (WL-03): the subscription absorbs up to its total in the same
+// transaction, the excess is charged to the wallet when the plan allows wallet
+// overflow, and the split is recorded on the relay info used by the consume log.
+func TestBillingSessionSettleSubscriptionOverflowChargesWallet(t *testing.T) {
+	for index, tc := range []struct {
+		name                                    string
+		allowOverflow                           bool
+		wallet, delta                           int
+		wantSubDelta, wantWallet, wantUncovered int64
+		wantBalance                             int
+		wantSubUsed                             int64
+	}{
+		{
+			name: "overflow charged to the wallet", allowOverflow: true, wallet: 5_000, delta: 1_000,
+			wantSubDelta: 500, wantWallet: 500, wantBalance: 4_500, wantSubUsed: 100_000,
+		},
+		{
+			name: "uncovered overflow is recorded", allowOverflow: true, wallet: 100, delta: 1_000,
+			wantSubDelta: 500, wantWallet: 100, wantUncovered: 400, wantBalance: 0, wantSubUsed: 100_000,
+		},
+		{
+			name: "plan without wallet overflow keeps the limit", wallet: 5_000, delta: 1_000,
+			wantSubDelta: 500, wantUncovered: 500, wantBalance: 5_000, wantSubUsed: 100_000,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			truncate(t)
+
+			userID := 810 + index
+			subID := 8_200 + index
+			const preConsumed = 400
+			seedUser(t, userID, tc.wallet)
+			seedSubscription(t, subID, userID, 100_000, 99_500)
+			require.NoError(t, model.DB.Model(&model.UserSubscription{}).
+				Where("id = ?", subID).
+				Update("allow_wallet_overflow", tc.allowOverflow).Error)
+
+			relayInfo := &relaycommon.RelayInfo{
+				UserId:                                userID,
+				IsPlayground:                          true,
+				BillingSource:                         BillingSourceSubscription,
+				SubscriptionId:                        subID,
+				SubscriptionPreConsumed:               preConsumed,
+				SubscriptionAmountTotal:               100_000,
+				SubscriptionAmountUsedAfterPreConsume: 99_500,
+			}
+			session := &BillingSession{
+				relayInfo: relayInfo,
+				funding: &SubscriptionFunding{
+					requestId:      "wl03-settle-overflow",
+					userId:         userID,
+					subscriptionId: subID,
+					amount:         preConsumed,
+					preConsumed:    preConsumed,
+				},
+				preConsumedQuota: preConsumed,
+			}
+			relayInfo.Billing = session
+
+			require.NoError(t, session.Settle(preConsumed+tc.delta))
+
+			assert.Equal(t, tc.wantBalance, getUserQuota(t, userID))
+			assert.Equal(t, tc.wantSubUsed, getSubscriptionUsed(t, subID))
+			assert.Equal(t, tc.wantSubDelta, relayInfo.SubscriptionPostDelta)
+			assert.Equal(t, tc.wantWallet, relayInfo.SubscriptionWalletOverflow)
+			assert.Equal(t, tc.wantUncovered, relayInfo.SubscriptionOverflowUncovered)
+
+			var ledger []model.WalletLedgerEntry
+			require.NoError(t, model.DB.Where("user_id = ? AND kind = ?", userID, model.WalletLedgerKindConsumeHourly).Find(&ledger).Error)
+			if tc.wantWallet > 0 {
+				require.Len(t, ledger, 1)
+				assert.EqualValues(t, -tc.wantWallet, ledger[0].Amount)
+			} else {
+				assert.Empty(t, ledger, "no wallet movement may leave a consumption row behind")
+			}
+
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+			other := GenerateTextOtherInfo(ctx, relayInfo, 1, 1, 1, 0, 0, 0, 0)
+			logOther := other.Snapshot()
+			assert.EqualValues(t, tc.wantWallet, logOther["wallet_quota_deducted"])
+			adminInfo, ok := logOther["admin_info"].(map[string]any)
+			require.True(t, ok, "the admin_info scope is always present")
+			if tc.wantUncovered > 0 {
+				assert.EqualValues(t, tc.wantUncovered, adminInfo["subscription_overflow_uncovered"])
+			} else {
+				assert.NotContains(t, adminInfo, "subscription_overflow_uncovered")
+			}
+		})
+	}
+}
