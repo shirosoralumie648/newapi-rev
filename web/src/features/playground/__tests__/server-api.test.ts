@@ -27,6 +27,7 @@ import {
   getPlaygroundMessages,
   replacePlaygroundMessages,
   sendChatCompletion,
+  updatePlaygroundSession,
 } from '../api'
 import type { Message } from '../types'
 
@@ -65,6 +66,100 @@ test('business failure does not return an empty successful session list', async 
     data: { success: false, message: 'Database unavailable' },
   })
   await expect(getPlaygroundSessions()).rejects.toThrow('Database unavailable')
+})
+
+test('context settings and the compression node map from the wire shape', async () => {
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        items: [
+          {
+            ...wireSession,
+            context: {
+              history_limit: 10,
+              token_budget: 5000,
+              auto_summarize: true,
+              summary_model: 'summary-model',
+            },
+            context_summary: {
+              id: 'pgc_1',
+              content: 'Earlier messages were compressed.',
+              through_message_key: 'm1',
+              message_count: 3,
+              model: 'summary-model',
+              created_at: 5,
+              request_id: 'req-1',
+              usage: {
+                promptTokens: 10,
+                completionTokens: 4,
+                totalTokens: 14,
+              },
+            },
+          },
+        ],
+        total: 1,
+      },
+    },
+  })
+  const sessions = await getPlaygroundSessions()
+  expect(sessions[0].context).toEqual({
+    historyLimit: 10,
+    tokenBudget: 5000,
+    autoSummarize: true,
+    summaryModel: 'summary-model',
+  })
+  expect(sessions[0].contextSummary).toMatchObject({
+    id: 'pgc_1',
+    content: 'Earlier messages were compressed.',
+    throughMessageKey: 'm1',
+    messageCount: 3,
+    model: 'summary-model',
+    requestId: 'req-1',
+    usage: { promptTokens: 10, completionTokens: 4, totalTokens: 14 },
+  })
+})
+
+test('session updates serialize context fields into the wire shape and clear the summary with null', async () => {
+  const patch = vi.spyOn(api, 'patch').mockResolvedValue({
+    data: { success: true, data: wireSession },
+  })
+  await updatePlaygroundSession('pgs_one', {
+    revision: 1,
+    context: {
+      historyLimit: 9,
+      tokenBudget: 1000,
+      autoSummarize: true,
+      summaryModel: 'summary-model',
+    },
+    context_summary: {
+      id: 'pgc_1',
+      content: 'Earlier messages.',
+      throughMessageKey: 'm1',
+      messageCount: 1,
+      model: 'summary-model',
+      createdAt: 5,
+    },
+  })
+  expect(patch.mock.calls[0][1]).toMatchObject({
+    context: {
+      history_limit: 9,
+      token_budget: 1000,
+      auto_summarize: true,
+      summary_model: 'summary-model',
+    },
+    context_summary: {
+      id: 'pgc_1',
+      through_message_key: 'm1',
+      message_count: 1,
+      created_at: 5,
+    },
+  })
+  await updatePlaygroundSession('pgs_one', {
+    revision: 2,
+    context_summary: null,
+  })
+  expect(patch.mock.calls[1][1]).toMatchObject({ context_summary: null })
 })
 
 test('message snapshots retain their server revision and payload', async () => {

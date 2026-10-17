@@ -37,6 +37,9 @@ var (
 	// capacity errors the resource quota policy produces for conversations.
 	ErrPlaygroundSessionLimit = errors.New("Playground conversation limit exceeded.")
 	ErrPlaygroundMessageLimit = errors.New("Playground message limit exceeded.")
+	// ErrPlaygroundContextSummaryLimit is raised when a client tries to persist
+	// a compression node bigger than the stored contract allows.
+	ErrPlaygroundContextSummaryLimit = errors.New("Playground context summary limit exceeded.")
 	// errPlaygroundMessageSequence only guards the internal ordering contract of
 	// the snapshot compatibility writer; request handlers validate their own
 	// input before reaching it.
@@ -84,7 +87,17 @@ type PlaygroundSession struct {
 	// `system` message of every request. The column stays nullable so an
 	// existing installation can add it on every supported database; a NULL
 	// value reads back as an empty prompt.
-	SystemPrompt    string `json:"-" gorm:"type:text"`
+	SystemPrompt string `json:"-" gorm:"type:text"`
+	// ContextConfig holds the conversation's context management settings — the
+	// history message limit, the estimated token budget, the automatic summary
+	// flag and the model that produces summaries — as JSON. The column is
+	// nullable like SystemPrompt; a NULL value reads back as an empty object
+	// and the client applies its defaults.
+	ContextConfig string `json:"-" gorm:"type:text"`
+	// ContextSummary is the persisted compression node: the summary that
+	// replaces the oldest messages of the conversation in a request. An empty
+	// value means the conversation sends its stored history uncompressed.
+	ContextSummary  string `json:"-" gorm:"type:text"`
 	Revision        int64  `json:"revision" gorm:"not null"`
 	MessageRevision int64  `json:"message_revision" gorm:"not null"`
 	CreatedAt       int64  `json:"created_at" gorm:"not null;index"`

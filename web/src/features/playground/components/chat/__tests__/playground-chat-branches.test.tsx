@@ -18,14 +18,22 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, test, vi } from 'vitest'
+import i18next from 'i18next'
+import { beforeAll, describe, expect, test, vi } from 'vitest'
 
-import type { Message } from '../../../types'
+import type { Message, PlaygroundContextSummary } from '../../../types'
 import { PlaygroundChat } from '../playground-chat'
 
 Object.defineProperty(HTMLElement.prototype, 'getAnimations', {
   configurable: true,
   value: () => [],
+})
+
+beforeAll(() => {
+  i18next.addResourceBundle('en', 'translation', {
+    'Compressed {{messages}} earlier messages':
+      'Compressed {{messages}} earlier messages',
+  })
 })
 
 const branchedMessage: Message = {
@@ -82,5 +90,48 @@ describe('PlaygroundChat branch history', () => {
     expect(
       screen.queryByRole('button', { name: 'Previous branch' })
     ).not.toBeInTheDocument()
+  })
+
+  test('renders the compression node right after the messages it covers', () => {
+    const messages: Message[] = [
+      {
+        key: 'u1',
+        from: 'user',
+        versions: [{ id: 'u1-v', content: 'First question' }],
+      },
+      {
+        key: 'a1',
+        from: 'assistant',
+        status: 'complete',
+        versions: [{ id: 'a1-v', content: 'First answer' }],
+      },
+      {
+        key: 'u2',
+        from: 'user',
+        versions: [{ id: 'u2-v', content: 'Second question' }],
+      },
+    ]
+    const summary: PlaygroundContextSummary = {
+      id: 'pgc_1',
+      content: 'Summary of the first exchange.',
+      throughMessageKey: 'a1',
+      messageCount: 2,
+      model: 'summary-model',
+      createdAt: 1,
+    }
+
+    render(<PlaygroundChat contextSummary={summary} messages={messages} />)
+
+    const node = screen.getByRole('button', {
+      name: 'Compressed 2 earlier messages',
+    })
+    const answer = screen.getByText('First answer')
+    const question = screen.getByText('Second question')
+    expect(
+      answer.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(
+      node.compareDocumentPosition(question) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
   })
 })

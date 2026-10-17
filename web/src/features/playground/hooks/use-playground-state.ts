@@ -20,7 +20,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { useAuthStore } from '@/stores/auth-store'
 
-import { DEFAULT_CONFIG, DEFAULT_PARAMETER_ENABLED } from '../constants'
+import {
+  DEFAULT_CONFIG,
+  DEFAULT_CONTEXT_SETTINGS,
+  DEFAULT_PARAMETER_ENABLED,
+} from '../constants'
 import {
   applyMessageStateUpdate,
   type MessageStateUpdater,
@@ -36,6 +40,8 @@ import type {
   ModelOption,
   ParameterEnabled,
   PlaygroundConfig,
+  PlaygroundContextSettings,
+  PlaygroundContextSummary,
   PlaygroundSession,
 } from '../types'
 
@@ -274,6 +280,32 @@ export function usePlaygroundState() {
     [updateSession]
   )
 
+  const updateContextSettings = useCallback(
+    (settings: PlaygroundContextSettings) => {
+      const currentActiveSessionId = latestActiveSessionIdRef.current
+      if (!currentActiveSessionId) return
+
+      updateSession(currentActiveSessionId, (session) => ({
+        ...session,
+        context: { ...settings },
+      }))
+    },
+    [updateSession]
+  )
+
+  const updateContextSummary = useCallback(
+    (summary: PlaygroundContextSummary | null) => {
+      const currentActiveSessionId = latestActiveSessionIdRef.current
+      if (!currentActiveSessionId) return
+
+      updateSession(currentActiveSessionId, (session) => ({
+        ...session,
+        contextSummary: summary,
+      }))
+    },
+    [updateSession]
+  )
+
   const updateMessages = useCallback<MessageUpdate>(
     (updater, sessionId = latestActiveSessionIdRef.current) => {
       if (!sessionId) return
@@ -364,7 +396,8 @@ export function usePlaygroundState() {
         createEmptySession(
           currentSession?.config ?? DEFAULT_CONFIG,
           currentSession?.parameterEnabled ?? DEFAULT_PARAMETER_ENABLED,
-          currentSession?.systemPrompt ?? ''
+          currentSession?.systemPrompt ?? '',
+          currentSession?.context
         )
       const nextSessions = remaining.length > 0 ? remaining : [fallback]
       const nextActiveSessionId =
@@ -412,6 +445,8 @@ export function usePlaygroundState() {
     parameterEnabled:
       activeSession?.parameterEnabled ?? DEFAULT_PARAMETER_ENABLED,
     systemPrompt: activeSession?.systemPrompt ?? '',
+    context: activeSession?.context ?? DEFAULT_CONTEXT_SETTINGS,
+    contextSummary: activeSession?.contextSummary ?? null,
     messages: activeSession?.messages ?? [],
     isLoadingMessages: !isHydrated,
     models,
@@ -424,6 +459,8 @@ export function usePlaygroundState() {
     updateConfig,
     updateParameterEnabled,
     updateSystemPrompt,
+    updateContextSettings,
+    updateContextSummary,
     applySessionSettings,
     updateMessages,
     clearMessages,

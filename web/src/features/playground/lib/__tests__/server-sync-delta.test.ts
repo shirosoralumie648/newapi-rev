@@ -18,8 +18,16 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { describe, expect, test } from 'vitest'
 
-import { DEFAULT_CONFIG, DEFAULT_PARAMETER_ENABLED } from '../../constants'
-import type { Message, PlaygroundSession } from '../../types'
+import {
+  DEFAULT_CONFIG,
+  DEFAULT_CONTEXT_SETTINGS,
+  DEFAULT_PARAMETER_ENABLED,
+} from '../../constants'
+import type {
+  Message,
+  PlaygroundContextSummary,
+  PlaygroundSession,
+} from '../../types'
 import {
   playgroundMessageDelta,
   playgroundSnapshot,
@@ -80,7 +88,10 @@ describe('playground message deltas', () => {
 })
 
 describe('playground session snapshots', () => {
-  function session(systemPrompt: string): PlaygroundSession {
+  function session(
+    systemPrompt: string,
+    overrides: Partial<PlaygroundSession> = {}
+  ): PlaygroundSession {
     return {
       id: 'local-1',
       title: 'Chat',
@@ -89,7 +100,10 @@ describe('playground session snapshots', () => {
       config: { ...DEFAULT_CONFIG },
       parameterEnabled: { ...DEFAULT_PARAMETER_ENABLED },
       systemPrompt,
+      context: { ...DEFAULT_CONTEXT_SETTINGS },
+      contextSummary: null,
       messages: [message('m1', 'first')],
+      ...overrides,
     }
   }
 
@@ -100,5 +114,29 @@ describe('playground session snapshots', () => {
     expect(playgroundSnapshot(session('Answer in French.'))).toBe(
       playgroundSnapshot(session('Answer in French.'))
     )
+  })
+
+  test('context settings and the compression node are part of the snapshot', () => {
+    const summary: PlaygroundContextSummary = {
+      id: 'pgc_1',
+      content: 'Earlier messages.',
+      throughMessageKey: 'm1',
+      messageCount: 1,
+      model: 'summary-model',
+      createdAt: 5,
+    }
+    expect(
+      playgroundSnapshot(
+        session('', {
+          context: {
+            ...DEFAULT_CONTEXT_SETTINGS,
+            historyLimit: 8,
+          },
+        })
+      )
+    ).not.toBe(playgroundSnapshot(session('')))
+    expect(
+      playgroundSnapshot(session('', { contextSummary: summary }))
+    ).not.toBe(playgroundSnapshot(session('')))
   })
 })

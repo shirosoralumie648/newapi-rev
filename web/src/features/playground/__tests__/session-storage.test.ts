@@ -22,6 +22,7 @@ import { useAuthStore } from '@/stores/auth-store'
 
 import {
   DEFAULT_CONFIG,
+  DEFAULT_CONTEXT_SETTINGS,
   DEFAULT_PARAMETER_ENABLED,
   STORAGE_KEYS,
 } from '../constants'
@@ -37,6 +38,8 @@ const session = (id: string, title = id): PlaygroundSession => ({
   config: { ...DEFAULT_CONFIG },
   parameterEnabled: { ...DEFAULT_PARAMETER_ENABLED },
   systemPrompt: '',
+  context: { ...DEFAULT_CONTEXT_SETTINGS },
+  contextSummary: null,
   messages: [],
 })
 
@@ -222,4 +225,84 @@ test('server cache eviction keeps unsynced drafts even when older than cached hi
     messages: [],
   })
   expect(loaded.sessions.some((item) => item.id === 'remote-20')).toBe(true)
+})
+
+test('context settings and the compression node survive a storage round trip', () => {
+  useAuthStore.getState().auth.setUser({ id: 11, username: 'eleven', role: 1 })
+  saveSessionsState({
+    activeSessionId: 'with-context',
+    sessions: [
+      {
+        ...session('with-context'),
+        context: {
+          historyLimit: 12,
+          tokenBudget: 3000,
+          autoSummarize: true,
+          summaryModel: 'summary-model',
+        },
+        contextSummary: {
+          id: 'pgc_1',
+          content: 'Earlier messages were compressed.',
+          throughMessageKey: 'm1',
+          messageCount: 3,
+          model: 'summary-model',
+          createdAt: 5,
+          requestId: 'req-1',
+          usage: { promptTokens: 10, completionTokens: 4, totalTokens: 14 },
+        },
+      },
+    ],
+  })
+
+  const loaded = loadSessionsState({
+    config: DEFAULT_CONFIG,
+    parameterEnabled: DEFAULT_PARAMETER_ENABLED,
+    messages: [],
+  })
+  expect(loaded.sessions[0].context).toEqual({
+    historyLimit: 12,
+    tokenBudget: 3000,
+    autoSummarize: true,
+    summaryModel: 'summary-model',
+  })
+  expect(loaded.sessions[0].contextSummary).toMatchObject({
+    id: 'pgc_1',
+    throughMessageKey: 'm1',
+    messageCount: 3,
+    requestId: 'req-1',
+    usage: { promptTokens: 10, completionTokens: 4, totalTokens: 14 },
+  })
+})
+
+test('missing or corrupt context data degrades to defaults without dropping the conversation', () => {
+  useAuthStore.getState().auth.setUser({ id: 12, username: 'twelve', role: 1 })
+  const legacySession = { ...session('legacy') } as Record<string, unknown>
+  delete legacySession.context
+  delete legacySession.contextSummary
+  const corruptSession = {
+    ...session('corrupt'),
+    context: { historyLimit: -5, tokenBudget: 'many', autoSummarize: 'yes' },
+    contextSummary: { id: 'pgc', content: '', throughMessageKey: 'x' },
+  }
+  localStorage.setItem(
+    `${STORAGE_KEYS.SESSIONS}:12`,
+    JSON.stringify({
+      version: 2,
+      data: {
+        activeSessionId: 'legacy',
+        sessions: [legacySession, corruptSession],
+      },
+    })
+  )
+
+  const loaded = loadSessionsState({
+    config: DEFAULT_CONFIG,
+    parameterEnabled: DEFAULT_PARAMETER_ENABLED,
+    messages: [],
+  })
+  expect(loaded.sessions).toHaveLength(2)
+  for (const item of loaded.sessions) {
+    expect(item.context).toEqual(DEFAULT_CONTEXT_SETTINGS)
+    expect(item.contextSummary).toBeNull()
+  }
 })

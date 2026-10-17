@@ -84,6 +84,8 @@ export function playgroundSnapshot(session: PlaygroundSession): string {
     config: session.config,
     parameterEnabled: session.parameterEnabled,
     systemPrompt: session.systemPrompt,
+    context: session.context,
+    contextSummary: session.contextSummary,
     messages: normalizeMessagesForStorage(session.messages),
   })
 }
@@ -132,6 +134,8 @@ export async function hydratePlaygroundWorkspace(
       config: session.config,
       parameterEnabled: session.parameterEnabled,
       systemPrompt: session.systemPrompt,
+      context: session.context,
+      contextSummary: session.contextSummary,
       messages,
       server: {
         id: session.id,
@@ -178,6 +182,8 @@ export async function savePlaygroundSession(
         config: draft.config,
         parameter_enabled: draft.parameterEnabled,
         system_prompt: draft.systemPrompt,
+        context: draft.context,
+        context_summary: draft.contextSummary,
         messages,
       },
       signal
@@ -207,7 +213,10 @@ export async function savePlaygroundSession(
       JSON.stringify(created.config) !== JSON.stringify(draft.config) ||
       JSON.stringify(created.parameterEnabled) !==
         JSON.stringify(draft.parameterEnabled) ||
-      created.systemPrompt !== draft.systemPrompt
+      created.systemPrompt !== draft.systemPrompt ||
+      JSON.stringify(created.context) !== JSON.stringify(draft.context) ||
+      JSON.stringify(created.contextSummary) !==
+        JSON.stringify(draft.contextSummary)
     ) {
       throw new Error(
         'Playground changed on another device. Reload before saving.'
@@ -224,6 +233,8 @@ export async function savePlaygroundSession(
       config: draft.config,
       parameter_enabled: draft.parameterEnabled,
       system_prompt: draft.systemPrompt,
+      context: draft.context,
+      context_summary: draft.contextSummary,
       revision: draft.server.revision,
     },
     signal

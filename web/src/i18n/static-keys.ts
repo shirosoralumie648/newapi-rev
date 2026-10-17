@@ -72,6 +72,7 @@ export const STATIC_I18N_KEYS = [
   'Assistant preset not found.',
   'Assistant preset limit exceeded.',
   'Playground system prompt limit exceeded.',
+  'Playground context summary limit exceeded.',
   'Assistant preset name must contain 1 to 100 characters.',
   'Assistant preset avatar must be an emoji or an http(s) image URL.',
   'Invalid assistant preset.',
