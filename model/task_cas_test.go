@@ -62,6 +62,7 @@ func TestMain(m *testing.M) {
 		&UserAccessToken{},
 		&WalletLedgerEntry{},
 		&WalletHold{},
+		&WalletDebt{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -97,6 +98,7 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM system_tasks")
 		DB.Exec("DELETE FROM wallet_ledger")
 		DB.Exec("DELETE FROM wallet_holds")
+		DB.Exec("DELETE FROM wallet_debts")
 	})
 }
 

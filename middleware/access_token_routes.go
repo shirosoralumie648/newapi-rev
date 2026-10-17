@@ -157,6 +157,7 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/user/:id/wallet/ledger":                  accessTokenScopeRule("user:read"),
 	"GET /api/user/:id/wallet/ledger/export":           accessTokenScopeRule("user:read"),
 	"GET /api/user/:id/wallet/reconcile":               accessTokenScopeRule("user:read"),
+	"GET /api/user/wallet/debts":                       accessTokenScopeRule("user:read"),
 
 	// router/api-router.go: /api/subscription
 	"GET /api/subscription/plans":                                    accessTokenScopeRule("wallet:read"),

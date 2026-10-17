@@ -34,6 +34,8 @@ export const WALLET_LEDGER_KIND_LABELS: Record<string, string> = {
   consume_hourly: 'Hourly Consumption',
   chargeback: 'Chargeback',
   storage_daily: 'Storage Fee',
+  debt: 'Wallet Debt',
+  debt_repayment: 'Debt Repayment',
 }
 
 /**

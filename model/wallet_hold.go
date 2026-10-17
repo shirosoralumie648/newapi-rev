@@ -196,11 +196,21 @@ func closeWalletHoldChildrenTx(tx *gorm.DB, parentId int, status string, now int
 }
 
 // reserveWalletQuotaWithHoldTx deducts quota and records the matching hold in
-// one transaction. The lock order is fixed (hold first, then the user row) so
-// concurrent reserves, settlements and refunds of one user cannot deadlock.
-// requireBalance=false mirrors the mid-flight reserve that admits wallet debt.
-func reserveWalletQuotaWithHoldTx(userId int, quota int64, requestId string, requireBalance bool) (bool, error) {
-	reserved := false
+// one transaction. The lock order is fixed (hold first, then the user row, then
+// the debt row) so concurrent reserves, settlements, refunds and debt
+// collections of one user cannot deadlock.
+//
+// requireBalance=true is the pre-consume reservation: it only deducts when the
+// whole amount fits above the account's credit line (-limit). requireBalance=false
+// mirrors the settlement top-up: the wallet is debited down to the credit line
+// and the remainder becomes tracked debt. The returned value is the amount that
+// actually left the wallet.
+func reserveWalletQuotaWithHoldTx(userId int, quota int64, requestId string, requireBalance bool) (int64, error) {
+	if quota <= 0 {
+		return 0, nil
+	}
+	limit := overdraftLimitForCharge(userId)
+	applied := int64(0)
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		hold, err := lockWalletHoldTx(tx, requestId)
 		if err != nil {
@@ -209,36 +219,49 @@ func reserveWalletQuotaWithHoldTx(userId int, quota int64, requestId string, req
 		if hold != nil && hold.Status != WalletHoldStatusActive {
 			return ErrWalletHoldClosed
 		}
-		balance, err := lockUserQuotaTx(tx, userId)
-		if err != nil {
-			return err
+		if requireBalance {
+			balance, err := lockUserQuotaTx(tx, userId)
+			if err != nil {
+				return err
+			}
+			if balance+limit < quota {
+				return nil
+			}
+			next, err := addWalletQuotaChecked(balance, -quota, "wallet hold reserve")
+			if err != nil {
+				return err
+			}
+			if err := writeLockedWalletQuotaTx(tx, userId, next); err != nil {
+				return err
+			}
+			applied = quota
+		} else {
+			applied, _, err = chargeWalletQuotaTx(tx, userId, quota, limit, requestId)
+			if err != nil {
+				return err
+			}
 		}
-		if requireBalance && balance < quota {
+		if applied <= 0 {
 			return nil
 		}
-		next, err := addWalletQuotaChecked(balance, -quota, "wallet hold reserve")
-		if err != nil {
-			return err
-		}
-		if err := writeLockedWalletQuotaTx(tx, userId, next); err != nil {
-			return err
-		}
-		if _, err := upsertWalletHoldTx(tx, hold, userId, requestId, quota, common.GetTimestamp()); err != nil {
-			return err
-		}
-		reserved = true
-		return nil
+		// The hold records exactly the money the wallet actually gave up, so a
+		// refund can never return more than was deducted.
+		_, err = upsertWalletHoldTx(tx, hold, userId, requestId, applied, common.GetTimestamp())
+		return err
 	})
 	if err != nil {
-		return false, err
+		return 0, err
 	}
-	return reserved, nil
+	return applied, nil
 }
 
 // SettleWalletHold closes the request's hold as settled and applies the
 // settlement difference to the wallet in one transaction. It returns the quota
-// actually charged (positive when the request cost more than reserved,
-// negative when part of the reservation is returned, zero for a replay).
+// that actually left the wallet (positive when the request cost more than
+// reserved, negative when part of the reservation is returned, zero for a
+// replay). A top-up beyond the account's credit line is not deducted from the
+// wallet: it is recorded as debt, so the returned value can be smaller than the
+// difference that was charged.
 //
 // A hold that was already refunded or expired (the process stopped before
 // settling and the sweep returned the reservation) is not re-opened: the full
@@ -248,12 +271,14 @@ func SettleWalletHold(userId int, requestId string, delta int64) (int64, error) 
 	if strings.TrimSpace(requestId) == "" {
 		return 0, errors.New("requestId is empty")
 	}
-	charged := int64(0)
+	limit := overdraftLimitForCharge(userId)
+	walletDelta := int64(0)
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		hold, err := lockWalletHoldTx(tx, requestId)
 		if err != nil {
 			return err
 		}
+		charged := int64(0)
 		if hold == nil {
 			// A request admitted before wallet holds existed settles the raw
 			// difference.
@@ -289,6 +314,14 @@ func SettleWalletHold(userId int, requestId string, delta int64) (int64, error) 
 		if charged == 0 {
 			return nil
 		}
+		if charged > 0 {
+			applied, _, err := chargeWalletQuotaTx(tx, userId, charged, limit, requestId)
+			if err != nil {
+				return err
+			}
+			walletDelta = applied
+			return nil
+		}
 		balance, err := lockUserQuotaTx(tx, userId)
 		if err != nil {
 			return err
@@ -297,15 +330,19 @@ func SettleWalletHold(userId int, requestId string, delta int64) (int64, error) 
 		if err != nil {
 			return err
 		}
-		return writeLockedWalletQuotaTx(tx, userId, next)
+		if err := writeLockedWalletQuotaTx(tx, userId, next); err != nil {
+			return err
+		}
+		walletDelta = charged
+		return nil
 	})
 	if err != nil {
 		return 0, err
 	}
-	if charged != 0 {
-		syncWalletQuotaCache(userId, -charged, "wallet hold settlement")
+	if walletDelta != 0 {
+		syncWalletQuotaCache(userId, -walletDelta, "wallet hold settlement")
 	}
-	return charged, nil
+	return walletDelta, nil
 }
 
 // RefundWalletHold closes an active hold as refunded and returns the whole held

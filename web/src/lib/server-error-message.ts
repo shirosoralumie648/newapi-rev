@@ -92,6 +92,10 @@ const serverErrorMessageKeys = {
   PLAYGROUND_TASK_NOT_FOUND: 'Task not found.',
   PLAYGROUND_TASK_NOT_CANCELABLE: 'Only a running task can be canceled.',
   PLAYGROUND_TASK_CANCEL_FAILED: 'Unable to cancel the task.',
+  PLAYGROUND_WALLET_DEBT_READ_ONLY:
+    'Your wallet has unsettled debt. Top up to restore access; reading and exporting data stays available.',
+  PLAYGROUND_WALLET_DEBT_UNAVAILABLE:
+    'Unable to check the account wallet debt.',
 } as const
 
 function isRecord(value: unknown): value is Record<string, unknown> {

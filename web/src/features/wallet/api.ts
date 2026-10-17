@@ -40,6 +40,7 @@ import type {
   WaffoPancakePaymentRequest,
   WaffoPancakePaymentResponse,
   WalletLedgerPage,
+  WalletDebtorPage,
 } from './types'
 
 // ============================================================================
@@ -295,4 +296,19 @@ export async function exportWalletLedgerCsv(userId?: number): Promise<Blob> {
     : '/api/user/self/wallet/ledger/export'
   const res = await api.get(path, { responseType: 'blob' })
   return res.data as Blob
+}
+
+/**
+ * List accounts with outstanding wallet debt (admin only).
+ */
+export async function getWalletDebtors(
+  page: number,
+  pageSize: number
+): Promise<ApiResponse<WalletDebtorPage>> {
+  const params = new URLSearchParams({
+    p: page.toString(),
+    page_size: pageSize.toString(),
+  })
+  const res = await api.get(`/api/user/wallet/debts?${params.toString()}`)
+  return res.data
 }

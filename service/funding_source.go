@@ -63,13 +63,17 @@ func (w *WalletFunding) Settle(delta int) error {
 			return nil
 		}
 		if delta > 0 {
-			if err := model.DecreaseUserQuota(w.userId, delta, false); err != nil {
+			// 无 requestId 的兼容路径同样受透支上限约束：超出信用额度的部分
+			// 记为欠款，只有真正扣走的额度计入消费账本。
+			applied, err := model.SettleWalletCharge(w.userId, delta)
+			if err != nil {
 				return err
 			}
-		} else {
-			if err := model.IncreaseUserQuota(w.userId, -delta, false); err != nil {
-				return err
-			}
+			model.RecordWalletConsumeDelta(w.userId, -int64(applied))
+			return nil
+		}
+		if err := model.IncreaseUserQuota(w.userId, -delta, false); err != nil {
+			return err
 		}
 		model.RecordWalletConsumeDelta(w.userId, -int64(delta))
 		return nil
