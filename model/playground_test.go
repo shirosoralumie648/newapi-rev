@@ -1697,7 +1697,7 @@ func TestPlaygroundTaskCancellation(t *testing.T) {
 
 	canceled, err := model.CancelPlaygroundTask(7, "pg-cancel-active")
 	require.NoError(t, err)
-	assert.Equal(t, model.TaskStatusFailure, canceled.Status)
+	assert.Equal(t, model.TaskStatus(model.TaskStatusFailure), canceled.Status)
 	assert.Equal(t, "100%", canceled.Progress)
 	assert.Equal(t, model.PlaygroundTaskCanceledReason, canceled.FailReason)
 	assert.NotZero(t, canceled.FinishTime)
@@ -1708,7 +1708,7 @@ func TestPlaygroundTaskCancellation(t *testing.T) {
 
 	var stored model.Task
 	require.NoError(t, db.Where("task_id = ?", "pg-cancel-active").First(&stored).Error)
-	assert.Equal(t, model.TaskStatusFailure, stored.Status)
+	assert.Equal(t, model.TaskStatus(model.TaskStatusFailure), stored.Status)
 	assert.Equal(t, model.PlaygroundTaskCanceledReason, stored.FailReason)
 
 	// The route contract maps owner scope to 404 and terminal rows to 409.
@@ -1726,7 +1726,10 @@ func TestPlaygroundTaskCancellation(t *testing.T) {
 	response = playgroundRequest(t, 7, http.MethodPost, "/api/playground/tasks/pg-cancel-zero/cancel", nil, controller.PlaygroundTaskCancel)
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	assert.Contains(t, response.Body.String(), `"success":true`)
+	// First() pins the destination's primary key into the query, so drop the
+	// previously loaded row before looking up the next task.
+	stored = model.Task{}
 	require.NoError(t, db.Where("task_id = ?", "pg-cancel-zero").First(&stored).Error)
-	assert.Equal(t, model.TaskStatusFailure, stored.Status)
+	assert.Equal(t, model.TaskStatus(model.TaskStatusFailure), stored.Status)
 	assert.Equal(t, model.PlaygroundTaskCanceledReason, stored.FailReason)
 }
