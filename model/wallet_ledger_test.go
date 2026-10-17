@@ -17,11 +17,12 @@ import (
 	"gorm.io/gorm/schema"
 )
 
-// walletLedgerTestDB opens a dedicated database for one dialect: in-memory
+// accountingTestDB opens a dedicated database for one dialect: in-memory
 // SQLite by default, or the external test database from TEST_MYSQL_DSN /
-// TEST_POSTGRES_DSN so the wallet ledger contract is verified on every
-// supported engine. Table names are prefixed so concurrent runs cannot clash.
-func walletLedgerTestDB(t *testing.T, dialect string) *gorm.DB {
+// TEST_POSTGRES_DSN so the wallet ledger and subscription settlement contracts
+// are verified on every supported engine. Table names are prefixed so
+// concurrent runs cannot clash.
+func accountingTestDB(t *testing.T, dialect string) *gorm.DB {
 	t.Helper()
 	var driver gorm.Dialector
 	switch dialect {
@@ -60,7 +61,7 @@ func walletLedgerTestDB(t *testing.T, dialect string) *gorm.DB {
 	DB = db
 	LOG_DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&WalletLedgerEntry{}, &User{}))
+		require.NoError(t, db.Migrator().DropTable(&WalletLedgerEntry{}, &SubscriptionPreConsumeRecord{}, &UserSubscription{}, &SubscriptionPlan{}, &User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
@@ -72,24 +73,24 @@ func walletLedgerTestDB(t *testing.T, dialect string) *gorm.DB {
 	})
 
 	// A fresh migration and a repeated migration both succeed, so the new
-	// table is created idempotently on every engine.
-	require.NoError(t, db.AutoMigrate(&User{}, &WalletLedgerEntry{}))
-	require.NoError(t, db.AutoMigrate(&User{}, &WalletLedgerEntry{}))
+	// tables are created idempotently on every engine.
+	require.NoError(t, db.AutoMigrate(&User{}, &WalletLedgerEntry{}, &SubscriptionPlan{}, &UserSubscription{}, &SubscriptionPreConsumeRecord{}))
+	require.NoError(t, db.AutoMigrate(&User{}, &WalletLedgerEntry{}, &SubscriptionPlan{}, &UserSubscription{}, &SubscriptionPreConsumeRecord{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
 		versionQuery = "SELECT sqlite_version()"
 	}
 	require.NoError(t, db.Raw(versionQuery).Scan(&version).Error)
-	t.Logf("wallet ledger database: %s %s", dialect, version)
+	t.Logf("accounting database: %s %s", dialect, version)
 	return db
 }
 
-func forEachWalletLedgerDialect(t *testing.T, run func(t *testing.T, db *gorm.DB)) {
+func forEachAccountingDialect(t *testing.T, run func(t *testing.T, db *gorm.DB)) {
 	t.Helper()
 	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
 		t.Run(dialect, func(t *testing.T) {
-			run(t, walletLedgerTestDB(t, dialect))
+			run(t, accountingTestDB(t, dialect))
 		})
 	}
 }
@@ -97,7 +98,7 @@ func forEachWalletLedgerDialect(t *testing.T, run func(t *testing.T, db *gorm.DB
 // The ledger row and the balance update must commit or roll back together, and
 // replaying the same reference must never move the balance twice.
 func TestWalletLedgerApplyDeltaIsAtomicAndReplaySafe(t *testing.T) {
-	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
+	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
 		require.NoError(t, db.Create(&User{Id: 41, Username: "ledger-atomic", Quota: 1000, Status: common.UserStatusEnabled}).Error)
 
 		require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
@@ -143,7 +144,7 @@ func TestWalletLedgerApplyDeltaIsAtomicAndReplaySafe(t *testing.T) {
 // Consumption must converge on exactly one consume_hourly row per user and
 // hour in both the batch-update and the direct-write mode.
 func TestWalletLedgerAggregatesConsumptionPerUserHour(t *testing.T) {
-	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
+	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
 		require.NoError(t, db.Create(&User{Id: 42, Username: "ledger-consume", Quota: 1000, Status: common.UserStatusEnabled}).Error)
 
 		RecordWalletConsumeDelta(42, -100)
@@ -172,7 +173,7 @@ func TestWalletLedgerAggregatesConsumptionPerUserHour(t *testing.T) {
 // The first launch writes one opening_balance baseline per user and repeating
 // the seed neither duplicates rows nor touches balances.
 func TestWalletLedgerOpeningBalanceSeedsOncePerUser(t *testing.T) {
-	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
+	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
 		require.NoError(t, db.Create(&User{Id: 51, Username: "ledger-opening-a", Quota: 700, Status: common.UserStatusEnabled}).Error)
 		require.NoError(t, db.Create(&User{Id: 52, Username: "ledger-opening-b", Quota: 0, Status: common.UserStatusEnabled}).Error)
 
@@ -203,7 +204,7 @@ func TestWalletLedgerOpeningBalanceSeedsOncePerUser(t *testing.T) {
 // A wallet that no longer matches its ledger sum is reported as a deviation,
 // and reconciliation never repairs the balance by itself.
 func TestWalletReconcileReportsDeviationWithoutChangingBalance(t *testing.T) {
-	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
+	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
 		require.NoError(t, db.Create(&User{Id: 61, Username: "ledger-ok", Quota: 0, Status: common.UserStatusEnabled}).Error)
 		applied, err := ApplyWalletLedgerDeltaDB(61, WalletLedgerKindTopUp, 1000, WalletLedgerRefTopUp, "reconcile-ok", "")
 		require.NoError(t, err)

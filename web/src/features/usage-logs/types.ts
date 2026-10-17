@@ -276,6 +276,9 @@ export interface LogOtherData {
   subscription_consumed?: number
   subscription_remain?: number
   subscription_total?: number
+  // Wallet quota charged for the settlement overflow beyond the subscription
+  // total (WL-03); zero unless the plan allows wallet overflow.
+  wallet_quota_deducted?: number
 }
 
 /**
