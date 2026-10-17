@@ -199,13 +199,13 @@ func TestS3TaskArtifactStorePersistResolveAndServe(t *testing.T) {
 	assert.Equal(t, system_setting.ObjectStoreBackendS3, ref.Backend)
 	assert.Equal(t, "artifact-bucket", ref.Bucket)
 	assert.Equal(t, "video", ref.ArtifactKey)
-	assert.Equal(t, "tasks/v1/tasks/7/2026/10/task-1/video", ref.ObjectKey)
+	assert.Equal(t, "tasks/7/2026/10/task-1/video", ref.ObjectKey)
 	assert.Equal(t, "video/mp4", ref.MimeType)
 	assert.Equal(t, int64(len("video-bytes")), ref.Size)
-	body, ok := server.object(ref.ObjectKey)
+	body, ok := server.object("tasks/v1/" + ref.ObjectKey)
 	require.True(t, ok)
 	assert.Equal(t, []byte("video-bytes"), body)
-	assert.Equal(t, "video/mp4", server.contentType(ref.ObjectKey))
+	assert.Equal(t, "video/mp4", server.contentType("tasks/v1/"+ref.ObjectKey))
 
 	resolved, err := store.Resolve(t.Context(), task, artifact)
 	require.NoError(t, err)
@@ -237,7 +237,7 @@ func TestS3TaskArtifactStorePersistResolveAndServe(t *testing.T) {
 	foreign := &StoredArtifactRef{
 		Backend:     system_setting.ObjectStoreBackendS3,
 		ArtifactKey: "video",
-		ObjectKey:   "tasks/v1/tasks/9/2026/10/task-9/video",
+		ObjectKey:   "tasks/9/2026/10/task-9/video",
 	}
 	foreignRecorder := httptest.NewRecorder()
 	foreignContext, _ := gin.CreateTestContext(foreignRecorder)
