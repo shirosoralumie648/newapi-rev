@@ -44,6 +44,7 @@ export const STATIC_I18N_KEYS = [
   'Only a running task can be canceled.',
   'Unable to cancel the task.',
   'Playground task result storage limit reached. Wait for old task results to expire.',
+  'Unable to update result retention.',
   // Playground wallet debt lock (WL-06): a debtor account may read and export,
   // not start new generation or uploads.
   'Your wallet has unsettled debt. Top up to restore access; reading and exporting data stays available.',

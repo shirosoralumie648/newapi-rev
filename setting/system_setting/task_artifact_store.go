@@ -23,6 +23,11 @@ const (
 	DefaultObjectStoreLocalDir                = "data/objectstore"
 	DefaultTaskArtifactStorePresignTTLSeconds = 900
 	MaxTaskArtifactStorePresignTTLSeconds     = 7 * 24 * 60 * 60
+
+	// DefaultTaskArtifactRetentionDays is how long persisted generation results
+	// survive before the scheduled cleanup deletes their stored bytes.
+	DefaultTaskArtifactRetentionDays = 30
+	MaxTaskArtifactRetentionDays     = 365
 )
 
 const (
@@ -35,6 +40,11 @@ const (
 	TaskArtifactStoreS3PrefixEnv     = "TASK_ARTIFACT_STORE_S3_PREFIX"
 	TaskArtifactStoreS3PresignTTLEnv = "TASK_ARTIFACT_STORE_S3_PRESIGN_TTL"
 	TaskArtifactStoreS3PathStyleEnv  = "TASK_ARTIFACT_STORE_S3_PATH_STYLE"
+
+	// TaskArtifactRetentionDaysEnv configures the generated-result retention
+	// window in days. Results pinned by the asset library or a canvas never
+	// expire.
+	TaskArtifactRetentionDaysEnv = "TASK_ARTIFACT_RETENTION_DAYS"
 )
 
 const (
@@ -74,11 +84,14 @@ type S3Settings struct {
 // TaskArtifactStoreConfig configures where generated task artifacts are
 // persisted. Upstream mode keeps the current behavior of proxying the
 // provider URL; S3 mode stores and serves bytes through the configured bucket.
+// RetentionDays bounds how long a stored result survives; pinned results are
+// exempt.
 type TaskArtifactStoreConfig struct {
 	Mode                string
 	S3                  S3Settings
 	S3Prefix            string
 	S3PresignTTLSeconds int
+	RetentionDays       int
 }
 
 // ObjectStoreConfig is the unified object storage contract shared by
@@ -157,6 +170,7 @@ func LoadTaskArtifactStoreConfig() TaskArtifactStoreConfig {
 		S3:                  loadS3Settings(taskArtifactStoreS3Env),
 		S3Prefix:            common.GetEnvOrDefaultString(TaskArtifactStoreS3PrefixEnv, ""),
 		S3PresignTTLSeconds: common.GetEnvOrDefault(TaskArtifactStoreS3PresignTTLEnv, DefaultTaskArtifactStorePresignTTLSeconds),
+		RetentionDays:       LoadTaskArtifactRetentionDays(),
 	}
 	if err := ValidateTaskArtifactStoreConfig(config); err != nil {
 		common.SysError(common.LogText("invalid task artifact store configuration: %s; using upstream mode", err.Error()))
@@ -164,6 +178,19 @@ func LoadTaskArtifactStoreConfig() TaskArtifactStoreConfig {
 		return config
 	}
 	return config
+}
+
+// LoadTaskArtifactRetentionDays reads the generated-result retention window.
+// A value outside 1..MaxTaskArtifactRetentionDays is clamped back to the
+// default, so a typo can never turn the lifecycle policy into "delete now" or
+// "keep forever" while the deployment still starts.
+func LoadTaskArtifactRetentionDays() int {
+	days := common.GetEnvOrDefault(TaskArtifactRetentionDaysEnv, DefaultTaskArtifactRetentionDays)
+	if days < 1 || days > MaxTaskArtifactRetentionDays {
+		common.SysError(common.LogText("task artifact retention days %d is out of range 1..%d; using the default %d", days, MaxTaskArtifactRetentionDays, DefaultTaskArtifactRetentionDays))
+		return DefaultTaskArtifactRetentionDays
+	}
+	return days
 }
 
 // LoadObjectStoreConfig reads and validates startup-only configuration. The

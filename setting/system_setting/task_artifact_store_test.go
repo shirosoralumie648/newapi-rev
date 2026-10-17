@@ -1,6 +1,7 @@
 package system_setting
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -312,4 +313,35 @@ func TestLoadObjectStoreConfigInheritsTaskArtifactS3Settings(t *testing.T) {
 	require.NoError(t, ValidateObjectStoreConfig(config))
 	assert.Equal(t, "playground-objects", config.S3.Bucket)
 	assert.Equal(t, "access-key-2", config.S3.AccessKey)
+}
+
+// The generated-result retention window is configurable within a bounded
+// range; an unset, malformed, or out-of-range value falls back to the default
+// so a typo can never turn the lifecycle policy into "delete now".
+func TestLoadTaskArtifactRetentionDays(t *testing.T) {
+	assert.Equal(t, DefaultTaskArtifactRetentionDays, LoadTaskArtifactRetentionDays())
+
+	t.Setenv(TaskArtifactRetentionDaysEnv, "7")
+	assert.Equal(t, 7, LoadTaskArtifactRetentionDays())
+
+	t.Setenv(TaskArtifactRetentionDaysEnv, "0")
+	assert.Equal(t, DefaultTaskArtifactRetentionDays, LoadTaskArtifactRetentionDays())
+
+	t.Setenv(TaskArtifactRetentionDaysEnv, "-1")
+	assert.Equal(t, DefaultTaskArtifactRetentionDays, LoadTaskArtifactRetentionDays())
+
+	t.Setenv(TaskArtifactRetentionDaysEnv, "abc")
+	assert.Equal(t, DefaultTaskArtifactRetentionDays, LoadTaskArtifactRetentionDays())
+
+	t.Setenv(TaskArtifactRetentionDaysEnv, strconv.Itoa(MaxTaskArtifactRetentionDays+1))
+	assert.Equal(t, DefaultTaskArtifactRetentionDays, LoadTaskArtifactRetentionDays())
+
+	// The loader exposes the same value on the store configuration.
+	t.Setenv(TaskArtifactRetentionDaysEnv, "90")
+	config := TaskArtifactStoreConfig{
+		Mode:                TaskArtifactStoreModeUpstream,
+		S3PresignTTLSeconds: DefaultTaskArtifactStorePresignTTLSeconds,
+		RetentionDays:       LoadTaskArtifactRetentionDays(),
+	}
+	assert.Equal(t, 90, config.RetentionDays)
 }

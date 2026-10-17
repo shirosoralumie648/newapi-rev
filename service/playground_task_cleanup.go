@@ -9,16 +9,20 @@ import (
 )
 
 const (
-	// playgroundTaskResultTTL is how long a finished Playground task keeps its
-	// durable row and retained result snapshot after reaching a terminal state.
-	playgroundTaskResultTTL    = 7 * 24 * time.Hour
+	// playgroundTaskCleanupEvery and playgroundTaskCleanupBatch bound the
+	// scheduled cleanup of finished workspace tasks and their stored results.
 	playgroundTaskCleanupEvery = 6 * time.Hour
 	playgroundTaskCleanupBatch = 200
+	// playgroundTaskArtifactCleanupBatch bounds how many expired stored
+	// results one run collects.
+	playgroundTaskArtifactCleanupBatch = 200
 )
 
 // playgroundTaskCleanupHandler deletes terminal Playground-origin tasks whose
-// results have outlived the retention window, freeing the account result
-// storage budget. Direct-API tasks are never touched.
+// results have outlived the configured retention window, freeing the account
+// result storage budget. The stored artifact bytes are collected first, and
+// tasks (or artifacts) still pinned by the asset library or a canvas are
+// never touched. Direct-API tasks are never touched.
 type playgroundTaskCleanupHandler struct{}
 
 func (playgroundTaskCleanupHandler) Type() string {
@@ -34,7 +38,9 @@ func (playgroundTaskCleanupHandler) Interval() time.Duration {
 func (playgroundTaskCleanupHandler) NewPayload() any { return nil }
 
 func (playgroundTaskCleanupHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
-	cutoff := common.GetTimestamp() - int64(playgroundTaskResultTTL.Seconds())
+	_, _ = DeleteExpiredTaskArtifactObjects(ctx, playgroundTaskArtifactCleanupBatch)
+
+	cutoff := common.GetTimestamp() - int64(TaskArtifactRetention().Seconds())
 	deleted, err := model.DeleteExpiredPlaygroundTasks(cutoff, playgroundTaskCleanupBatch)
 	if err != nil {
 		failSystemTask(task, runnerID, err)

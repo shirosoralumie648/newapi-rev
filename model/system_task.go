@@ -28,6 +28,10 @@ const (
 	SystemTaskTypePlaygroundAttachmentMigrate = "playground_attachment_migrate"
 	// SystemTaskTypePlaygroundTaskCleanup deletes expired terminal Playground task rows.
 	SystemTaskTypePlaygroundTaskCleanup = "playground_task_cleanup"
+	// SystemTaskTypePlaygroundTaskArtifactStore pulls the provider results of
+	// finished Playground tasks into the object store, enforcing the account
+	// result budget and marking unpinnable results as expired.
+	SystemTaskTypePlaygroundTaskArtifactStore = "playground_task_artifact_store"
 	// SystemTaskTypeWalletReconcile compares every wallet balance with the sum
 	// of its append-only ledger and alerts on deviation without changing balances.
 	SystemTaskTypeWalletReconcile = "wallet_reconcile"

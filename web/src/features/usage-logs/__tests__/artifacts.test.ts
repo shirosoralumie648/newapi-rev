@@ -158,6 +158,59 @@ describe('task artifact projection', () => {
     )
   })
 
+  test('reads the persistence metadata of a stored result', () => {
+    const projection = parseTaskArtifactsResponse({
+      success: true,
+      data: {
+        artifacts: [
+          {
+            key: 'video-main',
+            type: 'video',
+            content_url: artifactContentUrl('video-main'),
+            stored: true,
+            pinned: true,
+            expires_at: 1_800_000_000,
+          },
+          {
+            key: 'lost-audio',
+            type: 'audio',
+            content_url: artifactContentUrl('lost-audio'),
+            expired: true,
+            // Malformed metadata is treated as absent instead of failing the
+            // whole projection.
+            stored: 'yes',
+            expires_at: -5,
+          },
+          {
+            key: 'plain-file',
+            type: 'file',
+            content_url: artifactContentUrl('plain-file'),
+          },
+        ],
+      },
+    })
+
+    assert.deepEqual(projection.artifacts[0], {
+      key: 'video-main',
+      type: 'video',
+      content_url: artifactContentUrl('video-main'),
+      stored: true,
+      pinned: true,
+      expires_at: 1_800_000_000,
+    })
+    assert.deepEqual(projection.artifacts[1], {
+      key: 'lost-audio',
+      type: 'audio',
+      content_url: artifactContentUrl('lost-audio'),
+      expired: true,
+    })
+    assert.deepEqual(projection.artifacts[2], {
+      key: 'plain-file',
+      type: 'file',
+      content_url: artifactContentUrl('plain-file'),
+    })
+  })
+
   test('rejects failed, malformed, or duplicate artifact results', () => {
     assert.throws(
       () =>

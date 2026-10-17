@@ -257,10 +257,20 @@ func FindPlaygroundCanvasProjectByClientID(userID int, clientID string) (*Playgr
 	return &project, nil
 }
 
-// CreatePlaygroundCanvasProject stores a new canvas. attachmentIDs are the
-// attachments its nodes reference; they are pinned in the same transaction so
-// deleting the uploading message cannot orphan a canvas image.
-func CreatePlaygroundCanvasProject(userID int, project *PlaygroundCanvasProject, attachmentIDs []string) (*PlaygroundCanvasProject, bool, error) {
+// PlaygroundCanvasPins is the set of durable resources one canvas document
+// references. They are pinned in the same transaction as the document, so a
+// referenced attachment or generated result outlives the retention countdown
+// while the board still uses it.
+type PlaygroundCanvasPins struct {
+	AttachmentIDs []string
+	TaskArtifacts []PlaygroundCanvasTaskArtifactRef
+}
+
+// CreatePlaygroundCanvasProject stores a new canvas. pins names the
+// attachments and generated results its nodes reference; they are pinned in
+// the same transaction so deleting the uploading message cannot orphan a
+// canvas image and a stored result is not collected while the board shows it.
+func CreatePlaygroundCanvasProject(userID int, project *PlaygroundCanvasProject, pins PlaygroundCanvasPins) (*PlaygroundCanvasProject, bool, error) {
 	if userID <= 0 || project == nil {
 		return nil, false, ErrPlaygroundCanvasInvalid
 	}
@@ -311,7 +321,10 @@ func CreatePlaygroundCanvasProject(userID int, project *PlaygroundCanvasProject,
 		if err := tx.Create(project).Error; err != nil {
 			return err
 		}
-		if err := syncPlaygroundCanvasAssets(tx, userID, project.ID, attachmentIDs); err != nil {
+		if err := syncPlaygroundCanvasAssets(tx, userID, project.ID, pins.AttachmentIDs); err != nil {
+			return err
+		}
+		if err := syncPlaygroundCanvasTaskArtifactPins(tx, userID, project.ID, pins.TaskArtifacts); err != nil {
 			return err
 		}
 		created = true
@@ -379,9 +392,9 @@ type UpdatePlaygroundCanvasInput struct {
 	// Counters describe the replacement document and are always required with it.
 	NodeCount int
 	EdgeCount int
-	// AttachmentIDs are the attachments the replacement document references.
-	// They replace the canvas pins only when a document is written.
-	AttachmentIDs []string
+	// Pins are the resources the replacement document references. They replace
+	// the canvas pins only when a document is written.
+	Pins PlaygroundCanvasPins
 }
 
 func UpdatePlaygroundCanvasProject(userID int, id string, revision int64, input UpdatePlaygroundCanvasInput) (*PlaygroundCanvasProject, error) {
@@ -433,7 +446,10 @@ func UpdatePlaygroundCanvasProject(userID int, id string, revision int64, input 
 			return ErrPlaygroundConflict
 		}
 		if input.Document != nil {
-			if err := syncPlaygroundCanvasAssets(tx, userID, id, input.AttachmentIDs); err != nil {
+			if err := syncPlaygroundCanvasAssets(tx, userID, id, input.Pins.AttachmentIDs); err != nil {
+				return err
+			}
+			if err := syncPlaygroundCanvasTaskArtifactPins(tx, userID, id, input.Pins.TaskArtifacts); err != nil {
 				return err
 			}
 		}
@@ -458,6 +474,12 @@ func DeletePlaygroundCanvasProject(userID int, id string) error {
 		// Deleting the canvas releases every attachment pin it held, so the
 		// orphan cleanup can collect images this board was the last user of.
 		if err := tx.Where("canvas_id = ? AND user_id = ?", id, userID).Delete(&PlaygroundCanvasAsset{}).Error; err != nil {
+			return err
+		}
+		// The canvas also releases the generated results it kept alive, so the
+		// result retention window resumes for them.
+		if err := tx.Where("source = ? AND source_id = ? AND user_id = ?", PlaygroundTaskArtifactPinSourceCanvas, id, userID).
+			Delete(&PlaygroundTaskArtifactPin{}).Error; err != nil {
 			return err
 		}
 		return tx.Where("id = ? AND user_id = ?", id, userID).Delete(&PlaygroundCanvasProject{}).Error

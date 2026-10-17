@@ -184,6 +184,25 @@ test('a successful task result is sent to the canvas as a task reference', async
   )
 })
 
+test('a stored result is kept for its owner through the pin endpoint', async () => {
+  mockTaskEndpoints([taskFixture], [{ ...artifactFixture, stored: true }])
+  const put = vi.spyOn(api, 'put').mockResolvedValue({
+    data: { success: true, data: { pinned: true } },
+  })
+  const user = userEvent.setup()
+  renderPanel()
+
+  await screen.findByText('Success')
+  await user.click(screen.getByRole('button', { name: /Artifacts/ }))
+  await user.click(await screen.findByRole('button', { name: 'Keep results' }))
+
+  expect(put).toHaveBeenCalledWith(
+    '/api/playground/tasks/t1/artifacts/output-1/pin',
+    { pinned: true },
+    expect.anything()
+  )
+})
+
 test('a running task is canceled through the confirm dialog', async () => {
   mockTaskEndpoints([
     { ...taskFixture, id: 12, task_id: 't2', status: 'IN_PROGRESS' },

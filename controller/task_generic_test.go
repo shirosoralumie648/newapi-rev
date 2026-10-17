@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/service/objectstore"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -30,7 +33,8 @@ func setupGenericTaskTest(t *testing.T) *model.Task {
 	common.RedisEnabled = false
 	// The dialect harness lets the same fixture run against MySQL and
 	// PostgreSQL when TEST_TASK_DB_DIALECT selects them; SQLite stays the default.
-	database, _ := openTaskDialectDatabase(t, &model.Task{}, &model.Channel{}, &model.User{})
+	database, _ := openTaskDialectDatabase(t, &model.Task{}, &model.Channel{}, &model.User{},
+		&model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{})
 	model.DB = database
 	t.Cleanup(func() {
 		model.DB = originalDB
@@ -733,4 +737,145 @@ func TestSelfTaskMediaURLGuard(t *testing.T) {
 	assert.False(t, isSelfTaskMediaURL(c, remoteURL))
 	assert.True(t, isTaskMediaFallbackLoop(remoteURL.String(), "task-1"))
 	assert.False(t, isTaskMediaFallbackLoop(remoteURL.String(), "task-2"))
+}
+
+// installControllerArtifactObjectStore points the process-wide object store at
+// a temporary directory, so the artifact read path exercises the real stored
+// bytes instead of the provider proxy.
+func installControllerArtifactObjectStore(t *testing.T) objectstore.Store {
+	t.Helper()
+	store, err := objectstore.NewLocal(system_setting.ObjectStoreConfig{
+		Backend:           system_setting.ObjectStoreBackendLocal,
+		LocalDir:          t.TempDir(),
+		PresignTTLSeconds: system_setting.DefaultTaskArtifactStorePresignTTLSeconds,
+	})
+	require.NoError(t, err)
+	previousStore := objectstore.DefaultStore()
+	previousTTL := objectstore.DefaultPresignTTL()
+	objectstore.SetDefaultStore(store, time.Minute)
+	t.Cleanup(func() {
+		objectstore.SetDefaultStore(previousStore, previousTTL)
+		_ = store.Close()
+	})
+	return store
+}
+
+// The artifact listing reports the persistence state of every key: a stored
+// result carries its retention window, an unkept result is marked expired, and
+// a pinned result is visible to the owner.
+func TestTaskArtifactResponsesReportPersistenceState(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	previousSecret := common.CryptoSecret
+	previousPublicAddress := system_setting.TaskPublicAddress
+	common.CryptoSecret = "controller-task-artifact-persistence-secret"
+	system_setting.TaskPublicAddress = "https://gateway.example"
+	t.Cleanup(func() {
+		common.CryptoSecret = previousSecret
+		system_setting.TaskPublicAddress = previousPublicAddress
+	})
+	expiresAt := common.GetTimestamp() + 3600
+	records, err := model.EnsurePlaygroundTaskArtifacts(task.UserId, task.TaskID, []model.PlaygroundTaskArtifactSeed{
+		{Key: "video", Type: "video", MimeType: "video/mp4"},
+		{Key: "audio", Type: "audio", MimeType: "audio/mpeg"},
+		{Key: "cover", Type: "image", MimeType: "image/png"},
+	})
+	require.NoError(t, err)
+	recordsByKey := make(map[string]model.PlaygroundTaskArtifact, len(records))
+	for index := range records {
+		recordsByKey[records[index].ArtifactKey] = records[index]
+	}
+	require.NoError(t, model.MarkPlaygroundTaskArtifactStored(recordsByKey["video"].ID, "local", "pg/7/task/x/video", "video/mp4", 2048, "hash", expiresAt))
+	require.NoError(t, model.MarkPlaygroundTaskArtifactExpired(recordsByKey["audio"].ID, "https://upstream.invalid/audio.mp3?signature=secret", "storage limit"))
+	require.NoError(t, model.SetPlaygroundTaskArtifactPin(task.UserId, task.TaskID, "video", true))
+
+	artifacts := []relaychannel.TaskArtifact{
+		{Key: "video", Type: "video", MimeType: "video/mp4"},
+		{Key: "audio", Type: "audio", MimeType: "audio/mpeg"},
+		{Key: "cover", Type: "image", MimeType: "image/png"},
+	}
+	responses, err := buildTaskArtifactResponses(task, artifacts)
+	require.NoError(t, err)
+	require.Len(t, responses, 3)
+
+	assert.True(t, responses[0].Stored, "a persisted result reports its object store copy")
+	assert.False(t, responses[0].Expired)
+	assert.True(t, responses[0].Pinned)
+	assert.Equal(t, expiresAt, responses[0].ExpiresAt)
+	assert.NotEmpty(t, responses[0].ContentURL)
+
+	assert.False(t, responses[1].Stored)
+	assert.True(t, responses[1].Expired, "a result that could not be kept is marked expired instead of hidden")
+	assert.False(t, responses[1].Pinned)
+
+	assert.False(t, responses[2].Stored)
+	assert.False(t, responses[2].Expired)
+	encoded, err := common.Marshal(responses)
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), "signature=secret", "provider references never reach the response")
+	assert.NotContains(t, string(encoded), "upstream.invalid")
+}
+
+// The content endpoints serve a persisted result from the object store before
+// building any provider request, so a result stays readable after its provider
+// link dies.
+func TestTaskArtifactContentServesStoredResultWithoutProvider(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	store := installControllerArtifactObjectStore(t)
+	payload := []byte("stored-video-bytes")
+	var providerRequests int32
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&providerRequests, 1)
+		w.Header().Set("Content-Type", "video/mp4")
+		_, _ = w.Write([]byte("provider-video-bytes"))
+	}))
+	defer provider.Close()
+
+	task.Platform = "kling"
+	task.Action = constant.TaskActionTextToVideo
+	task.PrivateData = model.TaskPrivateData{ResultURL: provider.URL + "/result.mp4", PlaygroundOrigin: true}
+	require.NoError(t, model.DB.Save(task).Error)
+
+	records, err := model.EnsurePlaygroundTaskArtifacts(task.UserId, task.TaskID, []model.PlaygroundTaskArtifactSeed{{Key: "video", Type: "video", MimeType: "video/mp4"}})
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	objectKey := "pg/7/task/2026/10/" + task.TaskID + "/video"
+	_, err = store.Put(context.Background(), objectKey, bytes.NewReader(payload))
+	require.NoError(t, err)
+	require.NoError(t, model.MarkPlaygroundTaskArtifactStored(records[0].ID, store.Backend(), objectKey, "video/mp4", int64(len(payload)), "hash", common.GetTimestamp()+3600))
+
+	contentRecorder := httptest.NewRecorder()
+	contentContext, _ := gin.CreateTestContext(contentRecorder)
+	contentContext.Set("id", task.UserId)
+	contentContext.Params = gin.Params{{Key: "key", Value: task.TaskID}, {Key: "artifact_key", Value: "video"}}
+	contentContext.Request = httptest.NewRequest(http.MethodGet, "/v1/tasks/"+task.TaskID+"/artifacts/video/content", nil)
+	TaskArtifactContent(contentContext)
+	assert.Equal(t, http.StatusOK, contentRecorder.Code)
+	assert.Equal(t, payload, contentRecorder.Body.Bytes())
+	assert.Equal(t, "video/mp4", contentRecorder.Header().Get("Content-Type"))
+	assert.Equal(t, "nosniff", contentRecorder.Header().Get("X-Content-Type-Options"))
+
+	videoRecorder := httptest.NewRecorder()
+	videoContext, _ := gin.CreateTestContext(videoRecorder)
+	videoContext.Set("id", task.UserId)
+	videoContext.Params = gin.Params{{Key: "task_id", Value: task.TaskID}}
+	videoContext.Request = httptest.NewRequest(http.MethodGet, "/v1/videos/"+task.TaskID+"/content", nil)
+	VideoProxy(videoContext)
+	assert.Equal(t, http.StatusOK, videoRecorder.Code)
+	assert.Equal(t, payload, videoRecorder.Body.Bytes())
+
+	assert.Zero(t, atomic.LoadInt32(&providerRequests), "a stored result never asks the provider again")
+
+	// Removing the stored object falls back to the provider proxy.
+	_, err = store.Delete(context.Background(), objectKey)
+	require.NoError(t, err)
+	fallbackRecorder := httptest.NewRecorder()
+	fallbackContext, _ := gin.CreateTestContext(fallbackRecorder)
+	fallbackContext.Set("id", task.UserId)
+	fallbackContext.Params = gin.Params{{Key: "key", Value: task.TaskID}, {Key: "artifact_key", Value: "video"}}
+	fallbackContext.Request = httptest.NewRequest(http.MethodGet, "/v1/tasks/"+task.TaskID+"/artifacts/video/content", nil)
+	allowPrivateTaskMediaTest(t)
+	TaskArtifactContent(fallbackContext)
+	assert.Equal(t, http.StatusOK, fallbackRecorder.Code)
+	assert.Equal(t, []byte("provider-video-bytes"), fallbackRecorder.Body.Bytes())
+	assert.EqualValues(t, 1, atomic.LoadInt32(&providerRequests))
 }

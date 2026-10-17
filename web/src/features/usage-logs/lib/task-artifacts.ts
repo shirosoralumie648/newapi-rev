@@ -135,6 +135,18 @@ function parseTaskArtifact(value: unknown): TaskArtifact {
     }
     artifact.mime_type = mimeType
   }
+  // Persistence metadata is optional so old servers keep working; a malformed
+  // value is treated as absent instead of failing the whole projection.
+  if (value.stored === true) artifact.stored = true
+  if (value.expired === true) artifact.expired = true
+  if (value.pinned === true) artifact.pinned = true
+  if (
+    typeof value.expires_at === 'number' &&
+    Number.isInteger(value.expires_at) &&
+    value.expires_at > 0
+  ) {
+    artifact.expires_at = value.expires_at
+  }
   return artifact
 }
 
