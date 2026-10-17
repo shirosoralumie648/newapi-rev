@@ -87,10 +87,9 @@ export function LogCostDisplay(props: LogCostDisplayProps) {
   // it (WL-03). The billed amount is the subscription part plus that overflow;
   // when the subscription part is absent the log quota is already the total.
   let quota = props.quota
-  if (isSubscription && props.other?.subscription_consumed != null) {
-    quota =
-      props.other.subscription_consumed +
-      (props.other.wallet_quota_deducted ?? 0)
+  const subscriptionConsumed = props.other?.subscription_consumed
+  if (isSubscription && subscriptionConsumed != null) {
+    quota = subscriptionConsumed + (props.other?.wallet_quota_deducted ?? 0)
   }
   let source: string | undefined
 
