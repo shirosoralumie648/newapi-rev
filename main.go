@@ -31,6 +31,7 @@ import (
 	"github.com/QuantumNous/new-api/router"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
+	"github.com/QuantumNous/new-api/service/objectstore"
 	_ "github.com/QuantumNous/new-api/setting/performance_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
@@ -357,6 +358,14 @@ func InitResources() error {
 	ratio_setting.InitRatioSettings()
 
 	service.InitHttpClient()
+
+	// Attachment bytes and later object-backed resources live outside the
+	// database; a misconfigured backend must fail startup instead of silently
+	// dropping uploads.
+	if err = objectstore.InitDefaultStore(); err != nil {
+		common.FatalLog(common.LogText("failed to initialize the object store: %s", err.Error()))
+		return err
+	}
 
 	// Initialize SQL Database
 	err = model.InitDB()

@@ -23,6 +23,9 @@ const (
 	SystemTaskTypeAsyncTaskPoll  = "async_task_poll"
 	// SystemTaskTypePlaygroundAttachmentCleanup deletes long-orphaned Playground attachments.
 	SystemTaskTypePlaygroundAttachmentCleanup = "playground_attachment_cleanup"
+	// SystemTaskTypePlaygroundAttachmentMigrate moves attachment bytes that
+	// still live in the database into the configured object store.
+	SystemTaskTypePlaygroundAttachmentMigrate = "playground_attachment_migrate"
 	// SystemTaskTypePlaygroundTaskCleanup deletes expired terminal Playground task rows.
 	SystemTaskTypePlaygroundTaskCleanup = "playground_task_cleanup"
 	// SystemTaskTypeWalletReconcile compares every wallet balance with the sum

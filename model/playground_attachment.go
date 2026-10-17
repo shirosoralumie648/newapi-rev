@@ -20,16 +20,34 @@ package model
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"io"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/service/objectstore"
 	"github.com/QuantumNous/new-api/setting/playground_setting"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"gorm.io/gorm"
+)
+
+const (
+	// playgroundAttachmentStorageDatabase marks rows whose canonical base64
+	// payload is still inline in the data column instead of the object store.
+	playgroundAttachmentStorageDatabase = system_setting.ObjectStoreBackendDB
+	// playgroundAttachmentObjectTimeout bounds one object store operation so a
+	// hung backend cannot hold a request or a system task forever.
+	playgroundAttachmentObjectTimeout = 30 * time.Second
+	// playgroundAttachmentMigrateSelectBatch is how many rows one migration
+	// statement reads.
+	playgroundAttachmentMigrateSelectBatch = 50
 )
 
 var (
@@ -38,7 +56,10 @@ var (
 	ErrPlaygroundAttachmentConflict = errors.New("Playground attachment request ID was already used for different content.")
 	ErrPlaygroundAttachmentLimit    = errors.New("Playground attachment storage limit exceeded.")
 	ErrPlaygroundAttachmentInUse    = errors.New("Playground attachment is still referenced by a conversation message.")
-	playgroundAttachmentMediaTypes  = map[string]bool{
+	// ErrPlaygroundAttachmentStorage reports that no process-wide object store
+	// is configured, so new bytes cannot be persisted.
+	ErrPlaygroundAttachmentStorage = errors.New("Playground attachment storage is unavailable.")
+	playgroundAttachmentMediaTypes = map[string]bool{
 		"image/png":  true,
 		"image/jpeg": true,
 		"image/webp": true,
@@ -52,10 +73,11 @@ var (
 	}
 )
 
-// PlaygroundAttachment stores the bytes of one conversation attachment. Bytes
-// live in the database for the same reason artifact snapshots do: the gateway
-// has no separate object store, and backups must stay self-contained. The
-// per-account byte budget keeps the table bounded.
+// PlaygroundAttachment stores one conversation attachment. The bytes live in
+// the process-wide object store and only ownership and metadata stay in the
+// database: rows written before the object store existed keep their canonical
+// base64 payload in Data, and rows switched back by the rollback path do the
+// same. The per-account byte budget keeps the table bounded.
 type PlaygroundAttachment struct {
 	ID          string `gorm:"size:32;primaryKey"`
 	UserID      int    `gorm:"not null;uniqueIndex:uk_playground_attachment_client,priority:1"`
@@ -66,8 +88,16 @@ type PlaygroundAttachment struct {
 	ContentHash string `gorm:"size:64;not null"`
 	// Hashing the client ID makes uniqueness case-sensitive even with MySQL's default collation.
 	ClientKeyHash string `gorm:"size:64;not null;uniqueIndex:uk_playground_attachment_client,priority:2"`
-	// Data is the canonical base64 encoding of the uploaded bytes.
-	Data LongText `gorm:"not null"`
+	// StorageBackend names where the bytes live: the backend of the object
+	// store that accepted them, or "db" while they are inline in Data.
+	StorageBackend string `gorm:"size:32"`
+	// ObjectKey is the backend-relative key of the stored bytes. It is empty
+	// for database-backed rows.
+	ObjectKey string `gorm:"size:512"`
+	// Data is the canonical base64 encoding of a database-backed attachment.
+	// New uploads leave it NULL; the column stays readable so pre-migration
+	// rows and a rollback keep working.
+	Data *LongText
 	// ReferencedAt is zero while no conversation message references the
 	// attachment; the cleanup task deletes long-orphaned rows.
 	ReferencedAt int64 `gorm:"not null;index"`
@@ -75,11 +105,25 @@ type PlaygroundAttachment struct {
 	UpdatedAt    int64 `gorm:"not null"`
 }
 
+// StoredInDatabase reports whether the attachment bytes are still inline in
+// the data column: true for rows written before the object store migration
+// and for rows restored during a rollback.
+func (attachment *PlaygroundAttachment) StoredInDatabase() bool {
+	return attachment.StorageBackend == "" || attachment.StorageBackend == playgroundAttachmentStorageDatabase
+}
+
 type PlaygroundAttachmentInput struct {
 	ClientKey string
 	MediaType string
 	Filename  string
 	Data      []byte
+}
+
+// PlaygroundAttachmentStorageMigrationResult reports what one bounded batch of
+// attachment storage migration work changed.
+type PlaygroundAttachmentStorageMigrationResult struct {
+	Moved  int64
+	Failed int64
 }
 
 func IsPlaygroundAttachmentMediaType(mediaType string) bool {
@@ -139,6 +183,14 @@ func playgroundAttachmentContentHash(data []byte) string {
 	return hex.EncodeToString(hash[:])
 }
 
+// playgroundAttachmentObjectKey lays out one user's objects under the shared
+// object store. The random attachment ID makes concurrent uploads collide-free
+// within the same month.
+func playgroundAttachmentObjectKey(userID int, createdAt int64, id string) string {
+	month := time.Unix(createdAt, 0).UTC().Format("2006/01")
+	return fmt.Sprintf("pg/%d/attachment/%s/%s", userID, month, id)
+}
+
 func findPlaygroundAttachmentByClientKey(userID int, clientKeyHash string) (*PlaygroundAttachment, error) {
 	var attachment PlaygroundAttachment
 	if err := DB.Where("user_id = ? AND client_key_hash = ?", userID, clientKeyHash).First(&attachment).Error; err != nil {
@@ -152,7 +204,54 @@ func playgroundAttachmentMatchesRequest(attachment *PlaygroundAttachment, sessio
 		attachment.Filename == filename && attachment.ContentHash == contentHash
 }
 
-func CreatePlaygroundAttachment(userID int, sessionID string, input PlaygroundAttachmentInput) (*PlaygroundAttachment, bool, error) {
+// deletePlaygroundAttachmentObject removes stored bytes after their row is
+// gone. Failure is logged, never returned: the database is the authority, and
+// a leftover object is reconciled by later maintenance instead of failing a
+// request whose database state already committed.
+func deletePlaygroundAttachmentObject(store objectstore.Store, attachment *PlaygroundAttachment) {
+	if attachment == nil || attachment.ObjectKey == "" || attachment.StoredInDatabase() {
+		return
+	}
+	if store == nil {
+		store = objectstore.DefaultStore()
+	}
+	if store == nil {
+		common.SysError(common.LogText("failed to delete Playground attachment object %s: object store is not configured", attachment.ObjectKey))
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), playgroundAttachmentObjectTimeout)
+	defer cancel()
+	if err := store.Delete(ctx, attachment.ObjectKey); err != nil && !errors.Is(err, objectstore.ErrObjectNotFound) {
+		common.SysError(common.LogText("failed to delete Playground attachment object %s: %s", attachment.ObjectKey, err.Error()))
+	}
+}
+
+// readPlaygroundAttachmentObject reads one stored object back and verifies its
+// size and content hash before the caller trusts it.
+func readPlaygroundAttachmentObject(ctx context.Context, store objectstore.Store, key string, byteSize int64, contentHash string) ([]byte, error) {
+	reader, info, err := store.Get(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+	if info.Size != byteSize {
+		return nil, fmt.Errorf("stored attachment %s size does not match its metadata", key)
+	}
+	data, err := io.ReadAll(io.LimitReader(reader, byteSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) != byteSize || playgroundAttachmentContentHash(data) != contentHash {
+		return nil, fmt.Errorf("stored attachment %s content hash does not match its metadata", key)
+	}
+	return data, nil
+}
+
+// CreatePlaygroundAttachment stores the bytes of a new upload in the
+// process-wide object store and only records metadata in the database. The
+// client ID is an idempotency key: a retry after a lost response returns the
+// stored row without writing another object.
+func CreatePlaygroundAttachment(ctx context.Context, userID int, sessionID string, input PlaygroundAttachmentInput) (*PlaygroundAttachment, bool, error) {
 	if userID <= 0 {
 		return nil, false, gorm.ErrRecordNotFound
 	}
@@ -162,6 +261,10 @@ func CreatePlaygroundAttachment(userID int, sessionID string, input PlaygroundAt
 	}
 	if err := ValidatePlaygroundAttachmentInput(&input, policy.AttachmentMaxFileBytes); err != nil {
 		return nil, false, err
+	}
+	store := objectstore.DefaultStore()
+	if store == nil {
+		return nil, false, ErrPlaygroundAttachmentStorage
 	}
 	clientKeyHash := playgroundAttachmentClientKeyHash(input.ClientKey)
 	contentHash := playgroundAttachmentContentHash(input.Data)
@@ -175,6 +278,22 @@ func CreatePlaygroundAttachment(userID int, sessionID string, input PlaygroundAt
 		return existing, false, nil
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, false, err
+	}
+
+	key, err := common.GenerateRandomCharsKey(24)
+	if err != nil {
+		return nil, false, err
+	}
+	now := common.GetTimestamp()
+	objectKey := playgroundAttachmentObjectKey(userID, now, key)
+	info, err := store.Put(ctx, objectKey, bytes.NewReader(input.Data))
+	if err != nil {
+		return nil, false, err
+	}
+	written := &PlaygroundAttachment{StorageBackend: store.Backend(), ObjectKey: objectKey}
+	if info.Size != int64(len(input.Data)) {
+		deletePlaygroundAttachmentObject(store, written)
+		return nil, false, errors.New("Playground attachment object store wrote an unexpected size.")
 	}
 
 	var attachment PlaygroundAttachment
@@ -206,22 +325,20 @@ func CreatePlaygroundAttachment(userID int, sessionID string, input PlaygroundAt
 		if stored+int64(len(input.Data)) > policy.AttachmentUserMaxBytes {
 			return ErrPlaygroundAttachmentLimit
 		}
-		key, err := common.GenerateRandomCharsKey(24)
-		if err != nil {
-			return err
-		}
-		now := common.GetTimestamp()
 		attachment = PlaygroundAttachment{
 			ID: "pgf_" + key, UserID: userID, SessionID: sessionID,
 			MediaType: input.MediaType, Filename: input.Filename,
 			ByteSize: int64(len(input.Data)), ContentHash: contentHash,
-			ClientKeyHash: clientKeyHash,
-			Data:          LongText(base64.StdEncoding.EncodeToString(input.Data)),
-			ReferencedAt:  0, CreatedAt: now, UpdatedAt: now,
+			ClientKeyHash:  clientKeyHash,
+			StorageBackend: store.Backend(), ObjectKey: objectKey,
+			ReferencedAt: 0, CreatedAt: now, UpdatedAt: now,
 		}
 		return tx.Create(&attachment).Error
 	})
 	if err != nil {
+		// The bytes never became a durable row; retrying the database write
+		// rewrites the same object key, so the copy can be dropped now.
+		deletePlaygroundAttachmentObject(store, written)
 		// A concurrent upload with the same client ID may have won the unique
 		// index; a replay of identical content acknowledges that winner.
 		if existing, findErr := findPlaygroundAttachmentByClientKey(userID, clientKeyHash); findErr == nil {
@@ -289,7 +406,8 @@ func ListPlaygroundAttachments(userID int, sessionID string, offset, limit int) 
 }
 
 func DeletePlaygroundAttachment(userID int, sessionID, id string) error {
-	return DB.Transaction(func(tx *gorm.DB) error {
+	var removed PlaygroundAttachment
+	err := DB.Transaction(func(tx *gorm.DB) error {
 		if _, err := lockPlaygroundSession(tx, userID, sessionID); err != nil {
 			return err
 		}
@@ -311,8 +429,17 @@ func DeletePlaygroundAttachment(userID int, sessionID, id string) error {
 		if pinned > 0 {
 			return ErrPlaygroundAttachmentInUse
 		}
-		return tx.Where("id = ? AND user_id = ?", id, userID).Delete(&PlaygroundAttachment{}).Error
+		if err := tx.Where("id = ? AND user_id = ?", id, userID).Delete(&PlaygroundAttachment{}).Error; err != nil {
+			return err
+		}
+		removed = attachment
+		return nil
 	})
+	if err != nil {
+		return err
+	}
+	deletePlaygroundAttachmentObject(nil, &removed)
+	return nil
 }
 
 // syncPlaygroundAttachmentReferences recomputes which attachments the stored
@@ -352,32 +479,195 @@ func syncPlaygroundAttachmentReferences(tx *gorm.DB, userID int, sessionID strin
 }
 
 // DeleteOrphanedPlaygroundAttachments removes unreferenced attachments whose
-// last state change predates the cutoff. Referenced rows and attachments pinned
-// by a canvas are never touched.
+// last state change predates the cutoff, together with their stored objects.
+// Referenced rows and attachments pinned by a canvas are never touched. Each
+// row is deleted under the same guards it was selected with, so bytes are only
+// dropped after their row is really gone.
 func DeleteOrphanedPlaygroundAttachments(updatedBefore int64, batchSize int) (int64, error) {
 	if batchSize <= 0 {
 		batchSize = 200
 	}
 	var total int64
 	for {
-		var ids []string
-		if err := DB.Model(&PlaygroundAttachment{}).
+		rows := make([]PlaygroundAttachment, 0, batchSize)
+		if err := DB.Select("id", "storage_backend", "object_key").
 			Where("referenced_at = 0 AND updated_at < ? AND id NOT IN (?)", updatedBefore,
 				DB.Model(&PlaygroundCanvasAsset{}).Select("attachment_id")).
-			Order("updated_at ASC, id ASC").Limit(batchSize).Pluck("id", &ids).Error; err != nil {
+			Order("updated_at ASC, id ASC").Limit(batchSize).Find(&rows).Error; err != nil {
 			return total, err
 		}
-		if len(ids) == 0 {
-			return total, nil
+		for index := range rows {
+			result := DB.Where("id = ? AND referenced_at = 0 AND updated_at < ? AND id NOT IN (?)", rows[index].ID, updatedBefore,
+				DB.Model(&PlaygroundCanvasAsset{}).Select("attachment_id")).Delete(&PlaygroundAttachment{})
+			if result.Error != nil {
+				return total, result.Error
+			}
+			if result.RowsAffected == 0 {
+				// The row was referenced or pinned after the batch read, so it
+				// no longer matches and must keep its bytes.
+				continue
+			}
+			total++
+			deletePlaygroundAttachmentObject(nil, &rows[index])
 		}
-		result := DB.Where("id IN ? AND referenced_at = 0 AND updated_at < ? AND id NOT IN (?)", ids, updatedBefore,
-			DB.Model(&PlaygroundCanvasAsset{}).Select("attachment_id")).Delete(&PlaygroundAttachment{})
-		if result.Error != nil {
-			return total, result.Error
-		}
-		total += result.RowsAffected
-		if len(ids) < batchSize {
+		if len(rows) < batchSize {
 			return total, nil
 		}
 	}
+}
+
+// MigratePlaygroundAttachmentsToObjectStore moves up to maxRows
+// database-backed attachments into store, one attachment at a time: the
+// base64 payload is decoded and verified against content_hash, the object is
+// written and read back for verification, and only then is the row atomically
+// switched to the object backend with data cleared. A failed row keeps its
+// bytes untouched and is retried by the next run. The rollback path is
+// RestorePlaygroundAttachmentsToDatabase.
+func MigratePlaygroundAttachmentsToObjectStore(store objectstore.Store, maxRows int) (PlaygroundAttachmentStorageMigrationResult, error) {
+	if store == nil {
+		return PlaygroundAttachmentStorageMigrationResult{}, ErrPlaygroundAttachmentStorage
+	}
+	if maxRows <= 0 {
+		maxRows = playgroundAttachmentMigrateSelectBatch
+	}
+	result := PlaygroundAttachmentStorageMigrationResult{}
+	cursor := ""
+	for scanned := 0; scanned < maxRows; {
+		limit := playgroundAttachmentMigrateSelectBatch
+		if remaining := maxRows - scanned; remaining < limit {
+			limit = remaining
+		}
+		rows := make([]PlaygroundAttachment, 0, limit)
+		if err := DB.Where("storage_backend IS NULL OR storage_backend = ? OR storage_backend = ''", playgroundAttachmentStorageDatabase).
+			Where("id > ?", cursor).Order("id ASC").Limit(limit).Find(&rows).Error; err != nil {
+			return result, err
+		}
+		if len(rows) == 0 {
+			return result, nil
+		}
+		for index := range rows {
+			scanned++
+			if err := migratePlaygroundAttachmentRow(store, &rows[index]); err != nil {
+				result.Failed++
+				continue
+			}
+			result.Moved++
+		}
+		cursor = rows[len(rows)-1].ID
+		if len(rows) < limit {
+			return result, nil
+		}
+	}
+	return result, nil
+}
+
+func migratePlaygroundAttachmentRow(store objectstore.Store, attachment *PlaygroundAttachment) error {
+	if attachment.Data == nil {
+		return errors.New("attachment has no database payload to migrate")
+	}
+	data, err := base64.StdEncoding.DecodeString(string(*attachment.Data))
+	if err != nil {
+		return fmt.Errorf("decode attachment %s: %w", attachment.ID, err)
+	}
+	if int64(len(data)) != attachment.ByteSize || playgroundAttachmentContentHash(data) != attachment.ContentHash {
+		return fmt.Errorf("attachment %s content hash does not match its stored bytes", attachment.ID)
+	}
+	key := playgroundAttachmentObjectKey(attachment.UserID, attachment.CreatedAt, attachment.ID)
+	ctx, cancel := context.WithTimeout(context.Background(), playgroundAttachmentObjectTimeout)
+	defer cancel()
+	if _, err := store.Put(ctx, key, bytes.NewReader(data)); err != nil {
+		return err
+	}
+	if _, err := readPlaygroundAttachmentObject(ctx, store, key, attachment.ByteSize, attachment.ContentHash); err != nil {
+		deletePlaygroundAttachmentObject(store, &PlaygroundAttachment{StorageBackend: store.Backend(), ObjectKey: key})
+		return err
+	}
+	// UpdateColumns skips the UpdatedAt auto-touch: moving bytes must not reset
+	// the orphan countdown of an unreferenced attachment.
+	result := DB.Model(&PlaygroundAttachment{}).
+		Where("id = ? AND (storage_backend IS NULL OR storage_backend = ? OR storage_backend = '')", attachment.ID, playgroundAttachmentStorageDatabase).
+		UpdateColumns(map[string]any{"storage_backend": store.Backend(), "object_key": key, "data": nil})
+	if result.Error != nil {
+		deletePlaygroundAttachmentObject(store, &PlaygroundAttachment{StorageBackend: store.Backend(), ObjectKey: key})
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		// Another worker finished or removed this row first. Only drop the copy
+		// when the row is gone; otherwise the winner owns the object.
+		var count int64
+		if err := DB.Model(&PlaygroundAttachment{}).Where("id = ?", attachment.ID).Count(&count).Error; err == nil && count == 0 {
+			deletePlaygroundAttachmentObject(store, &PlaygroundAttachment{StorageBackend: store.Backend(), ObjectKey: key})
+		}
+		return errors.New("attachment was migrated or deleted concurrently")
+	}
+	return nil
+}
+
+// RestorePlaygroundAttachmentsToDatabase copies up to maxRows object-backed
+// attachments back into the data column and marks them database-backed again.
+// It is the rollback path for MigratePlaygroundAttachmentsToObjectStore: the
+// bytes are verified against content_hash before the row is switched, and the
+// object is removed only after the database write committed.
+func RestorePlaygroundAttachmentsToDatabase(store objectstore.Store, maxRows int) (PlaygroundAttachmentStorageMigrationResult, error) {
+	if store == nil {
+		return PlaygroundAttachmentStorageMigrationResult{}, ErrPlaygroundAttachmentStorage
+	}
+	if maxRows <= 0 {
+		maxRows = playgroundAttachmentMigrateSelectBatch
+	}
+	result := PlaygroundAttachmentStorageMigrationResult{}
+	cursor := ""
+	for scanned := 0; scanned < maxRows; {
+		limit := playgroundAttachmentMigrateSelectBatch
+		if remaining := maxRows - scanned; remaining < limit {
+			limit = remaining
+		}
+		rows := make([]PlaygroundAttachment, 0, limit)
+		if err := DB.Where("storage_backend IS NOT NULL AND storage_backend <> ? AND storage_backend <> '' AND object_key IS NOT NULL AND object_key <> ''", playgroundAttachmentStorageDatabase).
+			Where("id > ?", cursor).Order("id ASC").Limit(limit).Find(&rows).Error; err != nil {
+			return result, err
+		}
+		if len(rows) == 0 {
+			return result, nil
+		}
+		for index := range rows {
+			scanned++
+			if err := restorePlaygroundAttachmentRow(store, &rows[index]); err != nil {
+				result.Failed++
+				continue
+			}
+			result.Moved++
+		}
+		cursor = rows[len(rows)-1].ID
+		if len(rows) < limit {
+			return result, nil
+		}
+	}
+	return result, nil
+}
+
+func restorePlaygroundAttachmentRow(store objectstore.Store, attachment *PlaygroundAttachment) error {
+	ctx, cancel := context.WithTimeout(context.Background(), playgroundAttachmentObjectTimeout)
+	defer cancel()
+	data, err := readPlaygroundAttachmentObject(ctx, store, attachment.ObjectKey, attachment.ByteSize, attachment.ContentHash)
+	if err != nil {
+		return err
+	}
+	result := DB.Model(&PlaygroundAttachment{}).
+		Where("id = ? AND storage_backend = ? AND object_key = ?", attachment.ID, attachment.StorageBackend, attachment.ObjectKey).
+		UpdateColumns(map[string]any{
+			"data":            base64.StdEncoding.EncodeToString(data),
+			"storage_backend": playgroundAttachmentStorageDatabase,
+			"object_key":      "",
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return errors.New("attachment was restored or deleted concurrently")
+	}
+	// The row is database-backed again; drop the object with the backend/key
+	// captured before the row changed.
+	deletePlaygroundAttachmentObject(store, &PlaygroundAttachment{StorageBackend: attachment.StorageBackend, ObjectKey: attachment.ObjectKey})
+	return nil
 }

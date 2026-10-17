@@ -28,6 +28,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service/objectstore"
 	"github.com/gin-gonic/gin"
 )
 
@@ -117,7 +118,7 @@ func CreatePlaygroundAttachment(c *gin.Context) {
 		writePlaygroundAttachmentError(c, model.ErrPlaygroundAttachmentInvalid)
 		return
 	}
-	attachment, created, err := model.CreatePlaygroundAttachment(c.GetInt("id"), c.Param("id"), model.PlaygroundAttachmentInput{
+	attachment, created, err := model.CreatePlaygroundAttachment(c.Request.Context(), c.GetInt("id"), c.Param("id"), model.PlaygroundAttachmentInput{
 		ClientKey: request.ClientKey,
 		MediaType: request.MediaType,
 		Filename:  request.Filename,
@@ -165,18 +166,49 @@ func GetPlaygroundAttachmentContent(c *gin.Context) {
 		writePlaygroundAttachmentError(c, err)
 		return
 	}
-	data, err := base64.StdEncoding.DecodeString(string(attachment.Data))
-	if err != nil {
-		writePlaygroundAttachmentError(c, errors.New("decoded attachment is invalid"))
+	// Rows written before the object store existed, and rows restored during a
+	// rollback, keep their bytes inline in the database.
+	if attachment.StoredInDatabase() {
+		if attachment.Data == nil {
+			writePlaygroundAttachmentError(c, errors.New("stored attachment data is missing"))
+			return
+		}
+		data, err := base64.StdEncoding.DecodeString(string(*attachment.Data))
+		if err != nil {
+			writePlaygroundAttachmentError(c, errors.New("decoded attachment is invalid"))
+			return
+		}
+		// Inline rendering is restricted to the stored media type, and the
+		// filename is wrapped so it can never split the response headers.
+		c.Header("Content-Disposition", "inline; filename*=UTF-8''"+url.PathEscape(attachment.Filename))
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("Content-Security-Policy", "sandbox; default-src 'none'")
+		c.Header("Referrer-Policy", "no-referrer")
+		c.Data(http.StatusOK, attachment.MediaType, data)
 		return
 	}
-	// Inline rendering is restricted to the stored media type, and the
-	// filename is wrapped so it can never split the response headers.
-	c.Header("Content-Disposition", "inline; filename*=UTF-8''"+url.PathEscape(attachment.Filename))
-	c.Header("X-Content-Type-Options", "nosniff")
-	c.Header("Content-Security-Policy", "sandbox; default-src 'none'")
-	c.Header("Referrer-Policy", "no-referrer")
-	c.Data(http.StatusOK, attachment.MediaType, data)
+	store := objectstore.DefaultStore()
+	if store == nil {
+		writePlaygroundAttachmentError(c, errors.New("Playground attachment object store is not configured."))
+		return
+	}
+	// Attachments are private; neither the redirect nor the streamed body may
+	// be cached by shared proxies.
+	c.Header("Cache-Control", "private, no-store")
+	// A backend that hands out short-lived presigned links (S3 compatible)
+	// redirects instead of streaming through the gateway. Only absolute
+	// http(s) links are trusted; anything else falls back to streaming.
+	if location, presignErr := store.PresignGet(c.Request.Context(), attachment.ObjectKey, objectstore.DefaultPresignTTL()); presignErr == nil {
+		if parsed, parseErr := url.Parse(location); parseErr == nil && parsed.Host != "" && (parsed.Scheme == "http" || parsed.Scheme == "https") {
+			c.Redirect(http.StatusFound, location)
+			return
+		}
+	}
+	if err := objectstore.Serve(c.Request.Context(), store, c.Writer, attachment.ObjectKey, objectstore.ServeOptions{
+		Filename: attachment.Filename, ContentType: attachment.MediaType,
+	}); err != nil && !c.Writer.Written() {
+		writePlaygroundAttachmentError(c, err)
+	}
 }
 
 func DeletePlaygroundAttachment(c *gin.Context) {
