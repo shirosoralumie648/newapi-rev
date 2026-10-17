@@ -26,13 +26,27 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// writeMidjourneyImageNotFound answers a missing task and a task owned by
+// somebody else identically, so the route cannot be used to enumerate tasks.
+func writeMidjourneyImageNotFound(c *gin.Context) {
+	c.JSON(http.StatusNotFound, gin.H{
+		"error": "midjourney_task_not_found",
+	})
+}
+
 func RelayMidjourneyImage(c *gin.Context) {
 	taskId := c.Param("id")
 	midjourneyTask := model.GetByOnlyMJId(taskId)
 	if midjourneyTask == nil {
-		c.JSON(400, gin.H{
-			"error": "midjourney_task_not_found",
-		})
+		writeMidjourneyImageNotFound(c)
+		return
+	}
+	// The route guard authenticates the request unless the access mode grants
+	// anonymous reads; an authenticated caller may only read its own task.
+	// Administrators keep the dashboard-wide view, and the response does not
+	// reveal whether the task exists.
+	if userId := c.GetInt("id"); userId > 0 && midjourneyTask.UserId != userId && !model.IsAdmin(userId) {
+		writeMidjourneyImageNotFound(c)
 		return
 	}
 	var httpClient *http.Client
@@ -151,9 +165,13 @@ func coverMidjourneyTaskDto(c *gin.Context, originTask *model.Midjourney) (midjo
 	midjourneyTask.FinishTime = originTask.FinishTime
 	midjourneyTask.ImageUrl = ""
 	if originTask.ImageUrl != "" && setting.MjForwardUrlEnabled {
-		midjourneyTask.ImageUrl = system_setting.ServerAddress + "/mj/image/" + originTask.MjId
+		midjourneyTask.ImageUrl = service.BuildMjImageForwardURL(originTask.MjId)
 		if originTask.Status != "SUCCESS" {
-			midjourneyTask.ImageUrl += "?rand=" + strconv.FormatInt(time.Now().UnixNano(), 10)
+			separator := "?"
+			if strings.Contains(midjourneyTask.ImageUrl, "?") {
+				separator = "&"
+			}
+			midjourneyTask.ImageUrl += separator + "rand=" + strconv.FormatInt(time.Now().UnixNano(), 10)
 		}
 	} else {
 		midjourneyTask.ImageUrl = originTask.ImageUrl

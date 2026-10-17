@@ -243,7 +243,10 @@ func SetRelayRouter(router *gin.Engine) {
 }
 
 func registerMjRouterGroup(relayMjRouter *gin.RouterGroup) {
-	relayMjRouter.GET("/image/:id", relay.RelayMidjourneyImage)
+	// Images are loaded by browsers and MjProxy clients without an
+	// Authorization header, so this route keeps its own access control (see
+	// setting.MjImageAccessMode) instead of the TokenAuth below.
+	relayMjRouter.GET("/image/:id", middleware.MjImageAccessControl(), relay.RelayMidjourneyImage)
 	relayMjRouter.Use(middleware.TokenAuth(), middleware.Distribute())
 	{
 		relayMjRouter.POST("/submit/action", controller.RelayMidjourney)

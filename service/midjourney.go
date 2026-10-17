@@ -2,10 +2,14 @@ package service
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +22,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 
 	"github.com/gin-gonic/gin"
 )
@@ -28,6 +33,89 @@ func CovertMjpActionToModelName(mjAction string) string {
 		modelName = "swap_face"
 	}
 	return modelName
+}
+
+const (
+	// MjImageSignatureQueryParameter carries the HMAC of a signed Midjourney
+	// image link.
+	MjImageSignatureQueryParameter = "sig"
+	// MjImageExpiryQueryParameter carries the Unix expiry of a signed
+	// Midjourney image link.
+	MjImageExpiryQueryParameter = "exp"
+	// MjImageSignatureTTL bounds how long a forwarded image link stays valid
+	// without a credential.
+	MjImageSignatureTTL = 30 * time.Minute
+
+	mjImageSignatureVersion = "v1"
+	mjImageSignatureLength  = 43
+	maxMjImageTaskIDLength  = 191
+)
+
+// ErrMjImageSignatureInvalid reports a task ID or signing key that cannot be
+// used for a Midjourney image link.
+var ErrMjImageSignatureInvalid = errors.New("midjourney image signature is invalid")
+
+func mjImageSignatureMessage(taskID string, expiresAt int64) []byte {
+	return []byte(mjImageSignatureVersion + "\x00" + taskID + "\x00" + strconv.FormatInt(expiresAt, 10))
+}
+
+// SignMjImageLink returns the sig and exp query values that authorise one
+// Midjourney task image for MjImageSignatureTTL. The capability is bound to the
+// task ID only and carries no user or upstream data.
+func SignMjImageLink(taskID string) (string, int64, error) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" || len(taskID) > maxMjImageTaskIDLength || common.CryptoSecret == "" {
+		return "", 0, ErrMjImageSignatureInvalid
+	}
+
+	expiresAt := time.Now().Add(MjImageSignatureTTL).Unix()
+	mac := hmac.New(sha256.New, []byte(common.CryptoSecret))
+	_, _ = mac.Write(mjImageSignatureMessage(taskID, expiresAt))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), expiresAt, nil
+}
+
+// VerifyMjImageSignature verifies an unexpired image link signature without
+// reading task, user, or token state. Signature comparison is constant-time.
+func VerifyMjImageSignature(taskID, signature, expiresAt string) bool {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" || len(taskID) > maxMjImageTaskIDLength || common.CryptoSecret == "" {
+		return false
+	}
+	if len(signature) != mjImageSignatureLength {
+		return false
+	}
+	expiry, err := strconv.ParseInt(expiresAt, 10, 64)
+	if err != nil || expiry < time.Now().Unix() {
+		return false
+	}
+	actualSignature, err := base64.RawURLEncoding.Strict().DecodeString(signature)
+	if err != nil || len(actualSignature) != sha256.Size {
+		return false
+	}
+
+	mac := hmac.New(sha256.New, []byte(common.CryptoSecret))
+	_, _ = mac.Write(mjImageSignatureMessage(taskID, expiry))
+	return hmac.Equal(actualSignature, mac.Sum(nil))
+}
+
+// BuildMjImageForwardURL returns the forwarded link of one Midjourney task. In
+// signed mode the link carries an expiring HMAC so clients that load the image
+// without credentials keep working; every other mode returns the plain link and
+// the route decides on the request itself.
+func BuildMjImageForwardURL(taskID string) string {
+	forwardURL := system_setting.ServerAddress + "/mj/image/" + taskID
+	if setting.NormalizeMjImageAccessMode(setting.MjImageAccessMode) != setting.MjImageAccessSigned {
+		return forwardURL
+	}
+
+	signature, expiresAt, err := SignMjImageLink(taskID)
+	if err != nil {
+		return forwardURL
+	}
+	query := url.Values{}
+	query.Set(MjImageExpiryQueryParameter, strconv.FormatInt(expiresAt, 10))
+	query.Set(MjImageSignatureQueryParameter, signature)
+	return forwardURL + "?" + query.Encode()
 }
 
 // PrepareMidjourneyTaskBilling sets the durable refund marker before the task is inserted.

@@ -224,6 +224,7 @@ export type ContentSettings = {
   MjForwardUrlEnabled: boolean
   MjModeClearEnabled: boolean
   MjActionCheckSuccessEnabled: boolean
+  MjImageAccessMode: 'auth' | 'signed' | 'legacy'
 }
 
 export type ModelSettings = {

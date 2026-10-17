@@ -16,18 +16,92 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Dialog } from '@/components/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
+import { api } from '@/lib/http-client'
 
 interface ImageDialogProps {
   imageUrl: string
   taskId?: string
   open: boolean
   onOpenChange: (open: boolean) => void
+}
+
+const protectedImagePathPrefix = '/mj/image/'
+
+type ProtectedPreviewStatus = 'idle' | 'loading' | 'ready' | 'error'
+
+interface ProtectedPreview {
+  src: string
+  status: ProtectedPreviewStatus
+}
+
+function isProtectedImageUrl(imageUrl: string): boolean {
+  if (imageUrl === '' || typeof window === 'undefined') return false
+  try {
+    const parsed = new URL(imageUrl, window.location.origin)
+    return (
+      parsed.origin === window.location.origin &&
+      parsed.pathname.startsWith(protectedImagePathPrefix)
+    )
+  } catch {
+    return false
+  }
+}
+
+const idlePreview: ProtectedPreview = { src: '', status: 'idle' }
+
+/**
+ * Forwarded Midjourney image links need a login or an API token, but a plain
+ * `<img>` cannot send the Authorization header. Same-origin links are fetched
+ * with the shared axios client and displayed through an object URL; every other
+ * URL keeps loading directly.
+ */
+function useProtectedImagePreview(
+  imageUrl: string,
+  enabled: boolean
+): ProtectedPreview {
+  const [preview, setPreview] = useState<ProtectedPreview>(idlePreview)
+
+  useEffect(() => {
+    if (!enabled || !isProtectedImageUrl(imageUrl)) {
+      setPreview(idlePreview)
+      return
+    }
+
+    let objectUrl = ''
+    let cancelled = false
+    const controller = new AbortController()
+    setPreview({ src: '', status: 'loading' })
+
+    void api
+      .get(imageUrl, {
+        responseType: 'blob',
+        skipErrorHandler: true,
+        disableDuplicate: true,
+        signal: controller.signal,
+      })
+      .then((response) => {
+        if (cancelled) return
+        objectUrl = URL.createObjectURL(response.data as Blob)
+        setPreview({ src: objectUrl, status: 'ready' })
+      })
+      .catch(() => {
+        if (!cancelled) setPreview({ src: '', status: 'error' })
+      })
+
+    return () => {
+      cancelled = true
+      controller.abort()
+      if (objectUrl !== '') URL.revokeObjectURL(objectUrl)
+    }
+  }, [imageUrl, enabled])
+
+  return preview
 }
 
 export function ImageDialog({
@@ -39,6 +113,19 @@ export function ImageDialog({
   const { t } = useTranslation()
   const [isLoading, setIsLoading] = useState(true)
   const [hasError, setHasError] = useState(false)
+  const protectedPreview = useProtectedImagePreview(imageUrl, open)
+  // Decide from the current URL instead of the hook state so the raw protected
+  // link is never rendered before the credentialed fetch starts.
+  const previewRequiresCredentials = open && isProtectedImageUrl(imageUrl)
+  const previewSrc = previewRequiresCredentials
+    ? protectedPreview.src
+    : imageUrl
+  const showsSkeleton = previewRequiresCredentials
+    ? protectedPreview.status !== 'ready' || isLoading
+    : isLoading || hasError
+  const showsError = previewRequiresCredentials
+    ? protectedPreview.status === 'error'
+    : hasError
 
   // Reset loading state when dialog opens or image URL changes
   const handleOpenChange = (newOpen: boolean) => {
@@ -75,24 +162,26 @@ export function ImageDialog({
         <div className='py-4'>
           <div className='bg-muted/50 relative flex min-h-[300px] items-center justify-center rounded-lg border'>
             {/* Skeleton - show when loading or error */}
-            {(isLoading || hasError) && (
+            {showsSkeleton && (
               <Skeleton className='absolute inset-0 h-full w-full rounded-lg' />
             )}
 
             {/* Actual Image */}
-            <img
-              src={imageUrl}
-              alt={t('Generated image')}
-              className={`max-h-[550px] w-full rounded-lg object-contain ${
-                isLoading || hasError ? 'opacity-0' : 'opacity-100'
-              }`}
-              onLoad={handleImageLoad}
-              onError={handleImageError}
-              loading='lazy'
-            />
+            {previewSrc !== '' && (
+              <img
+                src={previewSrc}
+                alt={t('Generated image')}
+                className={`max-h-[550px] w-full rounded-lg object-contain ${
+                  showsSkeleton ? 'opacity-0' : 'opacity-100'
+                }`}
+                onLoad={handleImageLoad}
+                onError={handleImageError}
+                loading='lazy'
+              />
+            )}
 
             {/* Error text overlay (shown on skeleton) */}
-            {hasError && (
+            {showsError && (
               <div className='absolute inset-0 flex items-center justify-center'>
                 <p className='text-muted-foreground text-sm'>
                   {t('Failed to load image')}

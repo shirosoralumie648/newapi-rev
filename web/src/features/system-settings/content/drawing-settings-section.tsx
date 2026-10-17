@@ -27,9 +27,18 @@ import {
   FormControl,
   FormDescription,
   FormField,
+  FormItem,
   FormLabel,
   FormMessage,
 } from '@/components/ui/form'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 
 import {
@@ -48,6 +57,7 @@ const drawingSchema = z.object({
   MjForwardUrlEnabled: z.boolean(),
   MjModeClearEnabled: z.boolean(),
   MjActionCheckSuccessEnabled: z.boolean(),
+  MjImageAccessMode: z.enum(['auth', 'signed', 'legacy']),
 })
 
 type DrawingFormValues = z.infer<typeof drawingSchema>
@@ -78,6 +88,18 @@ export function DrawingSettingsSection({
     for (const [key, value] of updates) {
       await updateOption.mutateAsync({ key, value })
     }
+  }
+
+  const accessMode = form.watch('MjImageAccessMode')
+  const accessModeDescriptions: Record<
+    DrawingFormValues['MjImageAccessMode'],
+    string
+  > = {
+    auth: t('Login or API token access checks that the caller owns the task.'),
+    signed: t('Signed links expire and load without a login.'),
+    legacy: t(
+      'Legacy mode keeps the previous open access: anyone who knows a task ID can load its image.'
+    ),
   }
 
   const switches: Array<{
@@ -139,6 +161,51 @@ export function DrawingSettingsSection({
             saveLabel='Save drawing settings'
           />
           <div className='space-y-4'>
+            <FormField
+              control={form.control}
+              name='MjImageAccessMode'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Image link access mode')}</FormLabel>
+                  <FormControl>
+                    <Select
+                      items={[
+                        {
+                          value: 'auth',
+                          label: t('Require login or API token'),
+                        },
+                        { value: 'signed', label: t('Signed expiring link') },
+                        { value: 'legacy', label: t('Legacy open access') },
+                      ]}
+                      value={field.value}
+                      onValueChange={field.onChange}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent alignItemWithTrigger={false}>
+                        <SelectGroup>
+                          <SelectItem value='auth'>
+                            {t('Require login or API token')}
+                          </SelectItem>
+                          <SelectItem value='signed'>
+                            {t('Signed expiring link')}
+                          </SelectItem>
+                          <SelectItem value='legacy'>
+                            {t('Legacy open access')}
+                          </SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </FormControl>
+                  <FormDescription>
+                    {accessModeDescriptions[accessMode]}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
             {switches.map((item) => (
               <FormField
                 key={item.name}
