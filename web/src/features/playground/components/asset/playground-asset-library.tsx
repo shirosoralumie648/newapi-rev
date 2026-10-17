@@ -30,7 +30,10 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { CanvasSendSeed } from '@/features/canvas/lib/canvas-send'
 import { useDebounce } from '@/hooks/use-debounce'
-import { getServerMessage } from '@/lib/server-error-message'
+import {
+  getServerErrorMessage,
+  getServerMessage,
+} from '@/lib/server-error-message'
 
 import type { PlaygroundAssetItem } from '../../asset-api'
 import {
