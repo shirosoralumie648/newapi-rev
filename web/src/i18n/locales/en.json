@@ -7441,6 +7441,26 @@
     "Open canvas": "Open canvas",
     "Open conversation": "Open conversation",
     "This canvas has no nodes yet.": "This canvas has no nodes yet.",
-    "Unable to load the canvas.": "Unable to load the canvas."
+    "Unable to load the canvas.": "Unable to load the canvas.",
+    "Generate media": "Generate media",
+    "Generation type": "Generation type",
+    "Describe what you want to generate": "Describe what you want to generate",
+    "Size": "Size",
+    "Duration (seconds)": "Duration (seconds)",
+    "Voice": "Voice",
+    "Generated media": "Generated media",
+    "Generated audio": "Generated audio",
+    "Generation tasks": "Generation tasks",
+    "Loading generation tasks...": "Loading generation tasks...",
+    "No generation tasks": "No generation tasks",
+    "Start a generation and its status appears here.": "Start a generation and its status appears here.",
+    "Generate images, videos and audio through your configured channels.": "Generate images, videos and audio through your configured channels.",
+    "Image generation failed": "Image generation failed",
+    "Video generation failed": "Video generation failed",
+    "Audio generation failed": "Audio generation failed",
+    "Failed to load the generation tasks": "Failed to load the generation tasks",
+    "Unable to send the result to the canvas": "Unable to send the result to the canvas",
+    "Playground task concurrency limit reached. Wait for a running task to finish.": "Playground task concurrency limit reached. Wait for a running task to finish.",
+    "Unable to check the account task budget.": "Unable to check the account task budget."
   }
 }

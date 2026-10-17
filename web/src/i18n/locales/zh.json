@@ -7441,6 +7441,26 @@
     "Open canvas": "打开画布",
     "Open conversation": "打开对话",
     "This canvas has no nodes yet.": "此画布还没有任何节点。",
-    "Unable to load the canvas.": "无法加载画布。"
+    "Unable to load the canvas.": "无法加载画布。",
+    "Generate media": "生成媒体",
+    "Generation type": "生成类型",
+    "Describe what you want to generate": "描述你想生成的内容",
+    "Size": "尺寸",
+    "Duration (seconds)": "时长（秒）",
+    "Voice": "音色",
+    "Generated media": "生成结果",
+    "Generated audio": "生成的音频",
+    "Generation tasks": "生成任务",
+    "Loading generation tasks...": "正在加载生成任务...",
+    "No generation tasks": "暂无生成任务",
+    "Start a generation and its status appears here.": "开始生成后，任务状态会显示在这里。",
+    "Generate images, videos and audio through your configured channels.": "通过已配置的渠道生成图片、视频和音频。",
+    "Image generation failed": "图片生成失败",
+    "Video generation failed": "视频生成失败",
+    "Audio generation failed": "音频生成失败",
+    "Failed to load the generation tasks": "加载生成任务失败",
+    "Unable to send the result to the canvas": "无法将结果发送到画布",
+    "Playground task concurrency limit reached. Wait for a running task to finish.": "已达到任务并发上限，请等待正在运行的任务完成。",
+    "Unable to check the account task budget.": "无法检查账户任务额度。"
   }
 }

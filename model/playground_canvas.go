@@ -36,12 +36,18 @@ var (
 
 // PlaygroundCanvasReference identifies one external resource a canvas node
 // points at by ID. Empty fields are ignored; a message key always requires its
-// session so a cross-user message cannot be reached through an orphan key.
+// session so a cross-user message cannot be reached through an orphan key, and
+// a task artifact key always requires its task for the same reason.
 type PlaygroundCanvasReference struct {
 	SessionID    string
 	MessageKey   string
 	AttachmentID string
 	ArtifactID   string
+	// TaskID references an async generation task the account owns. The bytes
+	// of its artifacts stay behind the owner-scoped task artifact endpoints;
+	// the canvas stores the public task id and the artifact key only.
+	TaskID          string
+	TaskArtifactKey string
 }
 
 // resolvePlaygroundCanvasReference classifies one reference for an account.
@@ -57,6 +63,9 @@ type PlaygroundCanvasReference struct {
 // already be gone while the attachment is still served to its owner.
 func resolvePlaygroundCanvasReference(userID int, reference PlaygroundCanvasReference) (available bool, foreign bool, err error) {
 	if reference.MessageKey != "" && reference.SessionID == "" {
+		return false, true, nil
+	}
+	if reference.TaskArtifactKey != "" && reference.TaskID == "" {
 		return false, true, nil
 	}
 	sessionOwned := false
@@ -114,6 +123,28 @@ func resolvePlaygroundCanvasReference(userID int, reference PlaygroundCanvasRefe
 			available = false
 		case reference.SessionID != "" && artifact.SessionID != reference.SessionID:
 			available = false
+		}
+	}
+	if reference.TaskID != "" {
+		// A task id owned by the account keeps the node available until the
+		// row is deleted; a task id owned by another account is foreign. Task
+		// ids are not globally unique across historical rows, so ownership is
+		// resolved by the (user_id, task_id) pair rather than by id alone.
+		var owned Task
+		err := DB.Select("id").Where("user_id = ? AND task_id = ?", userID, reference.TaskID).First(&owned).Error
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			var foreignTask Task
+			foreignErr := DB.Select("id").Where("user_id <> ? AND task_id = ?", userID, reference.TaskID).First(&foreignTask).Error
+			if foreignErr == nil {
+				return false, true, nil
+			}
+			if !errors.Is(foreignErr, gorm.ErrRecordNotFound) {
+				return false, false, foreignErr
+			}
+			available = false
+		case err != nil:
+			return false, false, err
 		}
 	}
 	return available, false, nil

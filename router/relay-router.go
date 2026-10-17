@@ -68,6 +68,42 @@ func SetRelayRouter(router *gin.Engine) {
 	{
 		playgroundRouter.POST("/chat/completions", controller.Playground)
 	}
+
+	// Media generation routes mirror their /v1 counterparts behind UserAuth.
+	// The bridge rewrites the path before pinning and channel selection, so
+	// task plugins, model grouping and billing see the canonical request.
+	playgroundMediaRouter := router.Group("/pg")
+	playgroundMediaRouter.Use(middleware.RouteTag("relay"))
+	playgroundMediaRouter.Use(middleware.SystemPerformanceCheck())
+	playgroundMediaRouter.Use(middleware.UserAuth())
+	{
+		playgroundMediaRouter.POST("/images/generations",
+			middleware.PlaygroundRelayBridge("/v1/images/generations"),
+			middleware.PinTaskPluginEndpoint(),
+			middleware.PrepareTaskPluginEndpoint(),
+			middleware.Distribute(),
+			controller.PlaygroundImageGeneration,
+		)
+		playgroundMediaRouter.POST("/images/edits",
+			middleware.PlaygroundRelayBridge("/v1/images/edits"),
+			middleware.PinTaskPluginEndpoint(),
+			middleware.PrepareTaskPluginEndpoint(),
+			middleware.Distribute(),
+			controller.PlaygroundImageEdit,
+		)
+		playgroundMediaRouter.POST("/videos",
+			middleware.PlaygroundRelayBridge("/v1/videos"),
+			middleware.PinTaskPluginEndpoint(),
+			middleware.PrepareTaskPluginEndpoint(),
+			middleware.Distribute(),
+			controller.PlaygroundVideoTask,
+		)
+		playgroundMediaRouter.POST("/audio/speech",
+			middleware.PlaygroundRelayBridge("/v1/audio/speech"),
+			middleware.Distribute(),
+			controller.PlaygroundAudioSpeech,
+		)
+	}
 	relayV1Router := router.Group("/v1")
 	relayV1Router.Use(middleware.RouteTag("relay"))
 	relayV1Router.Use(middleware.SystemPerformanceCheck())

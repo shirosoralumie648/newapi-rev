@@ -35,6 +35,9 @@ export const MESSAGE_STATUS = {
 // API endpoints
 export const API_ENDPOINTS = {
   CHAT_COMPLETIONS: '/pg/chat/completions',
+  IMAGE_GENERATIONS: '/pg/images/generations',
+  VIDEO_GENERATIONS: '/pg/videos',
+  AUDIO_SPEECH: '/pg/audio/speech',
   USER_MODELS: '/api/user/models',
   USER_GROUPS: '/api/user/self/groups',
   PLAYGROUND_SESSIONS: '/api/playground/sessions',
@@ -83,6 +86,41 @@ export const PLAYGROUND_ATTACHMENT_ACCEPT =
   'image/png,image/jpeg,image/webp,image/gif'
 export const PLAYGROUND_ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024
 export const PLAYGROUND_ATTACHMENT_MAX_COUNT = 8
+
+// Generation entry defaults. The server validates every model and parameter
+// again through the ordinary Relay/task pipeline.
+export const PLAYGROUND_GENERATION_KINDS = ['image', 'video', 'audio'] as const
+export const PLAYGROUND_IMAGE_SIZES = [
+  '1024x1024',
+  '1792x1024',
+  '1024x1792',
+] as const
+export const PLAYGROUND_VIDEO_DURATIONS = [5, 10] as const
+export const PLAYGROUND_AUDIO_VOICES = [
+  'alloy',
+  'echo',
+  'fable',
+  'onyx',
+  'nova',
+  'shimmer',
+] as const
+
+// Task list polling. The list refreshes only while one of the account's tasks
+// is unfinished; the terminal states stop the interval.
+export const PLAYGROUND_TASK_PAGE_SIZE = 20
+export const PLAYGROUND_TASK_POLL_INTERVAL_MS = 5000
+export const PLAYGROUND_TASK_TERMINAL_STATUSES: readonly string[] = [
+  'SUCCESS',
+  'FAILURE',
+]
+
+export const PLAYGROUND_GENERATION_ERRORS = {
+  IMAGE_FAILED: 'Image generation failed',
+  VIDEO_FAILED: 'Video generation failed',
+  AUDIO_FAILED: 'Audio generation failed',
+  TASK_LIST_FAILED: 'Failed to load the generation tasks',
+  CANVAS_SEND_FAILED: 'Unable to send the result to the canvas',
+} as const
 
 // Error messages
 export const ERROR_MESSAGES = {

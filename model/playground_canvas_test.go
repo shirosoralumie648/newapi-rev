@@ -320,6 +320,60 @@ func TestPlaygroundCanvasReferenceOwnership(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, update.Code, update.Body.String())
 }
 
+// A canvas node can reference one async generation task the account owns. The
+// task row is the ownership record; the artifact key is a display-only
+// selector, and the bytes stay behind the owner-scoped task artifact
+// endpoints.
+func TestPlaygroundCanvasTaskReferences(t *testing.T) {
+	db := playgroundTestDB(t, "sqlite")
+	require.NoError(t, db.Create(&model.Task{
+		TaskID: "pg-canvas-task-owner", Platform: "sunoapi", UserId: 7,
+		Status: model.TaskStatusSuccess, SubmitTime: 10,
+	}).Error)
+	require.NoError(t, db.Create(&model.Task{
+		TaskID: "pg-canvas-task-other", Platform: "sunoapi", UserId: 8,
+		Status: model.TaskStatusSuccess, SubmitTime: 11,
+	}).Error)
+
+	create := func(user int, nodes []any) *httptest.ResponseRecorder {
+		return playgroundRequest(t, user, http.MethodPost, "/api/playground/canvases", map[string]any{
+			"title": "Task refs", "document": canvasDocument(nodes, nil),
+		}, controller.CreatePlaygroundCanvasProject)
+	}
+
+	// The owner may reference the task with or without one artifact key.
+	owner := create(7, []any{
+		canvasRefNode("n1", "task-result", map[string]any{"taskId": "pg-canvas-task-owner", "taskArtifactKey": "video"}),
+		canvasRefNode("n2", "task", map[string]any{"taskId": "pg-canvas-task-owner"}),
+	})
+	require.Equal(t, http.StatusOK, owner.Code, owner.Body.String())
+
+	// Another account referencing the task is rejected on save.
+	foreign := create(8, []any{canvasRefNode("n1", "task-result", map[string]any{"taskId": "pg-canvas-task-owner"})})
+	assert.Equal(t, http.StatusBadRequest, foreign.Code, foreign.Body.String())
+
+	// An artifact key without its task is structurally invalid.
+	assert.Equal(t, http.StatusBadRequest, create(7, []any{
+		canvasRefNode("n1", "task-result", map[string]any{"taskArtifactKey": "video"}),
+	}).Code)
+
+	// A deleted task is accepted so the board stays editable and is reported
+	// as an unavailable source on read.
+	detached := create(7, []any{canvasRefNode("d1", "task-result", map[string]any{"taskId": "pg-canvas-task-missing"})})
+	require.Equal(t, http.StatusOK, detached.Code, detached.Body.String())
+	detachedID := canvasEnvelope(t, detached.Body.Bytes())["id"].(string)
+	detail := playgroundRequest(t, 7, http.MethodGet, "/api/playground/canvases/"+detachedID, nil, controller.GetPlaygroundCanvasProject)
+	var detailEnvelope struct {
+		Success bool
+		Data    struct {
+			UnavailableNodeIDs []string `json:"unavailable_node_ids"`
+		}
+	}
+	require.NoError(t, common.Unmarshal(detail.Body.Bytes(), &detailEnvelope))
+	require.True(t, detailEnvelope.Success, detail.Body.String())
+	assert.ElementsMatch(t, []string{"d1"}, detailEnvelope.Data.UnavailableNodeIDs)
+}
+
 func TestPlaygroundCanvasLimits(t *testing.T) {
 	playgroundTestDB(t, "sqlite")
 	usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {

@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { FileText, Frame, Menu, PanelLeft } from 'lucide-react'
+import { FileText, Frame, Menu, PanelLeft, Sparkles } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -38,7 +38,7 @@ import { PlaygroundSessionList } from './playground-session-list'
  * Which view the unified right-side Inspector shows. The Inspector itself is
  * owner of the desktop resizable layout and the mobile Sheet.
  */
-export type PlaygroundInspectorView = 'artifacts' | 'canvas'
+export type PlaygroundInspectorView = 'artifacts' | 'canvas' | 'generate'
 
 interface PlaygroundWorkspaceProps {
   disabled?: boolean
@@ -75,12 +75,17 @@ export function PlaygroundWorkspace(props: PlaygroundWorkspaceProps) {
     />
   )
 
-  const inspectorTitle =
-    props.inspectorView === 'canvas' ? t('Canvases') : t('Artifacts')
-  const inspectorDescription =
-    props.inspectorView === 'canvas'
-      ? t('Switch between your canvas projects.')
-      : t('Edit and review saved artifacts.')
+  let inspectorTitle = t('Artifacts')
+  let inspectorDescription = t('Edit and review saved artifacts.')
+  if (props.inspectorView === 'canvas') {
+    inspectorTitle = t('Canvases')
+    inspectorDescription = t('Switch between your canvas projects.')
+  } else if (props.inspectorView === 'generate') {
+    inspectorTitle = t('Generate')
+    inspectorDescription = t(
+      'Generate images, videos and audio through your configured channels.'
+    )
+  }
 
   return (
     <div className='relative flex size-full min-h-0 overflow-hidden'>
@@ -128,6 +133,17 @@ export function PlaygroundWorkspace(props: PlaygroundWorkspaceProps) {
           </div>
           <div className='flex items-center gap-1'>
             {props.usagePanel}
+            <Button
+              aria-pressed={props.inspectorView === 'generate'}
+              disabled={props.disabled}
+              onClick={() => props.onToggleInspector('generate')}
+              size='sm'
+              type='button'
+              variant={props.inspectorView === 'generate' ? 'secondary' : 'ghost'}
+            >
+              <Sparkles aria-hidden='true' />
+              {t('Generate')}
+            </Button>
             <Button
               aria-pressed={props.inspectorView === 'canvas'}
               disabled={props.disabled}

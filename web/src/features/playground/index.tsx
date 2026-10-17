@@ -36,6 +36,7 @@ import type { PlaygroundArtifactSummary } from './artifact-api'
 import { PlaygroundArtifactPanel } from './components/artifact/playground-artifact-panel'
 import { PlaygroundArtifactSourceSheet } from './components/artifact/playground-artifact-source-sheet'
 import { PlaygroundChat } from './components/chat/playground-chat'
+import { PlaygroundGenerationPanel } from './components/generation/playground-generation-panel'
 import { PlaygroundInput } from './components/input/playground-input'
 import { PlaygroundCanvasPanel } from './components/workspace/playground-canvas-panel'
 import { PlaygroundUsagePopover } from './components/workspace/playground-usage-popover'
@@ -93,6 +94,7 @@ function PlaygroundContent(props: {
     CanvasSendSeed[] | null
   >(null)
   const [canvasOpen, setCanvasOpen] = useState(false)
+  const [generationOpen, setGenerationOpen] = useState(false)
   const [canvasProjectId, setCanvasProjectId] = useState<string | null>(null)
   const appliedSessionRef = useRef<string | null>(null)
   const appliedArtifactRef = useRef<string | null>(null)
@@ -381,11 +383,13 @@ function PlaygroundContent(props: {
   let inspectorView: PlaygroundInspectorView | null = null
   if (artifactController.state.isOpen) inspectorView = 'artifacts'
   else if (canvasOpen) inspectorView = 'canvas'
+  else if (generationOpen) inspectorView = 'generate'
 
   const openCanvasInspector = useCallback(
     (projectId: string | null) => {
       const action = () => {
         artifactController.store.getState().setOpen(false)
+        setGenerationOpen(false)
         setCanvasProjectId(projectId)
         setCanvasOpen(true)
       }
@@ -406,21 +410,42 @@ function PlaygroundContent(props: {
           return
         }
         setCanvasOpen(false)
+        setGenerationOpen(false)
         artifactController.store.getState().setOpen(true)
         return
       }
-      if (canvasOpen) {
-        setCanvasOpen(false)
+      if (view === 'canvas') {
+        if (canvasOpen) {
+          setCanvasOpen(false)
+          return
+        }
+        setGenerationOpen(false)
+        openCanvasInspector(canvasProjectId)
         return
       }
-      openCanvasInspector(canvasProjectId)
+      if (generationOpen) {
+        setGenerationOpen(false)
+        return
+      }
+      const action = () => {
+        artifactController.store.getState().setOpen(false)
+        setCanvasOpen(false)
+        setGenerationOpen(true)
+      }
+      if (artifactController.state.dirty) {
+        artifactController.store.getState().requestDiscard(action)
+        return
+      }
+      action()
     },
     [
+      artifactController.state.dirty,
       artifactController.state.isOpen,
       artifactController.store,
       canvasOpen,
       canvasProjectId,
       closeArtifactPanel,
+      generationOpen,
       openCanvasInspector,
     ]
   )
@@ -430,8 +455,12 @@ function PlaygroundContent(props: {
       closeArtifactPanel()
       return
     }
-    setCanvasOpen(false)
-  }, [artifactController.state.isOpen, closeArtifactPanel])
+    if (canvasOpen) {
+      setCanvasOpen(false)
+      return
+    }
+    setGenerationOpen(false)
+  }, [artifactController.state.isOpen, canvasOpen, closeArtifactPanel])
 
   const handleOpenCanvasProject = useCallback(
     (projectId: string) => {
@@ -524,6 +553,14 @@ function PlaygroundContent(props: {
             <PlaygroundCanvasPanel
               activeProjectId={canvasProjectId}
               onOpenProject={handleOpenCanvasProject}
+            />
+          ) : inspectorView === 'generate' ? (
+            <PlaygroundGenerationPanel
+              active
+              disabled={sync.isLoading}
+              group={config.group}
+              models={models}
+              onSendToCanvas={(seeds) => setCanvasSendSeeds(seeds)}
             />
           ) : canonicalSessionId ? (
             <PlaygroundArtifactPanel

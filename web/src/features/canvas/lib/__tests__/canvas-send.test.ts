@@ -25,6 +25,7 @@ import {
   buildArtifactCanvasSeeds,
   buildCanvasSendNodes,
   buildMessageCanvasSeeds,
+  buildTaskResultCanvasSeeds,
   sendNodesToCanvas,
 } from '../canvas-send'
 
@@ -181,4 +182,44 @@ test('a revision conflict reloads the canvas and retries once', async () => {
   expect(
     vi.mocked(updateCanvasProject).mock.calls.map((call) => call[1].revision)
   ).toEqual([4, 5])
+})
+
+test('a task result becomes one canvas node per artifact, referenced by task and key', () => {
+  const seeds = buildTaskResultCanvasSeeds({
+    taskId: 'task_1',
+    label: 'kling-v1',
+    artifacts: [
+      { key: 'output-1', type: 'image' },
+      { key: 'output-2', type: 'video' },
+    ],
+  })
+
+  expect(seeds).toEqual([
+    {
+      kind: 'task-result',
+      label: 'kling-v1 · image',
+      ref: { taskId: 'task_1', taskArtifactKey: 'output-1' },
+    },
+    {
+      kind: 'task-result',
+      label: 'kling-v1 · video',
+      ref: { taskId: 'task_1', taskArtifactKey: 'output-2' },
+    },
+  ])
+})
+
+test('a task without projected artifacts still becomes a node that references the task', () => {
+  const seeds = buildTaskResultCanvasSeeds({
+    taskId: 'task_1',
+    label: 'kling-v1',
+    artifacts: [],
+  })
+
+  expect(seeds).toEqual([
+    {
+      kind: 'task-result',
+      label: 'kling-v1',
+      ref: { taskId: 'task_1' },
+    },
+  ])
 })

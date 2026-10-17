@@ -73,10 +73,12 @@ type playgroundCanvasNode struct {
 // node may carry in its opaque `data` payload. Only these IDs are treated as
 // resource ownership claims; everything else stays display-only.
 type playgroundCanvasNodeReference struct {
-	SessionID    string `json:"sessionId"`
-	MessageKey   string `json:"messageKey"`
-	AttachmentID string `json:"attachmentId"`
-	ArtifactID   string `json:"artifactId"`
+	SessionID       string `json:"sessionId"`
+	MessageKey      string `json:"messageKey"`
+	AttachmentID    string `json:"attachmentId"`
+	ArtifactID      string `json:"artifactId"`
+	TaskID          string `json:"taskId"`
+	TaskArtifactKey string `json:"taskArtifactKey"`
 }
 
 type playgroundCanvasNodeData struct {
@@ -267,7 +269,8 @@ func playgroundCanvasNodeReferences(document *playgroundCanvasDocument) []playgr
 			continue
 		}
 		ref := decoded.Ref
-		if ref.SessionID == "" && ref.MessageKey == "" && ref.AttachmentID == "" && ref.ArtifactID == "" {
+		if ref.SessionID == "" && ref.MessageKey == "" && ref.AttachmentID == "" && ref.ArtifactID == "" &&
+			ref.TaskID == "" && ref.TaskArtifactKey == "" {
 			continue
 		}
 		references = append(references, playgroundCanvasReferenceClaim{
@@ -275,6 +278,7 @@ func playgroundCanvasNodeReferences(document *playgroundCanvasDocument) []playgr
 			Reference: model.PlaygroundCanvasReference{
 				SessionID: ref.SessionID, MessageKey: ref.MessageKey,
 				AttachmentID: ref.AttachmentID, ArtifactID: ref.ArtifactID,
+				TaskID: ref.TaskID, TaskArtifactKey: ref.TaskArtifactKey,
 			},
 		})
 	}

@@ -204,3 +204,6 @@ export interface GroupOption {
   ratio: number | string
   desc?: string
 }
+
+// Media generation the workspace can start through the /pg relay routes.
+export type PlaygroundGenerationKind = 'image' | 'video' | 'audio'

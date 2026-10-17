@@ -7441,6 +7441,26 @@
     "Open canvas": "キャンバスを開く",
     "Open conversation": "会話を開く",
     "This canvas has no nodes yet.": "このキャンバスにはまだノードがありません。",
-    "Unable to load the canvas.": "キャンバスを読み込めません。"
+    "Unable to load the canvas.": "キャンバスを読み込めません。",
+    "Generate media": "メディアを生成",
+    "Generation type": "生成タイプ",
+    "Describe what you want to generate": "生成したい内容を入力",
+    "Size": "サイズ",
+    "Duration (seconds)": "長さ（秒）",
+    "Voice": "ボイス",
+    "Generated media": "生成結果",
+    "Generated audio": "生成された音声",
+    "Generation tasks": "生成タスク",
+    "Loading generation tasks...": "生成タスクを読み込み中...",
+    "No generation tasks": "生成タスクはありません",
+    "Start a generation and its status appears here.": "生成を開始すると、ここに状態が表示されます。",
+    "Generate images, videos and audio through your configured channels.": "設定済みのチャネルで画像・動画・音声を生成します。",
+    "Image generation failed": "画像の生成に失敗しました",
+    "Video generation failed": "動画の生成に失敗しました",
+    "Audio generation failed": "音声の生成に失敗しました",
+    "Failed to load the generation tasks": "生成タスクの読み込みに失敗しました",
+    "Unable to send the result to the canvas": "結果をキャンバスに送信できません",
+    "Playground task concurrency limit reached. Wait for a running task to finish.": "同時実行タスクの上限に達しました。実行中のタスクの完了をお待ちください。",
+    "Unable to check the account task budget.": "アカウントのタスク上限を確認できません。"
   }
 }

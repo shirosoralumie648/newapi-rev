@@ -82,14 +82,14 @@ func playgroundTestDB(t *testing.T, dialect string) *gorm.DB {
 	common.SetDatabaseTypes(common.DatabaseType(dialect), previousLog)
 	model.DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundMessage{}, &model.PlaygroundSession{}, &model.User{}))
+		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundMessage{}, &model.PlaygroundSession{}, &model.Task{}, &model.User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
 		model.DB = previous
 		common.SetDatabaseTypes(previousMain, previousLog)
 	})
-	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasAsset{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasAsset{}, &model.Task{}, &model.User{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -1405,4 +1405,46 @@ func TestPlaygroundArtifactAccountLimit(t *testing.T) {
 	response := playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions/"+secondSession+"/artifacts", secondInput, controller.CreatePlaygroundArtifact)
 	assert.Equal(t, http.StatusUnprocessableEntity, response.Code, response.Body.String())
 	assert.Contains(t, response.Body.String(), "PLAYGROUND_ARTIFACT_LIMIT_EXCEEDED")
+}
+
+// Async generation task concurrency is an independent Playground resource
+// budget: the count reads durable task rows of one account and never touches
+// token quota, and a group override replaces the global default.
+func TestPlaygroundTaskConcurrencyCount(t *testing.T) {
+	db := playgroundTestDB(t, "sqlite")
+	usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+		policy.TaskMaxConcurrency = 2
+	})
+	usePlaygroundGroupQuota(t, "default", playground_setting.PlaygroundQuotaPolicy{TaskMaxConcurrency: 1})
+
+	tasks := []model.Task{
+		{TaskID: "pg-task-queued", Platform: "sunoapi", UserId: 7, Status: model.TaskStatusQueued, SubmitTime: 1},
+		{TaskID: "pg-task-running", Platform: "sunoapi", UserId: 7, Status: model.TaskStatusInProgress, SubmitTime: 2},
+		{TaskID: "pg-task-failed", Platform: "sunoapi", UserId: 7, Status: model.TaskStatusFailure, SubmitTime: 3},
+		{TaskID: "pg-task-done", Platform: "sunoapi", UserId: 7, Status: model.TaskStatusSuccess, SubmitTime: 4},
+		{TaskID: "pg-task-other", Platform: "sunoapi", UserId: 8, Status: model.TaskStatusSubmitted, SubmitTime: 5},
+	}
+	for index := range tasks {
+		require.NoError(t, db.Create(&tasks[index]).Error)
+	}
+
+	count, err := model.CountActivePlaygroundTasks(7)
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, count, "only unfinished tasks of the owner consume the budget")
+	count, err = model.CountActivePlaygroundTasks(8)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, count)
+	count, err = model.CountActivePlaygroundTasks(0)
+	require.NoError(t, err)
+	assert.EqualValues(t, 0, count)
+
+	policy, err := model.PlaygroundQuotaPolicyForUser(7)
+	require.NoError(t, err)
+	assert.Equal(t, 1, policy.TaskMaxConcurrency, "the group override replaces the global default")
+
+	// Finishing one task frees a slot without deleting the row.
+	require.NoError(t, db.Model(&model.Task{}).Where("task_id = ?", "pg-task-queued").Update("status", model.TaskStatusSuccess).Error)
+	count, err = model.CountActivePlaygroundTasks(7)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, count)
 }

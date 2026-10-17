@@ -7441,6 +7441,26 @@
     "Open canvas": "Открыть холст",
     "Open conversation": "Открыть разговор",
     "This canvas has no nodes yet.": "На этом холсте пока нет узлов.",
-    "Unable to load the canvas.": "Не удалось загрузить холст."
+    "Unable to load the canvas.": "Не удалось загрузить холст.",
+    "Generate media": "Создать медиа",
+    "Generation type": "Тип генерации",
+    "Describe what you want to generate": "Опишите, что нужно создать",
+    "Size": "Размер",
+    "Duration (seconds)": "Длительность (в секундах)",
+    "Voice": "Голос",
+    "Generated media": "Созданные медиа",
+    "Generated audio": "Созданное аудио",
+    "Generation tasks": "Задачи генерации",
+    "Loading generation tasks...": "Загрузка задач генерации...",
+    "No generation tasks": "Нет задач генерации",
+    "Start a generation and its status appears here.": "Запустите генерацию, и её статус появится здесь.",
+    "Generate images, videos and audio through your configured channels.": "Создавайте изображения, видео и аудио через настроенные каналы.",
+    "Image generation failed": "Не удалось создать изображение",
+    "Video generation failed": "Не удалось создать видео",
+    "Audio generation failed": "Не удалось создать аудио",
+    "Failed to load the generation tasks": "Не удалось загрузить задачи генерации",
+    "Unable to send the result to the canvas": "Не удалось отправить результат на холст",
+    "Playground task concurrency limit reached. Wait for a running task to finish.": "Достигнут предел одновременных задач. Дождитесь завершения текущей задачи.",
+    "Unable to check the account task budget.": "Не удалось проверить лимит задач аккаунта."
   }
 }

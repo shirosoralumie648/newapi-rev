@@ -120,6 +120,41 @@ export function buildArtifactCanvasSeeds(
   ]
 }
 
+export interface TaskResultCanvasSeedInput {
+  taskId: string
+  label: string
+  artifacts: { key: string; type: string }[]
+}
+
+/**
+ * Maps one async generation task to canvas nodes. Each artifact the task
+ * exposes becomes a `task-result` node that references the task by its public
+ * id plus the artifact key; the bytes stay behind the owner-scoped task
+ * artifact endpoints, so the canvas never stores a provider URL. A task
+ * without artifacts still yields one node that references the task itself.
+ */
+export function buildTaskResultCanvasSeeds(
+  input: TaskResultCanvasSeedInput
+): CanvasSendSeed[] {
+  if (input.artifacts.length === 0) {
+    return [
+      {
+        kind: 'task-result',
+        label: input.label,
+        ref: { taskId: input.taskId },
+      },
+    ]
+  }
+  return input.artifacts.map((artifact) => ({
+    kind: 'task-result' as const,
+    label: `${input.label} · ${artifact.type}`,
+    ref: {
+      taskId: input.taskId,
+      ...(artifact.key ? { taskArtifactKey: artifact.key } : {}),
+    },
+  }))
+}
+
 /** Places the given nodes in a small cascade below the existing content. */
 export function buildCanvasSendNodes(
   seeds: CanvasSendSeed[],

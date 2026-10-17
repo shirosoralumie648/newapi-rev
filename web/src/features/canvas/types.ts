@@ -38,12 +38,16 @@ export type CanvasMessageSnapshot = {
 
 // References are ID claims only. The bytes of an attachment or artifact stay
 // behind the owner-scoped content endpoints; a `blob:` or arbitrary URL is
-// never stored as proof that a canvas owns a resource.
+// never stored as proof that a canvas owns a resource. A task result is the
+// same contract: the canvas stores the public task id and the artifact key,
+// and the server re-checks task ownership on every save.
 export type CanvasNodeRef = {
   sessionId?: string
   messageKey?: string
   attachmentId?: string
   artifactId?: string
+  taskId?: string
+  taskArtifactKey?: string
 }
 
 export type CanvasNodeData = {
