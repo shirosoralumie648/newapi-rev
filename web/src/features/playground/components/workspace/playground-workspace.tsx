@@ -16,16 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { FileText, Menu, PanelLeft } from 'lucide-react'
+import { FileText, Frame, Menu, PanelLeft } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from '@/components/ui/resizable'
 import {
   Sheet,
   SheetContent,
@@ -33,10 +28,17 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
+import { WorkspaceInspector } from '@/components/workspace-inspector'
 import { useIsMobile } from '@/hooks/use-mobile'
 
 import type { PlaygroundSession } from '../../types'
 import { PlaygroundSessionList } from './playground-session-list'
+
+/**
+ * Which view the unified right-side Inspector shows. The Inspector itself is
+ * owner of the desktop resizable layout and the mobile Sheet.
+ */
+export type PlaygroundInspectorView = 'artifacts' | 'canvas'
 
 interface PlaygroundWorkspaceProps {
   disabled?: boolean
@@ -48,11 +50,11 @@ interface PlaygroundWorkspaceProps {
   onDelete: (sessionId: string) => void
   children: React.ReactNode
   usagePanel?: React.ReactNode
-  artifactsOpen?: boolean
-  artifactPanel?: React.ReactNode
-  onToggleArtifacts?: () => void
-  onCloseArtifacts?: () => void
-  artifactDisabled?: boolean
+  inspectorView: PlaygroundInspectorView | null
+  inspector: React.ReactNode
+  onToggleInspector: (view: PlaygroundInspectorView) => void
+  onCloseInspector: () => void
+  artifactsDisabled?: boolean
 }
 
 export function PlaygroundWorkspace(props: PlaygroundWorkspaceProps) {
@@ -72,6 +74,13 @@ export function PlaygroundWorkspace(props: PlaygroundWorkspaceProps) {
       sessions={props.sessions}
     />
   )
+
+  const inspectorTitle =
+    props.inspectorView === 'canvas' ? t('Canvases') : t('Artifacts')
+  const inspectorDescription =
+    props.inspectorView === 'canvas'
+      ? t('Switch between your canvas projects.')
+      : t('Edit and review saved artifacts.')
 
   return (
     <div className='relative flex size-full min-h-0 overflow-hidden'>
@@ -119,60 +128,41 @@ export function PlaygroundWorkspace(props: PlaygroundWorkspaceProps) {
           </div>
           <div className='flex items-center gap-1'>
             {props.usagePanel}
-            {props.onToggleArtifacts && (
-              <Button
-                aria-pressed={Boolean(props.artifactsOpen)}
-                disabled={props.disabled || props.artifactDisabled}
-                onClick={props.onToggleArtifacts}
-                size='sm'
-                type='button'
-                variant={props.artifactsOpen ? 'secondary' : 'ghost'}
-              >
-                <FileText aria-hidden='true' />
-                {t('Artifacts')}
-              </Button>
-            )}
+            <Button
+              aria-pressed={props.inspectorView === 'canvas'}
+              disabled={props.disabled}
+              onClick={() => props.onToggleInspector('canvas')}
+              size='sm'
+              type='button'
+              variant={props.inspectorView === 'canvas' ? 'secondary' : 'ghost'}
+            >
+              <Frame aria-hidden='true' />
+              {t('Canvases')}
+            </Button>
+            <Button
+              aria-pressed={props.inspectorView === 'artifacts'}
+              disabled={props.disabled || props.artifactsDisabled}
+              onClick={() => props.onToggleInspector('artifacts')}
+              size='sm'
+              type='button'
+              variant={
+                props.inspectorView === 'artifacts' ? 'secondary' : 'ghost'
+              }
+            >
+              <FileText aria-hidden='true' />
+              {t('Artifacts')}
+            </Button>
           </div>
         </div>
-        {isMobile && <div className='min-h-0 flex-1'>{props.children}</div>}
-        {!isMobile && props.artifactsOpen && props.artifactPanel && (
-          <ResizablePanelGroup
-            orientation='horizontal'
-            className='min-h-0 flex-1'
-          >
-            <ResizablePanel defaultSize='62' minSize='35'>
-              {props.children}
-            </ResizablePanel>
-            <ResizableHandle withHandle />
-            <ResizablePanel defaultSize='38' minSize='28'>
-              {props.artifactPanel}
-            </ResizablePanel>
-          </ResizablePanelGroup>
-        )}
-        {!isMobile && (!props.artifactsOpen || !props.artifactPanel) && (
-          <div className='min-h-0 flex-1'>{props.children}</div>
-        )}
-        {isMobile && props.artifactPanel && (
-          <Sheet
-            open={Boolean(props.artifactsOpen)}
-            onOpenChange={(open) => {
-              if (!open) props.onCloseArtifacts?.()
-            }}
-          >
-            <SheetContent
-              className='w-full gap-0 p-0 sm:max-w-3xl'
-              side='right'
-            >
-              <SheetHeader className='sr-only'>
-                <SheetTitle>{t('Artifacts')}</SheetTitle>
-                <SheetDescription>
-                  {t('Edit and review saved artifacts.')}
-                </SheetDescription>
-              </SheetHeader>
-              {props.artifactPanel}
-            </SheetContent>
-          </Sheet>
-        )}
+        <WorkspaceInspector
+          open={props.inspectorView !== null}
+          onClose={props.onCloseInspector}
+          title={inspectorTitle}
+          description={inspectorDescription}
+          main={props.children}
+        >
+          {props.inspector}
+        </WorkspaceInspector>
       </div>
     </div>
   )

@@ -40,65 +40,80 @@ const baseProps = {
   onSwitch: vi.fn(),
   onRename: vi.fn(),
   onDelete: vi.fn(),
+  inspectorView: null,
+  inspector: <div>Inspector body</div>,
+  onToggleInspector: vi.fn(),
+  onCloseInspector: vi.fn(),
 }
 
-test('desktop shows chat and artifact panel side by side without a modal', () => {
+test('desktop shows chat and inspector side by side without a modal', () => {
   render(
-    <PlaygroundWorkspace
-      {...baseProps}
-      artifactsOpen
-      artifactPanel={<div>Artifact body</div>}
-    >
+    <PlaygroundWorkspace {...baseProps} inspectorView='artifacts'>
       <div>Chat body</div>
     </PlaygroundWorkspace>
   )
 
   expect(screen.getByText('Chat body')).toBeVisible()
-  expect(screen.getByText('Artifact body')).toBeVisible()
+  expect(screen.getByText('Inspector body')).toBeVisible()
   expect(screen.queryByRole('dialog')).toBeNull()
 })
 
-test('desktop hides the artifact panel and reports toggle state', async () => {
+test('desktop hides the inspector and reports the requested view', async () => {
   const user = userEvent.setup()
-  const onToggleArtifacts = vi.fn()
+  const onToggleInspector = vi.fn()
   render(
-    <PlaygroundWorkspace
-      {...baseProps}
-      artifactsOpen={false}
-      artifactPanel={<div>Artifact body</div>}
-      onToggleArtifacts={onToggleArtifacts}
-    >
+    <PlaygroundWorkspace {...baseProps} onToggleInspector={onToggleInspector}>
       <div>Chat body</div>
     </PlaygroundWorkspace>
   )
 
-  expect(screen.queryByText('Artifact body')).toBeNull()
-  const toggle = screen.getByRole('button', { name: 'Artifacts' })
-  expect(toggle).toHaveAttribute('aria-pressed', 'false')
-  await user.click(toggle)
-  expect(onToggleArtifacts).toHaveBeenCalledTimes(1)
+  expect(screen.queryByText('Inspector body')).toBeNull()
+  const artifacts = screen.getByRole('button', { name: 'Artifacts' })
+  const canvases = screen.getByRole('button', { name: 'Canvases' })
+  expect(artifacts).toHaveAttribute('aria-pressed', 'false')
+  expect(canvases).toHaveAttribute('aria-pressed', 'false')
+  await user.click(artifacts)
+  expect(onToggleInspector).toHaveBeenCalledWith('artifacts')
+  await user.click(canvases)
+  expect(onToggleInspector).toHaveBeenCalledWith('canvas')
 })
 
-test('mobile presents the artifact panel in a sheet closing to the controller', async () => {
+test('desktop marks the active canvas inspector view', () => {
+  render(
+    <PlaygroundWorkspace {...baseProps} inspectorView='canvas'>
+      <div>Chat body</div>
+    </PlaygroundWorkspace>
+  )
+
+  expect(screen.getByRole('button', { name: 'Canvases' })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  )
+  expect(screen.getByRole('button', { name: 'Artifacts' })).toHaveAttribute(
+    'aria-pressed',
+    'false'
+  )
+  expect(screen.getByText('Inspector body')).toBeVisible()
+})
+
+test('mobile presents the inspector in a sheet closing to the controller', async () => {
   window.innerWidth = 375
   const user = userEvent.setup()
-  const onCloseArtifacts = vi.fn()
+  const onCloseInspector = vi.fn()
   render(
     <PlaygroundWorkspace
       {...baseProps}
-      artifactsOpen
-      artifactPanel={<div>Artifact body</div>}
-      onToggleArtifacts={vi.fn()}
-      onCloseArtifacts={onCloseArtifacts}
+      inspectorView='artifacts'
+      onCloseInspector={onCloseInspector}
     >
       <div>Chat body</div>
     </PlaygroundWorkspace>
   )
 
   const dialog = await screen.findByRole('dialog')
-  expect(within(dialog).getByText('Artifact body')).toBeVisible()
+  expect(within(dialog).getByText('Inspector body')).toBeVisible()
   await user.keyboard('{Escape}')
-  await waitFor(() => expect(onCloseArtifacts).toHaveBeenCalledTimes(1))
+  await waitFor(() => expect(onCloseInspector).toHaveBeenCalledTimes(1))
 })
 
 test('mobile opens the conversation list from the header button', async () => {

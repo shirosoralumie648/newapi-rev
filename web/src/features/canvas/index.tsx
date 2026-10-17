@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useNavigate } from '@tanstack/react-router'
 import { Menu, PanelLeft } from 'lucide-react'
 import { useCallback, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -40,11 +41,23 @@ import { CanvasEditor } from './components/canvas-editor'
 import { CanvasProjectList } from './components/canvas-project-list'
 import { CANVAS_DEFAULT_TITLE } from './constants'
 import { useCanvasProject, type CanvasSaveStatus } from './hooks/use-canvas-project'
+import { canvasSourceSearch } from './lib/canvas-navigation'
+import type { CanvasSourceTarget } from './lib/canvas-navigation'
 import type { CanvasServerDocument } from './types'
 
-export function CanvasWorkspace() {
+interface CanvasWorkspaceProps {
+  /** Project to open on first load; overrides the last-used selection. */
+  initialProjectId?: string
+}
+
+export function CanvasWorkspace(props: CanvasWorkspaceProps) {
   const userId = useAuthStore((state) => state.auth.user?.id ?? null)
-  return <CanvasWorkspaceContent key={userId ?? 'signed-out'} />
+  return (
+    <CanvasWorkspaceContent
+      key={userId ?? 'signed-out'}
+      initialProjectId={props.initialProjectId}
+    />
+  )
 }
 
 const SAVE_LABELS: Record<CanvasSaveStatus, string> = {
@@ -56,11 +69,12 @@ const SAVE_LABELS: Record<CanvasSaveStatus, string> = {
   conflict: 'Save conflict',
 }
 
-function CanvasWorkspaceContent() {
+function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
   const { t } = useTranslation()
   const isMobile = useIsMobile()
+  const navigate = useNavigate()
   const userId = useAuthStore((state) => state.auth.user?.id ?? null)
-  const controller = useCanvasProject(userId)
+  const controller = useCanvasProject(userId, props.initialProjectId)
   const [listOpen, setListOpen] = useState(false)
   const [epoch, setEpoch] = useState(0)
 
@@ -138,6 +152,13 @@ function CanvasWorkspaceContent() {
     [controller]
   )
 
+  const handleOpenSource = useCallback(
+    (target: CanvasSourceTarget) => {
+      void navigate({ to: '/playground', search: canvasSourceSearch(target) })
+    },
+    [navigate]
+  )
+
   const { project, status, error, dirty, conflict } = controller
   const projectList = (
     <CanvasProjectList
@@ -172,6 +193,7 @@ function CanvasWorkspaceContent() {
         key={`${project.id}:${epoch}`}
         disabled={status === 'loading'}
         onChange={handleDocumentChange}
+        onOpenSource={handleOpenSource}
         project={project}
       />
     )

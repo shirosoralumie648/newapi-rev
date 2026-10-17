@@ -70,7 +70,10 @@ function readStoredProjectId(key: string | null): string | null {
  * scoped to the signed-in account through the localStorage key and the
  * server-side owner filter.
  */
-export function useCanvasProject(userId: number | null) {
+export function useCanvasProject(
+  userId: number | null,
+  preferredProjectId?: string
+) {
   const [projects, setProjects] = useState<CanvasProjectSummary[]>([])
   const [project, setProject] = useState<CanvasServerProject | null>(null)
   const [status, setStatus] = useState<CanvasSaveStatus>('idle')
@@ -173,12 +176,18 @@ export function useCanvasProject(userId: number | null) {
       setStatus('idle')
       return
     }
-    void refreshProjects().catch((loadError) => {
+    void refreshProjects(preferredProjectId).catch((loadError) => {
       if (!mounted.current) return
       setError(toError(loadError))
       setStatus('error')
     })
-  }, [userId, refreshProjects, setActiveProject, applyProjects])
+  }, [
+    userId,
+    preferredProjectId,
+    refreshProjects,
+    setActiveProject,
+    applyProjects,
+  ])
 
   const flush = useCallback(async () => {
     const active = projectRef.current

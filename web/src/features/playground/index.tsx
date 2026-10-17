@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -37,8 +37,12 @@ import { PlaygroundArtifactPanel } from './components/artifact/playground-artifa
 import { PlaygroundArtifactSourceSheet } from './components/artifact/playground-artifact-source-sheet'
 import { PlaygroundChat } from './components/chat/playground-chat'
 import { PlaygroundInput } from './components/input/playground-input'
+import { PlaygroundCanvasPanel } from './components/workspace/playground-canvas-panel'
 import { PlaygroundUsagePopover } from './components/workspace/playground-usage-popover'
-import { PlaygroundWorkspace } from './components/workspace/playground-workspace'
+import {
+  PlaygroundWorkspace,
+  type PlaygroundInspectorView,
+} from './components/workspace/playground-workspace'
 import {
   useChatHandler,
   usePlaygroundConversation,
@@ -55,14 +59,30 @@ import {
   PLAYGROUND_ATTACHMENT_ERRORS,
   uploadPlaygroundAttachments,
 } from './lib'
-import type { Message, MessageAttachment } from './types'
+import type {
+  Message,
+  MessageAttachment,
+  PlaygroundRouteTarget,
+} from './types'
 
-export function Playground() {
+export function Playground(props: {
+  target?: PlaygroundRouteTarget
+  onOpenCanvas?: (projectId: string) => void
+}) {
   const userId = useAuthStore((state) => state.auth.user?.id ?? null)
-  return <PlaygroundContent key={userId ?? 'signed-out'} />
+  return (
+    <PlaygroundContent
+      key={userId ?? 'signed-out'}
+      target={props.target}
+      onOpenCanvas={props.onOpenCanvas}
+    />
+  )
 }
 
-function PlaygroundContent() {
+function PlaygroundContent(props: {
+  target?: PlaygroundRouteTarget
+  onOpenCanvas?: (projectId: string) => void
+}) {
   const { t } = useTranslation()
   const userId = useAuthStore((state) => state.auth.user?.id ?? null)
   const [artifactSource, setArtifactSource] = useState<{
@@ -72,6 +92,10 @@ function PlaygroundContent() {
   const [canvasSendSeeds, setCanvasSendSeeds] = useState<
     CanvasSendSeed[] | null
   >(null)
+  const [canvasOpen, setCanvasOpen] = useState(false)
+  const [canvasProjectId, setCanvasProjectId] = useState<string | null>(null)
+  const appliedSessionRef = useRef<string | null>(null)
+  const appliedArtifactRef = useRef<string | null>(null)
   const local = usePlaygroundState()
   const {
     config,
@@ -354,6 +378,111 @@ function PlaygroundContent() {
     if (!open) setArtifactSource(null)
   }, [])
 
+  let inspectorView: PlaygroundInspectorView | null = null
+  if (artifactController.state.isOpen) inspectorView = 'artifacts'
+  else if (canvasOpen) inspectorView = 'canvas'
+
+  const openCanvasInspector = useCallback(
+    (projectId: string | null) => {
+      const action = () => {
+        artifactController.store.getState().setOpen(false)
+        setCanvasProjectId(projectId)
+        setCanvasOpen(true)
+      }
+      if (artifactController.state.dirty) {
+        artifactController.store.getState().requestDiscard(action)
+        return
+      }
+      action()
+    },
+    [artifactController.state.dirty, artifactController.store]
+  )
+
+  const handleToggleInspector = useCallback(
+    (view: PlaygroundInspectorView) => {
+      if (view === 'artifacts') {
+        if (artifactController.state.isOpen) {
+          closeArtifactPanel()
+          return
+        }
+        setCanvasOpen(false)
+        artifactController.store.getState().setOpen(true)
+        return
+      }
+      if (canvasOpen) {
+        setCanvasOpen(false)
+        return
+      }
+      openCanvasInspector(canvasProjectId)
+    },
+    [
+      artifactController.state.isOpen,
+      artifactController.store,
+      canvasOpen,
+      canvasProjectId,
+      closeArtifactPanel,
+      openCanvasInspector,
+    ]
+  )
+
+  const handleCloseInspector = useCallback(() => {
+    if (artifactController.state.isOpen) {
+      closeArtifactPanel()
+      return
+    }
+    setCanvasOpen(false)
+  }, [artifactController.state.isOpen, closeArtifactPanel])
+
+  const handleOpenCanvasProject = useCallback(
+    (projectId: string) => {
+      props.onOpenCanvas?.(projectId)
+    },
+    [props.onOpenCanvas]
+  )
+
+  // After "Send to canvas", preview the canvas the nodes landed in so the user
+  // can jump to the full editor from the chat workspace.
+  const handleCanvasSent = useCallback(
+    (project: { id: string }) => {
+      openCanvasInspector(project.id)
+    },
+    [openCanvasInspector]
+  )
+
+  const requestedSession = props.target?.session
+  useEffect(() => {
+    if (!requestedSession || sync.isLoading) return
+    const match = sessions.find(
+      (session) => session.server?.id === requestedSession
+    )
+    if (!match) return
+    if (appliedSessionRef.current === requestedSession) return
+    appliedSessionRef.current = requestedSession
+    if (match.id !== activeSessionId) handleSwitchSession(match.id)
+  }, [
+    activeSessionId,
+    handleSwitchSession,
+    requestedSession,
+    sessions,
+    sync.isLoading,
+  ])
+
+  const requestedArtifact = props.target?.artifact
+  useEffect(() => {
+    if (!requestedArtifact || !canonicalSessionId) return
+    if (requestedSession && canonicalSessionId !== requestedSession) return
+    if (appliedArtifactRef.current === requestedArtifact) return
+    appliedArtifactRef.current = requestedArtifact
+    setCanvasOpen(false)
+    artifactController.store.getState().setOpen(true)
+    artifactController.store.getState().selectArtifact(requestedArtifact)
+  }, [
+    canonicalSessionId,
+    requestedArtifact,
+    requestedSession,
+    artifactController.store,
+  ])
+
   const updateLoadedConfig = useCallback<typeof updateConfig>(
     (key, value) => {
       if (!sync.isLoading) updateConfig(key, value)
@@ -386,24 +515,23 @@ function PlaygroundContent() {
         usagePanel={
           userId ? <PlaygroundUsagePopover userId={userId} /> : undefined
         }
-        artifactsOpen={artifactController.state.isOpen}
-        artifactDisabled={!canonicalSessionId}
-        onToggleArtifacts={() => {
-          if (artifactController.state.isOpen) {
-            closeArtifactPanel()
-          } else {
-            artifactController.store.getState().setOpen(true)
-          }
-        }}
-        onCloseArtifacts={closeArtifactPanel}
-        artifactPanel={
-          canonicalSessionId ? (
+        inspectorView={inspectorView}
+        artifactsDisabled={!canonicalSessionId}
+        onToggleInspector={handleToggleInspector}
+        onCloseInspector={handleCloseInspector}
+        inspector={
+          inspectorView === 'canvas' ? (
+            <PlaygroundCanvasPanel
+              activeProjectId={canvasProjectId}
+              onOpenProject={handleOpenCanvasProject}
+            />
+          ) : canonicalSessionId ? (
             <PlaygroundArtifactPanel
               controller={artifactController}
               onClose={closeArtifactPanel}
               onSendToCanvas={handleSendArtifactToCanvas}
             />
-          ) : undefined
+          ) : null
         }
       >
         <div className='relative flex size-full min-h-0 flex-col overflow-hidden'>
@@ -504,6 +632,7 @@ function PlaygroundContent() {
         onOpenChange={(open) => {
           if (!open) setCanvasSendSeeds(null)
         }}
+        onSent={handleCanvasSent}
         seeds={canvasSendSeeds ?? []}
       />
     </>

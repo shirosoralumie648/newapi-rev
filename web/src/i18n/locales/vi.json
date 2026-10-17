@@ -7436,6 +7436,11 @@
     "Loading resource usage...": "Đang tải mức sử dụng tài nguyên…",
     "Resource usage could not be loaded.": "Không thể tải mức sử dụng tài nguyên.",
     "{{used}} of {{limit}}": "{{used}} / {{limit}}",
-    "Your resource usage in the Playground. Limits are set by your administrator.": "Mức sử dụng tài nguyên của bạn trong Playground. Giới hạn do quản trị viên đặt."
+    "Your resource usage in the Playground. Limits are set by your administrator.": "Mức sử dụng tài nguyên của bạn trong Playground. Giới hạn do quản trị viên đặt.",
+    "Open artifact": "Mở sản phẩm",
+    "Open canvas": "Mở bảng vẽ",
+    "Open conversation": "Mở cuộc trò chuyện",
+    "This canvas has no nodes yet.": "Bảng vẽ này chưa có nút nào.",
+    "Unable to load the canvas.": "Không thể tải bảng vẽ."
   }
 }

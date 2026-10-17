@@ -63,6 +63,7 @@ beforeEach(() => {
 test('appends the seeds to the canvas the user picks', async () => {
   const user = userEvent.setup()
   const onOpenChange = vi.fn()
+  const onSent = vi.fn()
   vi.mocked(listCanvasProjects).mockResolvedValue([summary])
   vi.mocked(getCanvasProject).mockResolvedValue(project)
   vi.mocked(updateCanvasProject).mockResolvedValue({ ...project, revision: 2 })
@@ -72,12 +73,13 @@ test('appends the seeds to the canvas the user picks', async () => {
       open
       onOpenChange={onOpenChange}
       seeds={seeds}
-      onSent={vi.fn()}
+      onSent={onSent}
     />
   )
 
   await user.click(await screen.findByRole('button', { name: /Board A/ }))
   await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+  expect(onSent).toHaveBeenCalledWith({ ...project, revision: 2 })
 
   const [id, input] = vi.mocked(updateCanvasProject).mock.calls[0]
   expect(id).toBe('c1')

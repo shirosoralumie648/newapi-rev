@@ -7436,6 +7436,11 @@
     "Loading resource usage...": "リソース使用量を読み込んでいます…",
     "Resource usage could not be loaded.": "リソース使用量を読み込めませんでした。",
     "{{used}} of {{limit}}": "{{used}} / {{limit}}",
-    "Your resource usage in the Playground. Limits are set by your administrator.": "Playground でのリソース使用量です。上限は管理者が設定します。"
+    "Your resource usage in the Playground. Limits are set by your administrator.": "Playground でのリソース使用量です。上限は管理者が設定します。",
+    "Open artifact": "成果物を開く",
+    "Open canvas": "キャンバスを開く",
+    "Open conversation": "会話を開く",
+    "This canvas has no nodes yet.": "このキャンバスにはまだノードがありません。",
+    "Unable to load the canvas.": "キャンバスを読み込めません。"
   }
 }

@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Trash2 } from 'lucide-react'
+import { FileText, MessageSquare, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -25,6 +25,10 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 
 import { CANVAS_NODE_KIND_LABELS } from '../constants'
+import {
+  canvasNodeSourceTarget,
+  type CanvasSourceTarget,
+} from '../lib/canvas-navigation'
 import type { CanvasFlowNode, CanvasNodeData } from '../types'
 
 interface CanvasNodeInspectorProps {
@@ -32,6 +36,7 @@ interface CanvasNodeInspectorProps {
   disabled?: boolean
   onUpdateData: (id: string, patch: Partial<CanvasNodeData>) => void
   onDelete: (id: string) => void
+  onOpenSource?: (target: CanvasSourceTarget) => void
 }
 
 export function CanvasNodeInspector(props: CanvasNodeInspectorProps) {
@@ -56,6 +61,7 @@ export function CanvasNodeInspector(props: CanvasNodeInspectorProps) {
   const kindLabel = t(CANVAS_NODE_KIND_LABELS[node.data.kind])
   const snapshot = node.data.snapshot
   const reference = node.data.ref
+  const sourceTarget = canvasNodeSourceTarget(reference)
   const editable =
     node.data.kind === 'text' ||
     node.data.kind === 'prompt' ||
@@ -139,6 +145,38 @@ export function CanvasNodeInspector(props: CanvasNodeInspectorProps) {
             </div>
           ) : null}
         </dl>
+      ) : null}
+
+      {sourceTarget && props.onOpenSource ? (
+        <div className='grid gap-2'>
+          <span className='text-muted-foreground text-xs'>
+            {t('Source')}
+          </span>
+          <div className='flex flex-wrap gap-2'>
+            <Button
+              disabled={props.disabled}
+              onClick={() => props.onOpenSource?.(sourceTarget)}
+              size='sm'
+              type='button'
+              variant='outline'
+            >
+              <MessageSquare aria-hidden='true' />
+              {t('Open conversation')}
+            </Button>
+            {sourceTarget.artifactId ? (
+              <Button
+                disabled={props.disabled}
+                onClick={() => props.onOpenSource?.(sourceTarget)}
+                size='sm'
+                type='button'
+                variant='outline'
+              >
+                <FileText aria-hidden='true' />
+                {t('Open artifact')}
+              </Button>
+            ) : null}
+          </div>
+        </div>
       ) : null}
 
       <div className='mt-auto flex justify-end'>

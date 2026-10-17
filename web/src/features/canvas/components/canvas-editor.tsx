@@ -23,12 +23,7 @@ import { toast } from 'sonner'
 
 import { Canvas } from '@/components/ai-elements/canvas'
 import { Panel } from '@/components/ai-elements/panel'
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet'
+import { WorkspaceInspector } from '@/components/workspace-inspector'
 import { useIsMobile } from '@/hooks/use-mobile'
 
 import { useCanvasEditor } from '../hooks/use-canvas-editor'
@@ -39,6 +34,7 @@ import {
   toServerDocument,
   validateCanvasDocument,
 } from '../lib/canvas-document'
+import type { CanvasSourceTarget } from '../lib/canvas-navigation'
 import type {
   CanvasFlowEdge,
   CanvasFlowNode,
@@ -66,6 +62,7 @@ interface CanvasEditorProps {
   project: CanvasServerProject
   disabled?: boolean
   onChange: (document: CanvasServerDocument) => void
+  onOpenSource?: (target: CanvasSourceTarget) => void
 }
 
 export function CanvasEditor(props: CanvasEditorProps) {
@@ -143,69 +140,57 @@ export function CanvasEditor(props: CanvasEditorProps) {
   )
 
   const inspector = (
-    <CanvasNodeInspector
-      disabled={props.disabled}
-      node={editor.selectedNode}
-      onDelete={editor.deleteNode}
-      onUpdateData={editor.updateNodeData}
-    />
+    <div className='bg-muted/10 flex h-full min-h-0 w-full flex-col overflow-hidden border-l'>
+      <CanvasNodeInspector
+        disabled={props.disabled}
+        node={editor.selectedNode}
+        onDelete={editor.deleteNode}
+        onOpenSource={props.onOpenSource}
+        onUpdateData={editor.updateNodeData}
+      />
+    </div>
   )
 
   return (
     <div className='flex min-h-0 flex-1 overflow-hidden'>
-      <div className='relative min-h-0 min-w-0 flex-1'>
-        <Canvas
-          defaultViewport={props.project.document.viewport}
-          edges={editor.edges}
-          fitView={!props.project.document.viewport}
-          nodeTypes={canvasNodeTypes}
-          nodes={editor.nodes}
-          onConnect={editor.handleConnect}
-          onEdgesChange={editor.handleEdgesChange}
-          onMoveEnd={handleMoveEnd}
-          onNodesChange={editor.handleNodesChange}
-        >
-          <Panel position='top-left'>
-            <CanvasToolbar
-              canRedo={editor.canRedo}
-              canUndo={editor.canUndo}
-              disabled={props.disabled}
-              onAddNode={handleAddNode}
-              onExport={handleExport}
-              onImportFile={handleImportFile}
-              onRedo={editor.redo}
-              onUndo={editor.undo}
-            />
-          </Panel>
-          <MiniMap
-            className='bg-card!'
-            pannable
-            zoomable
-          />
-        </Canvas>
-      </div>
-
-      {!isMobile && (
-        <aside className='bg-muted/10 flex w-72 shrink-0 flex-col overflow-hidden border-l'>
-          {inspector}
-        </aside>
-      )}
-
-      {isMobile && (
-        <Sheet
-          onOpenChange={(open) => {
-            if (!open) editor.clearSelection()
-          }}
-          open={editor.selectedNode !== null}
-        >
-          <SheetContent className='w-full gap-0 p-0 sm:max-w-md' side='right'>
-            <SheetHeader className='sr-only'>
-              <SheetTitle>{t('Node details')}</SheetTitle>
-            </SheetHeader>
-            {inspector}
-          </SheetContent>
-        </Sheet>
-      )}
+      <WorkspaceInspector
+        open={isMobile ? editor.selectedNode !== null : true}
+        onClose={editor.clearSelection}
+        title={t('Node details')}
+        main={
+          <div className='relative min-h-0 min-w-0 flex-1'>
+            <Canvas
+              defaultViewport={props.project.document.viewport}
+              edges={editor.edges}
+              fitView={!props.project.document.viewport}
+              nodeTypes={canvasNodeTypes}
+              nodes={editor.nodes}
+              onConnect={editor.handleConnect}
+              onEdgesChange={editor.handleEdgesChange}
+              onMoveEnd={handleMoveEnd}
+              onNodesChange={editor.handleNodesChange}
+            >
+              <Panel position='top-left'>
+                <CanvasToolbar
+                  canRedo={editor.canRedo}
+                  canUndo={editor.canUndo}
+                  disabled={props.disabled}
+                  onAddNode={handleAddNode}
+                  onExport={handleExport}
+                  onImportFile={handleImportFile}
+                  onRedo={editor.redo}
+                  onUndo={editor.undo}
+                />
+              </Panel>
+              <MiniMap className='bg-card!' pannable zoomable />
+            </Canvas>
+          </div>
+        }
+        panelDefaultSize='30'
+        panelMinSize='22'
+      >
+        {inspector}
+      </WorkspaceInspector>
     </div>
   )
 }

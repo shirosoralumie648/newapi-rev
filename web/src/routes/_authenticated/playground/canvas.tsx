@@ -17,12 +17,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute, redirect } from '@tanstack/react-router'
+import z from 'zod'
 
 import { Main } from '@/components/layout'
 import { CanvasWorkspace } from '@/features/canvas'
 import { isSidebarModuleEnabled } from '@/lib/nav-modules'
 
+const canvasSearchSchema = z.object({
+  project: z.string().optional(),
+})
+
 export const Route = createFileRoute('/_authenticated/playground/canvas')({
+  validateSearch: canvasSearchSchema,
   beforeLoad: () => {
     if (!isSidebarModuleEnabled('chat', 'playground')) {
       throw redirect({ to: '/dashboard' })
@@ -32,9 +38,10 @@ export const Route = createFileRoute('/_authenticated/playground/canvas')({
 })
 
 function CanvasPage() {
+  const search = Route.useSearch()
   return (
     <Main className='p-0'>
-      <CanvasWorkspace />
+      <CanvasWorkspace initialProjectId={search.project} />
     </Main>
   )
 }

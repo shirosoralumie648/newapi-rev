@@ -7436,6 +7436,11 @@
     "Loading resource usage...": "Loading resource usage...",
     "Resource usage could not be loaded.": "Resource usage could not be loaded.",
     "{{used}} of {{limit}}": "{{used}} of {{limit}}",
-    "Your resource usage in the Playground. Limits are set by your administrator.": "Your resource usage in the Playground. Limits are set by your administrator."
+    "Your resource usage in the Playground. Limits are set by your administrator.": "Your resource usage in the Playground. Limits are set by your administrator.",
+    "Open artifact": "Open artifact",
+    "Open canvas": "Open canvas",
+    "Open conversation": "Open conversation",
+    "This canvas has no nodes yet.": "This canvas has no nodes yet.",
+    "Unable to load the canvas.": "Unable to load the canvas."
   }
 }

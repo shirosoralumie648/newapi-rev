@@ -74,6 +74,17 @@ export interface PlaygroundSession {
   syncPending?: boolean
 }
 
+/**
+ * Deep-link target for the Playground route. `session` is the canonical server
+ * session id a canvas node points back to; `artifact` selects a saved artifact
+ * inside that session.
+ */
+export interface PlaygroundRouteTarget {
+  session?: string
+  message?: string
+  artifact?: string
+}
+
 export interface PlaygroundSessionsState {
   activeSessionId: string
   sessions: PlaygroundSession[]

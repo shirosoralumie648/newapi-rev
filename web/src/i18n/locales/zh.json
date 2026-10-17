@@ -7436,6 +7436,11 @@
     "Loading resource usage...": "正在加载资源用量…",
     "Resource usage could not be loaded.": "无法加载资源用量。",
     "{{used}} of {{limit}}": "{{used}} / {{limit}}",
-    "Your resource usage in the Playground. Limits are set by your administrator.": "你在 Playground 的资源用量。上限由管理员设置。"
+    "Your resource usage in the Playground. Limits are set by your administrator.": "你在 Playground 的资源用量。上限由管理员设置。",
+    "Open artifact": "打开制品",
+    "Open canvas": "打开画布",
+    "Open conversation": "打开对话",
+    "This canvas has no nodes yet.": "此画布还没有任何节点。",
+    "Unable to load the canvas.": "无法加载画布。"
   }
 }

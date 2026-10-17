@@ -36,13 +36,13 @@ import {
   sendNodesToCanvas,
   type CanvasSendSeed,
 } from '../lib/canvas-send'
-import type { CanvasProjectSummary } from '../types'
+import type { CanvasProjectSummary, CanvasServerProject } from '../types'
 
 interface CanvasSendDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   seeds: CanvasSendSeed[]
-  onSent?: () => void
+  onSent?: (project: CanvasServerProject) => void
 }
 
 /**
@@ -93,8 +93,8 @@ export function CanvasSendDialog(props: CanvasSendDialogProps) {
     if (pendingId !== null || isCreating) return
     setPendingId(projectId)
     try {
-      await sendNodesToCanvas(projectId, props.seeds)
-      props.onSent?.()
+      const project = await sendNodesToCanvas(projectId, props.seeds)
+      props.onSent?.(project)
       props.onOpenChange(false)
     } catch (sendError) {
       reportError(sendError)
@@ -108,8 +108,8 @@ export function CanvasSendDialog(props: CanvasSendDialogProps) {
     if (!title || pendingId !== null || isCreating) return
     setIsCreating(true)
     try {
-      await createCanvasWithNodes(title, props.seeds)
-      props.onSent?.()
+      const project = await createCanvasWithNodes(title, props.seeds)
+      props.onSent?.(project)
       props.onOpenChange(false)
     } catch (createError) {
       reportError(createError)
