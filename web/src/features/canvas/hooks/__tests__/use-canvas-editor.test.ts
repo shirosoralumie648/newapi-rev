@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { act, renderHook } from '@testing-library/react'
+import { act, fireEvent, renderHook } from '@testing-library/react'
 import { expect, test, vi } from 'vitest'
 
 import { CANVAS_MAX_NODES } from '../../constants'
@@ -141,4 +141,56 @@ test('finishing a drag records history and notifies autosave', () => {
   expect(hook.result.current.nodes[0].position).toEqual({ x: 40, y: 80 })
   expect(hook.result.current.canUndo).toBe(true)
   expect(onChange).toHaveBeenCalledTimes(1)
+})
+
+test('keyboard shortcuts undo and redo with ctrl, meta, shift+z and y', () => {
+  const onChange = vi.fn()
+  const hook = renderHook(() => useCanvasEditor(EMPTY_DOCUMENT, onChange))
+
+  act(() => {
+    hook.result.current.addNode('text')
+  })
+  expect(hook.result.current.nodes).toHaveLength(1)
+
+  expect(fireEvent.keyDown(window, { key: 'z', ctrlKey: true })).toBe(false)
+  expect(hook.result.current.nodes).toHaveLength(0)
+  expect(hook.result.current.canRedo).toBe(true)
+
+  fireEvent.keyDown(window, { key: 'z', ctrlKey: true, shiftKey: true })
+  expect(hook.result.current.nodes).toHaveLength(1)
+
+  fireEvent.keyDown(window, { key: 'z', metaKey: true })
+  expect(hook.result.current.nodes).toHaveLength(0)
+
+  fireEvent.keyDown(window, { key: 'y', metaKey: true })
+  expect(hook.result.current.nodes).toHaveLength(1)
+})
+
+test('undo shortcuts skip editable fields so native undo keeps working', () => {
+  const onChange = vi.fn()
+  const hook = renderHook(() => useCanvasEditor(EMPTY_DOCUMENT, onChange))
+
+  act(() => {
+    hook.result.current.addNode('text')
+  })
+
+  const textarea = document.createElement('textarea')
+  document.body.appendChild(textarea)
+  expect(fireEvent.keyDown(textarea, { key: 'z', ctrlKey: true })).toBe(true)
+  expect(hook.result.current.nodes).toHaveLength(1)
+  textarea.remove()
+})
+
+test('undo shortcuts stay inactive while the editor is disabled', () => {
+  const onChange = vi.fn()
+  const hook = renderHook(() =>
+    useCanvasEditor(EMPTY_DOCUMENT, onChange, { shortcutsEnabled: false })
+  )
+
+  act(() => {
+    hook.result.current.addNode('text')
+  })
+
+  fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
+  expect(hook.result.current.nodes).toHaveLength(1)
 })

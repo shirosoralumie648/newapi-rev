@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { expect, test } from 'vitest'
 
-import { CANVAS_MAX_NODES } from '../../constants'
+import { CANVAS_MAX_NODES, CANVAS_NODE_DATA_MAX_BYTES } from '../../constants'
 import type { CanvasFlowEdge, CanvasFlowNode } from '../../types'
 import {
   CANVAS_ERRORS,
@@ -105,4 +105,28 @@ test('import only accepts a versioned export and keeps its title', () => {
   const imported = parseCanvasImport(exported)
   expect(imported.title).toBe('My board')
   expect(imported.document.nodes).toHaveLength(1)
+})
+
+test('import surfaces an oversized node instead of truncating it', () => {
+  const oversized = toServerDocument(
+    [flowNode('n1', 'x'.repeat(CANVAS_NODE_DATA_MAX_BYTES + 16))],
+    []
+  )
+  expect(validateCanvasDocument(oversized)).toBe(CANVAS_ERRORS.TOO_LARGE)
+
+  const exported = serializeCanvasExport('Huge', oversized)
+  expect(() => parseCanvasImport(exported)).toThrow(CANVAS_ERRORS.TOO_LARGE)
+})
+
+test('validation rejects a document that exceeds the byte budget', () => {
+  // Each node stays under the per-node data cap, but the document as a whole
+  // passes the 1 MiB persistence budget.
+  const text = 'y'.repeat(5400)
+  const document = toServerDocument(
+    Array.from({ length: CANVAS_MAX_NODES }, (_, index) =>
+      flowNode(`n${index}`, text)
+    ),
+    []
+  )
+  expect(validateCanvasDocument(document)).toBe(CANVAS_ERRORS.TOO_LARGE)
 })

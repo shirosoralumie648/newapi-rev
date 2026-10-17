@@ -83,7 +83,9 @@ export function CanvasEditor(props: CanvasEditorProps) {
     [props.onChange, t]
   )
 
-  const editor = useCanvasEditor(props.project.document, handleChange)
+  const editor = useCanvasEditor(props.project.document, handleChange, {
+    shortcutsEnabled: !props.disabled,
+  })
 
   const handleMoveEnd = useCallback(
     (_event: MouseEvent | TouchEvent | null, viewport: Viewport) => {

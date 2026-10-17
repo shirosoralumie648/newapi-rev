@@ -24,7 +24,7 @@ import {
   type EdgeChange,
   type NodeChange,
 } from '@xyflow/react'
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { CANVAS_MAX_NODES, CANVAS_NODE_ADD_OFFSET } from '../constants'
 import {
@@ -58,6 +58,11 @@ interface ApplyChangeOptions {
   notify: boolean
 }
 
+interface CanvasEditorOptions {
+  /** Binds Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z and Ctrl/Cmd+Y while mounted. */
+  shortcutsEnabled?: boolean
+}
+
 /**
  * Owns the editable node/edge graph of one canvas project: selection, node and
  * edge mutations, undo/redo history and the position stream while dragging.
@@ -66,7 +71,8 @@ interface ApplyChangeOptions {
  */
 export function useCanvasEditor(
   initial: CanvasServerDocument,
-  onChange: EditorChangeNotifier
+  onChange: EditorChangeNotifier,
+  options: CanvasEditorOptions = {}
 ) {
   const restored = useMemo(() => fromServerDocument(initial), [initial])
   const [nodes, setNodes] = useState<CanvasFlowNode[]>(restored.nodes)
@@ -88,13 +94,13 @@ export function useCanvasEditor(
     (
       nextNodes: CanvasFlowNode[],
       nextEdges: CanvasFlowEdge[],
-      options: ApplyChangeOptions
+      changeOptions: ApplyChangeOptions
     ) => {
       nodesRef.current = nextNodes
       edgesRef.current = nextEdges
       setNodes(nextNodes)
       setEdges(nextEdges)
-      if (options.record) {
+      if (changeOptions.record) {
         const nextHistory = pushCanvasHistory(historyRef.current, {
           nodes: nextNodes,
           edges: nextEdges,
@@ -102,7 +108,7 @@ export function useCanvasEditor(
         historyRef.current = nextHistory
         setHistory(nextHistory)
       }
-      if (options.notify) {
+      if (changeOptions.notify) {
         onChangeRef.current(nextNodes, nextEdges)
       }
     },
@@ -224,6 +230,37 @@ export function useCanvasEditor(
     setHistory(result.history)
     applySnapshot(result.snapshot)
   }, [applySnapshot])
+
+  const shortcutsEnabled = options.shortcutsEnabled ?? true
+  useEffect(() => {
+    if (!shortcutsEnabled) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return
+      // Editable fields keep their own native undo/redo.
+      const target = event.target
+      const editing =
+        target instanceof HTMLElement &&
+        (target.isContentEditable ||
+          target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT')
+      if (editing) return
+      const key = event.key.toLowerCase()
+      if (key === 'z') {
+        event.preventDefault()
+        if (event.shiftKey) {
+          redo()
+        } else {
+          undo()
+        }
+      } else if (key === 'y') {
+        event.preventDefault()
+        redo()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [shortcutsEnabled, undo, redo])
 
   const replaceDocument = useCallback(
     (document: CanvasServerDocument) => {
