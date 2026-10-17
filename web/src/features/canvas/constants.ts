@@ -32,11 +32,14 @@ export const CANVAS_STORAGE_LAST_PROJECT = 'playground_canvas_last_project'
 
 export const CANVAS_NODE_KINDS = [
   'text',
+  'note',
   'prompt',
+  'message',
+  'attachment',
   'image',
   'artifact',
-  'message',
   'task',
+  'task-result',
 ] as const
 
 // Translation keys for the node kinds. The values double as English source
@@ -44,11 +47,14 @@ export const CANVAS_NODE_KINDS = [
 // language.
 export const CANVAS_NODE_KIND_LABELS: Record<CanvasNodeKind, string> = {
   text: 'Text',
+  note: 'Note',
   prompt: 'Prompt',
+  message: 'Message',
+  attachment: 'Attachment',
   image: 'Image',
   artifact: 'Artifact',
-  message: 'Message',
   task: 'Task',
+  'task-result': 'Task result',
 }
 
 export const CANVAS_DEFAULT_TITLE = 'New canvas'

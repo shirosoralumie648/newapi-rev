@@ -24,6 +24,7 @@ import {
   Eye,
   FileCode2,
   FileText,
+  Frame,
   Pencil,
   RotateCcw,
   Trash2,
@@ -50,7 +51,10 @@ import { Markdown } from '@/components/ui/markdown'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { getServerMessage } from '@/lib/server-error-message'
 
-import type { PlaygroundArtifactResult } from '../../artifact-api'
+import type {
+  PlaygroundArtifactResult,
+  PlaygroundArtifactSummary,
+} from '../../artifact-api'
 import type {
   ArtifactDraft,
   usePlaygroundArtifacts,
@@ -62,6 +66,7 @@ type ArtifactController = ReturnType<typeof usePlaygroundArtifacts>
 interface PlaygroundArtifactPanelProps {
   controller: ArtifactController
   onClose: () => void
+  onSendToCanvas?: (artifact: PlaygroundArtifactSummary) => void
 }
 
 export function PlaygroundArtifactPanel(props: PlaygroundArtifactPanelProps) {
@@ -160,6 +165,14 @@ export function PlaygroundArtifactPanel(props: PlaygroundArtifactPanelProps) {
               tooltip={t('Download artifact')}
               icon={Download}
               onClick={saveAsFile}
+            />
+          )}
+          {selectedSummary && props.onSendToCanvas && (
+            <ArtifactAction
+              label={t('Send to canvas')}
+              tooltip={t('Send to canvas')}
+              icon={Frame}
+              onClick={() => props.onSendToCanvas?.(selectedSummary)}
             />
           )}
           {state.selectedArtifactId && !readOnlyHistory && (

@@ -20,11 +20,14 @@ import type { Edge, Node } from '@xyflow/react'
 
 export type CanvasNodeKind =
   | 'text'
+  | 'note'
   | 'prompt'
+  | 'message'
+  | 'attachment'
   | 'image'
   | 'artifact'
-  | 'message'
   | 'task'
+  | 'task-result'
 
 export type CanvasMessageSnapshot = {
   sessionId: string
@@ -33,13 +36,21 @@ export type CanvasMessageSnapshot = {
   text: string
 }
 
+// References are ID claims only. The bytes of an attachment or artifact stay
+// behind the owner-scoped content endpoints; a `blob:` or arbitrary URL is
+// never stored as proof that a canvas owns a resource.
+export type CanvasNodeRef = {
+  sessionId?: string
+  messageKey?: string
+  attachmentId?: string
+  artifactId?: string
+}
+
 export type CanvasNodeData = {
   kind: CanvasNodeKind
   text?: string
   snapshot?: CanvasMessageSnapshot
-  // Image/artifact/task nodes keep their references until their creation
-  // paths land; import and export preserve them untouched.
-  ref?: { sessionId?: string; attachmentId?: string; artifactId?: string }
+  ref?: CanvasNodeRef
   label?: string
 }
 

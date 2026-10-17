@@ -22,6 +22,7 @@ import {
   Edit,
   FileCode2,
   FileText,
+  Frame,
   MoreHorizontal,
   RefreshCw,
   Trash2,
@@ -58,6 +59,7 @@ interface MessageActionsProps {
   onEdit?: (message: Message) => void
   onDelete?: (message: Message) => void
   onCreateArtifact?: (message: Message) => void
+  onSendToCanvas?: (message: Message) => void
   isSourceVisible?: boolean
   isGenerating?: boolean
   alwaysVisible?: boolean
@@ -81,6 +83,7 @@ export function MessageActions({
   onEdit,
   onDelete,
   onCreateArtifact,
+  onSendToCanvas,
   isSourceVisible = false,
   isGenerating = false,
   alwaysVisible = false,
@@ -135,6 +138,19 @@ export function MessageActions({
       icon: FileText,
       label: 'Create an artifact',
       onClick: guardAction(() => onCreateArtifact(message)),
+    })
+  }
+
+  if (
+    hasContent &&
+    !isLoading &&
+    message.status !== 'error' &&
+    onSendToCanvas
+  ) {
+    actions.push({
+      icon: Frame,
+      label: MESSAGE_ACTION_LABELS.SEND_TO_CANVAS,
+      onClick: () => onSendToCanvas(message),
     })
   }
 

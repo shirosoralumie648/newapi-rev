@@ -45,10 +45,84 @@ var (
 )
 
 var (
-	ErrPlaygroundCanvasNotFound = errors.New("Playground canvas project not found.")
-	ErrPlaygroundCanvasInvalid  = errors.New("Invalid Playground canvas project.")
-	ErrPlaygroundCanvasLimit    = errors.New("Playground canvas storage limit exceeded.")
+	ErrPlaygroundCanvasNotFound  = errors.New("Playground canvas project not found.")
+	ErrPlaygroundCanvasInvalid   = errors.New("Invalid Playground canvas project.")
+	ErrPlaygroundCanvasLimit     = errors.New("Playground canvas storage limit exceeded.")
+	ErrPlaygroundCanvasReference = errors.New("Playground canvas references a resource that is not available to this account.")
 )
+
+// PlaygroundCanvasReference identifies one external resource a canvas node
+// points at by ID. Empty fields are ignored; a message key always requires its
+// session so a cross-user message cannot be reached through an orphan key.
+type PlaygroundCanvasReference struct {
+	SessionID    string
+	MessageKey   string
+	AttachmentID string
+	ArtifactID   string
+}
+
+// ValidatePlaygroundCanvasReferences rejects a document that references a
+// session, message, attachment or artifact owned by another account, or one
+// that no longer exists. It never reads attachment or artifact bodies; the
+// canvas stores references only, and the bytes stay behind the controlled
+// content endpoints.
+func ValidatePlaygroundCanvasReferences(userID int, references []PlaygroundCanvasReference) error {
+	if userID <= 0 {
+		return ErrPlaygroundCanvasInvalid
+	}
+	for _, reference := range references {
+		if reference.SessionID != "" {
+			var count int64
+			if err := DB.Model(&PlaygroundSession{}).Where("id = ? AND user_id = ?", reference.SessionID, userID).Count(&count).Error; err != nil {
+				return err
+			}
+			if count == 0 {
+				return ErrPlaygroundCanvasReference
+			}
+		}
+		if reference.MessageKey != "" {
+			if reference.SessionID == "" {
+				return ErrPlaygroundCanvasReference
+			}
+			var count int64
+			if err := DB.Model(&PlaygroundMessage{}).
+				Where("user_id = ? AND session_id = ? AND client_key = ?", userID, reference.SessionID, reference.MessageKey).
+				Count(&count).Error; err != nil {
+				return err
+			}
+			if count == 0 {
+				return ErrPlaygroundCanvasReference
+			}
+		}
+		if reference.AttachmentID != "" {
+			query := DB.Model(&PlaygroundAttachment{}).Where("id = ? AND user_id = ?", reference.AttachmentID, userID)
+			if reference.SessionID != "" {
+				query = query.Where("session_id = ?", reference.SessionID)
+			}
+			var count int64
+			if err := query.Count(&count).Error; err != nil {
+				return err
+			}
+			if count == 0 {
+				return ErrPlaygroundCanvasReference
+			}
+		}
+		if reference.ArtifactID != "" {
+			query := DB.Model(&PlaygroundArtifact{}).Where("id = ? AND user_id = ? AND deleted_at = 0", reference.ArtifactID, userID)
+			if reference.SessionID != "" {
+				query = query.Where("session_id = ?", reference.SessionID)
+			}
+			var count int64
+			if err := query.Count(&count).Error; err != nil {
+				return err
+			}
+			if count == 0 {
+				return ErrPlaygroundCanvasReference
+			}
+		}
+	}
+	return nil
+}
 
 // PlaygroundCanvasProject stores one canvas document (nodes, edges, viewport)
 // as a versioned JSON snapshot. The document references conversations,

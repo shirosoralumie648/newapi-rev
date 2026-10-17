@@ -17,6 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { NodeProps } from '@xyflow/react'
+import { ImageIcon } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -25,6 +27,11 @@ import {
   NodeHeader,
   NodeTitle,
 } from '@/components/ai-elements/node'
+import { playgroundAttachmentContentUrl } from '@/features/playground/api'
+import {
+  getPlaygroundAttachmentObjectUrl,
+  loadPlaygroundAttachment,
+} from '@/features/playground/lib/attachment-store'
 import { cn } from '@/lib/utils'
 
 import { CANVAS_NODE_KIND_LABELS } from '../constants'
@@ -39,11 +46,51 @@ function readNodePreview(data: CanvasNodeData): string {
   )
 }
 
+/**
+ * Resolves an attachment node's preview through the owner-scoped content
+ * endpoint. The node stores IDs only, so a missing session or attachment
+ * simply renders the placeholder and never fetches an unowned URL.
+ */
+function useCanvasAttachmentUrl(
+  sessionId?: string,
+  attachmentId?: string
+): string | undefined {
+  const [url, setUrl] = useState<string | undefined>(() =>
+    attachmentId ? getPlaygroundAttachmentObjectUrl(attachmentId) : undefined
+  )
+
+  useEffect(() => {
+    if (url || !sessionId || !attachmentId) return
+    let active = true
+    void loadPlaygroundAttachment(
+      playgroundAttachmentContentUrl(sessionId, attachmentId),
+      attachmentId
+    )
+      .then((entry) => {
+        if (active) setUrl(entry.objectUrl ?? entry.dataUrl)
+      })
+      .catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [attachmentId, sessionId, url])
+
+  return url
+}
+
 export function CanvasFlowNodeView(props: NodeProps) {
   const { t } = useTranslation()
   const data = props.data as CanvasNodeData
   const kind: CanvasNodeKind = data.kind ?? 'text'
   const preview = readNodePreview(data)
+  const reference = data.ref
+  const isAttachmentNode =
+    (kind === 'attachment' || kind === 'image') &&
+    Boolean(reference?.attachmentId)
+  const attachmentUrl = useCanvasAttachmentUrl(
+    isAttachmentNode ? reference?.sessionId : undefined,
+    isAttachmentNode ? reference?.attachmentId : undefined
+  )
 
   return (
     <CanvasNodeCard
@@ -58,16 +105,35 @@ export function CanvasFlowNodeView(props: NodeProps) {
           {t(CANVAS_NODE_KIND_LABELS[kind])}
         </NodeTitle>
       </NodeHeader>
-      <NodeContent className='p-2'>
-        {preview ? (
+      <NodeContent className='grid gap-2 p-2'>
+        {isAttachmentNode ? (
+          <figure className='border-border/70 bg-muted/20 overflow-hidden rounded-md border'>
+            {attachmentUrl ? (
+              <img
+                alt={preview || t('Attachment')}
+                className='max-h-40 w-full object-cover'
+                src={attachmentUrl}
+              />
+            ) : (
+              <div className='text-muted-foreground flex h-24 items-center justify-center'>
+                <ImageIcon className='size-5' />
+              </div>
+            )}
+            <figcaption className='text-muted-foreground truncate px-2 py-1 text-xs'>
+              {preview || t('Attachment')}
+            </figcaption>
+          </figure>
+        ) : null}
+        {!isAttachmentNode && preview ? (
           <p className='text-muted-foreground line-clamp-4 text-xs break-words whitespace-pre-wrap'>
             {preview}
           </p>
-        ) : (
+        ) : null}
+        {!isAttachmentNode && !preview ? (
           <p className='text-muted-foreground text-xs italic'>
             {t('Empty node')}
           </p>
-        )}
+        ) : null}
       </NodeContent>
     </CanvasNodeCard>
   )

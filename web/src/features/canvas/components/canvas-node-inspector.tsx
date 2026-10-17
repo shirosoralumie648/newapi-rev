@@ -56,7 +56,10 @@ export function CanvasNodeInspector(props: CanvasNodeInspectorProps) {
   const kindLabel = t(CANVAS_NODE_KIND_LABELS[node.data.kind])
   const snapshot = node.data.snapshot
   const reference = node.data.ref
-  const editable = node.data.kind === 'text' || node.data.kind === 'prompt'
+  const editable =
+    node.data.kind === 'text' ||
+    node.data.kind === 'prompt' ||
+    node.data.kind === 'note'
 
   const commitDraft = () => {
     const text = draft.trim()
@@ -109,6 +112,12 @@ export function CanvasNodeInspector(props: CanvasNodeInspectorProps) {
             <div className='flex justify-between gap-2'>
               <dt className='text-muted-foreground'>{t('Session')}</dt>
               <dd className='font-mono break-all'>{reference.sessionId}</dd>
+            </div>
+          ) : null}
+          {reference.messageKey ? (
+            <div className='flex justify-between gap-2'>
+              <dt className='text-muted-foreground'>{t('Message')}</dt>
+              <dd className='font-mono break-all'>{reference.messageKey}</dd>
             </div>
           ) : null}
           {reference.attachmentId ? (

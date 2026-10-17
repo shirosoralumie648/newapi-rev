@@ -36,6 +36,13 @@ func canvasNode(id, nodeType string, x, y float64) map[string]any {
 	return map[string]any{"id": id, "type": nodeType, "position": map[string]any{"x": x, "y": y}}
 }
 
+func canvasRefNode(id, nodeType string, ref map[string]any) map[string]any {
+	return map[string]any{
+		"id": id, "type": nodeType, "position": map[string]any{"x": 0, "y": 0},
+		"data": map[string]any{"kind": nodeType, "ref": ref},
+	}
+}
+
 func canvasDocument(nodes, edges []any) map[string]any {
 	if nodes == nil {
 		nodes = []any{}
@@ -230,6 +237,74 @@ func TestPlaygroundCanvasDocumentValidation(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, missingRevision.Code)
 	emptyPatch := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/canvases/"+id, map[string]any{"revision": 0}, controller.UpdatePlaygroundCanvasProject)
 	assert.Equal(t, http.StatusBadRequest, emptyPatch.Code)
+}
+
+// Canvas nodes may reference a session, message, attachment or artifact, but
+// only when every referenced row belongs to the saving account. The stored
+// document keeps references; it never becomes an ownership proof.
+func TestPlaygroundCanvasReferenceOwnership(t *testing.T) {
+	playgroundTestDB(t, "sqlite")
+	session := createPlayground(t, 7, "canvas-refs")
+	sessionID := session["id"].(string)
+	require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodPut, "/api/playground/sessions/"+sessionID+"/messages", map[string]any{
+		"revision": 0, "messages": []any{map[string]any{"client_key": "m1", "payload": map[string]any{
+			"key": "m1", "from": "user", "status": "complete",
+			"versions": []any{map[string]any{"id": "v1", "content": "hello canvas"}},
+		}}},
+	}, controller.ReplacePlaygroundMessages).Code)
+	attachment := playgroundUploadAttachment(t, 7, sessionID, "canvas-att", "image/png", playgroundPNGFixture(64))
+	attachmentID := attachment["id"].(string)
+	artifactSession, artifactInput := playgroundArtifactSourceFixture(t, 7, "canvas-ref-artifact")
+	artifact := artifactResult(t, playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions/"+artifactSession+"/artifacts", artifactInput, controller.CreatePlaygroundArtifact))
+
+	create := func(user int, nodes []any) *httptest.ResponseRecorder {
+		return playgroundRequest(t, user, http.MethodPost, "/api/playground/canvases", map[string]any{
+			"title": "Refs", "document": canvasDocument(nodes, nil),
+		}, controller.CreatePlaygroundCanvasProject)
+	}
+
+	// The owner can reference all four resource kinds, including a node that
+	// points at the artifact's session.
+	owner := create(7, []any{
+		canvasRefNode("n1", "message", map[string]any{"sessionId": sessionID, "messageKey": "m1"}),
+		canvasRefNode("n2", "attachment", map[string]any{"sessionId": sessionID, "attachmentId": attachmentID}),
+		canvasRefNode("n3", "artifact", map[string]any{"sessionId": artifactSession, "artifactId": artifact.Artifact.ID}),
+		canvasRefNode("n4", "message", map[string]any{"sessionId": sessionID}),
+	})
+	require.Equal(t, http.StatusOK, owner.Code, owner.Body.String())
+	id := canvasEnvelope(t, owner.Body.Bytes())["id"].(string)
+
+	// Another account referencing the same resources is rejected on save.
+	for index, ref := range []map[string]any{
+		{"sessionId": sessionID},
+		{"sessionId": sessionID, "messageKey": "m1"},
+		{"sessionId": sessionID, "attachmentId": attachmentID},
+		{"sessionId": artifactSession, "artifactId": artifact.Artifact.ID},
+	} {
+		response := create(8, []any{canvasRefNode("n1", "message", ref)})
+		assert.Equal(t, http.StatusBadRequest, response.Code, "ref %d: %s", index, response.Body.String())
+	}
+
+	// Unknown ids, a message key without a session, and a mismatched session
+	// are rejected for the owner too.
+	for index, ref := range []map[string]any{
+		{"sessionId": "pgs_missing"},
+		{"messageKey": "m1"},
+		{"sessionId": sessionID, "messageKey": "missing"},
+		{"sessionId": sessionID, "attachmentId": "pgf_missing"},
+		{"sessionId": "pgs_other", "artifactId": artifact.Artifact.ID},
+	} {
+		response := create(7, []any{canvasRefNode("n1", "message", ref)})
+		assert.Equal(t, http.StatusBadRequest, response.Code, "ref %d: %s", index, response.Body.String())
+	}
+
+	// The same validation runs on update, so an existing canvas cannot be
+	// edited into a reference owned by another account.
+	foreignSession := createPlayground(t, 8, "canvas-refs-foreign")["id"].(string)
+	update := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/canvases/"+id, map[string]any{
+		"revision": 0, "document": canvasDocument([]any{canvasRefNode("n1", "message", map[string]any{"sessionId": foreignSession})}, nil),
+	}, controller.UpdatePlaygroundCanvasProject)
+	assert.Equal(t, http.StatusBadRequest, update.Code, update.Body.String())
 }
 
 func TestPlaygroundCanvasLimits(t *testing.T) {

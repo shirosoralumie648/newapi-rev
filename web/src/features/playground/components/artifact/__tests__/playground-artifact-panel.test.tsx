@@ -27,6 +27,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import type {
   PlaygroundArtifactKind,
   PlaygroundArtifactResult,
+  PlaygroundArtifactSummary,
 } from '../../../artifact-api'
 import { usePlaygroundArtifacts } from '../../../hooks/use-playground-artifacts'
 import { PlaygroundArtifactPanel } from '../playground-artifact-panel'
@@ -160,9 +161,17 @@ function makeResult(fixture: ArtifactFixture): PlaygroundArtifactResult {
   }
 }
 
-function Harness() {
+function Harness(props: {
+  onSendToCanvas?: (artifact: PlaygroundArtifactSummary) => void
+}) {
   const controller = usePlaygroundArtifacts(7, SESSION)
-  return <PlaygroundArtifactPanel controller={controller} onClose={onClose} />
+  return (
+    <PlaygroundArtifactPanel
+      controller={controller}
+      onClose={onClose}
+      onSendToCanvas={props.onSendToCanvas}
+    />
+  )
 }
 
 beforeEach(() => {
@@ -236,13 +245,15 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-function renderPanel() {
+function renderPanel(
+  onSendToCanvas?: (artifact: PlaygroundArtifactSummary) => void
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   const view = render(
     <QueryClientProvider client={client}>
-      <Harness />
+      <Harness onSendToCanvas={onSendToCanvas} />
     </QueryClientProvider>
   )
   return view.container
@@ -363,6 +374,20 @@ test('copying an artifact puts its full content on the clipboard', async () => {
   )
 
   await waitFor(() => expect(writeText).toHaveBeenCalledWith('First content'))
+})
+
+test('sending an artifact to a canvas reports the selected artifact', async () => {
+  const user = userEvent.setup()
+  const onSendToCanvas = vi.fn()
+  renderPanel(onSendToCanvas)
+
+  await user.click(await screen.findByRole('button', { name: /Document One/ }))
+  await screen.findByRole('textbox', { name: 'Artifact title' })
+  await user.click(screen.getByRole('button', { name: 'Send to canvas' }))
+
+  expect(onSendToCanvas).toHaveBeenCalledWith(
+    expect.objectContaining({ id: 'pga_first', session_id: SESSION })
+  )
 })
 
 test('downloading an artifact writes a sanitized filename and plain-text body', async () => {

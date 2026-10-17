@@ -37,12 +37,15 @@ import (
 const playgroundCanvasRequestMaxBytes = 2 << 20
 
 var playgroundCanvasNodeTypes = map[string]bool{
-	"text":     true,
-	"prompt":   true,
-	"image":    true,
-	"artifact": true,
-	"message":  true,
-	"task":     true,
+	"text":        true,
+	"note":        true,
+	"prompt":      true,
+	"image":       true,
+	"attachment":  true,
+	"artifact":    true,
+	"message":     true,
+	"task":        true,
+	"task-result": true,
 }
 
 type playgroundCanvasViewport struct {
@@ -63,6 +66,20 @@ type playgroundCanvasNode struct {
 	Width    *float64                 `json:"width,omitempty"`
 	Height   *float64                 `json:"height,omitempty"`
 	Data     json.RawMessage          `json:"data,omitempty"`
+}
+
+// playgroundCanvasNodeReference mirrors the reference an imported or saved
+// node may carry in its opaque `data` payload. Only these IDs are treated as
+// resource ownership claims; everything else stays display-only.
+type playgroundCanvasNodeReference struct {
+	SessionID    string `json:"sessionId"`
+	MessageKey   string `json:"messageKey"`
+	AttachmentID string `json:"attachmentId"`
+	ArtifactID   string `json:"artifactId"`
+}
+
+type playgroundCanvasNodeData struct {
+	Ref *playgroundCanvasNodeReference `json:"ref"`
 }
 
 type playgroundCanvasEdge struct {
@@ -110,6 +127,8 @@ func writePlaygroundCanvasError(c *gin.Context, err error) {
 		status, code, message = http.StatusConflict, "PLAYGROUND_CONFLICT", err.Error()
 	case errors.Is(err, model.ErrPlaygroundCanvasLimit):
 		status, code, message = http.StatusUnprocessableEntity, "PLAYGROUND_CANVAS_LIMIT_EXCEEDED", err.Error()
+	case errors.Is(err, model.ErrPlaygroundCanvasReference):
+		status, code, message = http.StatusBadRequest, "PLAYGROUND_CANVAS_REFERENCE_INVALID", err.Error()
 	case errors.Is(err, model.ErrPlaygroundCanvasInvalid):
 		status, code, message = http.StatusBadRequest, "PLAYGROUND_INVALID_REQUEST", err.Error()
 	}
@@ -217,6 +236,36 @@ func normalizePlaygroundCanvasDocument(document *playgroundCanvasDocument) (stri
 	return string(encoded), len(document.Nodes), len(document.Edges), nil
 }
 
+// playgroundCanvasReferences collects the resources a document claims. Node
+// data is opaque and bounded, so a node without a well-formed `ref` object
+// contributes nothing; the model layer rejects any reference that belongs to
+// another account or no longer exists.
+func playgroundCanvasReferences(document *playgroundCanvasDocument) []model.PlaygroundCanvasReference {
+	references := make([]model.PlaygroundCanvasReference, 0)
+	if document == nil {
+		return references
+	}
+	for index := range document.Nodes {
+		data := document.Nodes[index].Data
+		if len(data) == 0 {
+			continue
+		}
+		var decoded playgroundCanvasNodeData
+		if common.Unmarshal(data, &decoded) != nil || decoded.Ref == nil {
+			continue
+		}
+		ref := decoded.Ref
+		if ref.SessionID == "" && ref.MessageKey == "" && ref.AttachmentID == "" && ref.ArtifactID == "" {
+			continue
+		}
+		references = append(references, model.PlaygroundCanvasReference{
+			SessionID: ref.SessionID, MessageKey: ref.MessageKey,
+			AttachmentID: ref.AttachmentID, ArtifactID: ref.ArtifactID,
+		})
+	}
+	return references
+}
+
 func playgroundDecodeCanvasProject(project *model.PlaygroundCanvasProject, created bool) playgroundCanvasResponse {
 	response := playgroundCanvasResponse{
 		Created: created, ID: project.ID, ClientID: project.ClientID, Title: project.Title,
@@ -282,6 +331,10 @@ func CreatePlaygroundCanvasProject(c *gin.Context) {
 		writePlaygroundCanvasError(c, err)
 		return
 	}
+	if err := model.ValidatePlaygroundCanvasReferences(c.GetInt("id"), playgroundCanvasReferences(request.Document)); err != nil {
+		writePlaygroundCanvasError(c, err)
+		return
+	}
 	project := &model.PlaygroundCanvasProject{
 		Title: title, Document: model.LongText(document),
 		DocumentBytes: int64(len(document)), NodeCount: nodeCount, EdgeCount: edgeCount,
@@ -327,6 +380,10 @@ func UpdatePlaygroundCanvasProject(c *gin.Context) {
 	if request.Document != nil {
 		document, nodeCount, edgeCount, err := normalizePlaygroundCanvasDocument(request.Document)
 		if err != nil {
+			writePlaygroundCanvasError(c, err)
+			return
+		}
+		if err := model.ValidatePlaygroundCanvasReferences(c.GetInt("id"), playgroundCanvasReferences(request.Document)); err != nil {
 			writePlaygroundCanvasError(c, err)
 			return
 		}

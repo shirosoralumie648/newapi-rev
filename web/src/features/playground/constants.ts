@@ -109,6 +109,7 @@ export const MESSAGE_ACTION_LABELS = {
   SHOW_SOURCE: 'Show source',
   EDIT: 'Edit',
   DELETE: 'Delete',
+  SEND_TO_CANVAS: 'Send to canvas',
   NO_CONTENT: 'No content to copy',
   WAIT_GENERATION: 'Please wait for the current generation to complete',
 } as const

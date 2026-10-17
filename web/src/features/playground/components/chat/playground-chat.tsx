@@ -63,6 +63,7 @@ interface PlaygroundChatProps {
   onDeleteMessage?: (message: MessageType) => void
   onSelectVersion?: (message: MessageType, versionIndex: number) => void
   onCreateArtifact?: (message: MessageType) => void
+  onSendToCanvas?: (message: MessageType) => void
   onSelectPrompt?: (prompt: string) => void
   isGenerating?: boolean
   isLoadingMessages?: boolean
@@ -81,6 +82,7 @@ export function PlaygroundChat({
   onDeleteMessage,
   onSelectVersion,
   onCreateArtifact,
+  onSendToCanvas,
   onSelectPrompt,
   isGenerating = false,
   isLoadingMessages = false,
@@ -148,6 +150,7 @@ export function PlaygroundChat({
         onEdit={onEditMessage}
         onDelete={onDeleteMessage}
         onCreateArtifact={onCreateArtifact}
+        onSendToCanvas={onSendToCanvas}
         isSourceVisible={isSourceVisible}
         isGenerating={isGenerating}
         alwaysVisible={alwaysShowActions}

@@ -23,9 +23,16 @@ import { toast } from 'sonner'
 
 import { ErrorState } from '@/components/error-state'
 import { Button } from '@/components/ui/button'
+import { CanvasSendDialog } from '@/features/canvas/components/canvas-send-dialog'
+import {
+  buildArtifactCanvasSeeds,
+  buildMessageCanvasSeeds,
+  type CanvasSendSeed,
+} from '@/features/canvas/lib/canvas-send'
 import { getServerMessage } from '@/lib/server-error-message'
 import { useAuthStore } from '@/stores/auth-store'
 
+import type { PlaygroundArtifactSummary } from './artifact-api'
 import { PlaygroundArtifactPanel } from './components/artifact/playground-artifact-panel'
 import { PlaygroundArtifactSourceSheet } from './components/artifact/playground-artifact-source-sheet'
 import { PlaygroundChat } from './components/chat/playground-chat'
@@ -61,6 +68,9 @@ function PlaygroundContent() {
     message: Message
     source: CapturedArtifactSource
   } | null>(null)
+  const [canvasSendSeeds, setCanvasSendSeeds] = useState<
+    CanvasSendSeed[] | null
+  >(null)
   const local = usePlaygroundState()
   const {
     config,
@@ -104,6 +114,11 @@ function PlaygroundContent() {
     !sync.isSaving &&
     !sync.error &&
     !isGenerating
+  )
+  // Sending a message snapshot to a canvas only needs the conversation to be
+  // persisted; it does not mutate or require an idle generation.
+  const canvasSendEnabled = Boolean(
+    canonicalSessionId && activeSession?.server && !activeSession.syncPending
   )
 
   const {
@@ -284,6 +299,44 @@ function PlaygroundContent() {
     ]
   )
 
+  const handleSendMessageToCanvas = useCallback(
+    (message: Message) => {
+      if (!canvasSendEnabled || !canonicalSessionId) return
+      const rawContent = getMessageContent(message)
+      const visibleContent = getMessageContentState(
+        message,
+        rawContent
+      ).displayContent
+      const version = getCurrentVersion(message)
+      const attachments = (version.attachments ?? []).map((attachment) => ({
+        id: attachment.id,
+        filename: attachment.filename,
+      }))
+      const seeds = buildMessageCanvasSeeds({
+        sessionId: canonicalSessionId,
+        messageKey: message.key,
+        role: message.from,
+        text: visibleContent,
+        attachments,
+      })
+      if (seeds.length > 0) setCanvasSendSeeds(seeds)
+    },
+    [canvasSendEnabled, canonicalSessionId]
+  )
+
+  const handleSendArtifactToCanvas = useCallback(
+    (artifact: PlaygroundArtifactSummary) => {
+      setCanvasSendSeeds(
+        buildArtifactCanvasSeeds({
+          sessionId: artifact.session_id,
+          artifactId: artifact.id,
+          title: artifact.title,
+        })
+      )
+    },
+    []
+  )
+
   const closeArtifactPanel = useCallback(() => {
     if (artifactController.state.dirty) {
       artifactController.store
@@ -344,6 +397,7 @@ function PlaygroundContent() {
             <PlaygroundArtifactPanel
               controller={artifactController}
               onClose={closeArtifactPanel}
+              onSendToCanvas={handleSendArtifactToCanvas}
             />
           ) : undefined
         }
@@ -398,6 +452,9 @@ function PlaygroundContent() {
               onCreateArtifact={
                 artifactCreationEnabled ? openArtifactSource : undefined
               }
+              onSendToCanvas={
+                canvasSendEnabled ? handleSendMessageToCanvas : undefined
+              }
               isGenerating={isGenerating}
               editingKey={editingMessageKey}
               onCancelEdit={handleEditOpenChange}
@@ -437,6 +494,13 @@ function PlaygroundContent() {
         onRetry={artifactController.retryCreate}
         onOpenChange={closeArtifactSource}
         onCreate={artifactController.createFromSource}
+      />
+      <CanvasSendDialog
+        open={canvasSendSeeds !== null}
+        onOpenChange={(open) => {
+          if (!open) setCanvasSendSeeds(null)
+        }}
+        seeds={canvasSendSeeds ?? []}
       />
     </>
   )
