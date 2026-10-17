@@ -23,8 +23,9 @@ var _ Store = (*Local)(nil)
 // Local stores objects below a single directory. os.Root resolves every
 // operation relative to that directory and rejects symlinks that escape it.
 type Local struct {
-	root   *os.Root
-	prefix string
+	root       *os.Root
+	prefix     string
+	presignTTL time.Duration
 }
 
 // NewLocal opens (and, if necessary, creates) the configured local directory.
@@ -52,11 +53,14 @@ func NewLocal(config system_setting.ObjectStoreConfig) (*Local, error) {
 	if err != nil {
 		return nil, fmt.Errorf("object store: open local directory: %w", err)
 	}
-	return &Local{root: root, prefix: strings.Trim(config.Prefix, "/")}, nil
+	return &Local{
+		root:       root,
+		prefix:     strings.Trim(config.Prefix, "/"),
+		presignTTL: time.Duration(config.PresignTTLSeconds) * time.Second,
+	}, nil
 }
 
-// New returns the Store implementation selected by config. Only the local
-// backend is implemented in this release.
+// New returns the Store implementation selected by config.
 func New(config system_setting.ObjectStoreConfig) (Store, error) {
 	backend := config.Backend
 	if backend == "" {
@@ -65,6 +69,8 @@ func New(config system_setting.ObjectStoreConfig) (Store, error) {
 	switch backend {
 	case localBackend:
 		return NewLocal(config)
+	case s3Backend:
+		return NewS3(config)
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedBackend, backend)
 	}
@@ -86,7 +92,7 @@ func (s *Local) Put(ctx context.Context, key string, body io.Reader) (ObjectInfo
 	if body == nil {
 		return ObjectInfo{}, errors.New("object store: object body is required")
 	}
-	storageKey, err := s.storageKey(key)
+	objectKey, err := storageKey(s.prefix, key)
 	if err != nil {
 		return ObjectInfo{}, err
 	}
@@ -94,7 +100,7 @@ func (s *Local) Put(ctx context.Context, key string, body io.Reader) (ObjectInfo
 		return ObjectInfo{}, err
 	}
 
-	if directory := path.Dir(storageKey); directory != "." {
+	if directory := path.Dir(objectKey); directory != "." {
 		if err := s.root.MkdirAll(directory, 0o750); err != nil {
 			return ObjectInfo{}, fmt.Errorf("object store: create object directory: %w", err)
 		}
@@ -104,7 +110,7 @@ func (s *Local) Put(ctx context.Context, key string, body io.Reader) (ObjectInfo
 	if _, err := rand.Read(random[:]); err != nil {
 		return ObjectInfo{}, fmt.Errorf("object store: create temporary name: %w", err)
 	}
-	tempKey := storageKey + ".tmp-" + hex.EncodeToString(random[:])
+	tempKey := objectKey + ".tmp-" + hex.EncodeToString(random[:])
 	file, err := s.root.OpenFile(tempKey, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o640)
 	if err != nil {
 		return ObjectInfo{}, fmt.Errorf("object store: create object: %w", err)
@@ -123,12 +129,12 @@ func (s *Local) Put(ctx context.Context, key string, body io.Reader) (ObjectInfo
 	if err := file.Close(); err != nil {
 		return ObjectInfo{}, fmt.Errorf("object store: close object: %w", err)
 	}
-	if err := s.root.Rename(tempKey, storageKey); err != nil {
+	if err := s.root.Rename(tempKey, objectKey); err != nil {
 		return ObjectInfo{}, fmt.Errorf("object store: commit object: %w", err)
 	}
 	committed = true
 
-	stat, err := s.root.Stat(storageKey)
+	stat, err := s.root.Stat(objectKey)
 	if err != nil {
 		return ObjectInfo{}, localObjectError(key, err)
 	}
@@ -139,11 +145,11 @@ func (s *Local) Get(ctx context.Context, key string) (io.ReadCloser, ObjectInfo,
 	if err := ctx.Err(); err != nil {
 		return nil, ObjectInfo{}, err
 	}
-	storageKey, err := s.storageKey(key)
+	objectKey, err := storageKey(s.prefix, key)
 	if err != nil {
 		return nil, ObjectInfo{}, err
 	}
-	file, err := s.root.Open(storageKey)
+	file, err := s.root.Open(objectKey)
 	if err != nil {
 		return nil, ObjectInfo{}, localObjectError(key, err)
 	}
@@ -163,11 +169,11 @@ func (s *Local) Head(ctx context.Context, key string) (ObjectInfo, error) {
 	if err := ctx.Err(); err != nil {
 		return ObjectInfo{}, err
 	}
-	storageKey, err := s.storageKey(key)
+	objectKey, err := storageKey(s.prefix, key)
 	if err != nil {
 		return ObjectInfo{}, err
 	}
-	stat, err := s.root.Stat(storageKey)
+	stat, err := s.root.Stat(objectKey)
 	if err != nil {
 		return ObjectInfo{}, localObjectError(key, err)
 	}
@@ -181,18 +187,18 @@ func (s *Local) Delete(ctx context.Context, key string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	storageKey, err := s.storageKey(key)
+	objectKey, err := storageKey(s.prefix, key)
 	if err != nil {
 		return err
 	}
-	stat, err := s.root.Lstat(storageKey)
+	stat, err := s.root.Lstat(objectKey)
 	if err != nil {
 		return localObjectError(key, err)
 	}
 	if !stat.Mode().IsRegular() {
 		return fmt.Errorf("%w: %s", ErrObjectNotFound, key)
 	}
-	if err := s.root.Remove(storageKey); err != nil {
+	if err := s.root.Remove(objectKey); err != nil {
 		return localObjectError(key, err)
 	}
 	return nil
@@ -210,23 +216,13 @@ func (s *Local) presign(ctx context.Context, key string, ttl time.Duration) (str
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	if _, err := s.storageKey(key); err != nil {
+	if _, err := storageKey(s.prefix, key); err != nil {
 		return "", err
 	}
-	if ttl <= 0 {
-		return "", errors.New("object store: presign TTL must be positive")
+	if _, err := resolvePresignTTL(ttl, s.presignTTL); err != nil {
+		return "", err
 	}
 	return "", ErrPresignUnsupported
-}
-
-func (s *Local) storageKey(key string) (string, error) {
-	if err := ValidateKey(key); err != nil {
-		return "", err
-	}
-	if s.prefix == "" {
-		return key, nil
-	}
-	return s.prefix + "/" + key, nil
 }
 
 func objectInfo(key string, stat fs.FileInfo) ObjectInfo {

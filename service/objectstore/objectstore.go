@@ -15,9 +15,15 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/QuantumNous/new-api/setting/system_setting"
 )
 
-const maxObjectKeyLength = 1024
+const (
+	maxObjectKeyLength = 1024
+	// maxPresignTTL bounds how long a generated presigned URL stays usable.
+	maxPresignTTL = time.Duration(system_setting.MaxTaskArtifactStorePresignTTLSeconds) * time.Second
+)
 
 var (
 	ErrObjectNotFound     = errors.New("object store: object not found")
@@ -48,6 +54,13 @@ type Store interface {
 
 // ObjectStore is the plan-facing name for Store.
 type ObjectStore = Store
+
+// ContentTypePutter is an optional Store capability for backends that persist
+// the media type with the object bytes, so presigned downloads render with the
+// content type the artifact was generated with.
+type ContentTypePutter interface {
+	PutWithContentType(ctx context.Context, key string, body io.Reader, contentType string) (ObjectInfo, error)
+}
 
 // ServeOptions controls the response headers used when Serve streams an
 // object. Filename is sanitized and escaped before it is written to
@@ -125,6 +138,33 @@ func ValidateKey(key string) error {
 		}
 	}
 	return nil
+}
+
+// resolvePresignTTL applies the backend default when the caller does not
+// request a specific lifetime and enforces the upper bound of seven days.
+func resolvePresignTTL(ttl, fallback time.Duration) (time.Duration, error) {
+	if ttl <= 0 {
+		ttl = fallback
+	}
+	if ttl <= 0 {
+		return 0, errors.New("object store: presign TTL must be positive")
+	}
+	if ttl > maxPresignTTL {
+		return 0, fmt.Errorf("object store: presign TTL must not exceed %s", maxPresignTTL)
+	}
+	return ttl, nil
+}
+
+// storageKey validates key and joins it with the backend prefix. Keys are
+// opaque and always stay below the configured prefix.
+func storageKey(prefix, key string) (string, error) {
+	if err := ValidateKey(key); err != nil {
+		return "", err
+	}
+	if prefix == "" {
+		return key, nil
+	}
+	return prefix + "/" + key, nil
 }
 
 func copyWithContext(ctx context.Context, dst io.Writer, src io.Reader) (int64, error) {
