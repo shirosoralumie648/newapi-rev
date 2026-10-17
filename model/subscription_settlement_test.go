@@ -32,11 +32,15 @@ func preConsumeRecordStatus(t *testing.T, db *gorm.DB, requestId string) string 
 // back too, and retrying afterwards refunds exactly once (upstream #5556).
 func TestSubscriptionPreConsumeRefundIsAtomicAndIdempotent(t *testing.T) {
 	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
-		const userId, subId = 71, 7101
+		const userId, subId, planId = 71, 7101, 7100
 		now := GetDBTimestamp()
 		require.NoError(t, db.Create(&User{Id: userId, Username: "wl03-refund", Status: common.UserStatusEnabled}).Error)
+		require.NoError(t, db.Create(&SubscriptionPlan{
+			Id: planId, Title: "WL-03 refund", DurationUnit: SubscriptionDurationMonth,
+			DurationValue: 1, TotalAmount: 1000, QuotaResetPeriod: SubscriptionResetNever,
+		}).Error)
 		require.NoError(t, db.Create(&UserSubscription{
-			Id: subId, UserId: userId, AmountTotal: 1000, AmountUsed: 0,
+			Id: subId, UserId: userId, PlanId: planId, AmountTotal: 1000, AmountUsed: 0,
 			AllowWalletOverflow: true, Status: "active", StartTime: now - 60, EndTime: now + 3600,
 		}).Error)
 
