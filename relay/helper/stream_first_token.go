@@ -100,10 +100,10 @@ func (w *sealedStreamWriter) WriteHeaderNow() {}
 func (w *sealedStreamWriter) Flush() {}
 
 func sealStreamResponse(c *gin.Context) {
-	if _, sealed := sealedStreamWriterOrigin(c); sealed {
+	if c == nil || c.Writer == nil {
 		return
 	}
-	if c == nil || c.Writer == nil {
+	if _, sealed := sealedStreamWriterOrigin(c); sealed {
 		return
 	}
 	c.Set(sealedStreamWriterKey, c.Writer)
