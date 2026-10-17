@@ -40,6 +40,8 @@ export function policyLabel(t: TFunction, value: string): string {
       return t('Request completed')
     case 'stream_not_successful':
       return t('Stream did not complete successfully')
+    case 'client_gone':
+      return t('Client disconnected; retry stopped')
     case 'channel':
       return t('Channel')
     case 'global':
@@ -58,6 +60,8 @@ export function policyLabel(t: TFunction, value: string): string {
       return t('Upstream connection')
     case 'local':
       return t('Local check')
+    case 'client':
+      return t('Client')
     case 'channel_constraint':
       return t('Fixed channel constraint')
     case 'unchanged':

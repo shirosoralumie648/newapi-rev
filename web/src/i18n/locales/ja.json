@@ -1310,6 +1310,7 @@
     "Click to view full prompt": "クリックしてプロンプト全文を表示",
     "Click to view image": "クリックして画像を表示",
     "Client": "クライアント",
+    "Client disconnected; retry stopped": "クライアントが切断されたため、再試行を停止しました",
     "Client header value": "クライアントヘッダー値",
     "Client headers override the gateway defaults and may cause upstream errors": "クライアントのヘッダーがゲートウェイの既定ヘッダーを上書きし、上流でエラーになる可能性があります",
     "Client ID": "クライアントID",

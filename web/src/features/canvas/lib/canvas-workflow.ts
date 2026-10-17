@@ -88,9 +88,7 @@ export function canvasWorkflowNodeText(data: CanvasNodeData): string {
   )
 }
 
-type CanvasWorkflowOrder =
-  | { steps: string[]; error?: undefined }
-  | { error: string }
+type CanvasWorkflowOrder = { steps: string[] } | { error: string }
 
 /**
  * Steps of a canvas in dependency order. A cyclic graph has no order, so the
@@ -191,7 +189,7 @@ export function validateCanvasWorkflow(
   edges: CanvasFlowEdge[]
 ): string | null {
   const order = orderCanvasWorkflow(nodes, edges)
-  if (order.error) return order.error
+  if ('error' in order) return order.error
   const steps = order.steps
   if (steps.length === 0) return CANVAS_WORKFLOW_ERRORS.NO_STEPS
   const byID = new Map(nodes.map((node) => [node.id, node]))

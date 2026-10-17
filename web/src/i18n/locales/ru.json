@@ -1310,6 +1310,7 @@
     "Click to view full prompt": "Нажмите, чтобы увидеть полный промпт",
     "Click to view image": "Нажмите, чтобы просмотреть изображение",
     "Client": "Клиент",
+    "Client disconnected; retry stopped": "Клиент отключился; повторная попытка остановлена",
     "Client header value": "Значение заголовка клиента",
     "Client headers override the gateway defaults and may cause upstream errors": "Заголовки клиента заменяют заголовки шлюза по умолчанию и могут вызвать ошибки вышестоящего сервиса",
     "Client ID": "ID клиента",
