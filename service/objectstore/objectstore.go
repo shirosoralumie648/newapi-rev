@@ -46,6 +46,9 @@ type Store interface {
 	Backend() string
 }
 
+// ObjectStore is the plan-facing name for Store.
+type ObjectStore = Store
+
 // ServeOptions controls the response headers used when Serve streams an
 // object. Filename is escaped before it is written to Content-Disposition.
 type ServeOptions struct {
