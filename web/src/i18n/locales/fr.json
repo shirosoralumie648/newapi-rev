@@ -7490,6 +7490,25 @@
     "Only a running task can be canceled.": "Seule une tâche en cours peut être annulée.",
     "Unable to cancel the task.": "Impossible d'annuler la tâche.",
     "Playground task result storage limit reached. Wait for old task results to expire.": "Limite de stockage des résultats de tâches Playground atteinte. Attendez l'expiration des anciens résultats.",
-    "Task result storage per user": "Stockage des résultats de tâches par utilisateur"
+    "Task result storage per user": "Stockage des résultats de tâches par utilisateur",
+    "Model call": "Appel de modèle",
+    "Run workflow": "Exécuter le workflow",
+    "Cancel run": "Annuler l'exécution",
+    "Retry step": "Réessayer l'étape",
+    "Workflow": "Workflow",
+    "Workflow output": "Résultat du workflow",
+    "Attempts: {{count}}": "Tentatives : {{count}}",
+    "Not started": "Non démarré",
+    "Succeeded": "Réussi",
+    "Canceled": "Annulé",
+    "Add a model call or generation step to run the workflow.": "Ajoutez un appel de modèle ou une étape de génération pour exécuter le workflow.",
+    "Workflow connections must not form a cycle.": "Les connexions du workflow ne doivent pas former de cycle.",
+    "Choose a model for every workflow step.": "Choisissez un modèle pour chaque étape du workflow.",
+    "Connect a prompt or an upstream step before this workflow step.": "Connectez une invite ou une étape en amont avant cette étape du workflow.",
+    "The workflow needs an available user group.": "Le workflow nécessite un groupe d'utilisateurs disponible.",
+    "The model returned no text.": "Le modèle n'a renvoyé aucun texte.",
+    "The generation task did not return a task id.": "La tâche de génération n'a pas renvoyé d'identifiant de tâche.",
+    "The generation task returned no image.": "La tâche de génération n'a renvoyé aucune image.",
+    "The workflow step failed.": "L'étape du workflow a échoué."
   }
 }

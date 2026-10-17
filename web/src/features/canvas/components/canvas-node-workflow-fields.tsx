@@ -1,0 +1,231 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+import { RotateCcw } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+
+import { Button } from '@/components/ui/button'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+import {
+  PLAYGROUND_IMAGE_SIZES,
+  PLAYGROUND_VIDEO_DURATIONS,
+} from '@/features/playground/constants'
+import type { ModelOption } from '@/features/playground/types'
+import { translateServerText } from '@/lib/server-error-message'
+
+import {
+  CANVAS_WORKFLOW_GENERATIONS,
+  CANVAS_WORKFLOW_GENERATION_LABELS,
+} from '../constants'
+import type { CanvasNodeDataUpdate } from '../hooks/use-canvas-editor'
+import type { CanvasWorkflowRunPhase } from '../hooks/use-canvas-workflow-runner'
+import type {
+  CanvasFlowNode,
+  CanvasNodeWorkflowState,
+  CanvasWorkflowGenerationKind,
+} from '../types'
+import { CanvasWorkflowStatusBadge } from './canvas-workflow-status-badge'
+
+interface CanvasNodeWorkflowFieldsProps {
+  node: CanvasFlowNode
+  models: ModelOption[]
+  /** Transient image previews of the current run for this node. */
+  previews: string[]
+  runPhase: CanvasWorkflowRunPhase
+  disabled?: boolean
+  onUpdateData: (id: string, update: CanvasNodeDataUpdate) => void
+  onRetry: (nodeId: string) => void
+}
+
+/**
+ * Configuration and last-run detail of one `model`/`task` step: the model it
+ * calls through the Playground relay, the media kind of a generation step and
+ * the bounded output or failure of its last attempt. Nothing here holds a
+ * provider URL or an API key; every field describes a request the server
+ * re-validates.
+ */
+export function CanvasNodeWorkflowFields(props: CanvasNodeWorkflowFieldsProps) {
+  const { t } = useTranslation()
+  const node = props.node
+  const workflow = node.data.workflow
+  const status = workflow?.status
+  const model = workflow?.model ?? ''
+  const isTask = node.data.kind === 'task'
+  const generation: CanvasWorkflowGenerationKind =
+    workflow?.generation === 'video' ? 'video' : 'image'
+  const size = workflow?.size ?? PLAYGROUND_IMAGE_SIZES[0]
+  const duration = workflow?.duration ?? PLAYGROUND_VIDEO_DURATIONS[0]
+  const canRetry =
+    (status === 'failed' || status === 'canceled') && props.runPhase === 'idle'
+
+  const updateWorkflow = (patch: Partial<CanvasNodeWorkflowState>) => {
+    props.onUpdateData(node.id, (data) => ({
+      workflow: { ...data.workflow, ...patch },
+    }))
+  }
+
+  return (
+    <div className='grid gap-3 rounded-md border p-2'>
+      <div className='flex items-center justify-between gap-2'>
+        <span className='text-muted-foreground text-xs'>{t('Workflow')}</span>
+        {status ? <CanvasWorkflowStatusBadge status={status} /> : null}
+      </div>
+
+      <label className='grid gap-1.5'>
+        <span className='text-muted-foreground text-xs'>{t('Model')}</span>
+        <NativeSelect
+          disabled={props.disabled || props.models.length === 0}
+          onChange={(event) => updateWorkflow({ model: event.target.value })}
+          value={model}
+        >
+          {props.models.length === 0 ? (
+            <NativeSelectOption value=''>
+              {t('No models available')}
+            </NativeSelectOption>
+          ) : null}
+          {props.models.map((option) => (
+            <NativeSelectOption key={option.value} value={option.value}>
+              {option.label}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+      </label>
+
+      {isTask ? (
+        <label className='grid gap-1.5'>
+          <span className='text-muted-foreground text-xs'>
+            {t('Generation type')}
+          </span>
+          <NativeSelect
+            disabled={props.disabled}
+            onChange={(event) =>
+              updateWorkflow({
+                generation: event.target.value as CanvasWorkflowGenerationKind,
+              })
+            }
+            value={generation}
+          >
+            {CANVAS_WORKFLOW_GENERATIONS.map((option) => (
+              <NativeSelectOption key={option} value={option}>
+                {t(CANVAS_WORKFLOW_GENERATION_LABELS[option])}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </label>
+      ) : null}
+
+      {isTask && generation === 'image' ? (
+        <label className='grid gap-1.5'>
+          <span className='text-muted-foreground text-xs'>{t('Size')}</span>
+          <NativeSelect
+            disabled={props.disabled}
+            onChange={(event) => updateWorkflow({ size: event.target.value })}
+            value={size}
+          >
+            {PLAYGROUND_IMAGE_SIZES.map((option) => (
+              <NativeSelectOption key={option} value={option}>
+                {option}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </label>
+      ) : null}
+
+      {isTask && generation === 'video' ? (
+        <label className='grid gap-1.5'>
+          <span className='text-muted-foreground text-xs'>
+            {t('Duration (seconds)')}
+          </span>
+          <NativeSelect
+            disabled={props.disabled}
+            onChange={(event) =>
+              updateWorkflow({ duration: Number(event.target.value) })
+            }
+            value={String(duration)}
+          >
+            {PLAYGROUND_VIDEO_DURATIONS.map((option) => (
+              <NativeSelectOption key={option} value={String(option)}>
+                {option}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </label>
+      ) : null}
+
+      {workflow?.attempts ? (
+        <p className='text-muted-foreground text-xs'>
+          {t('Attempts: {{count}}', { count: workflow.attempts })}
+        </p>
+      ) : null}
+
+      {workflow?.error ? (
+        <p className='text-destructive text-xs break-words whitespace-pre-wrap'>
+          {translateServerText(t, workflow.error)}
+        </p>
+      ) : null}
+
+      {workflow?.output ? (
+        <div className='grid gap-1'>
+          <span className='text-muted-foreground text-xs'>
+            {t('Workflow output')}
+          </span>
+          <p className='text-muted-foreground rounded-md border p-2 text-xs break-words whitespace-pre-wrap'>
+            {workflow.output}
+          </p>
+        </div>
+      ) : null}
+
+      {props.previews.length > 0 ? (
+        <div className='grid gap-1'>
+          <span className='text-muted-foreground text-xs'>
+            {t('Generated image')}
+          </span>
+          <div className='grid gap-2'>
+            {props.previews.map((source, index) => (
+              <a
+                href={source}
+                key={source}
+                rel='noopener noreferrer'
+                target='_blank'
+              >
+                <img
+                  alt={`${t('Generated image')} ${index + 1}`}
+                  className='border-border/70 max-h-60 w-full rounded-md border object-contain'
+                  src={source}
+                />
+              </a>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {canRetry ? (
+        <Button
+          disabled={props.disabled}
+          onClick={() => props.onRetry(node.id)}
+          size='sm'
+          type='button'
+          variant='outline'
+        >
+          <RotateCcw aria-hidden='true' />
+          {t('Retry step')}
+        </Button>
+      ) : null}
+    </div>
+  )
+}

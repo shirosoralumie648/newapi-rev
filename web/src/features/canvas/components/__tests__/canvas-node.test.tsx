@@ -75,3 +75,34 @@ test('does not mark a node whose source still resolves', () => {
 
   expect(screen.queryByText('Source deleted')).not.toBeInTheDocument()
 })
+
+test('shows the run state, output and failure of a workflow step', () => {
+  renderNode({
+    kind: 'model',
+    workflow: {
+      status: 'failed',
+      model: 'gpt-4o',
+      output: 'partial answer',
+      error: 'upstream exploded',
+    },
+  })
+
+  expect(screen.getByText('Failed')).toBeInTheDocument()
+  expect(screen.getByText('partial answer')).toBeInTheDocument()
+  expect(screen.getByText('upstream exploded')).toBeInTheDocument()
+})
+
+test('shows the durable task id of a generation step', () => {
+  renderNode({
+    kind: 'task',
+    workflow: {
+      status: 'succeeded',
+      model: 'kling-v1',
+      generation: 'video',
+      taskId: 'task-1',
+    },
+  })
+
+  expect(screen.getByText('Succeeded')).toBeInTheDocument()
+  expect(screen.getByText(/task-1/)).toBeInTheDocument()
+})

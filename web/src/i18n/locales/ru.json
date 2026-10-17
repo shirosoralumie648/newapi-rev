@@ -7490,6 +7490,25 @@
     "Only a running task can be canceled.": "Отменить можно только выполняющуюся задачу.",
     "Unable to cancel the task.": "Невозможно отменить задачу.",
     "Playground task result storage limit reached. Wait for old task results to expire.": "Достигнут лимит хранилища результатов задач Playground. Дождитесь истечения срока старых результатов.",
-    "Task result storage per user": "Хранилище результатов задач на пользователя"
+    "Task result storage per user": "Хранилище результатов задач на пользователя",
+    "Model call": "Вызов модели",
+    "Run workflow": "Запустить рабочий процесс",
+    "Cancel run": "Отменить запуск",
+    "Retry step": "Повторить шаг",
+    "Workflow": "Рабочий процесс",
+    "Workflow output": "Результат рабочего процесса",
+    "Attempts: {{count}}": "Попытки: {{count}}",
+    "Not started": "Не запущено",
+    "Succeeded": "Успешно",
+    "Canceled": "Отменено",
+    "Add a model call or generation step to run the workflow.": "Добавьте вызов модели или шаг генерации, чтобы запустить рабочий процесс.",
+    "Workflow connections must not form a cycle.": "Связи рабочего процесса не должны образовывать цикл.",
+    "Choose a model for every workflow step.": "Выберите модель для каждого шага рабочего процесса.",
+    "Connect a prompt or an upstream step before this workflow step.": "Подключите промпт или предыдущий шаг перед этим шагом рабочего процесса.",
+    "The workflow needs an available user group.": "Для рабочего процесса нужна доступная группа пользователей.",
+    "The model returned no text.": "Модель не вернула текст.",
+    "The generation task did not return a task id.": "Задача генерации не вернула идентификатор задачи.",
+    "The generation task returned no image.": "Задача генерации не вернула изображение.",
+    "The workflow step failed.": "Шаг рабочего процесса завершился неудачно."
   }
 }

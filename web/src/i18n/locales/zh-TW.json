@@ -7490,6 +7490,25 @@
     "Only a running task can be canceled.": "只有正在執行的任務可以取消。",
     "Unable to cancel the task.": "無法取消任務。",
     "Playground task result storage limit reached. Wait for old task results to expire.": "任務結果儲存已達上限，請等待舊任務結果過期。",
-    "Task result storage per user": "每位使用者任務結果儲存"
+    "Task result storage per user": "每位使用者任務結果儲存",
+    "Model call": "模型調用",
+    "Run workflow": "執行工作流",
+    "Cancel run": "取消執行",
+    "Retry step": "重試步驟",
+    "Workflow": "工作流",
+    "Workflow output": "工作流輸出",
+    "Attempts: {{count}}": "嘗試次數：{{count}}",
+    "Not started": "尚未開始",
+    "Succeeded": "成功",
+    "Canceled": "已取消",
+    "Add a model call or generation step to run the workflow.": "請先新增模型調用或生成步驟，然後再執行工作流。",
+    "Workflow connections must not form a cycle.": "工作流連線不能形成循環。",
+    "Choose a model for every workflow step.": "請為每個工作流步驟選擇模型。",
+    "Connect a prompt or an upstream step before this workflow step.": "請先連接提示或上游步驟，然後再連接此工作流步驟。",
+    "The workflow needs an available user group.": "工作流需要一個可用的使用者分組。",
+    "The model returned no text.": "模型未回傳文字。",
+    "The generation task did not return a task id.": "生成任務未回傳任務 ID。",
+    "The generation task returned no image.": "生成任務未回傳圖像。",
+    "The workflow step failed.": "工作流步驟失敗。"
   }
 }

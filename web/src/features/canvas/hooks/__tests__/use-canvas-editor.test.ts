@@ -20,6 +20,7 @@ import { act, fireEvent, renderHook } from '@testing-library/react'
 import { expect, test, vi } from 'vitest'
 
 import { CANVAS_MAX_NODES } from '../../constants'
+import { CANVAS_WORKFLOW_ERRORS } from '../../lib/canvas-workflow'
 import type { CanvasServerDocument } from '../../types'
 import { useCanvasEditor } from '../use-canvas-editor'
 
@@ -109,6 +110,57 @@ test('handleConnect links two nodes and becomes undoable', () => {
   expect(hook.result.current.canUndo).toBe(true)
 })
 
+test('handleConnect rejects a connection that would close a cycle', () => {
+  const onChange = vi.fn()
+  const onRejectedConnection = vi.fn()
+  const document: CanvasServerDocument = {
+    nodes: [
+      { id: 'a', type: 'prompt', position: { x: 0, y: 0 } },
+      { id: 'b', type: 'model', position: { x: 1, y: 0 } },
+      { id: 'c', type: 'task', position: { x: 2, y: 0 } },
+    ],
+    edges: [
+      { id: 'a-b', source: 'a', target: 'b' },
+      { id: 'b-c', source: 'b', target: 'c' },
+    ],
+  }
+  const hook = renderHook(() =>
+    useCanvasEditor(document, onChange, { onRejectedConnection })
+  )
+
+  act(() =>
+    hook.result.current.handleConnect({
+      source: 'c',
+      target: 'a',
+      sourceHandle: null,
+      targetHandle: null,
+    })
+  )
+
+  expect(hook.result.current.edges).toHaveLength(2)
+  expect(onRejectedConnection).toHaveBeenCalledWith(
+    CANVAS_WORKFLOW_ERRORS.CYCLE
+  )
+  expect(onChange).not.toHaveBeenCalled()
+})
+
+test('updateNodeData merges a functional update without recording history', () => {
+  const onChange = vi.fn()
+  const hook = renderHook(() => useCanvasEditor(LINKED_DOCUMENT, onChange))
+
+  act(() =>
+    hook.result.current.updateNodeData(
+      'a',
+      (data) => ({ text: `${data.text ?? ''}!` }),
+      { record: false }
+    )
+  )
+
+  expect(hook.result.current.nodes[0].data.text).toBe('!')
+  expect(hook.result.current.canUndo).toBe(false)
+  expect(onChange).toHaveBeenCalledTimes(1)
+})
+
 test('selection changes update state without notifying autosave', () => {
   const onChange = vi.fn()
   const hook = renderHook(() => useCanvasEditor(LINKED_DOCUMENT, onChange))
@@ -134,7 +186,12 @@ test('finishing a drag records history and notifies autosave', () => {
 
   act(() =>
     hook.result.current.handleNodesChange([
-      { id: 'a', type: 'position', position: { x: 40, y: 80 }, dragging: false },
+      {
+        id: 'a',
+        type: 'position',
+        position: { x: 40, y: 80 },
+        dragging: false,
+      },
     ])
   )
 

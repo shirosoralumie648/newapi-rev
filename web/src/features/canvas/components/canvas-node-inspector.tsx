@@ -23,19 +23,36 @@ import { useTranslation } from 'react-i18next'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import type { ModelOption } from '@/features/playground/types'
 
 import { CANVAS_NODE_KIND_LABELS } from '../constants'
+import type {
+  CanvasNodeDataUpdate,
+  CanvasNodeDataUpdateOptions,
+} from '../hooks/use-canvas-editor'
+import type { CanvasWorkflowRunPhase } from '../hooks/use-canvas-workflow-runner'
 import {
   canvasNodeSourceTarget,
   type CanvasSourceTarget,
 } from '../lib/canvas-navigation'
-import type { CanvasFlowNode, CanvasNodeData } from '../types'
+import { isCanvasWorkflowStep } from '../lib/canvas-workflow'
+import type { CanvasFlowNode } from '../types'
+import { CanvasNodeWorkflowFields } from './canvas-node-workflow-fields'
 
 interface CanvasNodeInspectorProps {
   node: CanvasFlowNode | null
   disabled?: boolean
-  onUpdateData: (id: string, patch: Partial<CanvasNodeData>) => void
+  models?: ModelOption[]
+  /** Transient run previews of the selected node; never persisted. */
+  previews?: string[]
+  runPhase?: CanvasWorkflowRunPhase
+  onUpdateData: (
+    id: string,
+    update: CanvasNodeDataUpdate,
+    options?: CanvasNodeDataUpdateOptions
+  ) => void
   onDelete: (id: string) => void
+  onRetry?: (nodeId: string) => void
   onOpenSource?: (target: CanvasSourceTarget) => void
 }
 
@@ -86,6 +103,18 @@ export function CanvasNodeInspector(props: CanvasNodeInspectorProps) {
         <p className='border-warning/40 bg-warning/10 text-warning rounded-md border p-2 text-xs'>
           {t('The original was deleted. A saved snapshot is shown instead.')}
         </p>
+      ) : null}
+
+      {isCanvasWorkflowStep(node.data.kind) && props.onRetry ? (
+        <CanvasNodeWorkflowFields
+          disabled={props.disabled}
+          models={props.models ?? []}
+          node={node}
+          onRetry={props.onRetry}
+          onUpdateData={props.onUpdateData}
+          previews={props.previews ?? []}
+          runPhase={props.runPhase ?? 'idle'}
+        />
       ) : null}
 
       {editable ? (
@@ -144,14 +173,26 @@ export function CanvasNodeInspector(props: CanvasNodeInspectorProps) {
               <dd className='font-mono break-all'>{reference.artifactId}</dd>
             </div>
           ) : null}
+          {reference.taskId ? (
+            <div className='flex justify-between gap-2'>
+              <dt className='text-muted-foreground'>{t('Task ID')}</dt>
+              <dd className='font-mono break-all'>{reference.taskId}</dd>
+            </div>
+          ) : null}
+          {reference.taskArtifactKey ? (
+            <div className='flex justify-between gap-2'>
+              <dt className='text-muted-foreground'>{t('Artifact')}</dt>
+              <dd className='font-mono break-all'>
+                {reference.taskArtifactKey}
+              </dd>
+            </div>
+          ) : null}
         </dl>
       ) : null}
 
       {sourceTarget && props.onOpenSource ? (
         <div className='grid gap-2'>
-          <span className='text-muted-foreground text-xs'>
-            {t('Source')}
-          </span>
+          <span className='text-muted-foreground text-xs'>{t('Source')}</span>
           <div className='flex flex-wrap gap-2'>
             <Button
               disabled={props.disabled}

@@ -7490,6 +7490,25 @@
     "Only a running task can be canceled.": "Only a running task can be canceled.",
     "Unable to cancel the task.": "Unable to cancel the task.",
     "Playground task result storage limit reached. Wait for old task results to expire.": "Playground task result storage limit reached. Wait for old task results to expire.",
-    "Task result storage per user": "Task result storage per user"
+    "Task result storage per user": "Task result storage per user",
+    "Model call": "Model call",
+    "Run workflow": "Run workflow",
+    "Cancel run": "Cancel run",
+    "Retry step": "Retry step",
+    "Workflow": "Workflow",
+    "Workflow output": "Workflow output",
+    "Attempts: {{count}}": "Attempts: {{count}}",
+    "Not started": "Not started",
+    "Succeeded": "Succeeded",
+    "Canceled": "Canceled",
+    "Add a model call or generation step to run the workflow.": "Add a model call or generation step to run the workflow.",
+    "Workflow connections must not form a cycle.": "Workflow connections must not form a cycle.",
+    "Choose a model for every workflow step.": "Choose a model for every workflow step.",
+    "Connect a prompt or an upstream step before this workflow step.": "Connect a prompt or an upstream step before this workflow step.",
+    "The workflow needs an available user group.": "The workflow needs an available user group.",
+    "The model returned no text.": "The model returned no text.",
+    "The generation task did not return a task id.": "The generation task did not return a task id.",
+    "The generation task returned no image.": "The generation task returned no image.",
+    "The workflow step failed.": "The workflow step failed."
   }
 }

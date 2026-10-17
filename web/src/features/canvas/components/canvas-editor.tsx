@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { MiniMap, type NodeTypes, type Viewport } from '@xyflow/react'
-import { useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -25,8 +25,11 @@ import { Canvas } from '@/components/ai-elements/canvas'
 import { Panel } from '@/components/ai-elements/panel'
 import { WorkspaceInspector } from '@/components/workspace-inspector'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { translateServerText } from '@/lib/server-error-message'
 
 import { useCanvasEditor } from '../hooks/use-canvas-editor'
+import { useCanvasWorkflowOptions } from '../hooks/use-canvas-workflow-options'
+import { useCanvasWorkflowRunner } from '../hooks/use-canvas-workflow-runner'
 import {
   CANVAS_ERRORS,
   parseCanvasImport,
@@ -54,6 +57,7 @@ const canvasNodeTypes: NodeTypes = {
   attachment: CanvasFlowNodeView,
   artifact: CanvasFlowNodeView,
   message: CanvasFlowNodeView,
+  model: CanvasFlowNodeView,
   task: CanvasFlowNodeView,
   'task-result': CanvasFlowNodeView,
 }
@@ -68,7 +72,10 @@ interface CanvasEditorProps {
 export function CanvasEditor(props: CanvasEditorProps) {
   const { t } = useTranslation()
   const isMobile = useIsMobile()
-  const viewportRef = useRef<Viewport | undefined>(props.project.document.viewport)
+  const viewportRef = useRef<Viewport | undefined>(
+    props.project.document.viewport
+  )
+  const workflowOptions = useCanvasWorkflowOptions()
 
   const handleChange = useCallback(
     (nodes: CanvasFlowNode[], edges: CanvasFlowEdge[]) => {
@@ -85,7 +92,24 @@ export function CanvasEditor(props: CanvasEditorProps) {
 
   const editor = useCanvasEditor(props.project.document, handleChange, {
     shortcutsEnabled: !props.disabled,
+    onRejectedConnection: (messageKey) => toast.error(t(messageKey)),
   })
+
+  const workflow = useCanvasWorkflowRunner({
+    nodes: editor.nodes,
+    edges: editor.edges,
+    group: workflowOptions.group,
+    updateNodeData: editor.updateNodeData,
+  })
+  const workflowMessage = workflow.message
+  const clearWorkflowMessage = workflow.clearMessage
+
+  const notifyWorkflow = useCallback(() => {
+    if (!workflowMessage) return
+    toast.error(translateServerText(t, workflowMessage))
+    clearWorkflowMessage()
+  }, [clearWorkflowMessage, t, workflowMessage])
+  useEffect(notifyWorkflow, [notifyWorkflow])
 
   const handleMoveEnd = useCallback(
     (_event: MouseEvent | TouchEvent | null, viewport: Viewport) => {
@@ -109,10 +133,7 @@ export function CanvasEditor(props: CanvasEditorProps) {
       editor.edges,
       viewportRef.current
     )
-    const text = serializeCanvasExport(
-      props.project.title,
-      canvasDocument
-    )
+    const text = serializeCanvasExport(props.project.title, canvasDocument)
     const url = URL.createObjectURL(
       new Blob([text], { type: 'application/json' })
     )
@@ -143,10 +164,18 @@ export function CanvasEditor(props: CanvasEditorProps) {
     <div className='bg-muted/10 flex h-full min-h-0 w-full flex-col overflow-hidden border-l'>
       <CanvasNodeInspector
         disabled={props.disabled}
+        models={workflowOptions.models}
         node={editor.selectedNode}
         onDelete={editor.deleteNode}
         onOpenSource={props.onOpenSource}
+        onRetry={workflow.retry}
         onUpdateData={editor.updateNodeData}
+        previews={
+          editor.selectedNode
+            ? (workflow.results[editor.selectedNode.id] ?? [])
+            : []
+        }
+        runPhase={workflow.phase}
       />
     </div>
   )
@@ -175,11 +204,17 @@ export function CanvasEditor(props: CanvasEditorProps) {
                   canRedo={editor.canRedo}
                   canUndo={editor.canUndo}
                   disabled={props.disabled}
+                  group={workflowOptions.group}
+                  groups={workflowOptions.groups}
                   onAddNode={handleAddNode}
+                  onCancelRun={() => void workflow.cancel()}
                   onExport={handleExport}
+                  onGroupChange={workflowOptions.setGroup}
                   onImportFile={handleImportFile}
                   onRedo={editor.redo}
+                  onRunWorkflow={() => workflow.run()}
                   onUndo={editor.undo}
+                  runPhase={workflow.phase}
                 />
               </Panel>
               <MiniMap className='bg-card!' pannable zoomable />

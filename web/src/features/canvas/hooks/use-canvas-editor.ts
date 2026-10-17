@@ -27,10 +27,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { CANVAS_MAX_NODES, CANVAS_NODE_ADD_OFFSET } from '../constants'
-import {
-  createCanvasNode,
-  fromServerDocument,
-} from '../lib/canvas-document'
+import { createCanvasNode, fromServerDocument } from '../lib/canvas-document'
 import {
   createCanvasHistory,
   pushCanvasHistory,
@@ -38,6 +35,10 @@ import {
   undoCanvasHistory,
   type CanvasSnapshot,
 } from '../lib/canvas-history'
+import {
+  wouldCreateCanvasWorkflowCycle,
+  CANVAS_WORKFLOW_ERRORS,
+} from '../lib/canvas-workflow'
 import type {
   CanvasFlowEdge,
   CanvasFlowNode,
@@ -61,6 +62,22 @@ interface ApplyChangeOptions {
 interface CanvasEditorOptions {
   /** Binds Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z and Ctrl/Cmd+Y while mounted. */
   shortcutsEnabled?: boolean
+  /** Reports a rejected connection with a translatable message key. */
+  onRejectedConnection?: (messageKey: string) => void
+}
+
+/**
+ * A node data edit is either a partial patch or a function of the latest data,
+ * so callers that merge nested state (a workflow run) never overwrite fields an
+ * earlier edit of the same tick already stored.
+ */
+export type CanvasNodeDataUpdate =
+  | Partial<CanvasNodeData>
+  | ((data: CanvasNodeData) => Partial<CanvasNodeData>)
+
+export interface CanvasNodeDataUpdateOptions {
+  /** Records an undo entry; run-state updates stay out of history. */
+  record?: boolean
 }
 
 /**
@@ -85,10 +102,12 @@ export function useCanvasEditor(
   const edgesRef = useRef(edges)
   const historyRef = useRef(history)
   const onChangeRef = useRef(onChange)
+  const optionsRef = useRef(options)
   nodesRef.current = nodes
   edgesRef.current = edges
   historyRef.current = history
   onChangeRef.current = onChange
+  optionsRef.current = options
 
   const commit = useCallback(
     (
@@ -167,6 +186,19 @@ export function useCanvasEditor(
 
   const handleConnect = useCallback(
     (connection: Connection) => {
+      // The graph stays a general editor, but a workflow run consumes a DAG:
+      // reject a connection that would close a cycle instead of executing an
+      // arbitrary prefix of it later.
+      if (
+        wouldCreateCanvasWorkflowCycle(
+          edgesRef.current,
+          connection.source,
+          connection.target
+        )
+      ) {
+        optionsRef.current.onRejectedConnection?.(CANVAS_WORKFLOW_ERRORS.CYCLE)
+        return
+      }
       const nextEdges = addEdge(connection, edgesRef.current)
       if (nextEdges === edgesRef.current) return
       commit(nodesRef.current, nextEdges, { record: true, notify: true })
@@ -194,11 +226,23 @@ export function useCanvasEditor(
   )
 
   const updateNodeData = useCallback(
-    (id: string, patch: Partial<CanvasNodeData>) => {
-      const nextNodes = nodesRef.current.map((node) =>
-        node.id === id ? { ...node, data: { ...node.data, ...patch } } : node
-      )
-      commit(nextNodes, edgesRef.current, { record: true, notify: true })
+    (
+      id: string,
+      update: CanvasNodeDataUpdate,
+      updateOptions: CanvasNodeDataUpdateOptions = {}
+    ) => {
+      let changed = false
+      const nextNodes = nodesRef.current.map((node) => {
+        if (node.id !== id) return node
+        const patch = typeof update === 'function' ? update(node.data) : update
+        changed = true
+        return { ...node, data: { ...node.data, ...patch } }
+      })
+      if (!changed) return
+      commit(nextNodes, edgesRef.current, {
+        record: updateOptions.record ?? true,
+        notify: true,
+      })
     },
     [commit]
   )
@@ -280,8 +324,7 @@ export function useCanvasEditor(
     commit(nextNodes, edgesRef.current, { record: false, notify: false })
   }, [commit])
 
-  const selectedNode =
-    nodes.find((node) => node.selected === true) ?? null
+  const selectedNode = nodes.find((node) => node.selected === true) ?? null
   const canUndo = history.past.length > 0
   const canRedo = history.future.length > 0
 
