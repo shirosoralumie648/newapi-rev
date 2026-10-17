@@ -29,6 +29,14 @@ const (
 	WalletLedgerKindAffiliateTransfer   = "affiliate_transfer"
 	WalletLedgerKindSystemGrant         = "system_grant"
 	WalletLedgerKindConsumeHourly       = "consume_hourly"
+	// WalletLedgerKindDebt records the debt account: the part of a wallet
+	// charge the credit line could not cover, and its later collection. Debt
+	// rows are excluded from the wallet balance sum; their total equals the
+	// outstanding WalletDebt.Amount.
+	WalletLedgerKindDebt = "debt"
+	// WalletLedgerKindDebtRepayment is the wallet-account side of collecting
+	// debt: the money that left the wallet to pay it.
+	WalletLedgerKindDebtRepayment = "debt_repayment"
 	// Reserved: chargeback reversals (WL payment webhooks) and the daily
 	// storage settlement (BL-02) record through these kinds.
 	WalletLedgerKindChargeback   = "chargeback"
@@ -49,6 +57,10 @@ const (
 	WalletLedgerRefMidjourneyRefund = "midjourney_refund"
 	WalletLedgerRefInviteeBonus     = "invitee_bonus"
 	WalletLedgerRefConsumeHourly    = "consume_hourly"
+	// Debt account references: one namespace records debt growth, the other its
+	// collection (WM-06 overdraft accounting).
+	WalletLedgerRefWalletDebt      = "wallet_debt"
+	WalletLedgerRefWalletDebtRepay = "wallet_debt_repay"
 )
 
 // walletLedgerConsumeHourSeconds is the aggregation window for API consumption.
@@ -244,7 +256,7 @@ func RecordWalletConsumeDelta(userId int, delta int64) {
 	if userId <= 0 || delta == 0 {
 		return
 	}
-	hour := common.GetTimestamp() / walletLedgerConsumeHourSeconds * walletLedgerConsumeHourSeconds
+	hour := walletConsumeHourBucket(common.GetTimestamp())
 	if !common.BatchUpdateEnabled {
 		if err := upsertWalletConsumeLedger(userId, hour, delta); err != nil {
 			common.SysError(common.LogText("failed to write wallet consume ledger for user %d: %s", userId, err.Error()))
@@ -294,12 +306,27 @@ func flushWalletConsumeLedgers() {
 	}
 }
 
+// walletConsumeHourBucket returns the aggregation window (hour start) of a
+// timestamp for the per-user consumption row.
+func walletConsumeHourBucket(timestamp int64) int64 {
+	return timestamp / walletLedgerConsumeHourSeconds * walletLedgerConsumeHourSeconds
+}
+
 func upsertWalletConsumeLedger(userId int, hour int64, delta int64) error {
+	return upsertWalletConsumeLedgerTx(DB, userId, hour, delta)
+}
+
+// upsertWalletConsumeLedgerTx accumulates delta into the user's hourly
+// consumption row through tx, so a wallet movement committed inside an outer
+// transaction records its ledger row in that same transaction. balance_after
+// is read through tx and therefore reflects any balance change the caller
+// already applied.
+func upsertWalletConsumeLedgerTx(tx *gorm.DB, userId int, hour int64, delta int64) error {
 	if delta == 0 {
 		return nil
 	}
 	var quota int64
-	if err := DB.Model(&User{}).Where("id = ?", userId).Pluck("quota", &quota).Error; err != nil {
+	if err := tx.Model(&User{}).Where("id = ?", userId).Pluck("quota", &quota).Error; err != nil {
 		return err
 	}
 	entry := &WalletLedgerEntry{
@@ -311,7 +338,7 @@ func upsertWalletConsumeLedger(userId int, hour int64, delta int64) error {
 		RefId:        fmt.Sprintf("%d:%d", userId, hour),
 		CreatedAt:    common.GetTimestamp(),
 	}
-	return DB.Clauses(clause.OnConflict{
+	return tx.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "ref_type"}, {Name: "ref_id"}},
 		DoUpdates: clause.Assignments(map[string]any{
 			// Qualify the accumulated column: PostgreSQL reports an unqualified
@@ -455,7 +482,10 @@ func StreamUserWalletLedger(userId int, exportLimit int, fn func(*WalletLedgerEn
 	return rows.Err()
 }
 
-// WalletLedgerSumForUser returns the ledger total and row count for one user.
+// WalletLedgerSumForUser returns the wallet-account total (every row except the
+// debt account) and row count for one user. The balance equals this sum; debt
+// rows live in their own account and are returned by
+// WalletDebtLedgerSumForUser.
 func WalletLedgerSumForUser(userId int) (int64, int64, error) {
 	var row struct {
 		Total      int64
@@ -463,11 +493,24 @@ func WalletLedgerSumForUser(userId int) (int64, int64, error) {
 	}
 	if err := DB.Model(&WalletLedgerEntry{}).
 		Select("COALESCE(SUM(amount), 0) AS total, COUNT(*) AS entry_count").
-		Where("user_id = ?", userId).
+		Where("user_id = ? AND kind <> ?", userId, WalletLedgerKindDebt).
 		Scan(&row).Error; err != nil {
 		return 0, 0, err
 	}
 	return row.Total, row.EntryCount, nil
+}
+
+// WalletDebtLedgerSumForUser returns the debt account total of one user, which
+// equals the outstanding debt recorded in wallet_debts.
+func WalletDebtLedgerSumForUser(userId int) (int64, error) {
+	var total int64
+	if err := DB.Model(&WalletLedgerEntry{}).
+		Select("COALESCE(SUM(amount), 0)").
+		Where("user_id = ? AND kind = ?", userId, WalletLedgerKindDebt).
+		Scan(&total).Error; err != nil {
+		return 0, err
+	}
+	return total, nil
 }
 
 // WalletReconciliation is the per-user result of comparing Σledger with the
@@ -481,7 +524,11 @@ type WalletReconciliation struct {
 	CacheQuota *int64 `json:"cache_quota,omitempty"`
 	Deviation  int64  `json:"deviation"`
 	Reconciled bool   `json:"reconciled"`
-	CheckedAt  int64  `json:"checked_at"`
+	// Debt is the debt-account ledger sum and DebtBalance the outstanding debt
+	// stored for the user; both must match and are outside the wallet sum.
+	Debt        int64 `json:"debt"`
+	DebtBalance int64 `json:"debt_balance"`
+	CheckedAt   int64 `json:"checked_at"`
 }
 
 // WalletReconciliationReport summarizes one reconciliation run. Deviations is
@@ -506,17 +553,27 @@ func ReconcileWalletLedgerForUser(userId int) (*WalletReconciliation, error) {
 	if err != nil {
 		return nil, err
 	}
+	debtSum, err := WalletDebtLedgerSumForUser(userId)
+	if err != nil {
+		return nil, err
+	}
+	debtBalance, err := WalletDebtForUser(userId)
+	if err != nil {
+		return nil, err
+	}
 	quota := int64(user.Quota)
 	result := &WalletReconciliation{
-		UserId:     user.Id,
-		Username:   user.Username,
-		LedgerSum:  ledgerSum,
-		EntryCount: entryCount,
-		Quota:      quota,
-		Deviation:  ledgerSum - quota,
-		CheckedAt:  common.GetTimestamp(),
+		UserId:      user.Id,
+		Username:    user.Username,
+		LedgerSum:   ledgerSum,
+		EntryCount:  entryCount,
+		Quota:       quota,
+		Deviation:   ledgerSum - quota,
+		Debt:        debtSum,
+		DebtBalance: debtBalance,
+		CheckedAt:   common.GetTimestamp(),
 	}
-	result.Reconciled = result.Deviation == 0
+	result.Reconciled = result.Deviation == 0 && debtSum == debtBalance
 	if !result.Reconciled && common.RedisEnabled {
 		if cacheQuota, cacheErr := getUserQuotaCache(userId); cacheErr == nil {
 			value := int64(cacheQuota)
@@ -536,10 +593,11 @@ func ReconcileWalletLedgers(deviationLimit int) (*WalletReconciliationReport, er
 		UserId     int
 		Total      int64
 		EntryCount int64
+		Debt       int64
 	}
 	var sums []ledgerSumRow
 	if err := DB.Model(&WalletLedgerEntry{}).
-		Select("user_id, SUM(amount) AS total, COUNT(*) AS entry_count").
+		Select("user_id, SUM(CASE WHEN kind = ? THEN 0 ELSE amount END) AS total, COUNT(*) AS entry_count, SUM(CASE WHEN kind = ? THEN amount ELSE 0 END) AS debt", WalletLedgerKindDebt, WalletLedgerKindDebt).
 		Group("user_id").
 		Find(&sums).Error; err != nil {
 		return nil, err
@@ -571,6 +629,7 @@ func ReconcileWalletLedgers(deviationLimit int) (*WalletReconciliationReport, er
 				EntryCount: row.EntryCount,
 				Quota:      quota,
 				Deviation:  deviation,
+				Debt:       row.Debt,
 				CheckedAt:  report.CheckedAt,
 			}
 			if common.RedisEnabled {

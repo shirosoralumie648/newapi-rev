@@ -16,11 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { ERROR_MESSAGES } from '../../constants'
+import { ERROR_MESSAGES, PLAYGROUND_REQUEST_ID_HEADER } from '../../constants'
 import type {
   ChatCompletionChunk,
   ChatCompletionToolCallDelta,
+  MessageUsage,
 } from '../../types'
+import { toMessageUsage } from '../message/message-usage-utils'
 
 const STREAM_DONE_MESSAGE = '[DONE]'
 const STREAM_CLOSED_READY_STATE = 2
@@ -35,6 +37,7 @@ export type StreamMessageUpdate = {
 export type StreamChunkParseResult = {
   updates: StreamMessageUpdate[]
   toolCalls: ChatCompletionToolCallDelta[]
+  usage?: MessageUsage
 }
 
 type StreamErrorPayload = {
@@ -75,14 +78,16 @@ export function parseStreamErrorDetails(data?: string): StreamErrorDetails {
 /**
  * Parse one SSE chunk. Text and reasoning updates flow into the assistant
  * content; tool call fragments are kept separate because they are merged by
- * stream index before they become stored calls.
+ * stream index before they become stored calls. The final frame carries the
+ * usage of the whole request, so it is reported even when it has no choices.
  */
 export function parseStreamChunk(data: string): StreamChunkParseResult {
   const chunk = JSON.parse(data) as ChatCompletionChunk
+  const usage = toMessageUsage(chunk.usage)
   const delta = chunk.choices?.[0]?.delta
 
   if (!delta) {
-    return { updates: [], toolCalls: [] }
+    return { updates: [], toolCalls: [], usage }
   }
 
   const updates: StreamMessageUpdate[] = []
@@ -96,7 +101,26 @@ export function parseStreamChunk(data: string): StreamChunkParseResult {
     updates.push({ type: 'content', chunk: delta.content })
   }
 
-  return { updates, toolCalls: delta.tool_calls ?? [] }
+  return { updates, toolCalls: delta.tool_calls ?? [], usage }
+}
+
+/**
+ * The relay request id the response header carries. The SSE transport exposes
+ * its XMLHttpRequest, so the header is readable once the response started; a
+ * transport without one (or a cross-origin response without the header
+ * exposed) simply yields no id.
+ */
+export function getStreamResponseRequestId(
+  source: unknown
+): string | undefined {
+  const xhr = (
+    source as {
+      xhr?: { getResponseHeader?: (name: string) => string | null }
+    }
+  ).xhr
+  const value = xhr?.getResponseHeader?.(PLAYGROUND_REQUEST_ID_HEADER)
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : undefined
 }
 
 export function isStreamDoneMessage(data: string): boolean {

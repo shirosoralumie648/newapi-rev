@@ -76,6 +76,17 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 			return err
 		}
 
+		// 订阅结算超额未能完全转扣钱包时（套餐不允许，或钱包余额不足）记录告警，
+		// 不再静默少扣。
+		if relayInfo.SubscriptionOverflowUncovered > 0 {
+			logger.LogWarn(ctx, common.LogText("subscription settlement overflow uncovered: user=%d subscription=%d uncovered=%s wallet_charged=%s",
+				relayInfo.UserId,
+				relayInfo.SubscriptionId,
+				logger.FormatQuota(int(relayInfo.SubscriptionOverflowUncovered)),
+				logger.FormatQuota(int(relayInfo.SubscriptionWalletOverflow)),
+			))
+		}
+
 		// 发送额度通知（订阅计费使用订阅剩余额度）
 		if actualQuota != 0 {
 			if relayInfo.BillingSource == BillingSourceSubscription {

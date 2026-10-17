@@ -51,8 +51,10 @@ const playgroundMessagePositionStride = 1024
 
 // PlaygroundMessageDelta is one incremental message write: Upserts carry the
 // canonical payloads the client added or changed, Deletes names the client keys
-// it removed, and Order optionally pins the complete resulting sequence (the
-// deprecated snapshot endpoint sets it).
+// it removed, and Order optionally pins the complete resulting sequence. A nil
+// Order leaves the stored sequence alone, while a non-nil Order — even an empty
+// one — is the complete snapshot, so every stored key outside it is removed
+// (the deprecated snapshot endpoint always sets it).
 type PlaygroundMessageDelta struct {
 	Upserts []PlaygroundMessage
 	Deletes []string
@@ -330,8 +332,11 @@ func ApplyPlaygroundMessagesDelta(userID int, sessionID string, revision int64, 
 // ReplacePlaygroundMessages is the deprecated full-snapshot writer kept for one
 // release. It is translated into the incremental path, so a snapshot that
 // matches the stored rows writes nothing and only a changed sequence renumbers
-// positions. Callers should move to ApplyPlaygroundMessagesDelta.
+// positions. An empty snapshot removes every stored message. Callers should move
+// to ApplyPlaygroundMessagesDelta.
 func ReplacePlaygroundMessages(userID int, sessionID string, revision int64, messages []PlaygroundMessage) (int64, error) {
+	// make keeps the order non-nil even for an empty snapshot, which is what
+	// tells the incremental engine to delete every stored key.
 	order := make([]string, 0, len(messages))
 	for index := range messages {
 		order = append(order, messages[index].ClientKey)
@@ -367,7 +372,7 @@ func applyPlaygroundMessageDelta(tx *gorm.DB, userID int, sessionID string, poli
 	}
 
 	changed := false
-	if len(delta.Order) > 0 {
+	if delta.Order != nil {
 		wanted := make(map[string]bool, len(delta.Order))
 		for _, key := range delta.Order {
 			if key == "" || wanted[key] {
@@ -445,7 +450,7 @@ func applyPlaygroundMessageDelta(tx *gorm.DB, userID int, sessionID string, poli
 		return false, ErrPlaygroundMessageLimit
 	}
 
-	if len(delta.Order) > 0 {
+	if delta.Order != nil {
 		ordered := make([]*PlaygroundMessage, 0, len(delta.Order))
 		for _, key := range delta.Order {
 			message, ok := byKey[key]

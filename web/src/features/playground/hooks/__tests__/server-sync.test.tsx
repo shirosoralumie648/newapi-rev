@@ -325,12 +325,14 @@ test('an account change aborts outstanding writes before they can continue under
   mockServer()
   let signal: AbortSignal | undefined
   let finish!: (value: unknown) => void
-  vi.spyOn(api, 'patch').mockImplementation((_url, _body, config) => {
-    signal = config?.signal as AbortSignal
-    return new Promise((resolve) => {
-      finish = resolve
+  const patch = vi
+    .spyOn(api, 'patch')
+    .mockImplementation((_url, _body, config) => {
+      signal = config?.signal as AbortSignal
+      return new Promise((resolve) => {
+        finish = resolve
+      })
     })
-  })
   const hook = mount()
   await waitFor(() =>
     expect(hook.result.current.local.activeSessionId).toBe(remote.id)

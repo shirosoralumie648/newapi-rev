@@ -206,8 +206,10 @@ func TestPreConsumePolicyDatabaseMatrix(t *testing.T) {
 			db := modelManagementDB(t, dialect.kind, os.Getenv(dialect.env))
 			require.NoError(t, db.AutoMigrate(&model.Token{}))
 			for key, value := range map[string]string{
-				"quota_setting.trust_quota_usd":        "10.5",
-				"quota_setting.pre_consume_multiplier": "1.5",
+				"quota_setting.trust_quota_usd":           "10.5",
+				"quota_setting.pre_consume_multiplier":    "1.5",
+				"quota_setting.overdraft_limit_usd":       "0.02",
+				"quota_setting.overdraft_group_overrides": `{"vip":0.5}`,
 			} {
 				var response struct{ Success bool }
 				modelManagementRequest(t, UpdateOption, http.MethodPut, "/api/option/", OptionUpdateRequest{Key: key, Value: value}, &response)
@@ -225,15 +227,24 @@ func TestPreConsumePolicyDatabaseMatrix(t *testing.T) {
 			for range 2 {
 				operation_setting.GetQuotaSetting().TrustQuotaUSD = 10
 				operation_setting.GetQuotaSetting().PreConsumeMultiplier = 1
+				operation_setting.GetQuotaSetting().OverdraftLimitUSD = 0
+				operation_setting.GetQuotaSetting().OverdraftGroupOverrides = nil
 				require.NoError(t, config.GlobalConfig.LoadFromDB(stored))
 				assert.Equal(t, 10.5, operation_setting.GetQuotaSetting().TrustQuotaUSD)
 				assert.Equal(t, 1.5, operation_setting.GetQuotaSetting().PreConsumeMultiplier)
+				assert.Equal(t, 0.02, operation_setting.GetQuotaSetting().OverdraftLimitUSD)
+				assert.Equal(t, int64(250_000), operation_setting.GetQuotaSetting().OverdraftLimitQuota("vip"))
+				assert.Equal(t, int64(10_000), operation_setting.GetQuotaSetting().OverdraftLimitQuota("default"))
 			}
 			for _, tc := range []struct{ key, value string }{
 				{"trust_quota_usd", "-1"}, {"trust_quota_usd", "NaN"}, {"trust_quota_usd", "+Inf"},
 				{"pre_consume_multiplier", "0"}, {"pre_consume_multiplier", "-0.5"},
 				{"pre_consume_multiplier", "NaN"}, {"pre_consume_multiplier", "Inf"},
 				{"pre_consume_multiplier", "1e309"}, {"pre_consume_multiplier", ""},
+				{"overdraft_limit_usd", "-1"}, {"overdraft_limit_usd", "NaN"}, {"overdraft_limit_usd", "+Inf"},
+				{"overdraft_limit_usd", "1e18"},
+				{"overdraft_group_overrides", `{"vip":-1}`}, {"overdraft_group_overrides", `{"":"1"}`},
+				{"overdraft_group_overrides", `[1,2]`}, {"overdraft_group_overrides", `{"vip":"x"}`},
 			} {
 				key := "quota_setting." + tc.key
 				var response struct{ Success bool }
@@ -270,6 +281,9 @@ func TestPreConsumePolicyDatabaseMatrix(t *testing.T) {
 				t.Run(tc.name, func(t *testing.T) {
 					require.NoError(t, model.UpdateOption("quota_setting.trust_quota_usd", strconv.FormatFloat(tc.threshold, 'f', -1, 64)))
 					require.NoError(t, model.UpdateOption("quota_setting.pre_consume_multiplier", strconv.FormatFloat(tc.multiplier, 'f', -1, 64)))
+					// The wallet overdraft credit line defaults to zero, so these
+					// reservation cases keep the pre-overdraft trust semantics.
+					require.NoError(t, model.UpdateOption("quota_setting.overdraft_limit_usd", "0"))
 					user := model.User{Username: fmt.Sprintf("policy-user-%d", i), Quota: tc.wallet, Group: "default", AffCode: fmt.Sprintf("policy-aff-%d", i)}
 					require.NoError(t, db.Create(&user).Error)
 					token := model.Token{UserId: user.Id, Key: fmt.Sprintf("policy-token-%d", i), RemainQuota: tc.token, UnlimitedQuota: tc.unlimited}

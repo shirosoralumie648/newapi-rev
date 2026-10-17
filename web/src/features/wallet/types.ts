@@ -307,6 +307,27 @@ export interface WalletLedgerPage {
 }
 
 /**
+ * One account with outstanding wallet debt. Amounts are quota values; the
+ * account is read-only while `debt` is positive.
+ */
+export interface WalletDebtor {
+  user_id: number
+  username: string
+  group: string
+  quota: number
+  debt: number
+  updated_at: number
+}
+
+/**
+ * Paginated outstanding wallet debt response
+ */
+export interface WalletDebtorPage {
+  items: WalletDebtor[]
+  total: number
+}
+
+/**
  * Complete order request (admin only)
  */
 export interface CompleteOrderRequest {

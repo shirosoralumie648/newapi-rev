@@ -63,13 +63,17 @@ func (w *WalletFunding) Settle(delta int) error {
 			return nil
 		}
 		if delta > 0 {
-			if err := model.DecreaseUserQuota(w.userId, delta, false); err != nil {
+			// 无 requestId 的兼容路径同样受透支上限约束：超出信用额度的部分
+			// 记为欠款，只有真正扣走的额度计入消费账本。
+			applied, err := model.SettleWalletCharge(w.userId, delta)
+			if err != nil {
 				return err
 			}
-		} else {
-			if err := model.IncreaseUserQuota(w.userId, -delta, false); err != nil {
-				return err
-			}
+			model.RecordWalletConsumeDelta(w.userId, -int64(applied))
+			return nil
+		}
+		if err := model.IncreaseUserQuota(w.userId, -delta, false); err != nil {
+			return err
 		}
 		model.RecordWalletConsumeDelta(w.userId, -int64(delta))
 		return nil
@@ -114,6 +118,9 @@ type SubscriptionFunding struct {
 	amount         int64 // 预扣的订阅额度（subConsume）
 	subscriptionId int
 	preConsumed    int64
+	// lastSettlement 记录最近一次结算如何分配 delta（订阅承担 / 钱包承担超额）。
+	// BillingSession 据此写入 relayInfo 的日志字段。
+	lastSettlement *model.SubscriptionSettlementResult
 	// 以下字段在 PreConsume 成功后填充，供 RelayInfo 同步使用
 	AmountTotal     int64
 	AmountUsedAfter int64
@@ -145,7 +152,14 @@ func (s *SubscriptionFunding) Settle(delta int) error {
 	if delta == 0 {
 		return nil
 	}
-	return model.PostConsumeUserSubscriptionDelta(s.subscriptionId, int64(delta))
+	// 单一事务内结算：订阅额度用尽时按套餐 AllowWalletOverflow 把超额转扣钱包，
+	// 并向钱包账本写入对应的消费行。
+	result, err := model.SettleUserSubscriptionDelta(s.subscriptionId, int64(delta))
+	if err != nil {
+		return err
+	}
+	s.lastSettlement = result
+	return nil
 }
 
 func (s *SubscriptionFunding) Refund() error {

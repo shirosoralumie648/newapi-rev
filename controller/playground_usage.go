@@ -20,11 +20,34 @@ package controller
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 )
+
+const (
+	// playgroundCostLookupMaxRequestIds bounds one cost lookup so a single
+	// request stays a bounded indexed query. A conversation holds far fewer
+	// generated versions than this.
+	playgroundCostLookupMaxRequestIds = 100
+	// playgroundCostRequestIdMaxLength matches the logs.request_id column.
+	playgroundCostRequestIdMaxLength = 64
+)
+
+// playgroundMessageCost is one message's settled cost, read from the caller's
+// ordinary consume log. It is display-only: the figures are copied from the
+// settled row and never recalculated.
+type playgroundMessageCost struct {
+	RequestId        string `json:"request_id"`
+	Quota            int    `json:"quota"`
+	PromptTokens     int    `json:"prompt_tokens"`
+	CompletionTokens int    `json:"completion_tokens"`
+	TotalTokens      int    `json:"total_tokens"`
+	ModelName        string `json:"model_name,omitempty"`
+	CreatedAt        int64  `json:"created_at"`
+}
 
 // GetPlaygroundUsage returns the caller's unified Playground resource usage.
 // It is read-only and scoped to the authenticated user, so it exposes only the
@@ -41,4 +64,62 @@ func GetPlaygroundUsage(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, usage)
+}
+
+// GetPlaygroundMessageCosts resolves the caller's own relay requests to their
+// ordinary consume-log rows, so a conversation can display the tokens and the
+// amount that were actually billed for each message. It is strictly read-only
+// and owner-scoped: another account's request id has no row, the figures come
+// from the settled log, and no quota is reserved, settled or refunded here.
+func GetPlaygroundMessageCosts(c *gin.Context) {
+	userID := c.GetInt("id")
+	if userID <= 0 {
+		common.ApiErrorStatus(c, http.StatusUnauthorized, common.NewMessage("Authentication required."))
+		return
+	}
+	raw := c.Query("request_ids")
+	if raw == "" {
+		writePlaygroundError(c, common.NewMessage("Invalid Playground request."))
+		return
+	}
+	parts := strings.Split(raw, ",")
+	if len(parts) > playgroundCostLookupMaxRequestIds {
+		writePlaygroundError(c, common.NewMessage("Invalid Playground request."))
+		return
+	}
+	ids := make([]string, 0, len(parts))
+	seen := make(map[string]bool, len(parts))
+	for _, part := range parts {
+		id := strings.TrimSpace(part)
+		if id == "" || len(id) > playgroundCostRequestIdMaxLength || seen[id] {
+			writePlaygroundError(c, common.NewMessage("Invalid Playground request."))
+			return
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	logs, err := model.GetUserConsumeLogsByRequestIds(userID, ids)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	items := make([]playgroundMessageCost, 0, len(logs))
+	for index := range logs {
+		entry := &logs[index]
+		items = append(items, playgroundMessageCost{
+			RequestId:        entry.RequestId,
+			Quota:            entry.Quota,
+			PromptTokens:     entry.PromptTokens,
+			CompletionTokens: entry.CompletionTokens,
+			TotalTokens:      entry.PromptTokens + entry.CompletionTokens,
+			ModelName:        entry.ModelName,
+			CreatedAt:        entry.CreatedAt,
+		})
+	}
+	// The enabled flag mirrors the runtime consume-log setting: when logging is
+	// switched off no row will ever appear, so the client stops waiting for one.
+	common.ApiSuccess(c, gin.H{
+		"enabled": common.LogConsumeEnabled,
+		"items":   items,
+	})
 }

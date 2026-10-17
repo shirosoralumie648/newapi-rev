@@ -56,6 +56,39 @@ export interface MessageVersion {
   content: string
   attachments?: MessageAttachment[]
   toolCalls?: MessageToolCall[]
+  /**
+   * Relay request id of the generation that produced this version. It only
+   * associates the version with the owner's consume log; the log stays the
+   * single source of the billed amount.
+   */
+  requestId?: string
+  /** Token usage the relay reported when this version finished generating. */
+  usage?: MessageUsage
+}
+
+/**
+ * Token usage of one generated version. Kept beside the message so the
+ * workspace can label a reply without another upstream call; billing figures
+ * are always read from the settle log.
+ */
+export interface MessageUsage {
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+}
+
+/**
+ * The settled consume-log row of one relay request, read back through the
+ * read-only Playground cost lookup. All figures are display-only.
+ */
+export interface PlaygroundMessageCost {
+  requestId: string
+  quota: number
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  modelName: string
+  createdAt: number
 }
 
 export interface Message {
@@ -200,6 +233,15 @@ export interface ChatCompletionChunk {
     }
     finish_reason: string | null
   }>
+  /** Final usage frame; new-api appends it by default when upstream omits it. */
+  usage?: ChatCompletionUsage
+}
+
+/** Wire shape of the usage object shared by streamed and complete responses. */
+export interface ChatCompletionUsage {
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
 }
 
 /**
@@ -231,11 +273,7 @@ export interface ChatCompletionResponse {
     }
     finish_reason: string
   }>
-  usage?: {
-    prompt_tokens: number
-    completion_tokens: number
-    total_tokens: number
-  }
+  usage?: ChatCompletionUsage
 }
 
 // Configuration types

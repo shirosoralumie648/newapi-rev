@@ -76,6 +76,7 @@ func SetApiRouter(router *gin.Engine) {
 		playgroundRoute.Use(middleware.DisableCache(), middleware.UserAuth())
 		{
 			playgroundRoute.GET("/usage", controller.GetPlaygroundUsage)
+			playgroundRoute.GET("/message-costs", controller.GetPlaygroundMessageCosts)
 			playgroundRoute.GET("/assets", controller.ListPlaygroundAssets)
 			playgroundRoute.POST("/tasks/:taskId/cancel", controller.PlaygroundTaskCancel)
 			playgroundRoute.GET("/presets", controller.ListPlaygroundPresets)
@@ -213,6 +214,7 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.GET("/:id/wallet/ledger", controller.GetUserWalletLedger)
 				adminRoute.GET("/:id/wallet/ledger/export", controller.ExportUserWalletLedger)
 				adminRoute.GET("/:id/wallet/reconcile", controller.GetUserWalletReconcile)
+				adminRoute.GET("/wallet/debts", controller.GetWalletDebtors)
 
 				// Admin 2FA routes
 				adminRoute.GET("/2fa/stats", controller.Admin2FAStats)

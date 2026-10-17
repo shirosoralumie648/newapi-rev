@@ -87,6 +87,17 @@ const messageVersionSchema = z.object({
   content: z.string(),
   attachments: z.array(messageAttachmentSchema).optional(),
   toolCalls: z.array(messageToolCallSchema).optional(),
+  // Display-only generation record. A stored version that carries it keeps the
+  // relay request id (64 characters, the logs.request_id column) and the token
+  // usage the relay reported; the settle log stays the billing source.
+  requestId: z.string().min(1).max(64).optional(),
+  usage: z
+    .object({
+      promptTokens: z.number().finite().nonnegative(),
+      completionTokens: z.number().finite().nonnegative(),
+      totalTokens: z.number().finite().nonnegative(),
+    })
+    .optional(),
 })
 
 const sourceSchema = z.object({

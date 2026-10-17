@@ -60,6 +60,7 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 
 	// router/api-router.go: /api/playground
 	"GET /api/playground/usage":                                                  accessTokenSessionRule,
+	"GET /api/playground/message-costs":                                          accessTokenSessionRule,
 	"GET /api/playground/assets":                                                 accessTokenSessionRule,
 	"POST /api/playground/tasks/:taskId/cancel":                                  accessTokenSessionRule,
 	"GET /api/playground/presets":                                                accessTokenSessionRule,
@@ -162,6 +163,7 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/user/:id/wallet/ledger":                  accessTokenScopeRule("user:read"),
 	"GET /api/user/:id/wallet/ledger/export":           accessTokenScopeRule("user:read"),
 	"GET /api/user/:id/wallet/reconcile":               accessTokenScopeRule("user:read"),
+	"GET /api/user/wallet/debts":                       accessTokenScopeRule("user:read"),
 
 	// router/api-router.go: /api/subscription
 	"GET /api/subscription/plans":                                    accessTokenScopeRule("wallet:read"),

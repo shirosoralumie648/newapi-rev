@@ -33,6 +33,7 @@ class FakeStreamSource {
   readyState = 0
   closed = false
   streamed = false
+  xhr: { getResponseHeader: (name: string) => string | null } | null = null
   private listeners = new Map<
     string,
     Array<(event: Event & { data?: string; readyState?: number }) => void>
@@ -63,6 +64,11 @@ class FakeStreamSource {
       })
     }
   }
+
+  emitReadyState(readyState: number) {
+    this.readyState = readyState
+    this.emit('readystatechange')
+  }
 }
 
 const payload: ChatCompletionRequest = {
@@ -74,6 +80,8 @@ const payload: ChatCompletionRequest = {
 const noopCallbacks = {
   onUpdate: () => undefined,
   onToolCalls: () => undefined,
+  onRequestId: () => undefined,
+  onUsage: () => undefined,
   onComplete: () => undefined,
   onError: () => undefined,
 }
@@ -177,6 +185,8 @@ describe('latest-wins stream request coordination', () => {
       onUpdate: (_type: 'reasoning' | 'content', chunk: string) =>
         updates.push(chunk),
       onToolCalls: () => undefined,
+      onRequestId: () => undefined,
+      onUsage: () => undefined,
       onComplete: () => undefined,
       onError: () => undefined,
     }
@@ -212,6 +222,8 @@ describe('latest-wins stream request coordination', () => {
     await controller.send(payload, {
       onUpdate: (_type, chunk) => updates.push(chunk),
       onToolCalls: (deltas) => toolCallDeltas.push(...deltas),
+      onRequestId: () => undefined,
+      onUsage: () => undefined,
       onComplete: () => undefined,
       onError: () => undefined,
     })
@@ -257,5 +269,122 @@ describe('latest-wins stream request coordination', () => {
       },
       { index: 0, function: { arguments: ':"Paris"}' } },
     ])
+  })
+
+  test('reports the relay request id once and the final usage frame', async () => {
+    const source = new FakeStreamSource()
+    source.xhr = {
+      getResponseHeader: (name) =>
+        name === 'X-Oneapi-Request-Id' ? 'req-stream-1' : null,
+    }
+    const requestIds: string[] = []
+    const usages: unknown[] = []
+    const completed: number[] = []
+    const controller = createStreamRequestController({
+      getHeaders: () => Promise.resolve({ Authorization: 'Bearer test' }),
+      createSource: () => source,
+      setStreaming: () => undefined,
+    })
+
+    await controller.send(payload, {
+      onUpdate: () => undefined,
+      onToolCalls: () => undefined,
+      onRequestId: (requestId) => requestIds.push(requestId),
+      onUsage: (usage) => usages.push(usage),
+      onComplete: () => completed.push(1),
+      onError: () => undefined,
+    })
+
+    // The headers arrive before the body, so the id is known early; repeating
+    // the state change must not report it twice.
+    source.emitReadyState(1)
+    source.emitReadyState(1)
+    source.emit(
+      'message',
+      JSON.stringify({
+        choices: [{ delta: { content: 'Answer' }, finish_reason: 'stop' }],
+      })
+    )
+    // The usage frame carries no choices; it is the last frame before [DONE].
+    source.emit(
+      'message',
+      JSON.stringify({
+        choices: [],
+        usage: { prompt_tokens: 5, completion_tokens: 7, total_tokens: 12 },
+      })
+    )
+    source.emit('message', '[DONE]')
+
+    expect(requestIds).toEqual(['req-stream-1'])
+    expect(usages).toEqual([
+      { promptTokens: 5, completionTokens: 7, totalTokens: 12 },
+    ])
+    expect(completed).toEqual([1])
+  })
+
+  test('captures the request id from the done frame when no state change fired', async () => {
+    const source = new FakeStreamSource()
+    source.xhr = {
+      getResponseHeader: () => 'req-stream-2',
+    }
+    const requestIds: string[] = []
+    const controller = createStreamRequestController({
+      getHeaders: () => Promise.resolve({ Authorization: 'Bearer test' }),
+      createSource: () => source,
+      setStreaming: () => undefined,
+    })
+
+    await controller.send(payload, {
+      onUpdate: () => undefined,
+      onToolCalls: () => undefined,
+      onRequestId: (requestId) => requestIds.push(requestId),
+      onUsage: () => undefined,
+      onComplete: () => undefined,
+      onError: () => undefined,
+    })
+    source.emit('message', '[DONE]')
+
+    expect(requestIds).toEqual(['req-stream-2'])
+  })
+
+  test('ignores the request id of a superseded stream', async () => {
+    const nextHeaders = deferred<Record<string, string>>()
+    let headerRequest = 0
+    const sources: FakeStreamSource[] = []
+    const requestIds: string[] = []
+    const controller = createStreamRequestController({
+      getHeaders: () => {
+        headerRequest += 1
+        if (headerRequest === 1) {
+          return Promise.resolve({ Authorization: 'Bearer first' })
+        }
+        return nextHeaders.promise
+      },
+      createSource: () => {
+        const source = new FakeStreamSource()
+        source.xhr = { getResponseHeader: () => `req-${sources.length + 1}` }
+        sources.push(source)
+        return source
+      },
+      setStreaming: () => undefined,
+    })
+    const callbacks = {
+      onUpdate: () => undefined,
+      onToolCalls: () => undefined,
+      onRequestId: (requestId: string) => requestIds.push(requestId),
+      onUsage: () => undefined,
+      onComplete: () => undefined,
+      onError: () => undefined,
+    }
+
+    await controller.send(payload, callbacks)
+    const second = controller.send(payload, callbacks)
+    sources[0]?.emitReadyState(1)
+
+    nextHeaders.resolve({ Authorization: 'Bearer second' })
+    await second
+    sources[1]?.emitReadyState(1)
+
+    expect(requestIds).toEqual(['req-2'])
   })
 })

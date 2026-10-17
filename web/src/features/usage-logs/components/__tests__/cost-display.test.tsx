@@ -81,6 +81,22 @@ describe('log cost display', () => {
     }
   )
 
+  test('adds the wallet overflow to the subscription cost', () => {
+    renderCost({
+      quota: 14000,
+      other: {
+        billing_source: 'subscription',
+        subscription_consumed: 9000,
+        wallet_quota_deducted: 5000,
+      },
+      showBillingSource: true,
+    })
+
+    // 9000 subscription + 5000 wallet overflow = 14000 quota.
+    expect(screen.getByText('$0.028')).toBeVisible()
+    expect(screen.getByRole('img', { name: 'Subscription' })).toBeVisible()
+  })
+
   test('shows wallet cost and source icon without using subscription metadata', () => {
     renderCost({
       quota: 5000,
@@ -115,7 +131,9 @@ describe('log cost display', () => {
 
     expect(screen.getByText('$0.025')).toBeVisible()
     expect(screen.getByRole('img', { name: 'Subscription' })).toBeVisible()
-    expect(screen.queryByRole('img', { name: 'Wallet' })).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('img', { name: 'Wallet' })
+    ).not.toBeInTheDocument()
   })
 
   test('keeps legacy cost visible without inventing a funding source', () => {

@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -48,6 +48,7 @@ import { PlaygroundGenerationPanel } from './components/generation/playground-ge
 import { PlaygroundInput } from './components/input/playground-input'
 import { PlaygroundCanvasPanel } from './components/workspace/playground-canvas-panel'
 import { PlaygroundPresetPanel } from './components/workspace/playground-preset-panel'
+import { PlaygroundSessionUsage } from './components/workspace/playground-session-usage'
 import { PlaygroundUsagePopover } from './components/workspace/playground-usage-popover'
 import {
   PlaygroundWorkspace,
@@ -56,6 +57,7 @@ import {
 import {
   useChatHandler,
   usePlaygroundConversation,
+  usePlaygroundMessageCosts,
   usePlaygroundOptions,
   usePlaygroundArtifacts,
   usePlaygroundState,
@@ -63,6 +65,7 @@ import {
 } from './hooks'
 import type { CapturedArtifactSource } from './hooks/use-playground-artifacts'
 import {
+  collectMessageRequestIds,
   getCurrentVersion,
   getMessageContent,
   getMessageContentState,
@@ -148,6 +151,15 @@ function PlaygroundContent(props: {
     onMessageUpdate: updateMessages,
     sessionId: activeSessionId,
   })
+
+  // Every generated version keeps the relay request id of its request, so the
+  // conversation can read the settled cost rows back in one bounded lookup.
+  const messageRequestIds = useMemo(
+    () => collectMessageRequestIds(messages),
+    [messages]
+  )
+  const messageCostQuery = usePlaygroundMessageCosts(userId, messageRequestIds)
+  const messageCosts = messageCostQuery.data?.costs
 
   const sync = usePlaygroundServer(local, isGenerating)
   const deleteSession = sync.deleteSession
@@ -840,9 +852,15 @@ function PlaygroundContent(props: {
           >
             {syncLabel}
           </p>
+          <PlaygroundSessionUsage
+            className='shrink-0 pt-0'
+            costs={messageCosts}
+            messages={messages}
+          />
           <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>
             <PlaygroundChat
               messages={messages}
+              costs={messageCosts}
               isLoadingMessages={isLoadingMessages || sync.isLoading}
               onRegenerateMessage={handleRegenerateMessage}
               onEditMessage={handleEditMessage}

@@ -104,6 +104,10 @@ func playgroundDecodeAttachment(attachment *model.PlaygroundAttachment, clientKe
 }
 
 func CreatePlaygroundAttachment(c *gin.Context) {
+	// 欠款只读：有未结清欠款的账号不能上传新附件（读取与导出不受影响）。
+	if !enforcePlaygroundWalletWritable(c) {
+		return
+	}
 	var request playgroundAttachmentRequest
 	if !decodePlaygroundAttachmentRequest(c, &request) {
 		return

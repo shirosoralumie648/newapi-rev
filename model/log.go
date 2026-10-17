@@ -604,6 +604,25 @@ func GetUserLogs(userId int, filter LogFilter, startIdx int, num int) (logs []*L
 	return logs, total, err
 }
 
+// GetUserConsumeLogsByRequestIds returns the caller's own consume-log rows for
+// the given relay request ids. The owner filter and the consume type are part
+// of the query, so a request id that belongs to another account (or to a
+// non-consume event such as a task refund) simply has no row: the lookup can
+// never disclose another account's billing. Rows are read from the log
+// database, which may be a separate connection or ClickHouse.
+func GetUserConsumeLogsByRequestIds(userId int, requestIds []string) ([]Log, error) {
+	logs := make([]Log, 0, len(requestIds))
+	if userId <= 0 || len(requestIds) == 0 {
+		return logs, nil
+	}
+	err := LOG_DB.Model(&Log{}).
+		Select("request_id", "quota", "prompt_tokens", "completion_tokens", "model_name", "created_at").
+		Where("logs.user_id = ? AND logs.type = ?", userId, LogTypeConsume).
+		Where("logs.request_id IN ?", requestIds).
+		Find(&logs).Error
+	return logs, err
+}
+
 // StreamAllLogs calls fn with each log matching filter, newest first, as an
 // administrator with role sees it. Rows are read one at a time, so an export
 // never holds the whole result in memory.
