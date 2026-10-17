@@ -217,7 +217,7 @@ function useRunnerHarness(
     updateNodeData,
     addLinkedNode,
   })
-  return { nodes, runner }
+  return { nodes, edges, runner }
 }
 
 test('runs a model step into an image step and keeps the preview in memory', async () => {
