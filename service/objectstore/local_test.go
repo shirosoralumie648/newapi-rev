@@ -269,6 +269,6 @@ func TestServeStreamsWithSafetyHeaders(t *testing.T) {
 	assert.Equal(t, "application/octet-stream", attachment.Header().Get("Content-Type"))
 
 	missing := httptest.NewRecorder()
-	_, err = Serve(t.Context(), store, missing, "pg/1/attachments/missing.png", ServeOptions{})
+	err = Serve(t.Context(), store, missing, "pg/1/attachments/missing.png", ServeOptions{})
 	assert.ErrorIs(t, err, ErrObjectNotFound)
 }

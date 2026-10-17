@@ -96,6 +96,17 @@ func forEachAccountingDialect(t *testing.T, run func(t *testing.T, db *gorm.DB))
 	}
 }
 
+// createWalletLedgerWallet creates one fixture wallet and seeds its opening
+// balance. A wallet's starting quota is funded outside the ledger, so
+// reconciliation can only explain it through the opening_balance row that
+// production writes on user creation and seeds at startup.
+func createWalletLedgerWallet(t *testing.T, db *gorm.DB, user *User) {
+	t.Helper()
+	require.NoError(t, db.Create(user).Error)
+	_, err := EnsureWalletLedgerOpeningBalances()
+	require.NoError(t, err)
+}
+
 // The ledger row and the balance update must commit or roll back together, and
 // replaying the same reference must never move the balance twice.
 func TestWalletLedgerApplyDeltaIsAtomicAndReplaySafe(t *testing.T) {
@@ -249,7 +260,7 @@ func TestWalletReconcileReportsDeviationWithoutChangingBalance(t *testing.T) {
 // closes it while charging exactly the difference.
 func TestWalletHoldReserveExtendsAndSettles(t *testing.T) {
 	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
-		require.NoError(t, db.Create(&User{Id: 71, Username: "hold-settle", Quota: 1000, Status: common.UserStatusEnabled}).Error)
+		require.NoError(t, db.Create(&User{Id: 71, Username: "hold-settle", AffCode: "hold-settle", Quota: 1000, Status: common.UserStatusEnabled}).Error)
 		startedAt := common.GetTimestamp()
 
 		reserved, err := TryReserveUserQuota(71, 300, "hold-settle-a")
@@ -328,7 +339,7 @@ func TestWalletHoldReserveExtendsAndSettles(t *testing.T) {
 // because the pre-consume is no longer held.
 func TestWalletHoldRefundIsIdempotent(t *testing.T) {
 	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
-		require.NoError(t, db.Create(&User{Id: 81, Username: "hold-refund", Quota: 1000, Status: common.UserStatusEnabled}).Error)
+		createWalletLedgerWallet(t, db, &User{Id: 81, Username: "hold-refund", AffCode: "hold-refund", Quota: 1000, Status: common.UserStatusEnabled})
 		var user User
 
 		reserved, err := TryReserveUserQuota(81, 200, "hold-refund-a")
@@ -389,7 +400,7 @@ func TestWalletHoldRefundIsIdempotent(t *testing.T) {
 // settled or fresh reservations are never touched.
 func TestWalletHoldExpiryRecoveryRefundsCrashedReservations(t *testing.T) {
 	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
-		require.NoError(t, db.Create(&User{Id: 91, Username: "hold-expiry", Quota: 1000, Status: common.UserStatusEnabled}).Error)
+		createWalletLedgerWallet(t, db, &User{Id: 91, Username: "hold-expiry", AffCode: "hold-expiry", Quota: 1000, Status: common.UserStatusEnabled})
 		var user User
 
 		reserved, err := TryReserveUserQuota(91, 250, "hold-expiry-a")
@@ -450,7 +461,7 @@ func TestWalletHoldExpiryRecoveryRefundsCrashedReservations(t *testing.T) {
 		assert.True(t, reconciliation.Reconciled, "deviation=%d", reconciliation.Deviation)
 
 		// A normal refund racing the sweep returns the reservation exactly once.
-		require.NoError(t, db.Create(&User{Id: 92, Username: "hold-race", Quota: 1000, Status: common.UserStatusEnabled}).Error)
+		createWalletLedgerWallet(t, db, &User{Id: 92, Username: "hold-race", AffCode: "hold-race", Quota: 1000, Status: common.UserStatusEnabled})
 		reserved, err = TryReserveUserQuota(92, 400, "hold-race-a")
 		require.NoError(t, err)
 		require.True(t, reserved)
@@ -490,7 +501,7 @@ func TestWalletHoldExpiryRecoveryRefundsCrashedReservations(t *testing.T) {
 // mount on it without deducting quota again and are closed with their parent.
 func TestWalletHoldBudgetParentMountsChildren(t *testing.T) {
 	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
-		require.NoError(t, db.Create(&User{Id: 101, Username: "hold-budget", Quota: 1000, Status: common.UserStatusEnabled}).Error)
+		require.NoError(t, db.Create(&User{Id: 101, Username: "hold-budget", AffCode: "hold-budget", Quota: 1000, Status: common.UserStatusEnabled}).Error)
 		var user User
 
 		parent, err := CreateWalletBudgetHold(101, "workflow-run-1", 400)
