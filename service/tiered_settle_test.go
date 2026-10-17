@@ -1232,12 +1232,12 @@ func TestBillingSessionSettleSubscriptionOverflowChargesWallet(t *testing.T) {
 			other := GenerateTextOtherInfo(ctx, relayInfo, 1, 1, 1, 0, 0, 0, 0)
 			logOther := other.Snapshot()
 			assert.EqualValues(t, tc.wantWallet, logOther["wallet_quota_deducted"])
+			adminInfo, ok := logOther["admin_info"].(map[string]any)
+			require.True(t, ok, "the admin_info scope is always present")
 			if tc.wantUncovered > 0 {
-				adminInfo, ok := logOther["admin_info"].(map[string]any)
-				require.True(t, ok)
 				assert.EqualValues(t, tc.wantUncovered, adminInfo["subscription_overflow_uncovered"])
 			} else {
-				assert.NotContains(t, logOther, "admin_info")
+				assert.NotContains(t, adminInfo, "subscription_overflow_uncovered")
 			}
 		})
 	}

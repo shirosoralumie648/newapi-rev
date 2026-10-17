@@ -79,7 +79,6 @@ func TestSubscriptionPreConsumeRefundIsAtomicAndIdempotent(t *testing.T) {
 // the wallet is only charged down to zero, and the rest is reported uncovered.
 func TestSubscriptionSettlementOverflowChargesWallet(t *testing.T) {
 	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
-		hour := walletConsumeHourBucket(common.GetTimestamp())
 		for index, tc := range []struct {
 			name                                   string
 			amountTotal, amountUsed, delta         int64
@@ -107,6 +106,7 @@ func TestSubscriptionSettlementOverflowChargesWallet(t *testing.T) {
 					AllowWalletOverflow: tc.allowOverflow, Status: "active", StartTime: now - 60, EndTime: now + 3600,
 				}).Error)
 
+				hour := walletConsumeHourBucket(common.GetTimestamp())
 				result, err := SettleUserSubscriptionDelta(subId, tc.delta)
 				require.NoError(t, err)
 				require.NotNil(t, result)
