@@ -34,7 +34,7 @@ func TestSubscriptionPreConsumeRefundIsAtomicAndIdempotent(t *testing.T) {
 	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
 		const userId, subId, planId = 71, 7101, 7100
 		now := GetDBTimestamp()
-		require.NoError(t, db.Create(&User{Id: userId, Username: "wl03-refund", Status: common.UserStatusEnabled}).Error)
+		require.NoError(t, db.Create(&User{Id: userId, Username: "wl03-refund", AffCode: "wl03-refund", Status: common.UserStatusEnabled}).Error)
 		require.NoError(t, db.Create(&SubscriptionPlan{
 			Id: planId, Title: "WL-03 refund", DurationUnit: SubscriptionDurationMonth,
 			DurationValue: 1, TotalAmount: 1000, QuotaResetPeriod: SubscriptionResetNever,
@@ -100,7 +100,7 @@ func TestSubscriptionSettlementOverflowChargesWallet(t *testing.T) {
 				userId := 800 + index
 				subId := 8100 + index
 				now := GetDBTimestamp()
-				require.NoError(t, db.Create(&User{Id: userId, Username: fmt.Sprintf("wl03-settle-%d", index), Quota: tc.wallet, Status: common.UserStatusEnabled}).Error)
+				require.NoError(t, db.Create(&User{Id: userId, Username: fmt.Sprintf("wl03-settle-%d", index), AffCode: fmt.Sprintf("wl03-settle-%d", index), Quota: tc.wallet, Status: common.UserStatusEnabled}).Error)
 				require.NoError(t, db.Create(&UserSubscription{
 					Id: subId, UserId: userId, AmountTotal: tc.amountTotal, AmountUsed: tc.amountUsed,
 					AllowWalletOverflow: tc.allowOverflow, Status: "active", StartTime: now - 60, EndTime: now + 3600,
