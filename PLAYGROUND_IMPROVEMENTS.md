@@ -159,8 +159,8 @@ Playground
 - [x] 建立画布项目、节点、边和节点资源模型（服务端 `PlaygroundCanvasProject` + 规范化 document 契约，前端 `types.ts` 的节点/边/文档类型与 `lib/canvas-document.ts` 的 Zod 校验）；
 - [x] 复用项目已有 `@xyflow/react` 和 `Canvas`/`Node`/`Edge` 能力（`components/ai-elements/canvas`、`node`、`panel` 组合出 `features/canvas/components/canvas-editor.tsx` 与 `canvas-node.tsx`，未新增依赖）；
 - [x] 支持缩放、平移、选区、小地图和节点详情（沿 `Canvas` 的缩放/平移/框选默认行为，`MiniMap` 小地图，右侧 Inspector 节点详情，移动端 Sheet，`canvas-node-inspector.tsx`）；
-- [x] 支持撤销/重做（`hooks/use-canvas-editor.ts` + `lib/canvas-history.ts`，仅结构性变更入栈，工具栏按钮，`use-canvas-editor.test.ts` 覆盖）；
-- [x] 支持导入/导出和版本化保存（工具栏 JSON 导入/导出复用 `parseCanvasImport`/`serializeCanvasExport`，保存走 `updateCanvasProject` 的 revision CAS，冲突态提示重新加载）；
+- [x] 支持撤销/重做（`hooks/use-canvas-editor.ts` + `lib/canvas-history.ts`，仅结构性变更入栈，工具栏按钮与 Ctrl/Cmd+Z、Ctrl/Cmd+Shift+Z、Ctrl/Cmd+Y 快捷键，可编辑元素内不拦截、编辑器禁用时不生效；`use-canvas-editor.test.ts` 覆盖快捷键矩阵、输入框透传与禁用态）；
+- [x] 支持导入/导出和版本化保存（工具栏 JSON 导入/导出复用 `parseCanvasImport`/`serializeCanvasExport`，以 `version:1`+`app` 校验版本化文件，超限/损坏文件抛出可翻译的 `CANVAS_ERRORS` 键且不静默截断，保存走 `updateCanvasProject` 的 revision CAS，冲突态提示重新加载；`canvas-document.test.ts` 覆盖损坏文件、超大节点与超预算文档的拒绝路径）；
 - [ ] 将聊天消息、Prompt、文件、Artifact、图片和任务结果映射为节点（部分完成：节点类型 `text/prompt/image/artifact/message/task` 与 `snapshot`/`ref` 字段已落地，Inspector 可展示消息快照与 session/附件/Artifact 引用；从聊天消息/附件/Artifact/任务结果自动建节点的路径待接入）；
 - [x] 建立画布项目和用户的归属关系（`playground_canvas` 表按 `user_id` 唯一与查询，列表/读取/更新/删除均带 `user_id = ?` 过滤，`model/playground_canvas_test.go` 覆盖跨用户 404）；
 - [x] 限制项目数量、节点数量和持久化大小（每账号 20 个项目 / 16 MiB、单文档 1 MiB、200 节点、400 边、单节点数据 64 KiB；服务端事务内校验并返回稳定错误码，前端 `validateCanvasDocument` 先做本地反馈）；
@@ -241,7 +241,7 @@ Playground
 
 ### 画布和资源限制
 
-- [x] 画布支持节点、边、缩放、平移、撤销/重做、导入/导出（前端 `features/canvas` 画布编辑器：`Canvas` 缩放/平移/框选、`MiniMap`、工具栏增删节点、撤销/重做、JSON 导入/导出；`use-canvas-editor.test.ts` 与 `canvas-project-list.test.tsx` 覆盖；本地未运行测试（CI-only））；
+- [x] 画布支持节点、边、缩放、平移、撤销/重做、导入/导出（前端 `features/canvas` 画布编辑器：`Canvas` 缩放/平移/框选、`MiniMap`、工具栏增删节点、撤销/重做（工具栏按钮 + Ctrl/Cmd+Z、Ctrl/Cmd+Shift+Z、Ctrl/Cmd+Y，可编辑元素内不拦截）、版本化 JSON 导入/导出（超限/损坏文件给可翻译错误、不截断）；`use-canvas-editor.test.ts`、`canvas-document.test.ts` 与 `canvas-project-list.test.tsx` 覆盖；本地未运行测试（CI-only））；
 - [ ] 聊天消息、附件和 Artifact 可以安全引用画布节点（部分完成：`message` 节点快照与 `ref` 引用字段、Inspector 展示引用已就绪；从消息/附件/Artifact 建立与校验引用关系的路径待接入）；
 - [ ] 达到用户或用户组配额时，服务端返回稳定、可翻译的错误（服务端硬上限已返回稳定错误码并登记七语言文案；按用户组配置的资源配额待实现）；
 - [x] 删除、恢复、过期和并发写入不会绕过资源配额（删除按剩余行重算账号预算，创建/更新在事务内 `lockForUpdate` + revision CAS，超限回滚；画布暂无恢复/过期语义，`model/playground_canvas_test.go` 覆盖并发与超限）；
@@ -300,3 +300,4 @@ Playground
 | 2026-10-17 | P5-01：完成 Infinite Canvas 前端画布编辑器——新增 `/_authenticated/playground/canvas` 路由与 Playground 侧边栏入口，画布项目列表（搜索/新建/重命名/删除确认），基于 `@xyflow/react` 与 ai-elements `Canvas`/`Node`/`Panel` 的编辑器（缩放/平移/框选/小地图/节点详情/撤销重做/JSON 导入导出/revision CAS 自动保存与冲突提示），复用既有 `features/canvas` 客户端与 `/api/playground/canvases` CRUD；新增 `use-canvas-editor` 与项目列表测试，补 44 个新键的七语言翻译（`i18n:sync` missingCount=0、extrasCount=0）；仅前端改动，无新依赖；本地未运行测试（CI-only，未运行 typecheck/vitest/lint/build）。 |
 | 2026-10-17 | SEC-01：为 Markdown/Code Artifact 补齐安全与复制/下载验收——`playground-artifact-panel.test.tsx` 新增 5 个用例：Markdown 预览不执行原始 HTML/`<script>`/内联事件处理器/`javascript:` 链接、Code Artifact 的标记仅作文本、复制写入完整正文、下载文件名清洗与正文内容/`text/plain;charset=utf-8` 类型、`plaintext`→`.txt` 扩展名；修复 `getArtifactFilename`：Code Artifact 无语言或 `plaintext` 时下载扩展名对齐 `CodeBlock` 输出 `.txt`；`i18n:sync` missingCount=0（未新增文案键，无 locale 变更）；本地未运行测试/typecheck/lint/build（CI-only）。 |
 | 2026-10-17 | UX-01：让 Playground 消息编辑与重新生成保留历史版本/分支——消息新增 `activeVersionIndex`，`versions` 保留每次编辑/重新生成的历史（`appendMessageVersion`/`setActiveMessageVersion`，`updateCurrentVersionContent` 仅改活动版本，`getCurrentVersion` 对缺失/越界索引回退首个版本）；编辑与重新生成改为追加助手回复版本，并保持生成回复为最后一条以兼容既有流式链路；`PlaygroundChat` 复用 ai-elements `Branch`/`BranchMessages`/`BranchSelector` 渲染可切换分支，生成中禁用切换；服务端 `playgroundMessagePayload` 持久化 `activeVersionIndex`，事务内校验索引越界、`PlaygroundMessageMaxVersions` 版本上限与消息数上限，超限回滚保留既有快照；新增 `message-branching.test.ts`、`playground-chat-branches.test.tsx` 与 `TestPlaygroundMessageVersionBranches`（SQLite/MySQL/PostgreSQL 矩阵）；未新增文案键，`i18n:sync` missingCount=0、extrasCount=0；本地未运行测试/typecheck/lint/build（CI-only）。 |
+| 2026-10-17 | P5-02：接入画布撤销/重做快捷键并加固版本化导入/导出——`useCanvasEditor` 新增 `shortcutsEnabled` 选项，绑定 Ctrl/Cmd+Z（撤销）、Ctrl/Cmd+Shift+Z 与 Ctrl/Cmd+Y（重做），输入框/文本域/选择框/contenteditable 内不拦截以保留原生撤销，编辑器禁用时不生效；沿用既有工具栏按钮与 `canvas-history`，导入/导出继续复用 `parseCanvasImport`/`serializeCanvasExport` 与 `version:1` 校验，超限/损坏文件抛可翻译的 `CANVAS_ERRORS` 且不截断，保存沿用 `updateCanvasProject` 的 revision CAS；`use-canvas-editor.test.ts` 补快捷键矩阵、可编辑元素透传与禁用态用例，`canvas-document.test.ts` 补超大节点与超预算文档拒绝用例；未新增文案键，`i18n:sync` missingCount=0、extrasCount=0；仅前端改动，无新依赖；本地未运行测试/typecheck/lint/build（CI-only）。 |
