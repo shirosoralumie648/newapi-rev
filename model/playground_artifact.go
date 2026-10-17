@@ -256,6 +256,13 @@ func checkPlaygroundArtifactCapacity(tx *gorm.DB, userID int, sessionID, artifac
 		if records >= int64(policy.ArtifactSessionMaxRecords) || active >= int64(policy.ArtifactSessionMaxCount) {
 			return ErrPlaygroundArtifactLimit
 		}
+		var accountActive int64
+		if err := tx.Model(&PlaygroundArtifact{}).Where("user_id = ? AND deleted_at = 0", userID).Count(&accountActive).Error; err != nil {
+			return err
+		}
+		if accountActive >= int64(policy.ArtifactUserMaxCount) {
+			return ErrPlaygroundArtifactLimit
+		}
 	} else {
 		var usage struct {
 			Count int64
@@ -275,6 +282,17 @@ func checkPlaygroundArtifactCapacity(tx *gorm.DB, userID int, sessionID, artifac
 		return err
 	}
 	if bytes+addedBytes > policy.ArtifactSessionMaxBytes {
+		return ErrPlaygroundArtifactLimit
+	}
+	// The account-level budget is the second half of the unified Playground
+	// usage view; per-session sums can still grow past it across conversations.
+	accountArtifacts := tx.Model(&PlaygroundArtifact{}).Where("user_id = ?", userID)
+	var accountBytes int64
+	if err := tx.Model(&PlaygroundArtifactVersion{}).Where("artifact_id IN (?)", accountArtifacts.Select("id")).
+		Select("COALESCE(SUM(byte_size), 0)").Scan(&accountBytes).Error; err != nil {
+		return err
+	}
+	if accountBytes+addedBytes > policy.ArtifactUserMaxBytes {
 		return ErrPlaygroundArtifactLimit
 	}
 	return nil

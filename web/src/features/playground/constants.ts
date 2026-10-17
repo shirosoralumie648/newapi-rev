@@ -38,6 +38,7 @@ export const API_ENDPOINTS = {
   USER_MODELS: '/api/user/models',
   USER_GROUPS: '/api/user/self/groups',
   PLAYGROUND_SESSIONS: '/api/playground/sessions',
+  PLAYGROUND_USAGE: '/api/playground/usage',
 } as const
 
 // Default group — uses 'default' as the safe fallback; auto-group is

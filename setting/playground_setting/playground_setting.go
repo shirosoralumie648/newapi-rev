@@ -25,6 +25,8 @@ type PlaygroundQuotaPolicy struct {
 	ArtifactContentMaxBytes   int64 `json:"artifact_content_max_bytes"`
 	ArtifactMaxBytes          int64 `json:"artifact_max_bytes"`
 	ArtifactSessionMaxBytes   int64 `json:"artifact_session_max_bytes"`
+	ArtifactUserMaxCount      int   `json:"artifact_user_max_count"`
+	ArtifactUserMaxBytes      int64 `json:"artifact_user_max_bytes"`
 	CanvasUserMaxProjects     int   `json:"canvas_user_max_projects"`
 	CanvasDocumentMaxBytes    int64 `json:"canvas_document_max_bytes"`
 	CanvasMaxNodes            int   `json:"canvas_max_nodes"`
@@ -72,13 +74,20 @@ func builtinPlaygroundQuotaPolicy() PlaygroundQuotaPolicy {
 		ArtifactContentMaxBytes:   256 << 10,
 		ArtifactMaxBytes:          8 << 20,
 		ArtifactSessionMaxBytes:   32 << 20,
-		CanvasUserMaxProjects:     20,
-		CanvasDocumentMaxBytes:    1 << 20,
-		CanvasMaxNodes:            200,
-		CanvasMaxEdges:            400,
-		CanvasNodeDataMaxBytes:    64 << 10,
-		CanvasUserMaxBytes:        16 << 20,
-		TaskMaxConcurrency:        3,
+		// The account-level artifact budget starts at the ceiling the per-session
+		// limits already imply (100 conversations x 32 active artifacts and
+		// 100 conversations x 32 MiB). It therefore never rejects a write that
+		// the previous per-session enforcement accepted, while giving the unified
+		// usage view and administrators a real, enforced account cap.
+		ArtifactUserMaxCount:   3200,
+		ArtifactUserMaxBytes:   32 << 20 * 100,
+		CanvasUserMaxProjects:  20,
+		CanvasDocumentMaxBytes: 1 << 20,
+		CanvasMaxNodes:         200,
+		CanvasMaxEdges:         400,
+		CanvasNodeDataMaxBytes: 64 << 10,
+		CanvasUserMaxBytes:     16 << 20,
+		TaskMaxConcurrency:     3,
 	}
 }
 
@@ -144,6 +153,12 @@ func applyPlaygroundQuotaOverrides(policy *PlaygroundQuotaPolicy, override *Play
 	}
 	if override.ArtifactSessionMaxBytes > 0 {
 		policy.ArtifactSessionMaxBytes = override.ArtifactSessionMaxBytes
+	}
+	if override.ArtifactUserMaxCount > 0 {
+		policy.ArtifactUserMaxCount = override.ArtifactUserMaxCount
+	}
+	if override.ArtifactUserMaxBytes > 0 {
+		policy.ArtifactUserMaxBytes = override.ArtifactUserMaxBytes
 	}
 	if override.CanvasUserMaxProjects > 0 {
 		policy.CanvasUserMaxProjects = override.CanvasUserMaxProjects

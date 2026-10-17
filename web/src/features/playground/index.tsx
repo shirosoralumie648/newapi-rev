@@ -37,6 +37,7 @@ import { PlaygroundArtifactPanel } from './components/artifact/playground-artifa
 import { PlaygroundArtifactSourceSheet } from './components/artifact/playground-artifact-source-sheet'
 import { PlaygroundChat } from './components/chat/playground-chat'
 import { PlaygroundInput } from './components/input/playground-input'
+import { PlaygroundUsagePopover } from './components/workspace/playground-usage-popover'
 import { PlaygroundWorkspace } from './components/workspace/playground-workspace'
 import {
   useChatHandler,
@@ -382,6 +383,9 @@ function PlaygroundContent() {
         disabled={sync.isLoading}
         onSwitch={handleSwitchSession}
         sessions={sessions}
+        usagePanel={
+          userId ? <PlaygroundUsagePopover userId={userId} /> : undefined
+        }
         artifactsOpen={artifactController.state.isOpen}
         artifactDisabled={!canonicalSessionId}
         onToggleArtifacts={() => {

@@ -411,3 +411,56 @@ export async function getPlaygroundAttachmentContent(
   } as Record<string, unknown>)
   return response.data as Blob
 }
+
+const playgroundUsageMetricSchema = z.object({
+  used: z.number().int().nonnegative(),
+  limit: z.number().int().nonnegative(),
+  used_bytes: z.number().int().nonnegative(),
+  limit_bytes: z.number().int().nonnegative(),
+})
+
+const playgroundUsageSchema = z.object({
+  sessions: playgroundUsageMetricSchema,
+  attachments: playgroundUsageMetricSchema,
+  artifacts: playgroundUsageMetricSchema,
+  canvas: playgroundUsageMetricSchema,
+})
+
+export interface PlaygroundUsageMetric {
+  used: number
+  limit: number
+  usedBytes: number
+  limitBytes: number
+}
+
+// The unified Playground resource usage: conversations, attachments, artifacts
+// and canvases the owner stores, each against the account-level cap the server
+// enforces for the owner's group.
+export interface PlaygroundResourceUsage {
+  sessions: PlaygroundUsageMetric
+  attachments: PlaygroundUsageMetric
+  artifacts: PlaygroundUsageMetric
+  canvas: PlaygroundUsageMetric
+}
+
+export async function getPlaygroundUsage(
+  signal?: AbortSignal
+): Promise<PlaygroundResourceUsage> {
+  const response = await api.get(API_ENDPOINTS.PLAYGROUND_USAGE, { signal })
+  requireServerSuccess(response.data)
+  const metrics = playgroundUsageSchema.parse(response.data.data)
+  const toMetric = (
+    source: z.output<typeof playgroundUsageMetricSchema>
+  ): PlaygroundUsageMetric => ({
+    used: source.used,
+    limit: source.limit,
+    usedBytes: source.used_bytes,
+    limitBytes: source.limit_bytes,
+  })
+  return {
+    sessions: toMetric(metrics.sessions),
+    attachments: toMetric(metrics.attachments),
+    artifacts: toMetric(metrics.artifacts),
+    canvas: toMetric(metrics.canvas),
+  }
+}

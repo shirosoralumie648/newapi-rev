@@ -75,6 +75,7 @@ func SetApiRouter(router *gin.Engine) {
 		playgroundRoute := apiRouter.Group("/playground")
 		playgroundRoute.Use(middleware.DisableCache(), middleware.UserAuth())
 		{
+			playgroundRoute.GET("/usage", controller.GetPlaygroundUsage)
 			playgroundRoute.GET("/sessions", controller.ListPlaygroundSessions)
 			playgroundRoute.POST("/sessions", controller.CreatePlaygroundSession)
 			playgroundRoute.GET("/sessions/:id", controller.GetPlaygroundSession)

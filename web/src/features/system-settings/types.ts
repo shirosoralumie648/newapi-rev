@@ -407,6 +407,8 @@ export type SecuritySettings = {
   'fetch_setting.allowed_ports': number[]
   'fetch_setting.apply_ip_filter_for_domain': boolean
   'token_setting.max_user_tokens': number
+  'playground_setting.defaults': string
+  'playground_setting.group_overrides': string
 }
 
 export type UpstreamChannel = {

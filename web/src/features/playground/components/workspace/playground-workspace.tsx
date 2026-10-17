@@ -47,6 +47,7 @@ interface PlaygroundWorkspaceProps {
   onRename: (sessionId: string, title: string) => void
   onDelete: (sessionId: string) => void
   children: React.ReactNode
+  usagePanel?: React.ReactNode
   artifactsOpen?: boolean
   artifactPanel?: React.ReactNode
   onToggleArtifacts?: () => void
@@ -116,19 +117,22 @@ export function PlaygroundWorkspace(props: PlaygroundWorkspaceProps) {
               </>
             )}
           </div>
-          {props.onToggleArtifacts && (
-            <Button
-              aria-pressed={Boolean(props.artifactsOpen)}
-              disabled={props.disabled || props.artifactDisabled}
-              onClick={props.onToggleArtifacts}
-              size='sm'
-              type='button'
-              variant={props.artifactsOpen ? 'secondary' : 'ghost'}
-            >
-              <FileText aria-hidden='true' />
-              {t('Artifacts')}
-            </Button>
-          )}
+          <div className='flex items-center gap-1'>
+            {props.usagePanel}
+            {props.onToggleArtifacts && (
+              <Button
+                aria-pressed={Boolean(props.artifactsOpen)}
+                disabled={props.disabled || props.artifactDisabled}
+                onClick={props.onToggleArtifacts}
+                size='sm'
+                type='button'
+                variant={props.artifactsOpen ? 'secondary' : 'ghost'}
+              >
+                <FileText aria-hidden='true' />
+                {t('Artifacts')}
+              </Button>
+            )}
+          </div>
         </div>
         {isMobile && <div className='min-h-0 flex-1'>{props.children}</div>}
         {!isMobile && props.artifactsOpen && props.artifactPanel && (

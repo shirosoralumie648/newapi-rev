@@ -983,6 +983,7 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	sessionID, input := playgroundArtifactSourceFixture(t, user.Id, "authenticated")
 	attachmentBase := "/api/playground/sessions/" + sessionID + "/attachments"
 	for _, route := range []struct{ method, path string }{
+		{http.MethodGet, "/api/playground/usage"},
 		{http.MethodGet, attachmentBase}, {http.MethodPost, attachmentBase},
 		{http.MethodGet, attachmentBase + "/missing"}, {http.MethodGet, attachmentBase + "/missing/content"},
 		{http.MethodDelete, attachmentBase + "/missing"},
@@ -1042,6 +1043,11 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	content := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, attachmentBase+"/"+uploaded.Data.ID+"/content", nil)
 	require.Equal(t, 200, content.Code)
 	assert.Equal(t, png, content.Body.Bytes())
+
+	// The unified usage endpoint answers only for the authenticated session.
+	usageResponse := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, "/api/playground/usage", nil)
+	require.Equal(t, 200, usageResponse.Code, usageResponse.Body.String())
+	assert.Contains(t, usageResponse.Body.String(), `"sessions"`)
 
 	// Canvas routes share the same session-only authentication contract.
 	canvasBase := "/api/playground/canvases"
@@ -1337,4 +1343,66 @@ func TestPlaygroundAttachmentCountLimit(t *testing.T) {
 	}, controller.CreatePlaygroundAttachment)
 	assert.Equal(t, http.StatusUnprocessableEntity, response.Code, response.Body.String())
 	assert.Contains(t, response.Body.String(), "PLAYGROUND_ATTACHMENT_LIMIT_EXCEEDED")
+}
+
+// The unified usage view reports the owner's stored conversations, attachments,
+// artifacts and canvases against the effective policy, and never mixes in
+// another account's rows. The limit column must follow the group override, so
+// it always matches what the write paths enforce.
+func TestPlaygroundUsageForUserReportsOwnerTotals(t *testing.T) {
+	playgroundTestDB(t, "sqlite")
+	usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+		policy.SessionMaxCount = 5
+		policy.AttachmentUserMaxCount = 4
+		policy.AttachmentUserMaxBytes = 4096
+		policy.ArtifactUserMaxCount = 3
+		policy.ArtifactUserMaxBytes = 8192
+		policy.CanvasUserMaxProjects = 6
+		policy.CanvasUserMaxBytes = 16384
+	})
+	usePlaygroundGroupQuota(t, "default", playground_setting.PlaygroundQuotaPolicy{CanvasUserMaxProjects: 9})
+
+	sessionID, input := playgroundArtifactSourceFixture(t, 7, "usage-owner")
+	artifactResult(t, playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions/"+sessionID+"/artifacts", input, controller.CreatePlaygroundArtifact))
+	playgroundUploadAttachment(t, 7, sessionID, "usage-file", "image/png", playgroundPNGFixture(64))
+	createCanvasProject(t, 7, "usage-canvas")
+
+	otherSession, otherInput := playgroundArtifactSourceFixture(t, 8, "usage-other")
+	artifactResult(t, playgroundRequest(t, 8, http.MethodPost, "/api/playground/sessions/"+otherSession+"/artifacts", otherInput, controller.CreatePlaygroundArtifact))
+	playgroundUploadAttachment(t, 8, otherSession, "usage-file-other", "image/png", playgroundPNGFixture(32))
+	createCanvasProject(t, 8, "usage-canvas-other")
+
+	usage, err := model.PlaygroundUsageForUser(7)
+	require.NoError(t, err)
+
+	assert.EqualValues(t, 1, usage.Sessions.Used)
+	assert.EqualValues(t, 5, usage.Sessions.Limit)
+	assert.EqualValues(t, 1, usage.Attachments.Used)
+	assert.EqualValues(t, 4, usage.Attachments.Limit)
+	assert.EqualValues(t, 64, usage.Attachments.UsedBytes)
+	assert.EqualValues(t, 4096, usage.Attachments.LimitBytes)
+	assert.EqualValues(t, 1, usage.Artifacts.Used)
+	assert.EqualValues(t, 3, usage.Artifacts.Limit)
+	assert.EqualValues(t, len(*input.Content), usage.Artifacts.UsedBytes)
+	assert.EqualValues(t, 8192, usage.Artifacts.LimitBytes)
+	assert.EqualValues(t, 1, usage.Canvas.Used)
+	assert.EqualValues(t, 9, usage.Canvas.Limit)
+	assert.NotZero(t, usage.Canvas.UsedBytes)
+	assert.EqualValues(t, 16384, usage.Canvas.LimitBytes)
+}
+
+// The account-level artifact budget is enforced on the write path, so the
+// unified usage view never advertises room the server would refuse.
+func TestPlaygroundArtifactAccountLimit(t *testing.T) {
+	playgroundTestDB(t, "sqlite")
+	usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+		policy.ArtifactUserMaxCount = 1
+	})
+	firstSession, firstInput := playgroundArtifactSourceFixture(t, 7, "artifact-account-a")
+	artifactResult(t, playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions/"+firstSession+"/artifacts", firstInput, controller.CreatePlaygroundArtifact))
+	secondSession, secondInput := playgroundArtifactSourceFixture(t, 7, "artifact-account-b")
+	secondInput.RequestID = "create_2"
+	response := playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions/"+secondSession+"/artifacts", secondInput, controller.CreatePlaygroundArtifact)
+	assert.Equal(t, http.StatusUnprocessableEntity, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), "PLAYGROUND_ARTIFACT_LIMIT_EXCEEDED")
 }
