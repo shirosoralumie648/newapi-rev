@@ -154,17 +154,17 @@ Playground
 - [x] 附件上传、读取、删除和过期清理都执行服务端权限校验（上传/列表/详情/内容/删除全走 `UserAuth` + owner/session 过滤；清理为 master 定时系统任务，删除超过 48 小时未被引用的附件）；
 - [x] 覆盖类型、大小、数量、权限、过期、失败重试和跨账号访问测试（`model/playground_test.go` 附件矩阵：幂等重放/冲突、签名与类型校验、单文件与每用户预算边界、引用与解除引用、孤儿清理、会话级联、真实路由 401/PAT 403/内容读取；前端 `attachment-flow`、`playground-input-attachments`、`message-attachment-list`、`server-api` 与 E2E `playground-attachments.spec.ts`）。
 
-### Phase 5：Infinite Canvas — 待实施
+### Phase 5：Infinite Canvas — 进行中
 
-- [ ] 建立画布项目、节点、边和节点资源模型；
-- [ ] 复用项目已有 `@xyflow/react` 和 `Canvas`/`Node`/`Edge` 能力；
-- [ ] 支持缩放、平移、选区、小地图和节点详情；
-- [ ] 支持撤销/重做；
-- [ ] 支持导入/导出和版本化保存；
-- [ ] 将聊天消息、Prompt、文件、Artifact、图片和任务结果映射为节点；
-- [ ] 建立画布项目和用户的归属关系；
-- [ ] 限制项目数量、节点数量和持久化大小；
-- [ ] 明确画布数据与聊天 session 的引用关系，避免删除消息导致资源意外丢失。
+- [x] 建立画布项目、节点、边和节点资源模型（服务端 `PlaygroundCanvasProject` + 规范化 document 契约，前端 `types.ts` 的节点/边/文档类型与 `lib/canvas-document.ts` 的 Zod 校验）；
+- [x] 复用项目已有 `@xyflow/react` 和 `Canvas`/`Node`/`Edge` 能力（`components/ai-elements/canvas`、`node`、`panel` 组合出 `features/canvas/components/canvas-editor.tsx` 与 `canvas-node.tsx`，未新增依赖）；
+- [x] 支持缩放、平移、选区、小地图和节点详情（沿 `Canvas` 的缩放/平移/框选默认行为，`MiniMap` 小地图，右侧 Inspector 节点详情，移动端 Sheet，`canvas-node-inspector.tsx`）；
+- [x] 支持撤销/重做（`hooks/use-canvas-editor.ts` + `lib/canvas-history.ts`，仅结构性变更入栈，工具栏按钮，`use-canvas-editor.test.ts` 覆盖）；
+- [x] 支持导入/导出和版本化保存（工具栏 JSON 导入/导出复用 `parseCanvasImport`/`serializeCanvasExport`，保存走 `updateCanvasProject` 的 revision CAS，冲突态提示重新加载）；
+- [ ] 将聊天消息、Prompt、文件、Artifact、图片和任务结果映射为节点（部分完成：节点类型 `text/prompt/image/artifact/message/task` 与 `snapshot`/`ref` 字段已落地，Inspector 可展示消息快照与 session/附件/Artifact 引用；从聊天消息/附件/Artifact/任务结果自动建节点的路径待接入）；
+- [x] 建立画布项目和用户的归属关系（`playground_canvas` 表按 `user_id` 唯一与查询，列表/读取/更新/删除均带 `user_id = ?` 过滤，`model/playground_canvas_test.go` 覆盖跨用户 404）；
+- [x] 限制项目数量、节点数量和持久化大小（每账号 20 个项目 / 16 MiB、单文档 1 MiB、200 节点、400 边、单节点数据 64 KiB；服务端事务内校验并返回稳定错误码，前端 `validateCanvasDocument` 先做本地反馈）；
+- [ ] 明确画布数据与聊天 session 的引用关系，避免删除消息导致资源意外丢失（部分完成：`message` 节点可保存 `sessionId`/`messageKey` 快照引用并在 Inspector 展示；删除消息时的引用失效与生命周期策略待定）。
 
 ### Phase 6：多媒体、Agent 和工作流 — 待实施
 
@@ -241,11 +241,11 @@ Playground
 
 ### 画布和资源限制
 
-- [ ] 画布支持节点、边、缩放、平移、撤销/重做、导入/导出；
-- [ ] 聊天消息、附件和 Artifact 可以安全引用画布节点；
-- [ ] 达到用户或用户组配额时，服务端返回稳定、可翻译的错误；
-- [ ] 删除、恢复、过期和并发写入不会绕过资源配额；
-- [ ] 配额检查不会影响现有 token billing 的结算语义。
+- [x] 画布支持节点、边、缩放、平移、撤销/重做、导入/导出（前端 `features/canvas` 画布编辑器：`Canvas` 缩放/平移/框选、`MiniMap`、工具栏增删节点、撤销/重做、JSON 导入/导出；`use-canvas-editor.test.ts` 与 `canvas-project-list.test.tsx` 覆盖；本地未运行测试（CI-only））；
+- [ ] 聊天消息、附件和 Artifact 可以安全引用画布节点（部分完成：`message` 节点快照与 `ref` 引用字段、Inspector 展示引用已就绪；从消息/附件/Artifact 建立与校验引用关系的路径待接入）；
+- [ ] 达到用户或用户组配额时，服务端返回稳定、可翻译的错误（服务端硬上限已返回稳定错误码并登记七语言文案；按用户组配置的资源配额待实现）；
+- [x] 删除、恢复、过期和并发写入不会绕过资源配额（删除按剩余行重算账号预算，创建/更新在事务内 `lockForUpdate` + revision CAS，超限回滚；画布暂无恢复/过期语义，`model/playground_canvas_test.go` 覆盖并发与超限）；
+- [x] 配额检查不会影响现有 token billing 的结算语义（画布配额为独立硬上限，未改动 `service/`、`relay/` 与计费表达式路径）。
 
 ### 真实环境验证
 
@@ -270,7 +270,7 @@ Playground
 4. ~~清理或明确 `.claude-flow/`、`.swarm/`、`graphify-out/` 等生成目录是否进入提交范围；~~ 已完成（已加入 `.gitignore`）；
 5. ~~补齐端到端的账号隔离、迟到请求和删除回退测试。~~ 已完成（`model/playground_test.go` 跨用户/并发/真实 router 鉴权 + 前端同步层测试）。
 
-剩余待办：按用户组配置的资源配额（当前为服务端硬上限）、Inspector/Canvas 面板边界、Phase 5 Infinite Canvas。
+剩余待办：按用户组配置的资源配额（当前为服务端硬上限）、Inspector/Canvas 面板边界、Phase 5 Infinite Canvas 剩余项（消息/附件/Artifact/任务结果自动建节点、画布与 session 引用生命周期）。
 
 ### P1：聊天工作区稳定后实施
 
@@ -281,7 +281,7 @@ Playground
 
 ### P2：产品能力扩展
 
-1. Infinite Canvas；
+1. Infinite Canvas（桌面/移动画布编辑器已完成，见 Phase 5 剩余项）；
 2. 图片、视频、音频任务；
 3. Agent 和工作流；
 4. 跨设备、分享和协作。
@@ -297,3 +297,4 @@ Playground
 | 2026-10-17 | 完成 Phase 4 附件与多模态消息：服务端 `playground_attachments` 表（base64 LongText 存储、媒体签名校验、单文件 8 MiB/每用户 64 MiB 预算、client key 幂等重放、会话级联删除、引用状态与孤儿 TTL 清理系统任务）；受控内容接口（`UserAuth` + owner/session 过滤、nosniff/沙箱 CSP、字节精确输出）；消息快照接受附件引用（仅用户消息、事务内重算引用、被引用禁止删除）；前端 `PromptInput` 附件入口/预览/限制、上传→消息→多模态 payload 全链路与消息附件预览；E2E 新增附件用例（上传→SSE→请求体 `image_url`→刷新恢复）。后端矩阵在 SQLite 3.50.4 / MySQL 8.0.46 / MySQL 5.7.44 / PostgreSQL 16.15 全部通过（期间清理了 PG 测试库中旧迁移遗留表导致的索引同名冲突）。 |
 | 2026-10-17 | 更新验收清单：勾选会话创建/切换/重命名/删除/清空、迟到 chunk 隔离、损坏数据降级、文本请求兼容、附件服务端控制、网络失败草稿保护，以及附件多模态的真实浏览器验收项；补齐附件相关 11 个新键与既有缺失键的七语言翻译（`i18n:sync` missingCount=0）。 |
 | 2026-10-17 | S00：让 GitHub CI 在推送 main 时运行——`.github/workflows/ci.yml` 增加 `push: branches: [main]`，checkout 以 `github.event.pull_request.base.repo.full_name \|\| github.repository` 与 push 时的 `github.sha` 修正，backend/frontend 两个 job 的 `if` 放开 push，concurrency 改为 ref+sha 分组避免 main 连续推送互相取消；仅改 CI 配置，本地未运行测试（CI-only）。 |
+| 2026-10-17 | P5-01：完成 Infinite Canvas 前端画布编辑器——新增 `/_authenticated/playground/canvas` 路由与 Playground 侧边栏入口，画布项目列表（搜索/新建/重命名/删除确认），基于 `@xyflow/react` 与 ai-elements `Canvas`/`Node`/`Panel` 的编辑器（缩放/平移/框选/小地图/节点详情/撤销重做/JSON 导入导出/revision CAS 自动保存与冲突提示），复用既有 `features/canvas` 客户端与 `/api/playground/canvases` CRUD；新增 `use-canvas-editor` 与项目列表测试，补 44 个新键的七语言翻译（`i18n:sync` missingCount=0、extrasCount=0）；仅前端改动，无新依赖；本地未运行测试（CI-only，未运行 typecheck/vitest/lint/build）。 |
