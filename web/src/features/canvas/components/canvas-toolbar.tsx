@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import {
   Download,
+  Pencil,
   Play,
   Plus,
   Redo2,
@@ -46,6 +47,11 @@ interface CanvasToolbarProps {
   disabled?: boolean
   canUndo: boolean
   canRedo: boolean
+  canCopy: boolean
+  canPaste: boolean
+  canSelectAll: boolean
+  canGroup: boolean
+  canUngroup: boolean
   runPhase: CanvasWorkflowRunPhase
   group: string
   groups: GroupOption[]
@@ -53,6 +59,11 @@ interface CanvasToolbarProps {
   onAddNode: (kind: CanvasNodeKind) => void
   onUndo: () => void
   onRedo: () => void
+  onCopy: () => void
+  onPaste: () => void
+  onSelectAll: () => void
+  onGroupSelection: () => void
+  onUngroupSelection: () => void
   onImportFile: (file: File) => void
   onExport: () => void
   onRunWorkflow: () => void
@@ -102,6 +113,47 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
       >
         <Redo2 aria-hidden='true' />
       </Button>
+
+      <DropdownMenu modal={false}>
+        <DropdownMenuTrigger
+          render={<Button size='sm' type='button' variant='outline' />}
+        >
+          <Pencil aria-hidden='true' />
+          {t('Edit')}
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align='start' className='w-44'>
+          <DropdownMenuItem
+            disabled={props.disabled || !props.canCopy}
+            onClick={props.onCopy}
+          >
+            {t('Copy')}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={props.disabled || !props.canPaste}
+            onClick={props.onPaste}
+          >
+            {t('Paste')}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={props.disabled || !props.canSelectAll}
+            onClick={props.onSelectAll}
+          >
+            {t('Select all')}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={props.disabled || !props.canGroup}
+            onClick={props.onGroupSelection}
+          >
+            {t('Group selection')}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={props.disabled || !props.canUngroup}
+            onClick={props.onUngroupSelection}
+          >
+            {t('Ungroup selection')}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
 
       <input
         accept='application/json,.json'

@@ -37,6 +37,16 @@ import {
   fromServerDocument,
 } from '../lib/canvas-document'
 import {
+  canvasCopySelection,
+  canvasExpandRemovedNodes,
+  canvasGroupSelection,
+  canvasNodeKind,
+  canvasPasteClipboard,
+  canvasSelectAll,
+  canvasUngroupSelection,
+  type CanvasClipboard,
+} from '../lib/canvas-edit'
+import {
   createCanvasHistory,
   pushCanvasHistory,
   redoCanvasHistory,
@@ -68,10 +78,17 @@ interface ApplyChangeOptions {
 }
 
 interface CanvasEditorOptions {
-  /** Binds Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z and Ctrl/Cmd+Y while mounted. */
+  /** Binds the canvas editing shortcuts (undo/redo, copy/paste, group). */
   shortcutsEnabled?: boolean
   /** Reports a rejected connection with a translatable message key. */
   onRejectedConnection?: (messageKey: string) => void
+}
+
+/** One node a caller adds in a single undoable step. */
+export interface CanvasAddedNode {
+  kind: CanvasNodeKind
+  position: { x: number; y: number }
+  data?: Partial<CanvasNodeData>
 }
 
 /**
@@ -156,20 +173,30 @@ export function useCanvasEditor(
         changes as NodeChange<CanvasFlowNode>[],
         nodesRef.current
       )
-      const removesNodes = changes.some((change) => change.type === 'remove')
+      const removedIds = new Set(
+        changes
+          .filter((change) => change.type === 'remove')
+          .map((change) => change.id)
+      )
+      const removesNodes = removedIds.size > 0
       const recordsHistory = changes.some(
         (change) =>
           change.type === 'remove' ||
           (change.type === 'position' && change.dragging === false)
       )
+      let committedNodes = nextNodes
       let nextEdges = edgesRef.current
       if (removesNodes) {
-        const present = new Set(nextNodes.map((node) => node.id))
+        // A deleted group takes its children with it instead of leaving nodes
+        // that point at a parent which no longer exists.
+        const expanded = canvasExpandRemovedNodes(nodesRef.current, removedIds)
+        committedNodes = nextNodes.filter((node) => !expanded.has(node.id))
+        const present = new Set(committedNodes.map((node) => node.id))
         nextEdges = nextEdges.filter(
           (edge) => present.has(edge.source) && present.has(edge.target)
         )
       }
-      commit(nextNodes, nextEdges, {
+      commit(committedNodes, nextEdges, {
         record: recordsHistory,
         notify: recordsHistory,
       })
@@ -214,23 +241,36 @@ export function useCanvasEditor(
     [commit]
   )
 
-  const addNode = useCallback(
-    (kind: CanvasNodeKind, position?: { x: number; y: number }): boolean => {
-      if (nodesRef.current.length >= CANVAS_MAX_NODES) {
-        return false
-      }
-      const cascade = CANVAS_NODE_ADD_OFFSET * (nodesRef.current.length % 8)
-      const node = createCanvasNode(
-        kind,
-        position ?? { x: 96 + cascade, y: 96 + cascade }
+  const addNodes = useCallback(
+    (entries: CanvasAddedNode[]): number => {
+      const room = CANVAS_MAX_NODES - nodesRef.current.length
+      if (room <= 0 || entries.length === 0) return 0
+      const accepted = entries.slice(0, room)
+      const created = accepted.map((entry) =>
+        createCanvasNode(entry.kind, entry.position, entry.data)
       )
-      commit([...nodesRef.current, node], edgesRef.current, {
+      commit([...nodesRef.current, ...created], edgesRef.current, {
         record: true,
         notify: true,
       })
-      return true
+      return accepted.length
     },
     [commit]
+  )
+
+  const addNode = useCallback(
+    (kind: CanvasNodeKind, position?: { x: number; y: number }): boolean => {
+      const cascade = CANVAS_NODE_ADD_OFFSET * (nodesRef.current.length % 8)
+      return (
+        addNodes([
+          {
+            kind,
+            position: position ?? { x: 96 + cascade, y: 96 + cascade },
+          },
+        ]) > 0
+      )
+    },
+    [addNodes]
   )
 
   /**
@@ -289,10 +329,13 @@ export function useCanvasEditor(
 
   const deleteNode = useCallback(
     (id: string) => {
-      const nextNodes = nodesRef.current.filter((node) => node.id !== id)
+      // Removing a group through the inspector drops its children with it,
+      // exactly like a keyboard delete of a selected box.
+      const removed = canvasExpandRemovedNodes(nodesRef.current, new Set([id]))
+      const nextNodes = nodesRef.current.filter((node) => !removed.has(node.id))
       if (nextNodes.length === nodesRef.current.length) return
       const nextEdges = edgesRef.current.filter(
-        (edge) => edge.source !== id && edge.target !== id
+        (edge) => !removed.has(edge.source) && !removed.has(edge.target)
       )
       commit(nextNodes, nextEdges, { record: true, notify: true })
     },
@@ -315,12 +358,52 @@ export function useCanvasEditor(
     applySnapshot(result.snapshot)
   }, [applySnapshot])
 
+  const [clipboard, setClipboard] = useState<CanvasClipboard | null>(null)
+
+  const copySelection = useCallback((): boolean => {
+    const copied = canvasCopySelection(nodesRef.current, edgesRef.current)
+    if (!copied) return false
+    setClipboard(copied)
+    return true
+  }, [])
+
+  const pasteSelection = useCallback((): boolean => {
+    if (!clipboard) return false
+    const pasted = canvasPasteClipboard(clipboard, {
+      nodes: nodesRef.current,
+      edges: edgesRef.current,
+    })
+    if (!pasted) return false
+    commit(pasted.nodes, pasted.edges, { record: true, notify: true })
+    return true
+  }, [clipboard, commit])
+
+  const selectAll = useCallback(() => {
+    const nextNodes = canvasSelectAll(nodesRef.current)
+    if (nextNodes === nodesRef.current) return
+    commit(nextNodes, edgesRef.current, { record: false, notify: false })
+  }, [commit])
+
+  const groupSelection = useCallback((): boolean => {
+    const grouped = canvasGroupSelection(nodesRef.current, edgesRef.current)
+    if (!grouped) return false
+    commit(grouped.nodes, grouped.edges, { record: true, notify: true })
+    return true
+  }, [commit])
+
+  const ungroupSelection = useCallback((): boolean => {
+    const released = canvasUngroupSelection(nodesRef.current, edgesRef.current)
+    if (!released) return false
+    commit(released.nodes, released.edges, { record: true, notify: true })
+    return true
+  }, [commit])
+
   const shortcutsEnabled = options.shortcutsEnabled ?? true
   useEffect(() => {
     if (!shortcutsEnabled) return
     const handleKeyDown = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.altKey) return
-      // Editable fields keep their own native undo/redo.
+      // Editable fields keep their own native undo/redo and copy/paste.
       const target = event.target
       const editing =
         target instanceof HTMLElement &&
@@ -337,14 +420,49 @@ export function useCanvasEditor(
         } else {
           undo()
         }
-      } else if (key === 'y') {
+        return
+      }
+      if (key === 'y') {
         event.preventDefault()
         redo()
+        return
+      }
+      if (key === 'a') {
+        event.preventDefault()
+        selectAll()
+        return
+      }
+      // Copy and paste keep their browser meaning when the canvas has nothing
+      // to offer: an empty selection or an empty editor clipboard.
+      if (key === 'c' && !event.shiftKey) {
+        if (copySelection()) event.preventDefault()
+        return
+      }
+      if (key === 'v' && !event.shiftKey) {
+        if (pasteSelection()) event.preventDefault()
+        return
+      }
+      if (key === 'g') {
+        event.preventDefault()
+        if (event.shiftKey) {
+          ungroupSelection()
+        } else {
+          groupSelection()
+        }
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [shortcutsEnabled, undo, redo])
+  }, [
+    copySelection,
+    groupSelection,
+    pasteSelection,
+    redo,
+    selectAll,
+    shortcutsEnabled,
+    undo,
+    ungroupSelection,
+  ])
 
   const replaceDocument = useCallback(
     (document: CanvasServerDocument) => {
@@ -367,22 +485,42 @@ export function useCanvasEditor(
   const selectedNode = nodes.find((node) => node.selected === true) ?? null
   const canUndo = history.past.length > 0
   const canRedo = history.future.length > 0
+  const selectedCount = nodes.filter((node) => node.selected === true).length
+  const hasClipboard = (clipboard?.nodes.length ?? 0) > 0
+  const canGroup = nodes.some(
+    (node) => node.selected === true && canvasNodeKind(node) !== 'group'
+  )
+  const canUngroup = nodes.some(
+    (node) =>
+      node.selected === true &&
+      (Boolean(node.parentId) || canvasNodeKind(node) === 'group')
+  )
 
   return {
     nodes,
     edges,
     selectedNode,
+    selectedCount,
     canUndo,
     canRedo,
+    canGroup,
+    canUngroup,
+    hasClipboard,
     handleNodesChange,
     handleEdgesChange,
     handleConnect,
     addNode,
+    addNodes,
     addLinkedNode,
     updateNodeData,
     deleteNode,
     undo,
     redo,
+    copySelection,
+    pasteSelection,
+    selectAll,
+    groupSelection,
+    ungroupSelection,
     replaceDocument,
     clearSelection,
   }

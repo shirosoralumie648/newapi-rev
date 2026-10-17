@@ -73,14 +73,19 @@ var (
 	}
 )
 
-// PlaygroundAttachment stores one conversation attachment. The bytes live in
-// the process-wide object store and only ownership and metadata stay in the
-// database: rows written before the object store existed keep their canonical
-// base64 payload in Data, and rows switched back by the rollback path do the
-// same. The per-account byte budget keeps the table bounded.
+// PlaygroundAttachment stores one uploaded file of a conversation or of the
+// canvas workspace. The bytes live in the process-wide object store and only
+// ownership and metadata stay in the database: rows written before the object
+// store existed keep their canonical base64 payload in Data, and rows switched
+// back by the rollback path do the same. The per-account byte budget keeps the
+// table bounded.
 type PlaygroundAttachment struct {
-	ID          string `gorm:"size:32;primaryKey"`
-	UserID      int    `gorm:"not null;uniqueIndex:uk_playground_attachment_client,priority:1"`
+	ID     string `gorm:"size:32;primaryKey"`
+	UserID int    `gorm:"not null;uniqueIndex:uk_playground_attachment_client,priority:1"`
+	// SessionID is the attachment's partition: the conversation id of a chat
+	// upload, or the canvas id of a workspace upload. Ownership is always the
+	// UserID row, so a partition that no longer resolves never exposes bytes
+	// of a different account.
 	SessionID   string `gorm:"size:128;not null;index"`
 	MediaType   string `gorm:"size:100;not null"`
 	Filename    string `gorm:"size:255;not null"`
@@ -247,11 +252,34 @@ func readPlaygroundAttachmentObject(ctx context.Context, store objectstore.Store
 	return data, nil
 }
 
-// CreatePlaygroundAttachment stores the bytes of a new upload in the
-// process-wide object store and only records metadata in the database. The
+// CreatePlaygroundAttachment stores the bytes of a new conversation upload in
+// the process-wide object store and only records metadata in the database. The
 // client ID is an idempotency key: a retry after a lost response returns the
 // stored row without writing another object.
 func CreatePlaygroundAttachment(ctx context.Context, userID int, sessionID string, input PlaygroundAttachmentInput) (*PlaygroundAttachment, bool, error) {
+	return createPlaygroundAttachment(ctx, userID, sessionID, input, func(tx *gorm.DB) error {
+		_, err := lockPlaygroundSession(tx, userID, sessionID)
+		return err
+	})
+}
+
+// CreatePlaygroundCanvasAttachment stores one upload of the canvas workspace.
+// The canvas id is the attachment's partition: the row and its bytes belong to
+// the account, the canvas is locked in the same transaction so capacity checks
+// and project deletion serialize against the upload, and the pin table of the
+// saved document keeps the attachment alive while a node references it.
+func CreatePlaygroundCanvasAttachment(ctx context.Context, userID int, canvasID string, input PlaygroundAttachmentInput) (*PlaygroundAttachment, bool, error) {
+	return createPlaygroundAttachment(ctx, userID, canvasID, input, func(tx *gorm.DB) error {
+		return lockPlaygroundCanvasProject(tx, userID, canvasID)
+	})
+}
+
+// createPlaygroundAttachment is the shared upload path of every attachment
+// partition. partitionID names the owning resource (a conversation or a
+// canvas); lockParent runs inside the write transaction and must lock that
+// resource for the account, so a foreign or missing partition is rejected
+// before any row is written.
+func createPlaygroundAttachment(ctx context.Context, userID int, partitionID string, input PlaygroundAttachmentInput, lockParent func(tx *gorm.DB) error) (*PlaygroundAttachment, bool, error) {
 	if userID <= 0 {
 		return nil, false, gorm.ErrRecordNotFound
 	}
@@ -272,7 +300,7 @@ func CreatePlaygroundAttachment(ctx context.Context, userID int, sessionID strin
 	// Client IDs are idempotency keys: retries after a lost response must not
 	// store the same bytes twice.
 	if existing, err := findPlaygroundAttachmentByClientKey(userID, clientKeyHash); err == nil {
-		if !playgroundAttachmentMatchesRequest(existing, sessionID, input.MediaType, input.Filename, contentHash) {
+		if !playgroundAttachmentMatchesRequest(existing, partitionID, input.MediaType, input.Filename, contentHash) {
 			return nil, false, ErrPlaygroundAttachmentConflict
 		}
 		return existing, false, nil
@@ -298,11 +326,11 @@ func CreatePlaygroundAttachment(ctx context.Context, userID int, sessionID strin
 
 	var attachment PlaygroundAttachment
 	err = DB.Transaction(func(tx *gorm.DB) error {
-		if _, err := lockPlaygroundSession(tx, userID, sessionID); err != nil {
+		if err := lockParent(tx); err != nil {
 			return err
 		}
 		// Locking the owner row makes the per-account byte and file budgets
-		// exact even when uploads for different sessions race.
+		// exact even when uploads for different partitions race.
 		var user User
 		if err := lockForUpdate(tx).Where("id = ?", userID).First(&user).Error; err != nil {
 			return err
@@ -326,7 +354,7 @@ func CreatePlaygroundAttachment(ctx context.Context, userID int, sessionID strin
 			return ErrPlaygroundAttachmentLimit
 		}
 		attachment = PlaygroundAttachment{
-			ID: "pgf_" + key, UserID: userID, SessionID: sessionID,
+			ID: "pgf_" + key, UserID: userID, SessionID: partitionID,
 			MediaType: input.MediaType, Filename: input.Filename,
 			ByteSize: int64(len(input.Data)), ContentHash: contentHash,
 			ClientKeyHash:  clientKeyHash,
@@ -342,7 +370,7 @@ func CreatePlaygroundAttachment(ctx context.Context, userID int, sessionID strin
 		// A concurrent upload with the same client ID may have won the unique
 		// index; a replay of identical content acknowledges that winner.
 		if existing, findErr := findPlaygroundAttachmentByClientKey(userID, clientKeyHash); findErr == nil {
-			if !playgroundAttachmentMatchesRequest(existing, sessionID, input.MediaType, input.Filename, contentHash) {
+			if !playgroundAttachmentMatchesRequest(existing, partitionID, input.MediaType, input.Filename, contentHash) {
 				return nil, false, ErrPlaygroundAttachmentConflict
 			}
 			return existing, false, nil

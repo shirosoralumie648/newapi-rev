@@ -139,7 +139,12 @@ function LegacyAudioPreview(props: { taskId: string }) {
   )
 }
 
-function ArtifactMedia(props: {
+/**
+ * The native player/preview of one task artifact. Shared by the workspace
+ * usage log and the canvas `video`/`audio` nodes, so both only ever render
+ * bytes fetched through the owner-scoped artifact content URL.
+ */
+export function TaskArtifactMedia(props: {
   artifact: TaskArtifact
   mediaUrl: string
   onError: () => void
@@ -235,7 +240,7 @@ function TaskArtifactCard(props: { artifact: TaskArtifact }) {
     )
   } else if (props.artifact.type !== 'file') {
     cardContent = (
-      <ArtifactMedia
+      <TaskArtifactMedia
         key={mediaRevision}
         artifact={props.artifact}
         mediaUrl={props.artifact.content_url}

@@ -16,7 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { MiniMap, type NodeTypes, type Viewport } from '@xyflow/react'
+import {
+  MiniMap,
+  ReactFlowProvider,
+  type NodeTypes,
+  type Viewport,
+} from '@xyflow/react'
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -25,9 +30,16 @@ import { Canvas } from '@/components/ai-elements/canvas'
 import { Panel } from '@/components/ai-elements/panel'
 import { WorkspaceInspector } from '@/components/workspace-inspector'
 import { useIsMobile } from '@/hooks/use-mobile'
-import { translateServerText } from '@/lib/server-error-message'
+import {
+  getServerMessage,
+  translateServerText,
+} from '@/lib/server-error-message'
 
-import { useCanvasEditor } from '../hooks/use-canvas-editor'
+import { CANVAS_DROP_MESSAGES, CANVAS_EDIT_MESSAGES } from '../constants'
+import {
+  useCanvasEditor,
+  type CanvasAddedNode,
+} from '../hooks/use-canvas-editor'
 import { useCanvasWorkflowOptions } from '../hooks/use-canvas-workflow-options'
 import { useCanvasWorkflowRunner } from '../hooks/use-canvas-workflow-runner'
 import {
@@ -37,6 +49,7 @@ import {
   toServerDocument,
   validateCanvasDocument,
 } from '../lib/canvas-document'
+import { CanvasDropError, canvasDropEntries } from '../lib/canvas-drop'
 import type { CanvasSourceTarget } from '../lib/canvas-navigation'
 import { canvasWorkflowMentions } from '../lib/canvas-workflow'
 import type {
@@ -46,7 +59,8 @@ import type {
   CanvasServerDocument,
   CanvasServerProject,
 } from '../types'
-import { CanvasFlowNodeView } from './canvas-node'
+import { CanvasDropZone } from './canvas-drop-zone'
+import { CanvasFlowNodeView, CanvasGroupNodeView } from './canvas-node'
 import { CanvasNodeInspector } from './canvas-node-inspector'
 import { CanvasToolbar } from './canvas-toolbar'
 
@@ -61,6 +75,9 @@ const canvasNodeTypes: NodeTypes = {
   model: CanvasFlowNodeView,
   task: CanvasFlowNodeView,
   'task-result': CanvasFlowNodeView,
+  video: CanvasFlowNodeView,
+  audio: CanvasFlowNodeView,
+  group: CanvasGroupNodeView,
 }
 
 interface CanvasEditorProps {
@@ -140,6 +157,33 @@ export function CanvasEditor(props: CanvasEditorProps) {
     [editor, t]
   )
 
+  const handlePaste = useCallback(() => {
+    if (!editor.pasteSelection()) {
+      toast.error(t(CANVAS_EDIT_MESSAGES.PASTE_NO_ROOM))
+    }
+  }, [editor, t])
+
+  const handleDropFiles = useCallback(
+    async (files: File[], position: { x: number; y: number }) => {
+      if (props.disabled) return
+      let entries: CanvasAddedNode[]
+      try {
+        entries = await canvasDropEntries(props.project.id, position, files)
+      } catch (error) {
+        const message =
+          error instanceof CanvasDropError
+            ? error.messageKey
+            : (getServerMessage(error) ?? CANVAS_DROP_MESSAGES.UPLOAD_FAILED)
+        toast.error(translateServerText(t, message))
+        return
+      }
+      if (editor.addNodes(entries) < entries.length) {
+        toast.error(t(CANVAS_ERRORS.TOO_MANY_NODES))
+      }
+    },
+    [editor, props.disabled, props.project.id, t]
+  )
+
   const handleExport = useCallback(() => {
     const canvasDocument = toServerDocument(
       editor.nodes,
@@ -202,39 +246,56 @@ export function CanvasEditor(props: CanvasEditorProps) {
         onClose={editor.clearSelection}
         title={t('Node details')}
         main={
-          <div className='relative min-h-0 min-w-0 flex-1'>
-            <Canvas
-              defaultViewport={props.project.document.viewport}
-              edges={editor.edges}
-              fitView={!props.project.document.viewport}
-              nodeTypes={canvasNodeTypes}
-              nodes={editor.nodes}
-              onConnect={editor.handleConnect}
-              onEdgesChange={editor.handleEdgesChange}
-              onMoveEnd={handleMoveEnd}
-              onNodesChange={editor.handleNodesChange}
+          <ReactFlowProvider>
+            <CanvasDropZone
+              disabled={props.disabled}
+              onDropFiles={(files, position) =>
+                void handleDropFiles(files, position)
+              }
             >
-              <Panel position='top-left'>
-                <CanvasToolbar
-                  canRedo={editor.canRedo}
-                  canUndo={editor.canUndo}
-                  disabled={props.disabled}
-                  group={workflowOptions.group}
-                  groups={workflowOptions.groups}
-                  onAddNode={handleAddNode}
-                  onCancelRun={() => void workflow.cancel()}
-                  onExport={handleExport}
-                  onGroupChange={workflowOptions.setGroup}
-                  onImportFile={handleImportFile}
-                  onRedo={editor.redo}
-                  onRunWorkflow={() => workflow.run()}
-                  onUndo={editor.undo}
-                  runPhase={workflow.phase}
-                />
-              </Panel>
-              <MiniMap className='bg-card!' pannable zoomable />
-            </Canvas>
-          </div>
+              <Canvas
+                defaultViewport={props.project.document.viewport}
+                edges={editor.edges}
+                fitView={!props.project.document.viewport}
+                nodeTypes={canvasNodeTypes}
+                nodes={editor.nodes}
+                onConnect={editor.handleConnect}
+                onEdgesChange={editor.handleEdgesChange}
+                onMoveEnd={handleMoveEnd}
+                onNodesChange={editor.handleNodesChange}
+              >
+                <Panel position='top-left'>
+                  <CanvasToolbar
+                    canCopy={editor.selectedCount > 0}
+                    canGroup={editor.canGroup}
+                    canPaste={editor.hasClipboard}
+                    canRedo={editor.canRedo}
+                    canSelectAll={editor.nodes.length > 0}
+                    canUndo={editor.canUndo}
+                    canUngroup={editor.canUngroup}
+                    disabled={props.disabled}
+                    group={workflowOptions.group}
+                    groups={workflowOptions.groups}
+                    onAddNode={handleAddNode}
+                    onCancelRun={() => void workflow.cancel()}
+                    onCopy={() => void editor.copySelection()}
+                    onExport={handleExport}
+                    onGroupChange={workflowOptions.setGroup}
+                    onGroupSelection={() => void editor.groupSelection()}
+                    onImportFile={handleImportFile}
+                    onPaste={handlePaste}
+                    onRedo={editor.redo}
+                    onRunWorkflow={() => workflow.run()}
+                    onSelectAll={editor.selectAll}
+                    onUndo={editor.undo}
+                    onUngroupSelection={() => void editor.ungroupSelection()}
+                    runPhase={workflow.phase}
+                  />
+                </Panel>
+                <MiniMap className='bg-card!' pannable zoomable />
+              </Canvas>
+            </CanvasDropZone>
+          </ReactFlowProvider>
         }
         panelDefaultSize='30'
         panelMinSize='22'

@@ -47,6 +47,7 @@ import {
   CANVAS_WORKFLOW_ERRORS,
   canvasWorkflowGroup,
   canvasWorkflowOutputTargets,
+  canvasWorkflowResultKind,
   canvasWorkflowRetryRecord,
   canvasWorkflowRetrySource,
   isCanvasWorkflowResult,
@@ -381,7 +382,7 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
       }
       if (targets.length === 0) {
         const created = addLinkedNodeRef.current(
-          'task-result',
+          canvasWorkflowResultKind(artifacts[0]?.type),
           node.id,
           { ...resultData(artifacts[0]), workflow: record },
           {

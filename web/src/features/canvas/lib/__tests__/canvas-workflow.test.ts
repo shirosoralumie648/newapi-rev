@@ -38,6 +38,7 @@ import {
   canvasWorkflowMentions,
   canvasWorkflowNodeText,
   canvasWorkflowOutputTargets,
+  canvasWorkflowResultKind,
   canvasWorkflowRetryRecord,
   canvasWorkflowRetrySource,
   hasCanvasWorkflowInput,
@@ -200,6 +201,31 @@ test('collects only the downstream task-result nodes of a generation step', () =
   ]
 
   expect(canvasWorkflowOutputTargets('t1', nodes, edges)).toEqual(['r1', 'r2'])
+})
+
+test('routes an artifact to the result node kind that can show it', () => {
+  expect(canvasWorkflowResultKind('video')).toBe('video')
+  expect(canvasWorkflowResultKind('audio')).toBe('audio')
+  expect(canvasWorkflowResultKind('image')).toBe('task-result')
+  expect(canvasWorkflowResultKind(undefined)).toBe('task-result')
+
+  const nodes = [
+    flowNode('t1', 'task', { workflow: { model: 'kling-v1' } }),
+    flowNode('v1', 'video'),
+    flowNode('a1', 'audio'),
+    flowNode('r1', 'task-result'),
+  ]
+  const edges = [
+    flowEdge('t1', 'v1'),
+    flowEdge('t1', 'a1'),
+    flowEdge('t1', 'r1'),
+  ]
+
+  expect(canvasWorkflowOutputTargets('t1', nodes, edges)).toEqual([
+    'v1',
+    'a1',
+    'r1',
+  ])
 })
 
 test('bounds a failure summary before it is stored on a node', () => {

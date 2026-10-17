@@ -29,6 +29,9 @@ export type CanvasNodeKind =
   | 'model'
   | 'task'
   | 'task-result'
+  | 'video'
+  | 'audio'
+  | 'group'
 
 /**
  * Workflow steps are the nodes a run executes: a `model` chat completion and a
@@ -122,6 +125,10 @@ export type CanvasNodeData = {
   // Set by the read path when the node's referenced resource was deleted. The
   // node keeps its snapshot/label so the content stays visible.
   sourceDeleted?: boolean
+  // Id of the `group` node that contains this node. The stored document keeps
+  // the parent here and the editor derives the xyflow parent/child layout
+  // (`parentId` + `extent`) from it, so a nested board round-trips.
+  parentId?: string
 }
 
 export type CanvasFlowNode = Node<CanvasNodeData>

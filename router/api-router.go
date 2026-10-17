@@ -112,6 +112,9 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.GET("/canvases/:canvasId", controller.GetPlaygroundCanvasProject)
 			playgroundRoute.PATCH("/canvases/:canvasId", controller.UpdatePlaygroundCanvasProject)
 			playgroundRoute.DELETE("/canvases/:canvasId", controller.DeletePlaygroundCanvasProject)
+			// A canvas owns its own attachment partition, so a file dropped on
+			// the board is uploaded without inventing a conversation for it.
+			playgroundRoute.POST("/canvases/:canvasId/attachments", controller.CreatePlaygroundCanvasAttachment)
 		}
 
 		userRoute := apiRouter.Group("/user")

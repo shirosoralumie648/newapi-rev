@@ -341,6 +341,23 @@ func GetPlaygroundCanvasProject(userID int, id string) (*PlaygroundCanvasProject
 	return &project, nil
 }
 
+// lockPlaygroundCanvasProject acquires the canvas row a canvas-scoped child
+// resource (an attachment upload) belongs to. It runs inside the writer's
+// transaction so capacity checks and project deletion serialize against the
+// upload, and a foreign or missing canvas is rejected before any row is
+// written.
+func lockPlaygroundCanvasProject(tx *gorm.DB, userID int, canvasID string) error {
+	if userID <= 0 {
+		return ErrPlaygroundCanvasNotFound
+	}
+	var project PlaygroundCanvasProject
+	err := lockForUpdate(tx).Where("id = ? AND user_id = ?", canvasID, userID).First(&project).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ErrPlaygroundCanvasNotFound
+	}
+	return err
+}
+
 func ListPlaygroundCanvasProjects(userID int, offset, limit int) ([]PlaygroundCanvasProject, int64, error) {
 	if offset < 0 || limit < 1 {
 		return nil, 0, ErrPlaygroundCanvasInvalid

@@ -1027,6 +1027,12 @@ export const STATIC_I18N_KEYS = [
   'The step that produced this result is no longer on the canvas.',
   'A connected reference image could not be read.',
   'A connected reference image is larger than the 8 MiB limit.',
+  // Canvas editing feedback: a drop and a paste report these keys from
+  // constants, so the literal scan cannot see them.
+  'Only image attachments can be added to the canvas.',
+  'Add at most {{count}} images at a time.',
+  'The image could not be added to the canvas.',
+  'The canvas is full; the selection could not be pasted.',
   // Canvas node kind and generation labels render through t(label) from
   // CANVAS_NODE_KIND_LABELS / CANVAS_WORKFLOW_GENERATION_LABELS.
   'Text',
@@ -1037,4 +1043,7 @@ export const STATIC_I18N_KEYS = [
   'Model call',
   'Task',
   'Task result',
+  'Video',
+  'Audio',
+  'Group',
 ] as const
