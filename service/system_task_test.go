@@ -236,6 +236,12 @@ func TestEnqueueSystemTaskReportsCreatedAndExistingActive(t *testing.T) {
 func TestStopSystemTaskRunnerWaitsForInFlightHandler(t *testing.T) {
 	truncate(t)
 
+	// StartSystemTaskRunner only starts on a master node, and the test binary
+	// never runs common.InitEnv, so the role must be set up explicitly here.
+	previousMasterNode := common.IsMasterNode
+	common.IsMasterNode = true
+	t.Cleanup(func() { common.IsMasterNode = previousMasterNode })
+
 	release := make(chan struct{})
 	started := make(chan context.Context, 1)
 	handler := &stubScheduledHandler{
