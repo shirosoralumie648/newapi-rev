@@ -314,7 +314,9 @@ func upsertWalletConsumeLedger(userId int, hour int64, delta int64) error {
 	return DB.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "ref_type"}, {Name: "ref_id"}},
 		DoUpdates: clause.Assignments(map[string]any{
-			"amount":        gorm.Expr("amount + ?", delta),
+			// Qualify the accumulated column: PostgreSQL reports an unqualified
+			// `amount` as ambiguous with the EXCLUDED row of the same statement.
+			"amount":        gorm.Expr("wallet_ledger.amount + ?", delta),
 			"balance_after": quota,
 		}),
 	}).Create(entry).Error
