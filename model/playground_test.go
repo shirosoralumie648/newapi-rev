@@ -115,14 +115,14 @@ func playgroundTestDB(t *testing.T, dialect string) *gorm.DB {
 	common.SetDatabaseTypes(common.DatabaseType(dialect), previousLog)
 	model.DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundMessage{}, &model.PlaygroundSession{}, &model.Task{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundUserUsage{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundMessage{}, &model.PlaygroundSession{}, &model.Task{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
 		model.DB = previous
 		common.SetDatabaseTypes(previousMain, previousLog)
 	})
-	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasAsset{}, &model.Task{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasAsset{}, &model.Task{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -130,7 +130,8 @@ func playgroundTestDB(t *testing.T, dialect string) *gorm.DB {
 	}
 	require.NoError(t, db.Raw(versionQuery).Scan(&version).Error)
 	t.Logf("Database version: %s", version)
-	// Attachment uploads lock the owner row for the per-account byte budget.
+	// Playground writes lock the account counter row instead of the users row,
+	// so the fixture only needs the accounts themselves.
 	for _, userID := range []int{7, 8, 9} {
 		user := model.User{Id: userID, Username: fmt.Sprintf("playground-%d", userID), AffCode: fmt.Sprintf("pg-aff-%d", userID), Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1}
 		require.NoError(t, db.Create(&user).Error)
@@ -2142,6 +2143,224 @@ func TestPlaygroundUsageForUserReportsOwnerTotals(t *testing.T) {
 	assert.EqualValues(t, 4, usage.Tasks.Limit)
 	assert.EqualValues(t, len(playgroundTaskDataFixture(512)), usage.Tasks.UsedBytes)
 	assert.EqualValues(t, 1<<20, usage.Tasks.LimitBytes)
+}
+
+// The account counters of every Playground resource are maintained inside the
+// write transactions that create or remove the resource, and the unified usage
+// view reports those counters. Deleting a conversation releases everything its
+// cascade removed.
+func TestPlaygroundUserUsageCounters(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			sessionID, input := playgroundArtifactSourceFixture(t, 7, "usage-counters")
+			counters := playgroundUsageCounters(t, db, 7)
+			assert.EqualValues(t, 1, counters.Sessions)
+			assert.Zero(t, counters.Presets)
+			assert.Zero(t, counters.AttachmentCount)
+			assert.Zero(t, counters.ArtifactCount)
+			assert.Zero(t, counters.CanvasCount)
+
+			png := playgroundPNGFixture(64)
+			uploaded := playgroundUploadAttachment(t, 7, sessionID, "usage-counter-file", "image/png", png)
+			attachmentID := uploaded["id"].(string)
+			created := artifactResult(t, playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions/"+sessionID+"/artifacts", input, controller.CreatePlaygroundArtifact))
+			canvas := createCanvasProject(t, 7, "usage-counters-canvas")
+			preset := model.PlaygroundPreset{Name: "Preset", Config: "{}", ParameterEnabled: "{}"}
+			require.NoError(t, model.CreatePlaygroundPreset(7, &preset))
+
+			counters = playgroundUsageCounters(t, db, 7)
+			assert.EqualValues(t, 1, counters.AttachmentCount)
+			assert.EqualValues(t, len(png), counters.AttachmentBytes)
+			assert.EqualValues(t, len(png), counters.ObjectBytes)
+			assert.EqualValues(t, 1, counters.ArtifactCount)
+			assert.EqualValues(t, len(*input.Content), counters.ArtifactBytes)
+			assert.EqualValues(t, 1, counters.CanvasCount)
+			var storedCanvas model.PlaygroundCanvasProject
+			require.NoError(t, db.Where("id = ?", canvas["id"].(string)).First(&storedCanvas).Error)
+			assert.EqualValues(t, storedCanvas.DocumentBytes, counters.CanvasBytes)
+			assert.EqualValues(t, 1, counters.Presets)
+
+			// A new artifact version adds its bytes; the counts stay put.
+			revision := created.Artifact.Revision
+			saved := strings.Repeat("题", 100)
+			savedResult := artifactResult(t, playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions/"+sessionID+"/artifacts/"+created.Artifact.ID+"/versions",
+				model.SavePlaygroundArtifactInput{RequestID: "usage-counter-save", ExpectedRevision: &revision, Title: "Saved", Language: "markdown", Content: &saved}, controller.SavePlaygroundArtifactVersion))
+			counters = playgroundUsageCounters(t, db, 7)
+			assert.EqualValues(t, 1, counters.ArtifactCount)
+			assert.EqualValues(t, len(*input.Content)+len(saved), counters.ArtifactBytes)
+
+			usage, err := model.PlaygroundUsageForUser(7)
+			require.NoError(t, err)
+			assert.EqualValues(t, counters.Sessions, usage.Sessions.Used)
+			assert.EqualValues(t, counters.AttachmentCount, usage.Attachments.Used)
+			assert.EqualValues(t, counters.AttachmentBytes, usage.Attachments.UsedBytes)
+			assert.EqualValues(t, counters.ArtifactCount, usage.Artifacts.Used)
+			assert.EqualValues(t, counters.ArtifactBytes, usage.Artifacts.UsedBytes)
+			assert.EqualValues(t, counters.CanvasCount, usage.Canvas.Used)
+			assert.EqualValues(t, counters.CanvasBytes, usage.Canvas.UsedBytes)
+
+			// Another account never observes these counters.
+			var foreignCount int64
+			require.NoError(t, db.Model(&model.PlaygroundUserUsage{}).Where("user_id = ?", 8).Count(&foreignCount).Error)
+			assert.Zero(t, foreignCount)
+
+			// Removing each resource decrements its counter.
+			require.NoError(t, model.DeletePlaygroundPreset(7, preset.ID))
+			require.NoError(t, model.DeletePlaygroundArtifact(7, sessionID, created.Artifact.ID, savedResult.Artifact.Revision))
+			counters = playgroundUsageCounters(t, db, 7)
+			assert.Zero(t, counters.Presets)
+			assert.Zero(t, counters.ArtifactCount)
+			assert.Zero(t, counters.ArtifactBytes)
+
+			require.NoError(t, model.DeletePlaygroundCanvasProject(7, storedCanvas.ID))
+			counters = playgroundUsageCounters(t, db, 7)
+			assert.Zero(t, counters.CanvasCount)
+			assert.Zero(t, counters.CanvasBytes)
+
+			require.NoError(t, model.DeletePlaygroundAttachment(7, sessionID, attachmentID))
+			counters = playgroundUsageCounters(t, db, 7)
+			assert.Zero(t, counters.AttachmentCount)
+			assert.Zero(t, counters.AttachmentBytes)
+			assert.Zero(t, counters.ObjectBytes)
+
+			// The conversation cascade releases the messages it still holds.
+			require.NoError(t, model.DeletePlaygroundSession(7, sessionID))
+			counters = playgroundUsageCounters(t, db, 7)
+			assert.EqualValues(t, 0, counters.Sessions)
+			assert.Zero(t, counters.AttachmentBytes)
+			assert.Zero(t, counters.ArtifactBytes)
+			assert.Zero(t, counters.CanvasBytes)
+			assert.Zero(t, counters.ObjectBytes)
+		})
+	}
+}
+
+// The counter row is derived state: an account measured before the counters
+// existed is initialized lazily by the first write (or by the reconciliation),
+// the read path measures on the fly without writing, and the daily
+// reconciliation repairs a drifted row without touching any resource.
+func TestPlaygroundUserUsageLazyInitAndReconcile(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			sessionID, input := playgroundArtifactSourceFixture(t, 7, "usage-lazy")
+			png := playgroundPNGFixture(64)
+			playgroundUploadAttachment(t, 7, sessionID, "usage-lazy-file", "image/png", png)
+			artifactResult(t, playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions/"+sessionID+"/artifacts", input, controller.CreatePlaygroundArtifact))
+			createCanvasProject(t, 7, "usage-lazy-canvas")
+			expected := playgroundUsageCounters(t, db, 7)
+
+			// Simulate a database written before the counters existed: the
+			// stored resources stay, only the derived row is gone.
+			require.NoError(t, db.Where("user_id = ?", 7).Delete(&model.PlaygroundUserUsage{}).Error)
+			usage, err := model.PlaygroundUsageForUser(7)
+			require.NoError(t, err)
+			assert.EqualValues(t, expected.Sessions, usage.Sessions.Used)
+			assert.EqualValues(t, expected.AttachmentCount, usage.Attachments.Used)
+			assert.EqualValues(t, expected.AttachmentBytes, usage.Attachments.UsedBytes)
+			assert.EqualValues(t, expected.ArtifactCount, usage.Artifacts.Used)
+			assert.EqualValues(t, expected.ArtifactBytes, usage.Artifacts.UsedBytes)
+			assert.EqualValues(t, expected.CanvasCount, usage.Canvas.Used)
+			assert.EqualValues(t, expected.CanvasBytes, usage.Canvas.UsedBytes)
+			var count int64
+			require.NoError(t, db.Model(&model.PlaygroundUserUsage{}).Where("user_id = ?", 7).Count(&count).Error)
+			assert.Zero(t, count, "the usage read must not create the counter row")
+
+			// The reconciliation initializes the missing row from the rows.
+			report, err := model.ReconcilePlaygroundUserUsage(10)
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, report.UserCount)
+			assert.Zero(t, report.RepairedCount, "initialization is not a repair")
+			assert.Equal(t, playgroundUsageCounterValues(expected), playgroundUsageCounterValues(playgroundUsageCounters(t, db, 7)))
+
+			// The read path trusts the stored counter: a manual drift is
+			// visible until the reconciliation repairs it.
+			require.NoError(t, db.Model(&model.PlaygroundUserUsage{}).Where("user_id = ?", 7).
+				Updates(map[string]any{"sessions": 9, "attachment_bytes": 1, "artifact_count": 0}).Error)
+			usage, err = model.PlaygroundUsageForUser(7)
+			require.NoError(t, err)
+			assert.EqualValues(t, 9, usage.Sessions.Used)
+			assert.EqualValues(t, 1, usage.Attachments.UsedBytes)
+
+			report, err = model.ReconcilePlaygroundUserUsage(10)
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, report.RepairedCount)
+			require.Len(t, report.Repairs, 1)
+			assert.Equal(t, 7, report.Repairs[0].UserID)
+			assert.EqualValues(t, 9, report.Repairs[0].Stored.Sessions)
+			assert.EqualValues(t, expected.Sessions, report.Repairs[0].Actual.Sessions)
+			assert.Equal(t, playgroundUsageCounterValues(expected), playgroundUsageCounterValues(playgroundUsageCounters(t, db, 7)))
+
+			// A converged account is not reported again and keeps its data.
+			report, err = model.ReconcilePlaygroundUserUsage(10)
+			require.NoError(t, err)
+			assert.Zero(t, report.RepairedCount)
+			var sessions int64
+			require.NoError(t, db.Model(&model.PlaygroundSession{}).Where("user_id = ?", 7).Count(&sessions).Error)
+			assert.EqualValues(t, 1, sessions)
+		})
+	}
+}
+
+// The counter row is the serialization point of the per-account budgets, so two
+// uploads to different partitions cannot both pass a byte budget they jointly
+// exceed.
+func TestPlaygroundUserUsageBudgetSerialization(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+				policy.AttachmentUserMaxBytes = 100
+			})
+			sessionID, _ := playgroundArtifactSourceFixture(t, 7, "usage-budget")
+			canvas := createCanvasProject(t, 7, "usage-budget-canvas")
+			canvasID := canvas["id"].(string)
+
+			outcomes := make(chan error, 2)
+			start := make(chan struct{})
+			upload := func(partition, clientKey string) {
+				<-start
+				_, _, err := model.CreatePlaygroundAttachment(context.Background(), 7, partition, model.PlaygroundAttachmentInput{
+					ClientKey: clientKey, MediaType: "image/png", Filename: "image.png", Data: playgroundPNGFixture(64),
+				})
+				outcomes <- err
+			}
+			go upload(sessionID, "usage-budget-a")
+			go upload(canvasID, "usage-budget-b")
+			close(start)
+			first, second := <-outcomes, <-outcomes
+			if first == nil {
+				assert.ErrorIs(t, second, model.ErrPlaygroundAttachmentLimit)
+			} else {
+				assert.ErrorIs(t, first, model.ErrPlaygroundAttachmentLimit)
+				require.NoError(t, second)
+			}
+			counters := playgroundUsageCounters(t, db, 7)
+			assert.EqualValues(t, 1, counters.AttachmentCount)
+			assert.EqualValues(t, 64, counters.AttachmentBytes)
+			assert.EqualValues(t, 64, counters.ObjectBytes)
+		})
+	}
+}
+
+// playgroundUsageCounters reads one account's stored counter row.
+func playgroundUsageCounters(t *testing.T, db *gorm.DB, userID int) model.PlaygroundUserUsage {
+	t.Helper()
+	var usage model.PlaygroundUserUsage
+	require.NoError(t, db.Where("user_id = ?", userID).First(&usage).Error)
+	return usage
+}
+
+// playgroundUsageCounterValues compares counters without the row's identity and
+// timestamps, which the model keeps private.
+func playgroundUsageCounterValues(usage model.PlaygroundUserUsage) []int64 {
+	return []int64{
+		usage.Sessions, usage.Presets,
+		usage.AttachmentCount, usage.AttachmentBytes, usage.ObjectBytes,
+		usage.ArtifactCount, usage.ArtifactBytes,
+		usage.CanvasCount, usage.CanvasBytes,
+	}
 }
 
 // The account-level artifact budget is enforced on the write path, so the

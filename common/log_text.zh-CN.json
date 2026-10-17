@@ -679,6 +679,7 @@
   "ping goroutine panic: %v": "ping goroutine 发生 panic: %v",
   "ping interval seconds: %d": "ping 间隔: %d 秒",
   "pinned task plugin does not support the requested protocol form": "选定的任务插件不支持本次请求的调用方式（流式、后台或同步）",
+  "playground usage reconciliation repaired %d accounts": "Playground 用量对账修复了 %d 个账号",
   "pprof enabled": "已启用 pprof",
   "pre-consumed quota matches the actual quota, no adjustment: %s (per-request billing)": "预扣费与实际消耗一致，无需调整：%s（按次计费）",
   "quota saturation on consume log: op=%s kind=%s original=%g clamped=%d user=%d model=%s": "消费日志: 额度超出上限，已按上限记录: op=%s kind=%s original=%g clamped=%d user=%d model=%s",
