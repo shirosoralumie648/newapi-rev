@@ -45,6 +45,7 @@ import {
 } from '../../lib'
 import type {
   Message as MessageType,
+  PlaygroundMessageCost,
   PlaygroundMessageLayoutMode,
 } from '../../types'
 import { MessageActions } from '../message/message-actions'
@@ -57,6 +58,8 @@ const MAX_RENDERED_HISTORY_MESSAGES = 24
 
 interface PlaygroundChatProps {
   messages: MessageType[]
+  /** Settled cost rows of the conversation's relay requests, by request id. */
+  costs?: ReadonlyMap<string, PlaygroundMessageCost>
   onCopyMessage?: (message: MessageType) => void
   onRegenerateMessage?: (message: MessageType) => void
   onEditMessage?: (message: MessageType) => void
@@ -83,6 +86,7 @@ interface PlaygroundChatProps {
 
 export function PlaygroundChat({
   messages,
+  costs,
   onCopyMessage,
   onRegenerateMessage,
   onEditMessage,
@@ -213,6 +217,11 @@ export function PlaygroundChat({
                   <PlaygroundMessageContent
                     actions={messageActions}
                     alignment={alignment}
+                    cost={
+                      version.requestId
+                        ? costs?.get(version.requestId)
+                        : undefined
+                    }
                     errorActions={errorActions}
                     isGenerating={isGenerating}
                     isLastMessage={isLastMessage}

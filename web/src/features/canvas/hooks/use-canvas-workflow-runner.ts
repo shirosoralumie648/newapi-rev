@@ -335,7 +335,7 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
     ): Promise<CanvasWorkflowStepOutcome> => {
       const model = node.data.workflow?.model?.trim() ?? ''
       try {
-        const response = await sendChatCompletion(
+        const { response } = await sendChatCompletion(
           {
             model,
             group: groupRef.current,

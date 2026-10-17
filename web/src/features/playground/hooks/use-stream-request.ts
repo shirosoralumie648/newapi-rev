@@ -24,6 +24,7 @@ import { getFreshAuthHeaders } from '@/lib/api'
 import { API_ENDPOINTS, ERROR_MESSAGES } from '../constants'
 import {
   getStreamReadyStateError,
+  getStreamResponseRequestId,
   isStreamClosedReadyState,
   isStreamDoneMessage,
   parseStreamChunk,
@@ -32,6 +33,7 @@ import {
 import type {
   ChatCompletionRequest,
   ChatCompletionToolCallDelta,
+  MessageUsage,
 } from '../types'
 
 interface StreamEventSource {
@@ -47,6 +49,10 @@ interface StreamEventSource {
 export interface StreamRequestCallbacks {
   onUpdate: (type: 'reasoning' | 'content', chunk: string) => void
   onToolCalls: (deltas: ChatCompletionToolCallDelta[]) => void
+  /** The relay request id the response header carries, reported once. */
+  onRequestId: (requestId: string) => void
+  /** The usage frame the relay appended at the end of the stream. */
+  onUsage: (usage: MessageUsage) => void
   onComplete: () => void
   onError: (error: string, errorCode?: string) => void
 }
@@ -103,9 +109,21 @@ export function createStreamRequestController(
     source = nextSource
     runtime.setStreaming(true)
     let completed = false
+    let requestIdReported = false
 
     const isCurrent = () =>
       generation === requestGeneration && source === nextSource
+
+    // The relay echoes the request id it recorded, so the finished message can
+    // be linked to its consume log. It is reported once, as soon as the
+    // response headers are available.
+    const captureRequestId = () => {
+      if (requestIdReported || !isCurrent()) return
+      const requestId = getStreamResponseRequestId(nextSource)
+      if (!requestId) return
+      requestIdReported = true
+      callbacks.onRequestId(requestId)
+    }
 
     const handleError = (errorMessage: string, errorCode?: string) => {
       if (!isCurrent() || completed) return
@@ -119,13 +137,14 @@ export function createStreamRequestController(
       const data = event.data ?? ''
       if (isStreamDoneMessage(data)) {
         completed = true
+        captureRequestId()
         closeActiveSource(nextSource)
         callbacks.onComplete()
         return
       }
 
       try {
-        const { updates, toolCalls } = parseStreamChunk(data)
+        const { updates, toolCalls, usage } = parseStreamChunk(data)
 
         for (const update of updates) {
           callbacks.onUpdate(update.type, update.chunk)
@@ -133,6 +152,10 @@ export function createStreamRequestController(
 
         if (toolCalls.length > 0) {
           callbacks.onToolCalls(toolCalls)
+        }
+
+        if (usage) {
+          callbacks.onUsage(usage)
         }
       } catch (error) {
         // eslint-disable-next-line no-console
@@ -153,6 +176,7 @@ export function createStreamRequestController(
 
     nextSource.addEventListener('readystatechange', (event) => {
       if (!isCurrent() || completed) return
+      captureRequestId()
       const errorMessage = getStreamReadyStateError(
         event.readyState,
         nextSource

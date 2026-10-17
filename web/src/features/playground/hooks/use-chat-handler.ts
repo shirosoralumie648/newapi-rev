@@ -26,8 +26,10 @@ import { ERROR_MESSAGES } from '../constants'
 import {
   applyStreamingChunk,
   applyToolCallDelta,
+  attachMessageVersionUsage,
   buildChatCompletionPayload,
   ensurePlaygroundMessageAttachments,
+  toMessageUsage,
   updateAssistantMessageWithError,
   updateLastAssistantMessage,
   parseRequestErrorDetails,
@@ -38,7 +40,12 @@ import {
   isAssistantMessagePending,
 } from '../lib'
 import type { ToolCallDelta } from '../lib'
-import type { Message, PlaygroundConfig, ParameterEnabled } from '../types'
+import type {
+  Message,
+  MessageUsage,
+  PlaygroundConfig,
+  ParameterEnabled,
+} from '../types'
 import { useStreamRequest } from './use-stream-request'
 
 interface UseChatHandlerOptions {
@@ -94,6 +101,10 @@ export function useChatHandler({
   })
   const streamFlushTimerRef = useRef<number | null>(null)
   const requestSessionIdRef = useRef<string | null>(sessionId)
+  // Generation record captured while the stream runs; it is attached to the
+  // finished message so the conversation can show usage and look up the cost.
+  const pendingRequestIdRef = useRef<string | null>(null)
+  const pendingUsageRef = useRef<MessageUsage | null>(null)
 
   const discardPendingStreamUpdates = useCallback((generation: number) => {
     if (streamFlushTimerRef.current !== null) {
@@ -234,18 +245,44 @@ export function useChatHandler({
     [scheduleStreamFlush]
   )
 
+  // The relay request id arrives with the response headers; it is kept until
+  // the reply finishes so one lookup uses the settled consume row.
+  const handleStreamRequestId = useCallback(
+    (generation: number, requestId: string) => {
+      if (generation !== requestGenerationRef.current) return
+      pendingRequestIdRef.current = requestId
+    },
+    []
+  )
+
+  // The usage frame is the last chunk of the stream.
+  const handleStreamUsage = useCallback(
+    (generation: number, usage: MessageUsage) => {
+      if (generation !== requestGenerationRef.current) return
+      pendingUsageRef.current = usage
+    },
+    []
+  )
+
   // Handle stream complete
   const handleStreamComplete = useCallback(
     (generation: number) => {
       if (generation !== requestGenerationRef.current) return
       flushStreamUpdates(generation)
       setIsRequesting(false)
+      const generationRecord = {
+        requestId: pendingRequestIdRef.current ?? undefined,
+        usage: pendingUsageRef.current ?? undefined,
+      }
       onMessageUpdate((prev) => {
         if (generation !== requestGenerationRef.current) return prev
         return updateLastAssistantMessage(prev, (message) =>
-          isAssistantMessageFinal(message)
-            ? message
-            : completeAssistantMessage(message)
+          attachMessageVersionUsage(
+            isAssistantMessageFinal(message)
+              ? message
+              : completeAssistantMessage(message),
+            generationRecord
+          )
         )
       }, requestSessionIdRef.current)
     },
@@ -261,13 +298,20 @@ export function useChatHandler({
       const displayError = getDisplayError(error)
       handleServerError(new Error(displayError))
       const errorTitle = t(ERROR_MESSAGES.API_REQUEST_ERROR)
+      // A failed attempt can still be billed, so the recorded request id is
+      // kept on the error message and its consume row stays visible.
+      const requestId = pendingRequestIdRef.current
       onMessageUpdate((prev) => {
         if (generation !== requestGenerationRef.current) return prev
-        return updateAssistantMessageWithError(
+        const errored = updateAssistantMessageWithError(
           prev,
           displayError,
           errorCode,
           errorTitle
+        )
+        if (!requestId) return errored
+        return updateLastAssistantMessage(errored, (message) =>
+          attachMessageVersionUsage(message, { requestId })
         )
       }, requestSessionIdRef.current)
     },
@@ -282,6 +326,8 @@ export function useChatHandler({
       requestSessionIdRef.current = sessionId
       abortControllerRef.current?.abort()
       abortControllerRef.current = null
+      pendingRequestIdRef.current = null
+      pendingUsageRef.current = null
       discardPendingStreamUpdates(generation)
       setIsRequesting(true)
       const payload = buildChatCompletionPayload(
@@ -292,6 +338,9 @@ export function useChatHandler({
       void sendStreamRequest(payload, {
         onUpdate: (type, chunk) => handleStreamUpdate(generation, type, chunk),
         onToolCalls: (deltas) => handleToolCallDeltas(generation, deltas),
+        onRequestId: (requestId) =>
+          handleStreamRequestId(generation, requestId),
+        onUsage: (usage) => handleStreamUsage(generation, usage),
         onComplete: () => handleStreamComplete(generation),
         onError: (error, errorCode) =>
           handleStreamError(generation, error, errorCode),
@@ -304,6 +353,8 @@ export function useChatHandler({
       discardPendingStreamUpdates,
       handleStreamUpdate,
       handleToolCallDeltas,
+      handleStreamRequestId,
+      handleStreamUsage,
       handleStreamComplete,
       handleStreamError,
       sessionId,
@@ -324,13 +375,15 @@ export function useChatHandler({
       requestGenerationRef.current = generation
       requestSessionIdRef.current = sessionId
       stopStream()
+      pendingRequestIdRef.current = null
+      pendingUsageRef.current = null
       discardPendingStreamUpdates(generation)
       abortControllerRef.current?.abort()
       abortControllerRef.current = abortController
 
       try {
         setIsRequesting(true)
-        const response = await sendChatCompletion(
+        const { response, requestId } = await sendChatCompletion(
           payload,
           abortController.signal
         )
@@ -341,11 +394,16 @@ export function useChatHandler({
           return
         }
 
+        // The failed-attempt path below reads the pending record, so the
+        // request id stays attached even when the response is unusable.
+        pendingRequestIdRef.current = requestId ?? null
+
         if (!hasChatCompletionChoice(response)) {
           handleStreamError(generation, ERROR_MESSAGES.API_REQUEST_ERROR)
           return
         }
 
+        const usage = toMessageUsage(response.usage)
         onMessageUpdate((prev) => {
           if (requestGenerationRef.current !== generation) return prev
           return updateLastAssistantMessage(prev, (message) => {
@@ -354,7 +412,12 @@ export function useChatHandler({
               response
             )
 
-            return updatedMessage ?? message
+            if (!updatedMessage) return message
+
+            return attachMessageVersionUsage(updatedMessage, {
+              requestId,
+              usage,
+            })
           })
         }, requestSessionIdRef.current)
       } catch (error: unknown) {
@@ -412,11 +475,20 @@ export function useChatHandler({
     abortControllerRef.current?.abort()
     abortControllerRef.current = null
     setIsRequesting(false)
+    // A stopped stream was still billed for what it produced, so whatever
+    // usage and request id arrived before the abort is kept.
+    const generationRecord = {
+      requestId: pendingRequestIdRef.current ?? undefined,
+      usage: pendingUsageRef.current ?? undefined,
+    }
     onMessageUpdate((prev) => {
       if (requestGenerationRef.current !== idleGeneration) return prev
       return updateLastAssistantMessage(prev, (message) =>
         isAssistantMessagePending(message)
-          ? completeAssistantMessage(message)
+          ? attachMessageVersionUsage(
+              completeAssistantMessage(message),
+              generationRecord
+            )
           : message
       )
     }, requestSessionIdRef.current)

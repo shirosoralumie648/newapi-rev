@@ -25,6 +25,7 @@ import {
   API_ENDPOINTS,
   DEFAULT_CONFIG,
   DEFAULT_PARAMETER_ENABLED,
+  PLAYGROUND_REQUEST_ID_HEADER,
 } from './constants'
 import {
   messagesSchema,
@@ -39,8 +40,26 @@ import type {
   Message,
   ParameterEnabled,
   PlaygroundConfig,
+  PlaygroundMessageCost,
   PlaygroundServerSession,
 } from './types'
+
+/** One non-streaming completion plus the relay request id it was recorded as. */
+export interface ChatCompletionResult {
+  response: ChatCompletionResponse
+  requestId?: string
+}
+
+// Axios lower-cases response header names; the relay writes the request id it
+// logged into this header.
+function readRequestIdHeader(headers: unknown): string | undefined {
+  if (!headers || typeof headers !== 'object') return undefined
+  const value = (headers as Record<string, unknown>)[
+    PLAYGROUND_REQUEST_ID_HEADER.toLowerCase()
+  ]
+  const text = typeof value === 'string' ? value.trim() : ''
+  return text ? text : undefined
+}
 
 /**
  * Send chat completion request (non-streaming)
@@ -48,12 +67,15 @@ import type {
 export async function sendChatCompletion(
   payload: ChatCompletionRequest,
   signal?: AbortSignal
-): Promise<ChatCompletionResponse> {
+): Promise<ChatCompletionResult> {
   const res = await api.post(API_ENDPOINTS.CHAT_COMPLETIONS, payload, {
     signal,
     skipErrorHandler: true,
   } as Record<string, unknown>)
-  return res.data
+  return {
+    response: res.data as ChatCompletionResponse,
+    requestId: readRequestIdHeader(res.headers),
+  }
 }
 
 /**
@@ -460,6 +482,21 @@ const playgroundUsageMetricSchema = z.object({
   limit_bytes: z.number().int().nonnegative(),
 })
 
+const playgroundMessageCostSchema = z.object({
+  request_id: z.string().min(1),
+  quota: z.number(),
+  prompt_tokens: z.number().int().nonnegative(),
+  completion_tokens: z.number().int().nonnegative(),
+  total_tokens: z.number().int().nonnegative(),
+  model_name: z.string().optional(),
+  created_at: z.number().int().nonnegative(),
+})
+
+const playgroundMessageCostLookupSchema = z.object({
+  enabled: z.boolean(),
+  items: z.array(playgroundMessageCostSchema),
+})
+
 const playgroundUsageSchema = z.object({
   sessions: playgroundUsageMetricSchema,
   attachments: playgroundUsageMetricSchema,
@@ -484,6 +521,46 @@ export interface PlaygroundResourceUsage {
   artifacts: PlaygroundUsageMetric
   canvas: PlaygroundUsageMetric
   tasks: PlaygroundUsageMetric
+}
+
+/**
+ * The settled consume rows of the requested relay requests, by request id.
+ * `enabled` mirrors the runtime consume-log setting: when it is false no row
+ * will ever appear and the caller must not keep waiting for one.
+ */
+export interface PlaygroundMessageCostLookup {
+  enabled: boolean
+  costs: Map<string, PlaygroundMessageCost>
+}
+
+/**
+ * Read-only lookup of the caller's own settled consume rows for the given
+ * relay requests. It never reserves, settles or refunds quota; the returned
+ * figures are the rows the gateway already wrote.
+ */
+export async function getPlaygroundMessageCosts(
+  requestIds: string[],
+  signal?: AbortSignal
+): Promise<PlaygroundMessageCostLookup> {
+  const response = await api.get(API_ENDPOINTS.PLAYGROUND_MESSAGE_COSTS, {
+    params: { request_ids: requestIds.join(',') },
+    signal,
+  })
+  requireServerSuccess(response.data)
+  const data = playgroundMessageCostLookupSchema.parse(response.data.data)
+  const costs = new Map<string, PlaygroundMessageCost>()
+  for (const item of data.items) {
+    costs.set(item.request_id, {
+      requestId: item.request_id,
+      quota: item.quota,
+      promptTokens: item.prompt_tokens,
+      completionTokens: item.completion_tokens,
+      totalTokens: item.total_tokens,
+      modelName: item.model_name ?? '',
+      createdAt: item.created_at * 1000,
+    })
+  }
+  return { enabled: data.enabled, costs }
 }
 
 export async function getPlaygroundUsage(

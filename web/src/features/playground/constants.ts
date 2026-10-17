@@ -60,9 +60,26 @@ export const API_ENDPOINTS = {
   USER_GROUPS: '/api/user/self/groups',
   PLAYGROUND_SESSIONS: '/api/playground/sessions',
   PLAYGROUND_USAGE: '/api/playground/usage',
+  PLAYGROUND_MESSAGE_COSTS: '/api/playground/message-costs',
   PLAYGROUND_ASSETS: '/api/playground/assets',
   PLAYGROUND_TASKS: '/api/playground/tasks',
 } as const
+
+// The relay answers every request with the request id it recorded, so a
+// finished generation can be associated with its consume log row.
+export const PLAYGROUND_REQUEST_ID_HEADER = 'X-Oneapi-Request-Id'
+// The stored generation record mirrors the logs.request_id column: an over-long
+// id can never be looked up, so it is dropped instead of breaking the snapshot.
+export const PLAYGROUND_REQUEST_ID_MAX_LENGTH = 64
+// Sanity ceiling for the display-only token counts, mirroring the bound the
+// server applies to a stored message version.
+export const PLAYGROUND_MESSAGE_TOKEN_MAX = 2 ** 40
+
+// A settle row is written right after the stream ends, so the first lookup can
+// miss it. The conversation cost view retries a bounded number of times while
+// an id has no row and stops immediately when consume logs are switched off.
+export const PLAYGROUND_COST_LOOKUP_POLL_INTERVAL_MS = 2000
+export const PLAYGROUND_COST_LOOKUP_MAX_ATTEMPTS = 5
 
 // Default group — uses 'default' as the safe fallback; auto-group is
 // only selected when the backend confirms it is available for the user.

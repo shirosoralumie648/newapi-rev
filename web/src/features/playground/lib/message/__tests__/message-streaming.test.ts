@@ -126,4 +126,45 @@ describe('chat completion reasoning', () => {
       { type: 'content', chunk: 'Answer' },
     ])
   })
+
+  test('parses the usage frame and drops an incomplete one', () => {
+    const reported = parseStreamChunk(
+      JSON.stringify({
+        choices: [],
+        usage: { prompt_tokens: 5, completion_tokens: 7, total_tokens: 12 },
+      })
+    )
+    expect(reported.usage).toEqual({
+      promptTokens: 5,
+      completionTokens: 7,
+      totalTokens: 12,
+    })
+
+    // A provider that omits the total still yields a usable record.
+    const derived = parseStreamChunk(
+      JSON.stringify({
+        choices: [],
+        usage: { prompt_tokens: 3, completion_tokens: 4 },
+      })
+    )
+    expect(derived.usage).toEqual({
+      promptTokens: 3,
+      completionTokens: 4,
+      totalTokens: 7,
+    })
+
+    // Half a frame must not invent token counts.
+    const partial = parseStreamChunk(
+      JSON.stringify({ choices: [], usage: { prompt_tokens: 3 } })
+    )
+    expect(partial.usage).toBeUndefined()
+
+    const negative = parseStreamChunk(
+      JSON.stringify({
+        choices: [],
+        usage: { prompt_tokens: -1, completion_tokens: 2, total_tokens: 1 },
+      })
+    )
+    expect(negative.usage).toBeUndefined()
+  })
 })
