@@ -158,18 +158,50 @@ func reserveTokenQuotaDB(id int, quota int) (bool, error) {
 	return result.RowsAffected == 1, result.Error
 }
 
-// TryReserveUserQuota atomically checks and deducts a user's wallet quota.
-// 缓存命中时以缓存余额为准（避免批量模式下过期的数据库余额放大并发超扣）；
-// Redis 异常或水合失败时降级为数据库条件更新，保证服务可用。
-func TryReserveUserQuota(id int, quota int) (bool, error) {
+// TryReserveUserQuota atomically checks and deducts a user's wallet quota. With
+// a non-empty requestId the deduction and an active wallet hold commit in one
+// transaction, which is what makes a reservation left behind by a crash
+// refundable. An empty requestId keeps the legacy cache/batch path.
+func TryReserveUserQuota(id int, quota int, requestId string) (bool, error) {
 	if quota < 0 {
 		return false, errors.New("quota cannot be negative")
 	}
 	if quota == 0 {
 		return true, nil
 	}
+	if requestId == "" {
+		// Legacy path without a durable hold, kept for callers that carry no
+		// stable request reference.
+		if !common.RedisEnabled {
+			return reserveUserQuotaDB(id, quota)
+		}
+
+		result, err := cacheTryReserveUserQuota(id, int64(quota))
+		if err == nil && result == cacheQuotaMiss {
+			if _, hydrateErr := GetUserCache(id); hydrateErr == nil {
+				result, err = cacheTryReserveUserQuota(id, int64(quota))
+			}
+		}
+		if err != nil || result == cacheQuotaMiss {
+			if err != nil {
+				common.SysLog(common.LogText("user quota cache reserve unavailable, falling back to database: %s", err.Error()))
+			}
+			return reserveUserQuotaDB(id, quota)
+		}
+		if result == cacheQuotaInsufficient {
+			return false, nil
+		}
+		if err = persistUserQuotaDelta(id, -quota); err != nil {
+			compensated, compensateErr := cacheApplyUserQuotaDelta(id, int64(quota))
+			if compensateErr != nil || compensated != cacheQuotaOK {
+				common.SysError(common.LogText("failed to compensate reserved user quota: result=%d error=%v", compensated, compensateErr))
+			}
+			return false, err
+		}
+		return true, nil
+	}
 	if !common.RedisEnabled {
-		return reserveUserQuotaDB(id, quota)
+		return reserveWalletQuotaWithHoldTx(id, int64(quota), requestId, true)
 	}
 
 	result, err := cacheTryReserveUserQuota(id, int64(quota))
@@ -182,12 +214,14 @@ func TryReserveUserQuota(id int, quota int) (bool, error) {
 		if err != nil {
 			common.SysLog(common.LogText("user quota cache reserve unavailable, falling back to database: %s", err.Error()))
 		}
-		return reserveUserQuotaDB(id, quota)
+		return reserveWalletQuotaWithHoldTx(id, int64(quota), requestId, true)
 	}
 	if result == cacheQuotaInsufficient {
 		return false, nil
 	}
-	if err = persistUserQuotaDelta(id, -quota); err != nil {
+	// The cache already authorized the reservation, so the database write only
+	// has to persist it together with the hold.
+	if _, err = reserveWalletQuotaWithHoldTx(id, int64(quota), requestId, false); err != nil {
 		compensated, compensateErr := cacheApplyUserQuotaDelta(id, int64(quota))
 		if compensateErr != nil || compensated != cacheQuotaOK {
 			common.SysError(common.LogText("failed to compensate reserved user quota: result=%d error=%v", compensated, compensateErr))
@@ -195,6 +229,29 @@ func TryReserveUserQuota(id int, quota int) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// ReserveUserQuotaWithDebt deducts quota without a balance check, admitting
+// wallet debt for the uncovered part (the same semantics as a settlement
+// top-up). With a non-empty requestId the deduction and the hold extension
+// commit together; otherwise it falls back to the legacy batch queue.
+func ReserveUserQuotaWithDebt(id int, quota int, requestId string) error {
+	if quota < 0 {
+		return errors.New("quota cannot be negative")
+	}
+	if quota == 0 {
+		return nil
+	}
+	if requestId == "" {
+		return DecreaseUserQuota(id, quota, false)
+	}
+	if _, err := reserveWalletQuotaWithHoldTx(id, int64(quota), requestId, false); err != nil {
+		return err
+	}
+	// DecreaseUserQuota keeps the cache in step for this path; mirror it so the
+	// cache cannot authorize the already spent quota again.
+	syncWalletQuotaCache(id, -int64(quota), "wallet reserve with debt")
+	return nil
 }
 
 // TryReserveTokenQuota atomically checks and deducts a token quota. Unlimited

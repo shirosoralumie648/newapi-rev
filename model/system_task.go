@@ -28,6 +28,9 @@ const (
 	// SystemTaskTypeWalletReconcile compares every wallet balance with the sum
 	// of its append-only ledger and alerts on deviation without changing balances.
 	SystemTaskTypeWalletReconcile = "wallet_reconcile"
+	// SystemTaskTypeWalletHoldRecovery refunds wallet holds whose reservation
+	// lifetime elapsed without a settlement or refund (crash recovery).
+	SystemTaskTypeWalletHoldRecovery = "wallet_hold_recovery"
 )
 
 var ErrSystemTaskLockLost = errors.New("system task lock lost")

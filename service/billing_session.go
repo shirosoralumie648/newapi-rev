@@ -52,16 +52,18 @@ func (s *BillingSession) Settle(actualQuota int) error {
 		return nil
 	}
 	delta := actualQuota - s.preConsumedQuota
-	if delta == 0 {
-		s.settled = true
-		return nil
-	}
-	// 1) 调整资金来源（仅在尚未提交时执行，防止重复调用）
+	// 1) 调整资金来源（仅在尚未提交时执行，防止重复调用）。
+	// 差额为 0 时同样要提交一次：钱包 hold 必须在这里关闭，否则回收任务会把
+	// 正常完成的请求当成崩溃预扣退款。
 	if !s.fundingSettled {
 		if err := s.funding.Settle(delta); err != nil {
 			return err
 		}
 		s.fundingSettled = true
+	}
+	if delta == 0 {
+		s.settled = true
+		return nil
 	}
 	// 2) 调整令牌额度
 	var tokenErr error
@@ -299,8 +301,8 @@ func (s *BillingSession) reserveFunding(delta int, requireAvailableQuota bool) e
 		// 与结算补扣（SettleBilling 正差额 → WalletFunding.Settle）语义一致：
 		// 全额无条件扣减，余额不足的部分记为欠费（余额可为负），不中断请求，
 		// 保证日志记录的预扣额度与用户余额的实际变动始终对账一致。
-		// DecreaseUserQuota 仅在数据库错误时失败。
-		if err := model.DecreaseUserQuota(funding.userId, delta, false); err != nil {
+		// 有 requestId 时该增量同时扩写持久化 hold，供崩溃后回收对照。
+		if err := model.ReserveUserQuotaWithDebt(funding.userId, delta, funding.requestId); err != nil {
 			return types.NewError(err, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
 		}
 		funding.consumed += delta
@@ -325,11 +327,10 @@ func (s *BillingSession) reserveFunding(delta int, requireAvailableQuota bool) e
 func (s *BillingSession) rollbackFundingReserve(delta int) {
 	switch funding := s.funding.(type) {
 	case *WalletFunding:
-		if err := model.IncreaseUserQuota(funding.userId, delta, false); err != nil {
+		if err := model.ReverseWalletHoldReserve(funding.userId, funding.requestId, delta); err != nil {
 			common.SysLog(common.LogText("error rolling back wallet funding reserve: %s", err.Error()))
 		} else {
 			funding.consumed -= delta
-			model.RecordWalletConsumeDelta(funding.userId, int64(delta))
 		}
 	case *SubscriptionFunding:
 		if err := model.PostConsumeUserSubscriptionDelta(funding.subscriptionId, -int64(delta)); err != nil {

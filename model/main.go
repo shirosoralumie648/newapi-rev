@@ -447,6 +447,7 @@ func migrateDB() error {
 		&PlaygroundCanvasProject{},
 		&PlaygroundCanvasAsset{},
 		&WalletLedgerEntry{},
+		&WalletHold{},
 	)
 	if err != nil {
 		return err
