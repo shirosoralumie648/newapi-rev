@@ -318,7 +318,11 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		return nil, fmt.Errorf("get request url failed: %w", err)
 	}
 	logger.LogDebug(c, "fullRequestURL: %s", common.SanitizeURLForLog(fullRequestURL))
-	req, err := http.NewRequest(c.Request.Method, fullRequestURL, requestBody)
+	// Bind the upstream request to the client request context so a client
+	// disconnect cancels upstream generation instead of leaving it running.
+	// Settlement is unchanged: the stream path still settles from the usage
+	// already received (a zero-output abort charges the prompt part).
+	req, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, fullRequestURL, requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
@@ -348,7 +352,8 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 		return nil, fmt.Errorf("get request url failed: %w", err)
 	}
 	logger.LogDebug(c, "fullRequestURL: %s", common.SanitizeURLForLog(fullRequestURL))
-	req, err := http.NewRequest(c.Request.Method, fullRequestURL, requestBody)
+	// Same client cancellation contract as DoApiRequest.
+	req, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, fullRequestURL, requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
@@ -623,6 +628,12 @@ func DoTaskApiRequest(a TaskAdaptor, c *gin.Context, info *common.RelayInfo, req
 	return resp, nil
 }
 
+// newTaskAPIRequest binds task submissions to the client request context, the
+// same as the regular relay path. Task submissions are handled separately:
+// executeTaskSubmission in controller/relay.go re-checks the context around
+// submission and only inserts the durable task row after the upstream call
+// returned, so cancellation before persistence refunds the reservation and
+// never removes a task that was already stored.
 func newTaskAPIRequest(c *gin.Context, fullRequestURL string, requestBody io.Reader) (*http.Request, error) {
 	if c == nil || c.Request == nil {
 		return nil, errors.New("task client request is missing")

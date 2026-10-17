@@ -1258,6 +1258,7 @@
     "Click to view full prompt": "Nhấp để xem toàn bộ lời nhắc",
     "Click to view image": "Nhấp để xem hình ảnh",
     "Client": "Máy khách",
+    "Client disconnected; retry stopped": "Máy khách đã ngắt kết nối; dừng thử lại",
     "Client header value": "Giá trị header client",
     "Client headers override the gateway defaults and may cause upstream errors": "Header của client sẽ ghi đè header mặc định của gateway và có thể gây lỗi ở upstream",
     "Client ID": "Mã khách hàng",
