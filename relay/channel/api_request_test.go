@@ -10,6 +10,7 @@ import (
 	"time"
 
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -63,6 +64,10 @@ func TestDoRequestCancelsUpstreamWhenClientDisconnects(t *testing.T) {
 			started := make(chan struct{})
 			upstreamCanceled := make(chan struct{})
 			server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				// net/http starts watching for a client disconnect only after the
+				// request body has been read to EOF, so consume the body before
+				// blocking on the request context.
+				_, _ = io.Copy(io.Discard, r.Body)
 				close(started)
 				<-r.Context().Done()
 				close(upstreamCanceled)
@@ -103,7 +108,12 @@ func TestDoRequestCancelsUpstreamWhenClientDisconnects(t *testing.T) {
 
 			err := <-resultCh
 			require.Error(t, err)
-			assert.ErrorIs(t, err, context.Canceled)
+			// doRequest hides the upstream failure text on transport errors, so
+			// the failure is asserted through its stable error code; the
+			// upstreamCanceled check above proves it came from the cancellation.
+			var apiErr *types.NewAPIError
+			require.ErrorAs(t, err, &apiErr)
+			assert.Equal(t, types.ErrorCodeDoRequestFailed, apiErr.GetErrorCode())
 		})
 	}
 }
