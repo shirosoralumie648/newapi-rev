@@ -60,6 +60,7 @@ export const API_ENDPOINTS = {
   USER_GROUPS: '/api/user/self/groups',
   PLAYGROUND_SESSIONS: '/api/playground/sessions',
   PLAYGROUND_USAGE: '/api/playground/usage',
+  PLAYGROUND_ASSETS: '/api/playground/assets',
   PLAYGROUND_TASKS: '/api/playground/tasks',
 } as const
 
@@ -132,6 +133,11 @@ export const PLAYGROUND_TASK_TERMINAL_STATUSES: readonly string[] = [
   'SUCCESS',
   'FAILURE',
 ]
+
+// Asset library paging. The server caps the page size at 50 and rejects search
+// terms longer than 100 characters, so the input is limited to match.
+export const PLAYGROUND_ASSET_PAGE_SIZE = 20
+export const PLAYGROUND_ASSET_SEARCH_MAX_LENGTH = 100
 
 export const PLAYGROUND_GENERATION_ERRORS = {
   IMAGE_FAILED: 'Image generation failed',

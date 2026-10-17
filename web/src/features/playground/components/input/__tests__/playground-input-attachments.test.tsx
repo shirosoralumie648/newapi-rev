@@ -30,12 +30,11 @@ Object.defineProperty(HTMLElement.prototype, 'getAnimations', {
   value: () => [],
 })
 
-function renderInput(
-  onSubmit: ComponentProps<typeof PlaygroundInput>['onSubmit'] = vi
-    .fn()
-    .mockResolvedValue(undefined)
+function buildInputElement(
+  onSubmit: ComponentProps<typeof PlaygroundInput>['onSubmit'],
+  overrides: Partial<ComponentProps<typeof PlaygroundInput>> = {}
 ) {
-  render(
+  return (
     <PlaygroundInput
       config={DEFAULT_CONFIG}
       groupValue='default'
@@ -48,8 +47,17 @@ function renderInput(
       onParameterEnabledChange={() => undefined}
       onSubmit={onSubmit}
       parameterEnabled={DEFAULT_PARAMETER_ENABLED}
+      {...overrides}
     />
   )
+}
+
+function renderInput(
+  onSubmit: ComponentProps<typeof PlaygroundInput>['onSubmit'] = vi
+    .fn()
+    .mockResolvedValue(undefined)
+) {
+  render(buildInputElement(onSubmit))
   return onSubmit
 }
 
@@ -149,4 +157,50 @@ test('a failed send keeps the draft text and attachment for retry', async () => 
   await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1))
   expect(screen.getByPlaceholderText('Ask anything')).toHaveValue('keep me')
   expect(screen.getByText('photo.png')).toBeVisible()
+})
+
+test('pending files from the library join the composer exactly once', async () => {
+  const onPendingFilesConsumed = vi.fn()
+  const pending = [attachmentFile()]
+  const { rerender } = render(
+    buildInputElement(vi.fn().mockResolvedValue(undefined), {
+      pendingFiles: pending,
+      onPendingFilesConsumed,
+    })
+  )
+
+  expect(await screen.findByText('photo.png')).toBeVisible()
+  expect(onPendingFilesConsumed).toHaveBeenCalledTimes(1)
+
+  // A parent re-render with the same batch must not add the file again.
+  rerender(
+    buildInputElement(vi.fn().mockResolvedValue(undefined), {
+      pendingFiles: pending,
+      onPendingFilesConsumed,
+    })
+  )
+  expect(screen.getAllByText('photo.png')).toHaveLength(1)
+  expect(onPendingFilesConsumed).toHaveBeenCalledTimes(1)
+})
+
+test('pending artifact text is appended to the draft once', async () => {
+  const user = userEvent.setup()
+  const onPendingTextConsumed = vi.fn()
+  const onSubmit = vi.fn().mockResolvedValue(undefined)
+  const { rerender } = render(buildInputElement(onSubmit))
+
+  await user.type(screen.getByPlaceholderText('Ask anything'), 'Draft')
+  rerender(
+    buildInputElement(onSubmit, {
+      pendingText: 'artifact body',
+      onPendingTextConsumed,
+    })
+  )
+
+  await waitFor(() =>
+    expect(screen.getByPlaceholderText('Ask anything')).toHaveValue(
+      'Draft\n\nartifact body'
+    )
+  )
+  expect(onPendingTextConsumed).toHaveBeenCalledTimes(1)
 })

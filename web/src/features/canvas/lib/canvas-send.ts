@@ -120,6 +120,25 @@ export function buildArtifactCanvasSeeds(
   ]
 }
 
+export interface AttachmentCanvasSeedInput {
+  sessionId: string
+  attachmentId: string
+  filename?: string
+}
+
+/** Maps one saved attachment to a canvas node that references it by ID. */
+export function buildAttachmentCanvasSeeds(
+  input: AttachmentCanvasSeedInput
+): CanvasSendSeed[] {
+  return [
+    {
+      kind: 'attachment',
+      ...(input.filename ? { label: input.filename } : {}),
+      ref: { sessionId: input.sessionId, attachmentId: input.attachmentId },
+    },
+  ]
+}
+
 export interface TaskResultCanvasSeedInput {
   taskId: string
   label: string

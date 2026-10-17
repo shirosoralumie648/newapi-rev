@@ -22,6 +22,11 @@ export const playgroundQueryKeys = {
   list: (userId: number | null) => ['playground', userId, 'sessions'] as const,
   usage: (userId: number | null) => ['playground', userId, 'usage'] as const,
   tasks: () => ['playground', 'tasks', 'list'] as const,
+  assets: (userId: number | null, kind: string, search: string, page: number) =>
+    ['playground-assets', userId, kind, search, page] as const,
+  assetsAll: (userId: number | null) => ['playground-assets', userId] as const,
+  artifactsAll: (userId: number | null) =>
+    ['playground-artifacts', userId] as const,
   detail: (userId: number, id: string) =>
     ['playground', userId, 'session', id] as const,
   messages: (userId: number, id: string) =>

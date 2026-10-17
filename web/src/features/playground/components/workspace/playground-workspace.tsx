@@ -16,7 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { FileText, Frame, Menu, PanelLeft, Sparkles } from 'lucide-react'
+import {
+  FileText,
+  FolderOpen,
+  Frame,
+  Menu,
+  PanelLeft,
+  Sparkles,
+} from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -38,7 +45,11 @@ import { PlaygroundSessionList } from './playground-session-list'
  * Which view the unified right-side Inspector shows. The Inspector itself is
  * owner of the desktop resizable layout and the mobile Sheet.
  */
-export type PlaygroundInspectorView = 'artifacts' | 'canvas' | 'generate'
+export type PlaygroundInspectorView =
+  | 'artifacts'
+  | 'canvas'
+  | 'generate'
+  | 'library'
 
 interface PlaygroundWorkspaceProps {
   disabled?: boolean
@@ -84,6 +95,11 @@ export function PlaygroundWorkspace(props: PlaygroundWorkspaceProps) {
     inspectorTitle = t('Generate')
     inspectorDescription = t(
       'Generate images, videos and audio through your configured channels.'
+    )
+  } else if (props.inspectorView === 'library') {
+    inspectorTitle = t('Asset library')
+    inspectorDescription = t(
+      'Attachments, artifacts and generation results in your Playground.'
     )
   }
 
@@ -139,7 +155,9 @@ export function PlaygroundWorkspace(props: PlaygroundWorkspaceProps) {
               onClick={() => props.onToggleInspector('generate')}
               size='sm'
               type='button'
-              variant={props.inspectorView === 'generate' ? 'secondary' : 'ghost'}
+              variant={
+                props.inspectorView === 'generate' ? 'secondary' : 'ghost'
+              }
             >
               <Sparkles aria-hidden='true' />
               {t('Generate')}
@@ -167,6 +185,19 @@ export function PlaygroundWorkspace(props: PlaygroundWorkspaceProps) {
             >
               <FileText aria-hidden='true' />
               {t('Artifacts')}
+            </Button>
+            <Button
+              aria-pressed={props.inspectorView === 'library'}
+              disabled={props.disabled}
+              onClick={() => props.onToggleInspector('library')}
+              size='sm'
+              type='button'
+              variant={
+                props.inspectorView === 'library' ? 'secondary' : 'ghost'
+              }
+            >
+              <FolderOpen aria-hidden='true' />
+              {t('Library')}
             </Button>
           </div>
         </div>
