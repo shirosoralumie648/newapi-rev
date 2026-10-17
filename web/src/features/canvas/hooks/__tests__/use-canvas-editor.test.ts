@@ -251,3 +251,160 @@ test('undo shortcuts stay inactive while the editor is disabled', () => {
   fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
   expect(hook.result.current.nodes).toHaveLength(1)
 })
+
+test('addNodes appends every entry as one undoable step and respects the limit', () => {
+  const onChange = vi.fn()
+  const hook = renderHook(() => useCanvasEditor(EMPTY_DOCUMENT, onChange))
+
+  act(() => {
+    expect(
+      hook.result.current.addNodes([
+        {
+          kind: 'attachment',
+          position: { x: 10, y: 20 },
+          data: { label: 'cat.png' },
+        },
+        { kind: 'attachment', position: { x: 310, y: 20 } },
+      ])
+    ).toBe(2)
+  })
+
+  expect(hook.result.current.nodes).toHaveLength(2)
+  expect(hook.result.current.nodes[0].data.label).toBe('cat.png')
+  expect(onChange).toHaveBeenCalledTimes(1)
+
+  act(() => hook.result.current.undo())
+  expect(hook.result.current.nodes).toHaveLength(0)
+
+  const fullDocument: CanvasServerDocument = {
+    nodes: Array.from({ length: CANVAS_MAX_NODES }, (_, index) => ({
+      id: `node-${index}`,
+      type: 'text' as const,
+      position: { x: index, y: index },
+    })),
+    edges: [],
+  }
+  const full = renderHook(() => useCanvasEditor(fullDocument, vi.fn()))
+  act(() => {
+    expect(
+      full.result.current.addNodes([
+        { kind: 'text', position: { x: 0, y: 0 } },
+        { kind: 'text', position: { x: 1, y: 1 } },
+      ])
+    ).toBe(0)
+  })
+  expect(full.result.current.nodes).toHaveLength(CANVAS_MAX_NODES)
+})
+
+test('copy and paste shortcuts duplicate the selection with fresh ids', () => {
+  const onChange = vi.fn()
+  const hook = renderHook(() => useCanvasEditor(LINKED_DOCUMENT, onChange))
+
+  act(() =>
+    hook.result.current.handleNodesChange([
+      { id: 'a', type: 'select', selected: true },
+      { id: 'b', type: 'select', selected: true },
+    ])
+  )
+
+  expect(fireEvent.keyDown(window, { key: 'c', ctrlKey: true })).toBe(false)
+  expect(hook.result.current.hasClipboard).toBe(true)
+
+  fireEvent.keyDown(window, { key: 'v', ctrlKey: true })
+  expect(hook.result.current.nodes).toHaveLength(4)
+  const pasted = hook.result.current.nodes.slice(2)
+  expect(new Set(hook.result.current.nodes.map((node) => node.id)).size).toBe(4)
+  expect(pasted.every((node) => node.selected === true)).toBe(true)
+  expect(hook.result.current.edges).toHaveLength(2)
+  expect(hook.result.current.canUndo).toBe(true)
+
+  fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
+  expect(hook.result.current.nodes).toHaveLength(2)
+})
+
+test('copy and paste stay inert without a selection or a clipboard', () => {
+  const onChange = vi.fn()
+  const hook = renderHook(() => useCanvasEditor(LINKED_DOCUMENT, onChange))
+
+  // Without a selection the browser keeps its own copy shortcut.
+  expect(fireEvent.keyDown(window, { key: 'c', ctrlKey: true })).toBe(true)
+  expect(hook.result.current.hasClipboard).toBe(false)
+
+  // With an empty editor clipboard paste is not intercepted either.
+  expect(fireEvent.keyDown(window, { key: 'v', ctrlKey: true })).toBe(true)
+  expect(hook.result.current.nodes).toHaveLength(2)
+})
+
+test('select all, group and ungroup run through the keyboard shortcuts', () => {
+  const onChange = vi.fn()
+  const hook = renderHook(() => useCanvasEditor(LINKED_DOCUMENT, onChange))
+
+  expect(fireEvent.keyDown(window, { key: 'a', ctrlKey: true })).toBe(false)
+  expect(
+    hook.result.current.nodes.every((node) => node.selected === true)
+  ).toBe(true)
+
+  fireEvent.keyDown(window, { key: 'g', ctrlKey: true })
+  const group = hook.result.current.nodes.find(
+    (node) => node.data.kind === 'group'
+  )
+  expect(group).toBeDefined()
+  expect(hook.result.current.canUngroup).toBe(true)
+  expect(hook.result.current.canGroup).toBe(false)
+  expect(hook.result.current.canUndo).toBe(true)
+
+  fireEvent.keyDown(window, { key: 'g', ctrlKey: true, shiftKey: true })
+  expect(
+    hook.result.current.nodes.some((node) => node.data.kind === 'group')
+  ).toBe(false)
+  expect(hook.result.current.canGroup).toBe(true)
+
+  fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
+  expect(
+    hook.result.current.nodes.some((node) => node.data.kind === 'group')
+  ).toBe(true)
+})
+
+test('deleting a group removes its children and their edges too', () => {
+  const onChange = vi.fn()
+  const hook = renderHook(() => useCanvasEditor(LINKED_DOCUMENT, onChange))
+
+  act(() => {
+    hook.result.current.handleNodesChange([
+      { id: 'a', type: 'select', selected: true },
+      { id: 'b', type: 'select', selected: true },
+    ])
+  })
+  act(() => hook.result.current.groupSelection())
+  const groupId = hook.result.current.nodes.find(
+    (node) => node.data.kind === 'group'
+  )?.id
+  expect(groupId).toBeDefined()
+  expect(
+    hook.result.current.nodes.filter((node) => node.parentId === groupId)
+  ).toHaveLength(2)
+  expect(hook.result.current.canGroup).toBe(false)
+  expect(hook.result.current.canUngroup).toBe(true)
+
+  act(() =>
+    hook.result.current.handleNodesChange([
+      { id: groupId ?? '', type: 'remove' },
+    ])
+  )
+  expect(hook.result.current.nodes).toHaveLength(0)
+  expect(hook.result.current.edges).toHaveLength(0)
+  expect(hook.result.current.canUndo).toBe(true)
+
+  act(() => hook.result.current.undo())
+  expect(hook.result.current.nodes).toHaveLength(3)
+})
+
+test('grouping and pasting refuse an impossible edit without notifying autosave', () => {
+  const onChange = vi.fn()
+  const hook = renderHook(() => useCanvasEditor(LINKED_DOCUMENT, onChange))
+
+  expect(hook.result.current.groupSelection()).toBe(false)
+  expect(hook.result.current.pasteSelection()).toBe(false)
+  expect(hook.result.current.ungroupSelection()).toBe(false)
+  expect(onChange).not.toHaveBeenCalled()
+})

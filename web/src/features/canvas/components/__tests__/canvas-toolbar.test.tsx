@@ -25,8 +25,13 @@ import { CanvasToolbar } from '../canvas-toolbar'
 
 function toolbarProps(runPhase: CanvasWorkflowRunPhase = 'idle') {
   return {
+    canCopy: false,
+    canGroup: false,
+    canPaste: false,
     canRedo: false,
+    canSelectAll: true,
     canUndo: false,
+    canUngroup: false,
     disabled: false,
     group: 'default',
     groups: [
@@ -35,12 +40,17 @@ function toolbarProps(runPhase: CanvasWorkflowRunPhase = 'idle') {
     ],
     onAddNode: vi.fn(),
     onCancelRun: vi.fn(),
+    onCopy: vi.fn(),
     onExport: vi.fn(),
     onGroupChange: vi.fn(),
+    onGroupSelection: vi.fn(),
     onImportFile: vi.fn(),
+    onPaste: vi.fn(),
     onRedo: vi.fn(),
     onRunWorkflow: vi.fn(),
+    onSelectAll: vi.fn(),
     onUndo: vi.fn(),
+    onUngroupSelection: vi.fn(),
     runPhase,
   }
 }
@@ -65,4 +75,61 @@ test('offers cancel instead of a second run while the workflow is running', asyn
   expect(screen.queryByRole('button', { name: 'Run workflow' })).toBeNull()
   await user.click(screen.getByRole('button', { name: 'Cancel run' }))
   expect(props.onCancelRun).toHaveBeenCalledTimes(1)
+})
+
+test('disables edit actions that do not apply to the selection', async () => {
+  const user = userEvent.setup()
+  const props = toolbarProps()
+  render(<CanvasToolbar {...props} />)
+
+  await user.click(screen.getByRole('button', { name: 'Edit' }))
+
+  for (const name of [
+    'Copy',
+    'Paste',
+    'Group selection',
+    'Ungroup selection',
+  ]) {
+    expect(screen.getByRole('menuitem', { name })).toHaveAttribute(
+      'aria-disabled',
+      'true'
+    )
+  }
+  expect(
+    screen.getByRole('menuitem', { name: 'Select all' })
+  ).not.toHaveAttribute('aria-disabled', 'true')
+})
+
+test('runs the edit actions the selection allows', async () => {
+  const user = userEvent.setup()
+  const props = {
+    ...toolbarProps(),
+    canCopy: true,
+    canGroup: true,
+    canPaste: true,
+    canRedo: true,
+    canUngroup: true,
+    canUndo: true,
+  }
+  render(<CanvasToolbar {...props} />)
+
+  await user.click(screen.getByRole('button', { name: 'Edit' }))
+  await user.click(screen.getByRole('menuitem', { name: 'Copy' }))
+  expect(props.onCopy).toHaveBeenCalledTimes(1)
+
+  await user.click(screen.getByRole('button', { name: 'Edit' }))
+  await user.click(screen.getByRole('menuitem', { name: 'Paste' }))
+  expect(props.onPaste).toHaveBeenCalledTimes(1)
+
+  await user.click(screen.getByRole('button', { name: 'Edit' }))
+  await user.click(screen.getByRole('menuitem', { name: 'Group selection' }))
+  expect(props.onGroupSelection).toHaveBeenCalledTimes(1)
+
+  await user.click(screen.getByRole('button', { name: 'Edit' }))
+  await user.click(screen.getByRole('menuitem', { name: 'Ungroup selection' }))
+  expect(props.onUngroupSelection).toHaveBeenCalledTimes(1)
+
+  await user.click(screen.getByRole('button', { name: 'Edit' }))
+  await user.click(screen.getByRole('menuitem', { name: 'Select all' }))
+  expect(props.onSelectAll).toHaveBeenCalledTimes(1)
 })

@@ -60,6 +60,10 @@ func writePlaygroundAttachmentError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, model.ErrPlaygroundSessionNotFound):
 		status, code, message = http.StatusNotFound, "PLAYGROUND_NOT_FOUND", "Playground conversation not found."
+	case errors.Is(err, model.ErrPlaygroundCanvasNotFound):
+		// A canvas-scoped upload of an unknown or foreign project is a 404,
+		// exactly like the conversation case.
+		status, code, message = http.StatusNotFound, "PLAYGROUND_NOT_FOUND", err.Error()
 	case errors.Is(err, model.ErrPlaygroundAttachmentNotFound):
 		status, code, message = http.StatusNotFound, "PLAYGROUND_NOT_FOUND", err.Error()
 	case errors.Is(err, model.ErrPlaygroundAttachmentConflict):
@@ -104,31 +108,63 @@ func playgroundDecodeAttachment(attachment *model.PlaygroundAttachment, clientKe
 	}
 }
 
+// decodePlaygroundAttachmentUpload reads one upload request and decodes its
+// payload for either attachment partition (a conversation or a canvas).
+func decodePlaygroundAttachmentUpload(c *gin.Context) (model.PlaygroundAttachmentInput, bool) {
+	var request playgroundAttachmentRequest
+	if !decodePlaygroundAttachmentRequest(c, &request) {
+		return model.PlaygroundAttachmentInput{}, false
+	}
+	data, err := base64.StdEncoding.DecodeString(request.Data)
+	if err != nil {
+		writePlaygroundAttachmentError(c, model.ErrPlaygroundAttachmentInvalid)
+		return model.PlaygroundAttachmentInput{}, false
+	}
+	return model.PlaygroundAttachmentInput{
+		ClientKey: request.ClientKey,
+		MediaType: request.MediaType,
+		Filename:  request.Filename,
+		Data:      data,
+	}, true
+}
+
+// respondPlaygroundAttachmentUpload writes the stored attachment or maps the
+// failure of either upload partition to its stable error code.
+func respondPlaygroundAttachmentUpload(c *gin.Context, input model.PlaygroundAttachmentInput, attachment *model.PlaygroundAttachment, created bool, err error) {
+	if err != nil {
+		writePlaygroundAttachmentError(c, err)
+		return
+	}
+	common.ApiSuccess(c, playgroundDecodeAttachment(attachment, input.ClientKey, created))
+}
+
 func CreatePlaygroundAttachment(c *gin.Context) {
 	// 欠款只读：有未结清欠款的账号不能上传新附件（读取与导出不受影响）。
 	if !enforcePlaygroundWalletWritable(c) {
 		return
 	}
-	var request playgroundAttachmentRequest
-	if !decodePlaygroundAttachmentRequest(c, &request) {
+	input, ok := decodePlaygroundAttachmentUpload(c)
+	if !ok {
 		return
 	}
-	data, err := base64.StdEncoding.DecodeString(request.Data)
-	if err != nil {
-		writePlaygroundAttachmentError(c, model.ErrPlaygroundAttachmentInvalid)
+	attachment, created, err := model.CreatePlaygroundAttachment(c.Request.Context(), c.GetInt("id"), c.Param("id"), input)
+	respondPlaygroundAttachmentUpload(c, input, attachment, created, err)
+}
+
+// CreatePlaygroundCanvasAttachment stores one upload of the canvas workspace.
+// The canvas id is the attachment partition: the model layer locks the project
+// row for the account before anything is written, so a foreign or missing
+// canvas answers exactly like a foreign conversation.
+func CreatePlaygroundCanvasAttachment(c *gin.Context) {
+	if !enforcePlaygroundWalletWritable(c) {
 		return
 	}
-	attachment, created, err := model.CreatePlaygroundAttachment(c.Request.Context(), c.GetInt("id"), c.Param("id"), model.PlaygroundAttachmentInput{
-		ClientKey: request.ClientKey,
-		MediaType: request.MediaType,
-		Filename:  request.Filename,
-		Data:      data,
-	})
-	if err != nil {
-		writePlaygroundAttachmentError(c, err)
+	input, ok := decodePlaygroundAttachmentUpload(c)
+	if !ok {
 		return
 	}
-	common.ApiSuccess(c, playgroundDecodeAttachment(attachment, request.ClientKey, created))
+	attachment, created, err := model.CreatePlaygroundCanvasAttachment(c.Request.Context(), c.GetInt("id"), c.Param("canvasId"), input)
+	respondPlaygroundAttachmentUpload(c, input, attachment, created, err)
 }
 
 func ListPlaygroundAttachments(c *gin.Context) {

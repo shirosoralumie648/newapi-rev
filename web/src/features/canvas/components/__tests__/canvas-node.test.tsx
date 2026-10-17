@@ -16,15 +16,22 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { render, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { render, screen, waitFor } from '@testing-library/react'
 import { ReactFlowProvider } from '@xyflow/react'
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
+
+import { getTaskArtifacts } from '@/features/usage-logs/api'
 
 import type { CanvasNodeData } from '../../types'
-import { CanvasFlowNodeView } from '../canvas-node'
+import { CanvasFlowNodeView, CanvasGroupNodeView } from '../canvas-node'
 
-function renderNode(data: CanvasNodeData) {
-  const props = {
+vi.mock('@/features/usage-logs/api', () => ({
+  getTaskArtifacts: vi.fn(),
+}))
+
+function nodeProps(data: CanvasNodeData) {
+  return {
     id: 'n1',
     data,
     selected: false,
@@ -35,11 +42,19 @@ function renderNode(data: CanvasNodeData) {
     positionAbsoluteX: 0,
     positionAbsoluteY: 0,
   } as unknown as Parameters<typeof CanvasFlowNodeView>[0]
+}
+
+function renderNode(data: CanvasNodeData) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
 
   return render(
-    <ReactFlowProvider>
-      <CanvasFlowNodeView {...props} />
-    </ReactFlowProvider>
+    <QueryClientProvider client={client}>
+      <ReactFlowProvider>
+        <CanvasFlowNodeView {...nodeProps(data)} />
+      </ReactFlowProvider>
+    </QueryClientProvider>
   )
 }
 
@@ -105,4 +120,88 @@ test('shows the durable task id of a generation step', () => {
 
   expect(screen.getByText('Succeeded')).toBeInTheDocument()
   expect(screen.getByText(/task-1/)).toBeInTheDocument()
+})
+
+test('plays a video artifact of a settled task through the controlled URL', async () => {
+  vi.mocked(getTaskArtifacts).mockResolvedValue({
+    artifacts: [
+      {
+        key: 'out-1',
+        type: 'video',
+        content_url: '/api/task/task-1/artifacts/out-1/content',
+      },
+    ],
+  })
+
+  const { container } = renderNode({
+    kind: 'video',
+    label: 'kling-v1 · video',
+    ref: { taskId: 'task-1', taskArtifactKey: 'out-1' },
+  })
+
+  await waitFor(() => expect(container.querySelector('video')).not.toBeNull())
+  expect(screen.getByText('kling-v1 · video')).toBeInTheDocument()
+  expect(container.querySelector('video')).toHaveAttribute(
+    'src',
+    '/api/task/task-1/artifacts/out-1/content'
+  )
+  expect(getTaskArtifacts).toHaveBeenCalledWith('task-1')
+})
+
+test('plays an audio artifact with the audio element', async () => {
+  vi.mocked(getTaskArtifacts).mockResolvedValue({
+    artifacts: [
+      {
+        key: 'out-9',
+        type: 'audio',
+        content_url: '/api/task/task-9/artifacts/out-9/content',
+      },
+    ],
+  })
+
+  const { container } = renderNode({
+    kind: 'audio',
+    ref: { taskId: 'task-9' },
+  })
+
+  await waitFor(() => expect(container.querySelector('audio')).not.toBeNull())
+  expect(container.querySelector('audio')).toHaveAttribute(
+    'src',
+    '/api/task/task-9/artifacts/out-9/content'
+  )
+  expect(container.querySelector('video')).toBeNull()
+})
+
+test('shows the empty state of a media node without a task reference', () => {
+  const { container } = renderNode({ kind: 'video' })
+
+  expect(screen.getByText('Empty node')).toBeInTheDocument()
+  expect(container.querySelector('video')).toBeNull()
+  expect(getTaskArtifacts).not.toHaveBeenCalled()
+})
+
+test('reports an unavailable media artifact instead of a broken player', async () => {
+  vi.mocked(getTaskArtifacts).mockRejectedValue(new Error('gone'))
+
+  const { container } = renderNode({
+    kind: 'video',
+    ref: { taskId: 'task-missing' },
+  })
+
+  expect(await screen.findByText('Preview unavailable')).toBeInTheDocument()
+  expect(container.querySelector('video')).toBeNull()
+})
+
+test('renders a group as a dashed box without handles', () => {
+  const client = new QueryClient()
+  const { container } = render(
+    <QueryClientProvider client={client}>
+      <ReactFlowProvider>
+        <CanvasGroupNodeView {...nodeProps({ kind: 'group', text: 'Scene' })} />
+      </ReactFlowProvider>
+    </QueryClientProvider>
+  )
+
+  expect(screen.getByText('Scene')).toBeInTheDocument()
+  expect(container.querySelector('.react-flow__handle')).toBeNull()
 })

@@ -276,7 +276,7 @@ jobs:
           touch web/dist/index.html
 
       - name: Test batch update flush, token quota adjustments, wallet debt, and Playground message deltas, attachment storage, presets, and system prompts on SQLite, MySQL, and PostgreSQL
-        run: go test ./model/ -run 'TestBatchUpdateShutdownFlushMatrix|TestFlushBatchUpdateTimeoutLogsAndRetainsDeltas|TestTokenQuotaUpdatePreservesConcurrentDeductions|TestPlaygroundMessageDelta|TestPlaygroundMessageUniquenessMigration|TestPlaygroundMessageCostLookup|TestPlaygroundMessageVersionBranches|TestPlaygroundWalletDebt|TestPlaygroundAttachmentPersistenceMatrix|TestPlaygroundAttachmentStorageSchemaMigration|TestPlaygroundPresetPersistenceAndOwnership|TestPlaygroundSessionSystemPrompt' -count=1 -v
+        run: go test ./model/ -run 'TestBatchUpdateShutdownFlushMatrix|TestFlushBatchUpdateTimeoutLogsAndRetainsDeltas|TestTokenQuotaUpdatePreservesConcurrentDeductions|TestPlaygroundMessageDelta|TestPlaygroundMessageUniquenessMigration|TestPlaygroundMessageCostLookup|TestPlaygroundMessageVersionBranches|TestPlaygroundWalletDebt|TestPlaygroundAttachmentPersistenceMatrix|TestPlaygroundAttachmentStorageSchemaMigration|TestPlaygroundCanvasAttachmentUpload|TestPlaygroundPresetPersistenceAndOwnership|TestPlaygroundSessionSystemPrompt' -count=1 -v
 
   frontend:
     name: Frontend typecheck and test

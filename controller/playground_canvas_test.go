@@ -37,7 +37,7 @@ func TestPlaygroundCanvasDocumentAcceptsWorkflowNodeKinds(t *testing.T) {
 	policy := playground_setting.GetPlaygroundQuotaPolicy("")
 	for _, kind := range []string{
 		"text", "note", "prompt", "message", "attachment", "image", "artifact",
-		"model", "task", "task-result",
+		"model", "task", "task-result", "video", "audio", "group",
 	} {
 		var request playgroundCanvasRequest
 		require.NoError(t, common.UnmarshalJsonStr(`{

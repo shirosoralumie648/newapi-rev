@@ -1542,6 +1542,7 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodGet, canvasBase}, {http.MethodPost, canvasBase},
 		{http.MethodGet, canvasBase + "/missing"}, {http.MethodPatch, canvasBase + "/missing"},
 		{http.MethodDelete, canvasBase + "/missing"},
+		{http.MethodPost, canvasBase + "/missing/attachments"},
 	} {
 		response := playgroundAuthenticatedRequest(t, engine, "", route.method, route.path, upload)
 		assert.Equal(t, 401, response.Code, response.Body.String())

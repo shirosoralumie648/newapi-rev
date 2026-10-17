@@ -141,6 +141,60 @@ export function createCanvasNode(
   }
 }
 
+// A grouped node stores its parent in `data.parentId`, which is the only place
+// the field survives the server contract, while xyflow needs it on the node
+// itself. Every mutation writes both through this helper so the persisted
+// document and the live layout can never disagree.
+export function canvasNodeDataWithParent(
+  data: CanvasNodeData,
+  parentId?: string
+): CanvasNodeData {
+  const next = { ...data }
+  if (parentId) {
+    next.parentId = parentId
+  } else {
+    delete next.parentId
+  }
+  return next
+}
+
+/**
+ * xyflow renders a parent before its children, so a stored document whose
+ * order changed (an import, a paste) is rewritten into parent-first order on
+ * read. A child whose parent is missing or part of a cycle is emitted as a
+ * top-level node instead of being dropped.
+ */
+export function orderCanvasNodesForFlow(
+  nodes: CanvasFlowNode[]
+): CanvasFlowNode[] {
+  if (!nodes.some((node) => node.data.parentId)) return nodes
+  const known = new Set(nodes.map((node) => node.id))
+  const emitted = new Set<string>()
+  const ordered: CanvasFlowNode[] = []
+  let pending = nodes
+  while (pending.length > 0) {
+    const next: CanvasFlowNode[] = []
+    let progressed = false
+    for (const node of pending) {
+      const parentId = node.data.parentId
+      if (!parentId || !known.has(parentId) || emitted.has(parentId)) {
+        ordered.push(node)
+        emitted.add(node.id)
+        progressed = true
+      } else {
+        next.push(node)
+      }
+    }
+    if (!progressed) {
+      // A cycle (an imported document) cannot be ordered; keep the rest as is.
+      ordered.push(...next)
+      break
+    }
+    pending = next
+  }
+  return ordered
+}
+
 export function createCanvasEdge(
   source: string,
   target: string
@@ -163,7 +217,7 @@ export function toServerDocument(
       position: { x: node.position.x, y: node.position.y },
       ...(node.width ? { width: node.width } : {}),
       ...(node.height ? { height: node.height } : {}),
-      ...(node.data ? { data: { ...node.data } } : {}),
+      data: canvasNodeDataWithParent(node.data, node.parentId),
     })),
     edges: edges.map((edge) => ({
       id: edge.id,
@@ -181,16 +235,24 @@ export function fromServerDocument(document: CanvasServerDocument): {
   edges: CanvasFlowEdge[]
   viewport?: CanvasViewport
 } {
-  return {
-    viewport: document.viewport,
-    nodes: document.nodes.map((node) => ({
+  const nodes = document.nodes.map((node) => {
+    const data = { kind: node.type, ...node.data } as CanvasNodeData
+    const parentId = typeof data.parentId === 'string' ? data.parentId : ''
+    return {
       id: node.id,
       type: node.type,
       position: { ...node.position },
       ...(node.width ? { width: node.width } : {}),
       ...(node.height ? { height: node.height } : {}),
-      data: { kind: node.type, ...node.data } as CanvasNodeData,
-    })),
+      ...(parentId
+        ? { parentId, extent: 'parent' as const, expandParent: true }
+        : {}),
+      data,
+    }
+  })
+  return {
+    viewport: document.viewport,
+    nodes: orderCanvasNodesForFlow(nodes),
     edges: document.edges.map((edge) => ({
       id: edge.id,
       source: edge.source,
@@ -206,7 +268,9 @@ export function canvasDocumentByteSize(document: CanvasServerDocument): number {
   return new TextEncoder().encode(JSON.stringify(document)).length
 }
 
-export function validateCanvasDocument(document: CanvasServerDocument): string | null {
+export function validateCanvasDocument(
+  document: CanvasServerDocument
+): string | null {
   if (document.nodes.length > CANVAS_MAX_NODES) {
     return CANVAS_ERRORS.TOO_MANY_NODES
   }

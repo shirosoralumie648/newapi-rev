@@ -207,3 +207,57 @@ test('reference status leaves a resolvable project untouched', () => {
 
   expect(applyCanvasReferenceStatus(project)).toBe(project)
 })
+
+test('a group round-trips through the server contract in parent-first order', () => {
+  const document = toServerDocument(
+    [
+      {
+        id: 'child',
+        type: 'text',
+        position: { x: 32, y: 32 },
+        parentId: 'group',
+        extent: 'parent',
+        expandParent: true,
+        data: { kind: 'text', text: 'inside' },
+      },
+      {
+        id: 'group',
+        type: 'group',
+        position: { x: 100, y: 100 },
+        width: 320,
+        height: 200,
+        data: { kind: 'group' },
+      },
+    ],
+    []
+  )
+
+  // The persisted node data carries the parent, which is the only field the
+  // server contract keeps for it.
+  expect(document.nodes[0].data).toEqual({
+    kind: 'text',
+    text: 'inside',
+    parentId: 'group',
+  })
+  expect(document.nodes[1].data).toEqual({ kind: 'group' })
+
+  // A stored document whose order changed (an import, a paste) is read back
+  // with the parent first, as xyflow requires.
+  const restored = fromServerDocument({
+    nodes: [
+      document.nodes[0],
+      document.nodes[1],
+      { id: 'plain', type: 'note', position: { x: 0, y: 0 } },
+    ],
+    edges: [],
+  })
+  expect(restored.nodes.map((node) => node.id)).toEqual([
+    'group',
+    'plain',
+    'child',
+  ])
+  const child = restored.nodes.find((node) => node.id === 'child')
+  expect(child?.parentId).toBe('group')
+  expect(child?.extent).toBe('parent')
+  expect(child?.data.parentId).toBe('group')
+})
