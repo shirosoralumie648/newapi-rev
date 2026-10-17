@@ -235,8 +235,8 @@ Playground
 - [x] 文本请求行为与现有 Playground 保持兼容（纯文本提交路径与请求体形状不变，`playground-input-attachments` 与既有聊天/同步测试覆盖）；
 - [ ] 编辑和重新生成不会丢失历史版本或分支（历史版本/分支尚未实现：编辑替换当前版本，重新生成替换其后消息）；
 - [x] 附件类型、大小、数量、权限和生命周期均由服务端控制（媒体类型白名单与签名校验、单文件/每用户预算、所有者与会话过滤、孤儿 TTL 清理均为服务端行为）；
-- [ ] Markdown 和 Code Artifact 可以创建、编辑、保存版本、恢复、复制、下载和删除（后端矩阵覆盖创建/保存/恢复/删除；复制与下载的浏览器验收未专项覆盖）；
-- [ ] Artifact 不会执行原始 HTML、JavaScript 或代码（沿用现有安全渲染链路，未做专项安全验收）；
+- [x] Markdown 和 Code Artifact 可以创建、编辑、保存版本、恢复、复制、下载和删除（后端矩阵覆盖创建/保存/恢复/删除；复制与下载由 `playground-artifact-panel.test.tsx` 的 "copying an artifact puts its full content on the clipboard"、"downloading an artifact writes a sanitized filename and plain-text body"、"downloading a plaintext code artifact maps its extension to txt" 覆盖：剪贴板写入完整正文、下载文件名按标题清洗非法字符并追加扩展名、下载正文与 `text/plain;charset=utf-8` 类型一致；同时修复 Code Artifact 无语言或 `plaintext` 时下载扩展名为 `.txt`，对齐 `CodeBlock`；本地未运行测试（CI-only））；
+- [x] Artifact 不会执行原始 HTML、JavaScript 或代码（`playground-artifact-panel.test.tsx` 专项安全用例：Markdown 预览中的 `<script>`、`onerror`/`onclick` 内联事件处理器和 `javascript:` 链接均由现有 `marked` + DOMPurify 链路清除，渲染后无 `script`/`iframe`/事件属性且哨兵变量未被置位；Code Artifact 的 `<script>` 与处理器标记只作为 CodeMirror 文本原样呈现，不生成活动节点；本地未运行测试（CI-only））；
 - [x] 网络失败、冲突和响应丢失时草稿不会被静默覆盖（`server-sync.test.tsx` 冲突保留草稿与重试、取消写入重试；附件上传失败时输入保留文本与附件供重发）。
 
 ### 画布和资源限制
@@ -298,3 +298,4 @@ Playground
 | 2026-10-17 | 更新验收清单：勾选会话创建/切换/重命名/删除/清空、迟到 chunk 隔离、损坏数据降级、文本请求兼容、附件服务端控制、网络失败草稿保护，以及附件多模态的真实浏览器验收项；补齐附件相关 11 个新键与既有缺失键的七语言翻译（`i18n:sync` missingCount=0）。 |
 | 2026-10-17 | S00：让 GitHub CI 在推送 main 时运行——`.github/workflows/ci.yml` 增加 `push: branches: [main]`，checkout 以 `github.event.pull_request.base.repo.full_name \|\| github.repository` 与 push 时的 `github.sha` 修正，backend/frontend 两个 job 的 `if` 放开 push，concurrency 改为 ref+sha 分组避免 main 连续推送互相取消；仅改 CI 配置，本地未运行测试（CI-only）。 |
 | 2026-10-17 | P5-01：完成 Infinite Canvas 前端画布编辑器——新增 `/_authenticated/playground/canvas` 路由与 Playground 侧边栏入口，画布项目列表（搜索/新建/重命名/删除确认），基于 `@xyflow/react` 与 ai-elements `Canvas`/`Node`/`Panel` 的编辑器（缩放/平移/框选/小地图/节点详情/撤销重做/JSON 导入导出/revision CAS 自动保存与冲突提示），复用既有 `features/canvas` 客户端与 `/api/playground/canvases` CRUD；新增 `use-canvas-editor` 与项目列表测试，补 44 个新键的七语言翻译（`i18n:sync` missingCount=0、extrasCount=0）；仅前端改动，无新依赖；本地未运行测试（CI-only，未运行 typecheck/vitest/lint/build）。 |
+| 2026-10-17 | SEC-01：为 Markdown/Code Artifact 补齐安全与复制/下载验收——`playground-artifact-panel.test.tsx` 新增 5 个用例：Markdown 预览不执行原始 HTML/`<script>`/内联事件处理器/`javascript:` 链接、Code Artifact 的标记仅作文本、复制写入完整正文、下载文件名清洗与正文内容/`text/plain;charset=utf-8` 类型、`plaintext`→`.txt` 扩展名；修复 `getArtifactFilename`：Code Artifact 无语言或 `plaintext` 时下载扩展名对齐 `CodeBlock` 输出 `.txt`；`i18n:sync` missingCount=0（未新增文案键，无 locale 变更）；本地未运行测试/typecheck/lint/build（CI-only）。 |
