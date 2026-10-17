@@ -12,6 +12,8 @@ import "github.com/QuantumNous/new-api/setting/config"
 // misconfigured option can never silently disable a server-side limit.
 type PlaygroundQuotaPolicy struct {
 	SessionMaxCount           int   `json:"session_max_count"`
+	PresetUserMaxCount        int   `json:"preset_user_max_count"`
+	SystemPromptMaxBytes      int64 `json:"system_prompt_max_bytes"`
 	MessageMaxCount           int   `json:"message_max_count"`
 	MessageMaxVersions        int   `json:"message_max_versions"`
 	MessageMaxBytes           int64 `json:"message_max_bytes"`
@@ -65,6 +67,8 @@ func newPlaygroundSetting() PlaygroundSetting {
 func builtinPlaygroundQuotaPolicy() PlaygroundQuotaPolicy {
 	return PlaygroundQuotaPolicy{
 		SessionMaxCount:           100,
+		PresetUserMaxCount:        50,
+		SystemPromptMaxBytes:      16 << 10,
 		MessageMaxCount:           100,
 		MessageMaxVersions:        100,
 		MessageMaxBytes:           1 << 20,
@@ -125,6 +129,12 @@ func applyPlaygroundQuotaOverrides(policy *PlaygroundQuotaPolicy, override *Play
 	}
 	if override.SessionMaxCount > 0 {
 		policy.SessionMaxCount = override.SessionMaxCount
+	}
+	if override.PresetUserMaxCount > 0 {
+		policy.PresetUserMaxCount = override.PresetUserMaxCount
+	}
+	if override.SystemPromptMaxBytes > 0 {
+		policy.SystemPromptMaxBytes = override.SystemPromptMaxBytes
 	}
 	if override.MessageMaxCount > 0 {
 		policy.MessageMaxCount = override.MessageMaxCount

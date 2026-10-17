@@ -36,6 +36,7 @@ import {
 import { getSearchActionNotice } from '../../lib'
 import type { ParameterEnabled, PlaygroundConfig } from '../../types'
 import { PlaygroundParameterPanel } from './playground-parameter-panel'
+import { PlaygroundSystemPromptPanel } from './playground-system-prompt-panel'
 
 type PlaygroundInputToolsProps = {
   config: PlaygroundConfig
@@ -51,6 +52,8 @@ type PlaygroundInputToolsProps = {
     value: boolean
   ) => void
   parameterEnabled: ParameterEnabled
+  systemPrompt: string
+  onSystemPromptChange: (value: string) => void
 }
 
 export function PlaygroundInputTools({
@@ -61,6 +64,8 @@ export function PlaygroundInputTools({
   onConfigChange,
   onParameterEnabledChange,
   parameterEnabled,
+  systemPrompt,
+  onSystemPromptChange,
 }: PlaygroundInputToolsProps) {
   const { t } = useTranslation()
   const attachments = usePromptInputAttachments()
@@ -124,6 +129,12 @@ export function PlaygroundInputTools({
           onConfigChange={onConfigChange}
           onParameterEnabledChange={onParameterEnabledChange}
           parameterEnabled={parameterEnabled}
+        />
+
+        <PlaygroundSystemPromptPanel
+          disabled={disabled}
+          onSystemPromptChange={onSystemPromptChange}
+          systemPrompt={systemPrompt}
         />
 
         <Tooltip>

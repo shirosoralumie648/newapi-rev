@@ -47,6 +47,7 @@ import { PlaygroundChat } from './components/chat/playground-chat'
 import { PlaygroundGenerationPanel } from './components/generation/playground-generation-panel'
 import { PlaygroundInput } from './components/input/playground-input'
 import { PlaygroundCanvasPanel } from './components/workspace/playground-canvas-panel'
+import { PlaygroundPresetPanel } from './components/workspace/playground-preset-panel'
 import { PlaygroundSessionUsage } from './components/workspace/playground-session-usage'
 import { PlaygroundUsagePopover } from './components/workspace/playground-usage-popover'
 import {
@@ -71,9 +72,15 @@ import {
   hasPendingToolCalls,
   loadPlaygroundAttachment,
   PLAYGROUND_ATTACHMENT_ERRORS,
+  presetSessionSettings,
   uploadPlaygroundAttachments,
 } from './lib'
-import type { Message, MessageAttachment, PlaygroundRouteTarget } from './types'
+import type {
+  AssistantPreset,
+  Message,
+  MessageAttachment,
+  PlaygroundRouteTarget,
+} from './types'
 
 export function Playground(props: {
   target?: PlaygroundRouteTarget
@@ -106,6 +113,7 @@ function PlaygroundContent(props: {
   const [generationOpen, setGenerationOpen] = useState(false)
   const [canvasProjectId, setCanvasProjectId] = useState<string | null>(null)
   const [libraryOpen, setLibraryOpen] = useState(false)
+  const [presetsOpen, setPresetsOpen] = useState(false)
   const [pendingLibraryFiles, setPendingLibraryFiles] = useState<File[]>([])
   const [pendingLibraryText, setPendingLibraryText] = useState<string | null>(
     null
@@ -116,6 +124,7 @@ function PlaygroundContent(props: {
   const {
     config,
     parameterEnabled,
+    systemPrompt,
     messages,
     isLoadingMessages,
     models,
@@ -125,6 +134,8 @@ function PlaygroundContent(props: {
     setGroups,
     updateConfig,
     updateParameterEnabled,
+    updateSystemPrompt,
+    applySessionSettings,
     clearMessages,
     sessions,
     activeSessionId,
@@ -136,6 +147,7 @@ function PlaygroundContent(props: {
   const { sendChat, stopGeneration, isGenerating } = useChatHandler({
     config,
     parameterEnabled,
+    systemPrompt,
     onMessageUpdate: updateMessages,
     sessionId: activeSessionId,
   })
@@ -239,6 +251,15 @@ function PlaygroundContent(props: {
     [artifactController.state.dirty, artifactController.store]
   )
 
+  // The settings a preset contributes to a conversation: its model, sampling
+  // parameters, parameter flags and system prompt. Routing and transport stay
+  // with the conversation the user configured.
+  const sessionSettingsFromPreset = useCallback(
+    (preset: AssistantPreset) =>
+      presetSessionSettings(preset, { config, parameterEnabled }),
+    [config, parameterEnabled]
+  )
+
   const handleCreateSession = useCallback(() => {
     if (sync.isLoading) return
     handleWorkspaceTransition(() => {
@@ -254,6 +275,37 @@ function PlaygroundContent(props: {
     handleEditOpenChange,
     handleWorkspaceTransition,
   ])
+
+  const handleCreateSessionWithPreset = useCallback(
+    (preset: AssistantPreset) => {
+      if (sync.isLoading) return
+      handleWorkspaceTransition(() => {
+        stopBeforeSessionChange()
+        handleEditOpenChange(false)
+        setArtifactSource(null)
+        createSession(sessionSettingsFromPreset(preset))
+        // The new conversation starts behind the inspector; on mobile the panel
+        // is a sheet, so reveal the chat instead of leaving it covered.
+        setPresetsOpen(false)
+      })
+    },
+    [
+      createSession,
+      sessionSettingsFromPreset,
+      sync.isLoading,
+      stopBeforeSessionChange,
+      handleEditOpenChange,
+      handleWorkspaceTransition,
+    ]
+  )
+
+  const handleApplyPreset = useCallback(
+    (preset: AssistantPreset) => {
+      applySessionSettings(sessionSettingsFromPreset(preset))
+      toast.success(t('Preset applied'))
+    },
+    [applySessionSettings, sessionSettingsFromPreset, t]
+  )
 
   const handleSwitchSession = useCallback(
     (sessionId: string) => {
@@ -413,6 +465,7 @@ function PlaygroundContent(props: {
   else if (canvasOpen) inspectorView = 'canvas'
   else if (generationOpen) inspectorView = 'generate'
   else if (libraryOpen) inspectorView = 'library'
+  else if (presetsOpen) inspectorView = 'presets'
 
   const openCanvasInspector = useCallback(
     (projectId: string | null) => {
@@ -420,6 +473,7 @@ function PlaygroundContent(props: {
         artifactController.store.getState().setOpen(false)
         setGenerationOpen(false)
         setLibraryOpen(false)
+        setPresetsOpen(false)
         setCanvasProjectId(projectId)
         setCanvasOpen(true)
       }
@@ -442,6 +496,7 @@ function PlaygroundContent(props: {
         setCanvasOpen(false)
         setGenerationOpen(false)
         setLibraryOpen(false)
+        setPresetsOpen(false)
         artifactController.store.getState().setOpen(true)
         return
       }
@@ -463,6 +518,7 @@ function PlaygroundContent(props: {
           artifactController.store.getState().setOpen(false)
           setCanvasOpen(false)
           setGenerationOpen(false)
+          setPresetsOpen(false)
           setLibraryOpen(true)
         }
         if (artifactController.state.dirty) {
@@ -470,6 +526,25 @@ function PlaygroundContent(props: {
           return
         }
         openLibrary()
+        return
+      }
+      if (view === 'presets') {
+        if (presetsOpen) {
+          setPresetsOpen(false)
+          return
+        }
+        const openPresets = () => {
+          artifactController.store.getState().setOpen(false)
+          setCanvasOpen(false)
+          setGenerationOpen(false)
+          setLibraryOpen(false)
+          setPresetsOpen(true)
+        }
+        if (artifactController.state.dirty) {
+          artifactController.store.getState().requestDiscard(openPresets)
+          return
+        }
+        openPresets()
         return
       }
       if (generationOpen) {
@@ -480,6 +555,7 @@ function PlaygroundContent(props: {
         artifactController.store.getState().setOpen(false)
         setCanvasOpen(false)
         setLibraryOpen(false)
+        setPresetsOpen(false)
         setGenerationOpen(true)
       }
       if (artifactController.state.dirty) {
@@ -498,6 +574,7 @@ function PlaygroundContent(props: {
       generationOpen,
       libraryOpen,
       openCanvasInspector,
+      presetsOpen,
     ]
   )
 
@@ -514,13 +591,23 @@ function PlaygroundContent(props: {
       setGenerationOpen(false)
       return
     }
+    if (presetsOpen) {
+      setPresetsOpen(false)
+      return
+    }
     setLibraryOpen(false)
   }, [
     artifactController.state.isOpen,
     canvasOpen,
     closeArtifactPanel,
     generationOpen,
+    presetsOpen,
   ])
+
+  const handleOpenPresets = useCallback(
+    () => handleToggleInspector('presets'),
+    [handleToggleInspector]
+  )
 
   const handleOpenCanvasProject = useCallback(
     (projectId: string) => {
@@ -671,6 +758,7 @@ function PlaygroundContent(props: {
         activeSessionId={activeSessionId}
         onCreate={handleCreateSession}
         onDelete={handleDeleteSession}
+        onOpenPresets={handleOpenPresets}
         onRename={renameSession}
         disabled={sync.isLoading}
         onSwitch={handleSwitchSession}
@@ -705,6 +793,17 @@ function PlaygroundContent(props: {
               onSendArtifactToChat={handleLibraryArtifactToChat}
               onSendSeedsToCanvas={(seeds) => setCanvasSendSeeds(seeds)}
               onSendToCanvas={handleLibraryAssetToCanvas}
+            />
+          ) : inspectorView === 'presets' ? (
+            <PlaygroundPresetPanel
+              active
+              currentConfig={config}
+              currentParameterEnabled={parameterEnabled}
+              currentSystemPrompt={systemPrompt}
+              disabled={sync.isLoading}
+              models={models}
+              onApplyPreset={handleApplyPreset}
+              onCreateSession={handleCreateSessionWithPreset}
             />
           ) : canonicalSessionId ? (
             <PlaygroundArtifactPanel
@@ -810,7 +909,9 @@ function PlaygroundContent(props: {
               onParameterEnabledChange={updateParameterEnabled}
               onStop={stopGeneration}
               onSubmit={handleInputSubmit}
+              onSystemPromptChange={updateSystemPrompt}
               parameterEnabled={parameterEnabled}
+              systemPrompt={systemPrompt}
               hasMessages={messages.length > 0}
               pendingFiles={pendingLibraryFiles}
               onPendingFilesConsumed={clearPendingLibraryFiles}

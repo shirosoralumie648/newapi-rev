@@ -36,6 +36,7 @@ const session = (id: string, title = id): PlaygroundSession => ({
   updatedAt: 1,
   config: { ...DEFAULT_CONFIG },
   parameterEnabled: { ...DEFAULT_PARAMETER_ENABLED },
+  systemPrompt: '',
   messages: [],
 })
 
@@ -152,7 +153,40 @@ test('migrates a version one session envelope and rewrites it at the current ver
   expect(loaded.sessions[0].title).toBe('Legacy')
   expect(loaded.sessions[0].config.model).toBe('legacy-model')
   expect(loaded.sessions[0].parameterEnabled.temperature).toBe(false)
+  expect(loaded.sessions[0].systemPrompt).toBe('')
   expect(JSON.parse(localStorage.getItem(key) ?? '{}').version).toBe(2)
+})
+
+test('keeps a stored system prompt and defaults a session written before the field existed', () => {
+  useAuthStore.getState().auth.setUser({ id: 7, username: 'seven', role: 1 })
+  saveSessionsState({
+    activeSessionId: 'with-prompt',
+    sessions: [
+      { ...session('with-prompt'), systemPrompt: 'Answer in French.' },
+    ],
+  })
+
+  const loaded = loadSessionsState({
+    config: DEFAULT_CONFIG,
+    parameterEnabled: DEFAULT_PARAMETER_ENABLED,
+    messages: [],
+  })
+  expect(loaded.sessions[0].systemPrompt).toBe('Answer in French.')
+
+  // A snapshot serialized before the field existed loads with an empty prompt
+  // instead of dropping the whole conversation.
+  const key = `${STORAGE_KEYS.SESSIONS}:7`
+  const stored = JSON.parse(localStorage.getItem(key) ?? '{}')
+  delete stored.data.sessions[0].systemPrompt
+  localStorage.setItem(key, JSON.stringify(stored))
+
+  const legacy = loadSessionsState({
+    config: DEFAULT_CONFIG,
+    parameterEnabled: DEFAULT_PARAMETER_ENABLED,
+    messages: [],
+  })
+  expect(legacy.sessions[0].systemPrompt).toBe('')
+  expect(legacy.sessions[0].id).toBe('with-prompt')
 })
 
 test('reads user-scoped legacy data without deleting it before session migration', () => {

@@ -31,7 +31,11 @@ Object.defineProperty(HTMLElement.prototype, 'getAnimations', {
   value: () => [],
 })
 
-function renderTools(onClearMessages = vi.fn()) {
+function renderTools(
+  onClearMessages = vi.fn(),
+  onSystemPromptChange = vi.fn(),
+  systemPrompt = ''
+) {
   render(
     <PromptInputProvider>
       <PlaygroundInputTools
@@ -40,11 +44,13 @@ function renderTools(onClearMessages = vi.fn()) {
         onClearMessages={onClearMessages}
         onConfigChange={() => undefined}
         onParameterEnabledChange={() => undefined}
+        onSystemPromptChange={onSystemPromptChange}
         parameterEnabled={DEFAULT_PARAMETER_ENABLED}
+        systemPrompt={systemPrompt}
       />
     </PromptInputProvider>
   )
-  return onClearMessages
+  return { onClearMessages, onSystemPromptChange }
 }
 
 beforeAll(() => {
@@ -53,17 +59,51 @@ beforeAll(() => {
     Clear: 'Clear',
     'Clear chat history': 'Clear chat history',
     'Clear chat history?': 'Clear chat history?',
+    Save: 'Save',
     Search: 'Search',
+    'System prompt': 'System prompt',
+    'System prompt cleared': 'System prompt cleared',
+    'System prompt saved': 'System prompt saved',
+    'The system prompt is sent to the model at the start of every request in this conversation.':
+      'The system prompt is sent to the model at the start of every request in this conversation.',
+    'e.g. You are a concise assistant.': 'e.g. You are a concise assistant.',
   })
 })
 
 test('clearing chat history asks for confirmation before removing messages', async () => {
   const user = userEvent.setup()
-  const onClearMessages = renderTools()
+  const { onClearMessages } = renderTools()
 
   await user.click(screen.getByRole('button', { name: 'Clear chat history' }))
   expect(onClearMessages).not.toHaveBeenCalled()
 
   await user.click(screen.getByRole('button', { name: 'Clear' }))
   expect(onClearMessages).toHaveBeenCalledTimes(1)
+})
+
+test('saving the system prompt persists the trimmed draft', async () => {
+  const user = userEvent.setup()
+  const { onSystemPromptChange } = renderTools()
+
+  await user.click(screen.getByRole('button', { name: 'System prompt' }))
+  const input = await screen.findByRole('textbox', { name: 'System prompt' })
+  await user.type(input, '  Answer in French.  ')
+  await user.click(screen.getByRole('button', { name: 'Save' }))
+
+  expect(onSystemPromptChange).toHaveBeenCalledTimes(1)
+  expect(onSystemPromptChange).toHaveBeenCalledWith('Answer in French.')
+})
+
+test('clearing the stored system prompt persists an empty value', async () => {
+  const user = userEvent.setup()
+  const { onSystemPromptChange } = renderTools(
+    vi.fn(),
+    vi.fn(),
+    'Answer briefly.'
+  )
+
+  await user.click(screen.getByRole('button', { name: 'System prompt' }))
+  await user.click(await screen.findByRole('button', { name: 'Clear' }))
+
+  expect(onSystemPromptChange).toHaveBeenCalledWith('')
 })

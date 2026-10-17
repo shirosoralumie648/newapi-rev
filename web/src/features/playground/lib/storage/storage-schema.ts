@@ -143,6 +143,8 @@ export const playgroundSessionSchema = z.object({
   updatedAt: z.number().finite(),
   config: storedConfigSchema,
   parameterEnabled: storedParameterEnabledSchema,
+  /** Absent in data written before the conversation system prompt existed. */
+  systemPrompt: z.string().optional(),
   messages: messagesSchema,
   server: z
     .object({

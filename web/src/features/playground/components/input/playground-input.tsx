@@ -72,6 +72,8 @@ interface PlaygroundInputProps {
     value: boolean
   ) => void
   parameterEnabled: ParameterEnabled
+  systemPrompt: string
+  onSystemPromptChange: (value: string) => void
   /**
    * Files the workspace wants added to the composer (for example "send to
    * chat" from the asset library). Each array is consumed once and validated
@@ -102,6 +104,8 @@ export function PlaygroundInput({
   onClearMessages,
   onParameterEnabledChange,
   parameterEnabled,
+  systemPrompt,
+  onSystemPromptChange,
   pendingFiles,
   onPendingFilesConsumed,
   pendingText,
@@ -192,7 +196,9 @@ export function PlaygroundInput({
                 onConfigChange={onConfigChange}
                 onClearMessages={onClearMessages}
                 onParameterEnabledChange={onParameterEnabledChange}
+                onSystemPromptChange={onSystemPromptChange}
                 parameterEnabled={parameterEnabled}
+                systemPrompt={systemPrompt}
               />
             }
           />

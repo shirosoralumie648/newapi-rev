@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Plus, Search } from 'lucide-react'
+import { Bot, Plus, Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -37,6 +37,7 @@ interface PlaygroundSessionListProps {
   onRename: (sessionId: string, title: string) => void
   onDelete: (sessionId: string) => void
   onAction?: () => void
+  onOpenPresets?: () => void
 }
 
 export function PlaygroundSessionList(props: PlaygroundSessionListProps) {
@@ -116,6 +117,22 @@ export function PlaygroundSessionList(props: PlaygroundSessionListProps) {
           )}
         </div>
       </ScrollArea>
+
+      {props.onOpenPresets && (
+        <Button
+          className='w-full justify-start'
+          onClick={() => {
+            props.onOpenPresets?.()
+            props.onAction?.()
+          }}
+          size='sm'
+          type='button'
+          variant='outline'
+        >
+          <Bot aria-hidden='true' />
+          {t('Assistant presets')}
+        </Button>
+      )}
 
       <ConfirmDialog
         confirmText={t('Delete')}
