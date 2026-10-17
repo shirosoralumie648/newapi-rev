@@ -98,7 +98,7 @@ func forEachWalletLedgerDialect(t *testing.T, run func(t *testing.T, db *gorm.DB
 // replaying the same reference must never move the balance twice.
 func TestWalletLedgerApplyDeltaIsAtomicAndReplaySafe(t *testing.T) {
 	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
-		require.NoError(t, db.Create(&User{Id: 41, Username: "ledger-atomic", Quota: 1000, Status: common.UserStatusEnabled}).Error)
+		require.NoError(t, db.Create(&User{Id: 41, Username: "ledger-atomic", AffCode: "ledger-atomic", Quota: 1000, Status: common.UserStatusEnabled}).Error)
 
 		require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
 			applied, err := ApplyWalletLedgerDelta(tx, 41, WalletLedgerKindTopUp, 500, WalletLedgerRefTopUp, "tx-commit", "")
@@ -144,7 +144,7 @@ func TestWalletLedgerApplyDeltaIsAtomicAndReplaySafe(t *testing.T) {
 // hour in both the batch-update and the direct-write mode.
 func TestWalletLedgerAggregatesConsumptionPerUserHour(t *testing.T) {
 	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
-		require.NoError(t, db.Create(&User{Id: 42, Username: "ledger-consume", Quota: 1000, Status: common.UserStatusEnabled}).Error)
+		require.NoError(t, db.Create(&User{Id: 42, Username: "ledger-consume", AffCode: "ledger-consume", Quota: 1000, Status: common.UserStatusEnabled}).Error)
 
 		RecordWalletConsumeDelta(42, -100)
 		RecordWalletConsumeDelta(42, 40)
@@ -173,8 +173,8 @@ func TestWalletLedgerAggregatesConsumptionPerUserHour(t *testing.T) {
 // the seed neither duplicates rows nor touches balances.
 func TestWalletLedgerOpeningBalanceSeedsOncePerUser(t *testing.T) {
 	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
-		require.NoError(t, db.Create(&User{Id: 51, Username: "ledger-opening-a", Quota: 700, Status: common.UserStatusEnabled}).Error)
-		require.NoError(t, db.Create(&User{Id: 52, Username: "ledger-opening-b", Quota: 0, Status: common.UserStatusEnabled}).Error)
+		require.NoError(t, db.Create(&User{Id: 51, Username: "ledger-opening-a", AffCode: "ledger-opening-a", Quota: 700, Status: common.UserStatusEnabled}).Error)
+		require.NoError(t, db.Create(&User{Id: 52, Username: "ledger-opening-b", AffCode: "ledger-opening-b", Quota: 0, Status: common.UserStatusEnabled}).Error)
 
 		seeded, err := EnsureWalletLedgerOpeningBalances()
 		require.NoError(t, err)
@@ -193,7 +193,7 @@ func TestWalletLedgerOpeningBalanceSeedsOncePerUser(t *testing.T) {
 		require.NoError(t, db.Model(&WalletLedgerEntry{}).Where("user_id = ?", 51).Count(&count).Error)
 		assert.EqualValues(t, 1, count)
 
-		require.NoError(t, db.Create(&User{Id: 53, Username: "ledger-opening-c", Quota: 25, Status: common.UserStatusEnabled}).Error)
+		require.NoError(t, db.Create(&User{Id: 53, Username: "ledger-opening-c", AffCode: "ledger-opening-c", Quota: 25, Status: common.UserStatusEnabled}).Error)
 		seeded, err = EnsureWalletLedgerOpeningBalances()
 		require.NoError(t, err)
 		assert.Equal(t, 1, seeded)
@@ -204,12 +204,12 @@ func TestWalletLedgerOpeningBalanceSeedsOncePerUser(t *testing.T) {
 // and reconciliation never repairs the balance by itself.
 func TestWalletReconcileReportsDeviationWithoutChangingBalance(t *testing.T) {
 	forEachWalletLedgerDialect(t, func(t *testing.T, db *gorm.DB) {
-		require.NoError(t, db.Create(&User{Id: 61, Username: "ledger-ok", Quota: 0, Status: common.UserStatusEnabled}).Error)
+		require.NoError(t, db.Create(&User{Id: 61, Username: "ledger-ok", AffCode: "ledger-ok", Quota: 0, Status: common.UserStatusEnabled}).Error)
 		applied, err := ApplyWalletLedgerDeltaDB(61, WalletLedgerKindTopUp, 1000, WalletLedgerRefTopUp, "reconcile-ok", "")
 		require.NoError(t, err)
 		require.True(t, applied)
 
-		require.NoError(t, db.Create(&User{Id: 62, Username: "ledger-bad", Quota: 400, Status: common.UserStatusEnabled}).Error)
+		require.NoError(t, db.Create(&User{Id: 62, Username: "ledger-bad", AffCode: "ledger-bad", Quota: 400, Status: common.UserStatusEnabled}).Error)
 		applied, err = ApplyWalletLedgerDeltaDB(62, WalletLedgerKindTopUp, 500, WalletLedgerRefTopUp, "reconcile-bad", "")
 		require.NoError(t, err)
 		require.True(t, applied)
