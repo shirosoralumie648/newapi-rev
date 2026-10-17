@@ -276,7 +276,7 @@ jobs:
           touch web/dist/index.html
 
       - name: Test batch update flush, token quota adjustments, and Playground message deltas on SQLite, MySQL, and PostgreSQL
-        run: go test ./model/ -run 'TestBatchUpdateShutdownFlushMatrix|TestFlushBatchUpdateTimeoutLogsAndRetainsDeltas|TestTokenQuotaUpdatePreservesConcurrentDeductions|TestPlaygroundMessageDelta|TestPlaygroundMessageUniquenessMigration' -count=1 -v
+        run: go test ./model/ -run 'TestBatchUpdateShutdownFlushMatrix|TestFlushBatchUpdateTimeoutLogsAndRetainsDeltas|TestTokenQuotaUpdatePreservesConcurrentDeductions|TestPlaygroundMessageDelta|TestPlaygroundMessageUniquenessMigration|TestPlaygroundMessageCostLookup|TestPlaygroundMessageVersionBranches' -count=1 -v
 
   frontend:
     name: Frontend typecheck and test
