@@ -59,6 +59,18 @@ function attachmentFile() {
   })
 }
 
+// jsdom's Blob cannot be passed to undici's Response (cross-realm), so the
+// stub only needs the blob() surface the converter uses.
+function stubBlobFetch() {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({
+      blob: async () =>
+        new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' }),
+    }))
+  )
+}
+
 beforeAll(() => {
   i18next.addResourceBundle('en', 'translation', {
     Attach: 'Attach',
@@ -90,13 +102,7 @@ function sendButton(): HTMLElement {
 
 test('an attachment-only message submits once the file is added', async () => {
   const user = userEvent.setup()
-  // jsdom's Blob cannot be passed to undici's Response (cross-realm), so the
-  // stub only needs the blob() surface the converter uses.
-  const fetchStub = vi.fn(async () => ({
-    blob: async () =>
-      new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' }),
-  }))
-  vi.stubGlobal('fetch', fetchStub)
+  stubBlobFetch()
   const onSubmit = renderInput()
 
   fireEvent.change(screen.getByLabelText('Upload files'), {
@@ -129,6 +135,7 @@ test('text-only messages keep the existing submit shape', async () => {
 
 test('a failed send keeps the draft text and attachment for retry', async () => {
   const user = userEvent.setup()
+  stubBlobFetch()
   const onSubmit = vi.fn().mockRejectedValue(new Error('upload failed'))
   renderInput(onSubmit)
 
