@@ -781,6 +781,7 @@ func TestWalletDebtPreConsumeUsesOverdraftLimit(t *testing.T) {
 
 		// Without a credit line the same reservation is refused.
 		useWalletOverdraftLimit(t, 0, nil)
+		require.NoError(t, db.Create(&User{Id: 232, Username: "debt-preconsume-b", AffCode: "debt-preconsume-b", Quota: 0, Group: "default", Status: common.UserStatusEnabled}).Error)
 		reserved, err = TryReserveUserQuota(232, 1, "debt-preconsume-c")
 		require.NoError(t, err)
 		assert.False(t, reserved)
