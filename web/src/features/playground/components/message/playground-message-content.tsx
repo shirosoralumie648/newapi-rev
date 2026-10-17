@@ -48,7 +48,11 @@ import {
   type MessageAlignment,
 } from '../../lib'
 import { getMessageContentStyles } from '../../lib/message/message-styles'
-import type { Message, MessageVersion } from '../../types'
+import type {
+  Message,
+  MessageVersion,
+  PlaygroundMessageCost,
+} from '../../types'
 import { MessageAttachmentList } from './message-attachment-list'
 import { MessageError } from './message-error'
 import { MessageMetadata } from './message-metadata'
@@ -57,6 +61,8 @@ import { MessageToolCalls } from './message-tool-calls'
 type PlaygroundMessageContentProps = {
   actions: ReactNode
   alignment: MessageAlignment
+  /** Settled consume row of this version's request, when it is loaded. */
+  cost?: PlaygroundMessageCost
   errorActions?: ReactNode
   isGenerating?: boolean
   isLastMessage?: boolean
@@ -75,6 +81,7 @@ type PlaygroundMessageContentProps = {
 export function PlaygroundMessageContent({
   actions,
   alignment,
+  cost,
   errorActions,
   isGenerating = false,
   isLastMessage = false,
@@ -148,7 +155,12 @@ export function PlaygroundMessageContent({
       {isError && (
         <>
           <MessageError message={message} className='mb-2' />
-          <MessageMetadata alignment={alignment} message={message} />
+          <MessageMetadata
+            alignment={alignment}
+            cost={cost}
+            message={message}
+            version={version}
+          />
           {errorActions}
         </>
       )}
@@ -191,7 +203,12 @@ export function PlaygroundMessageContent({
             onProvideResult={onProvideToolResult}
             version={version}
           />
-          <MessageMetadata alignment={alignment} message={message} />
+          <MessageMetadata
+            alignment={alignment}
+            cost={cost}
+            message={message}
+            version={version}
+          />
           {actions}
         </>
       )}

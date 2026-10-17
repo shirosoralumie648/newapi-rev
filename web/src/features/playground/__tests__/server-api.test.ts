@@ -22,9 +22,11 @@ import { api } from '@/lib/api'
 
 import {
   applyPlaygroundMessagesDelta,
+  getPlaygroundMessageCosts,
   getPlaygroundSessions,
   getPlaygroundMessages,
   replacePlaygroundMessages,
+  sendChatCompletion,
 } from '../api'
 
 const wireSession = {
@@ -179,4 +181,73 @@ test('the deprecated snapshot endpoint still sends the complete ordered list', a
     revision: 1,
     messages: [{ client_key: 'm', payload: message }],
   })
+})
+
+test('the cost lookup sends the request ids and maps settled rows by id', async () => {
+  const get = vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        enabled: true,
+        items: [
+          {
+            request_id: 'req-1',
+            quota: 1234,
+            prompt_tokens: 10,
+            completion_tokens: 20,
+            total_tokens: 30,
+            model_name: 'test-model',
+            created_at: 100,
+          },
+        ],
+      },
+    },
+  })
+
+  const lookup = await getPlaygroundMessageCosts(['req-1', 'req-2'])
+
+  expect(get).toHaveBeenCalledTimes(1)
+  expect(get.mock.calls[0][0]).toBe('/api/playground/message-costs')
+  expect(get.mock.calls[0][1]).toEqual({
+    params: { request_ids: 'req-1,req-2' },
+    signal: undefined,
+  })
+  expect(lookup.enabled).toBe(true)
+  expect(lookup.costs.get('req-1')).toEqual({
+    requestId: 'req-1',
+    quota: 1234,
+    promptTokens: 10,
+    completionTokens: 20,
+    totalTokens: 30,
+    modelName: 'test-model',
+    createdAt: 100000,
+  })
+  expect(lookup.costs.has('req-2')).toBe(false)
+})
+
+test('a failed cost lookup surfaces the server message instead of an empty map', async () => {
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: { success: false, message: 'Failed to query logs' },
+  })
+
+  await expect(getPlaygroundMessageCosts(['req-1'])).rejects.toThrow(
+    'Failed to query logs'
+  )
+})
+
+test('a non-streaming completion reports the relay request id header', async () => {
+  const post = vi.spyOn(api, 'post').mockResolvedValue({
+    data: { id: 'chatcmpl-1', choices: [] },
+    headers: { 'x-oneapi-request-id': 'req-9' },
+  })
+
+  const result = await sendChatCompletion({
+    model: 'test-model',
+    messages: [{ role: 'user', content: 'hello' }],
+    stream: false,
+  })
+
+  expect(post).toHaveBeenCalledTimes(1)
+  expect(result.requestId).toBe('req-9')
+  expect(result.response).toEqual({ id: 'chatcmpl-1', choices: [] })
 })

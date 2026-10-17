@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -34,6 +35,15 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/playground_setting"
 	"github.com/gin-gonic/gin"
+)
+
+const (
+	// playgroundMessageRequestIdMaxLength matches the logs.request_id column,
+	// so a stored id can always be looked up in the consume log.
+	playgroundMessageRequestIdMaxLength = 64
+	// playgroundMessageTokenMax is a sanity ceiling for the display-only token
+	// counts a client may attach to one version, not a billing limit.
+	playgroundMessageTokenMax = 1 << 40
 )
 
 type playgroundSessionRequest struct {
@@ -85,6 +95,12 @@ type playgroundMessagePayload struct {
 		Content     string                        `json:"content"`
 		Attachments []playgroundMessageAttachment `json:"attachments,omitempty"`
 		ToolCalls   []playgroundMessageToolCall   `json:"toolCalls,omitempty"`
+		// RequestId and Usage are the display-only record of the generation
+		// that produced this version: the relay request id plus the token
+		// usage it reported. Neither feeds billing; the settled consume log
+		// remains the only source of the billed amount.
+		RequestId *string                 `json:"requestId,omitempty"`
+		Usage     *playgroundMessageUsage `json:"usage,omitempty"`
 	} `json:"versions"`
 	ActiveVersionIndex *int     `json:"activeVersionIndex,omitempty"`
 	CreatedAt          *float64 `json:"createdAt,omitempty"`
@@ -123,6 +139,15 @@ type playgroundMessageToolCall struct {
 	ErrorMessage *string  `json:"errorMessage,omitempty"`
 	CreatedAt    *float64 `json:"createdAt,omitempty"`
 	CompletedAt  *float64 `json:"completedAt,omitempty"`
+}
+
+// playgroundMessageUsage is the token usage a client recorded when a version
+// finished generating. It only labels the stored message; the billed amount
+// always comes from the settled consume log the request id points at.
+type playgroundMessageUsage struct {
+	PromptTokens     *float64 `json:"promptTokens,omitempty"`
+	CompletionTokens *float64 `json:"completionTokens,omitempty"`
+	TotalTokens      *float64 `json:"totalTokens,omitempty"`
 }
 
 type playgroundMessageResponse struct {
@@ -327,6 +352,28 @@ func validatePlaygroundToolCalls(from string, toolCalls []playgroundMessageToolC
 	return nil
 }
 
+// validatePlaygroundMessageUsage bounds the optional display metadata one
+// stored version may carry. The request id associates the version with the
+// owner's consume log and the token counts only label it; neither is billing
+// input, so a single sanity ceiling on the numbers is enough.
+func validatePlaygroundMessageUsage(requestId *string, usage *playgroundMessageUsage) error {
+	if requestId != nil && (*requestId == "" || len(*requestId) > playgroundMessageRequestIdMaxLength) {
+		return common.NewMessage("Invalid Playground message.")
+	}
+	if usage == nil {
+		return nil
+	}
+	if usage.PromptTokens == nil || usage.CompletionTokens == nil || usage.TotalTokens == nil {
+		return common.NewMessage("Invalid Playground message.")
+	}
+	for _, value := range []float64{*usage.PromptTokens, *usage.CompletionTokens, *usage.TotalTokens} {
+		if value < 0 || value > playgroundMessageTokenMax || value != math.Trunc(value) {
+			return common.NewMessage("Invalid Playground message.")
+		}
+	}
+	return nil
+}
+
 // validatePlaygroundMessages normalizes stored payloads and resolves attachment
 // references against the session's owned attachments. Create-time snapshots
 // cannot reference attachments yet, so allowAttachments is false there.
@@ -368,6 +415,9 @@ func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroun
 			version := &payload.Versions[versionIndex]
 			if version.ID == "" || len(version.ID) > 200 {
 				return nil, common.NewMessage("Invalid Playground message.")
+			}
+			if err := validatePlaygroundMessageUsage(version.RequestId, version.Usage); err != nil {
+				return nil, err
 			}
 			if len(version.ToolCalls) > 0 {
 				if err := validatePlaygroundToolCalls(payload.From, version.ToolCalls, policy); err != nil {

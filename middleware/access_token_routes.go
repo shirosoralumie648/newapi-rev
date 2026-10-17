@@ -60,6 +60,7 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 
 	// router/api-router.go: /api/playground
 	"GET /api/playground/usage":                                                  accessTokenSessionRule,
+	"GET /api/playground/message-costs":                                          accessTokenSessionRule,
 	"GET /api/playground/assets":                                                 accessTokenSessionRule,
 	"POST /api/playground/tasks/:taskId/cancel":                                  accessTokenSessionRule,
 	"GET /api/playground/sessions":                                               accessTokenSessionRule,

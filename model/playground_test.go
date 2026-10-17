@@ -246,6 +246,12 @@ func TestPlaygroundRejectsInvalidSnapshotsWithoutReplacingHistory(t *testing.T) 
 		{"non-object payload", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": "text"}}}},
 		{"invalid role", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "owner", "versions": []any{map[string]any{"id": "v", "content": "text"}}}}}}},
 		{"oversized body", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "user", "versions": []any{map[string]any{"id": "v", "content": strings.Repeat("x", 2<<20)}}}}}}},
+		{"oversized request id", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "assistant", "versions": []any{map[string]any{"id": "v", "content": "text", "requestId": strings.Repeat("r", 65)}}}}}}},
+		{"empty request id", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "assistant", "versions": []any{map[string]any{"id": "v", "content": "text", "requestId": ""}}}}}}},
+		{"negative usage", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "assistant", "versions": []any{map[string]any{"id": "v", "content": "text", "usage": map[string]any{"promptTokens": -1, "completionTokens": 0, "totalTokens": 0}}}}}}}},
+		{"fractional usage", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "assistant", "versions": []any{map[string]any{"id": "v", "content": "text", "usage": map[string]any{"promptTokens": 1.5, "completionTokens": 0, "totalTokens": 1.5}}}}}}}},
+		{"partial usage", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "assistant", "versions": []any{map[string]any{"id": "v", "content": "text", "usage": map[string]any{"promptTokens": 1}}}}}}}},
+		{"oversized usage", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "assistant", "versions": []any{map[string]any{"id": "v", "content": "text", "usage": map[string]any{"promptTokens": 1 << 41, "completionTokens": 0, "totalTokens": 1 << 41}}}}}}}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -1223,6 +1229,7 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	attachmentBase := "/api/playground/sessions/" + sessionID + "/attachments"
 	for _, route := range []struct{ method, path string }{
 		{http.MethodGet, "/api/playground/usage"},
+		{http.MethodGet, "/api/playground/message-costs?request_ids=route-cost"},
 		{http.MethodGet, "/api/playground/assets?kind=attachment"},
 		{http.MethodPost, "/api/playground/tasks/missing/cancel"},
 		{http.MethodGet, attachmentBase}, {http.MethodPost, attachmentBase},
@@ -1458,7 +1465,9 @@ func TestPlaygroundMessageVersionBranches(t *testing.T) {
 						"activeVersionIndex": 1,
 						"versions": []any{
 							map[string]any{"id": "a1", "content": "First answer"},
-							map[string]any{"id": "a2", "content": "Regenerated answer"},
+							map[string]any{"id": "a2", "content": "Regenerated answer",
+								"requestId": "req-branch-2",
+								"usage":     map[string]any{"promptTokens": 12, "completionTokens": 34, "totalTokens": 46}},
 						},
 					}},
 				},
@@ -1475,6 +1484,9 @@ func TestPlaygroundMessageVersionBranches(t *testing.T) {
 			assert.Contains(t, string(messages[0].Payload), "Edited question")
 			assert.Contains(t, string(messages[1].Payload), "First answer")
 			assert.Contains(t, string(messages[1].Payload), "Regenerated answer")
+			// The generation record of the selected version round-trips verbatim.
+			assert.Contains(t, string(messages[1].Payload), `"requestId":"req-branch-2"`)
+			assert.Contains(t, string(messages[1].Payload), `"totalTokens":46`)
 
 			for _, index := range []int{-1, 2} {
 				invalid := map[string]any{
@@ -2088,4 +2100,89 @@ func TestPlaygroundTaskCancellation(t *testing.T) {
 	require.NoError(t, db.Where("task_id = ?", "pg-cancel-zero").First(&stored).Error)
 	assert.Equal(t, model.TaskStatus(model.TaskStatusFailure), stored.Status)
 	assert.Equal(t, model.PlaygroundTaskCanceledReason, stored.FailReason)
+}
+
+// Message costs are read back from the owner's settled consume rows. The
+// lookup is owner- and type-scoped, so another account's request id, a
+// non-consume row and an unknown id all yield nothing, and a malformed query
+// is rejected before any query runs.
+func TestPlaygroundMessageCostLookup(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			previousLog := model.LOG_DB
+			model.LOG_DB = db
+			require.NoError(t, db.AutoMigrate(&model.Log{}))
+			t.Cleanup(func() {
+				model.LOG_DB = previousLog
+				require.NoError(t, db.Migrator().DropTable(&model.Log{}))
+			})
+			require.NoError(t, db.Create(&[]model.Log{
+				{UserId: 7, Type: model.LogTypeConsume, RequestId: "pg-cost-owner", Quota: 1234, PromptTokens: 10, CompletionTokens: 20, ModelName: "cost-model", CreatedAt: 100},
+				{UserId: 8, Type: model.LogTypeConsume, RequestId: "pg-cost-other", Quota: 9999, PromptTokens: 1, CompletionTokens: 1, ModelName: "other-model", CreatedAt: 100},
+				{UserId: 7, Type: model.LogTypeError, RequestId: "pg-cost-error", Quota: 0, CreatedAt: 100},
+			}).Error)
+
+			logs, err := model.GetUserConsumeLogsByRequestIds(7, []string{"pg-cost-owner", "pg-cost-other", "pg-cost-error", "pg-cost-missing"})
+			require.NoError(t, err)
+			require.Len(t, logs, 1)
+			assert.Equal(t, "pg-cost-owner", logs[0].RequestId)
+			assert.Equal(t, 1234, logs[0].Quota)
+
+			empty, err := model.GetUserConsumeLogsByRequestIds(7, nil)
+			require.NoError(t, err)
+			assert.Empty(t, empty)
+
+			response := playgroundRequest(t, 7, http.MethodGet, "/api/playground/message-costs?request_ids=pg-cost-owner,pg-cost-other,pg-cost-missing", nil, controller.GetPlaygroundMessageCosts)
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			var envelope struct {
+				Success bool `json:"success"`
+				Data    struct {
+					Enabled bool `json:"enabled"`
+					Items   []struct {
+						RequestID        string `json:"request_id"`
+						Quota            int    `json:"quota"`
+						PromptTokens     int    `json:"prompt_tokens"`
+						CompletionTokens int    `json:"completion_tokens"`
+						TotalTokens      int    `json:"total_tokens"`
+						ModelName        string `json:"model_name"`
+						CreatedAt        int64  `json:"created_at"`
+					} `json:"items"`
+				} `json:"data"`
+			}
+			require.NoError(t, common.Unmarshal(response.Body.Bytes(), &envelope))
+			require.True(t, envelope.Success, response.Body.String())
+			assert.True(t, envelope.Data.Enabled)
+			require.Len(t, envelope.Data.Items, 1)
+			item := envelope.Data.Items[0]
+			assert.Equal(t, "pg-cost-owner", item.RequestID)
+			assert.Equal(t, 1234, item.Quota)
+			assert.Equal(t, 10, item.PromptTokens)
+			assert.Equal(t, 20, item.CompletionTokens)
+			assert.Equal(t, 30, item.TotalTokens)
+			assert.Equal(t, "cost-model", item.ModelName)
+			assert.EqualValues(t, 100, item.CreatedAt)
+
+			invalidQueries := []string{
+				"",
+				"pg-cost-owner,",
+				"pg-cost-owner,pg-cost-owner",
+				strings.Repeat("r", 65),
+			}
+			tooMany := make([]string, 101)
+			for index := range tooMany {
+				tooMany[index] = fmt.Sprintf("req-%d", index)
+			}
+			invalidQueries = append(invalidQueries, strings.Join(tooMany, ","))
+			for _, query := range invalidQueries {
+				path := "/api/playground/message-costs"
+				if query != "" {
+					path += "?request_ids=" + url.QueryEscape(query)
+				}
+				rejected := playgroundRequest(t, 7, http.MethodGet, path, nil, controller.GetPlaygroundMessageCosts)
+				assert.Equal(t, http.StatusBadRequest, rejected.Code, path)
+				assert.Contains(t, rejected.Body.String(), "PLAYGROUND_INVALID_REQUEST", path)
+			}
+		})
+	}
 }
