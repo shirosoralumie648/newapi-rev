@@ -272,6 +272,9 @@ function PlaygroundContent(props: {
         handleEditOpenChange(false)
         setArtifactSource(null)
         createSession(sessionSettingsFromPreset(preset))
+        // The new conversation starts behind the inspector; on mobile the panel
+        // is a sheet, so reveal the chat instead of leaving it covered.
+        setPresetsOpen(false)
       })
     },
     [
