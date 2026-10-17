@@ -1258,6 +1258,7 @@
     "Click to view full prompt": "Click to view full prompt",
     "Click to view image": "Click to view image",
     "Client": "Client",
+    "Client disconnected; retry stopped": "Client disconnected; retry stopped",
     "Client header value": "Client header value",
     "Client headers override the gateway defaults and may cause upstream errors": "Client headers override the gateway defaults and may cause upstream errors",
     "Client ID": "Client ID",

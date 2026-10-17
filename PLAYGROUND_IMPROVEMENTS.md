@@ -392,6 +392,10 @@ Playground
 | UP-13 | 稳定分组标识（改名不使令牌失效） | UP-00 | 可选 |
 | UP-14 | Responses → ChatCompletions 协议降级 | UP-00 | 可选 |
 
+Step 进度：
+
+- [x] UP-01：客户端断开时取消上游请求并停止重试 —— `relay/channel/api_request.go` 的 `DoApiRequest`/`DoFormRequest` 改用 `http.NewRequestWithContext(c.Request.Context(), ...)`，客户端断开即取消上游请求，不再让上游继续生成；任务类提交沿用既有 `newTaskAPIRequest` 的上下文绑定与 `executeTaskSubmission`「提交前取消即退款、已持久化任务不回滚」守卫，语义不变；`service/relay_error.go` 的 `DecideRelayRetry` 在客户端请求上下文已取消时返回 `{stop, client_gone, client}`，覆盖常规重试与渠道错误重试；计费策略不变（零输出中断流照常收 prompt 费用，未改计费路径）；管理端请求策略展示补 `client_gone`/`client` 标签与七语言翻译（`i18n:sync` missingCount=0、extrasCount=0）；新增 `TestDoRequestCancelsUpstreamWhenClientDisconnects`（两个请求构造器表格）与 `TestDecideRelayRetryReasons` 断开用例；本地未运行测试（CI-only）。
+
 ## 11. 钱包（2026-10-17 调研与决策）
 
 > 来源：对 newapi-rev 钱包、计费与支付代码的只读调研（main @ `2cbfb4f`），对照 OpenRouter、LobeHub Cloud、one-api 的做法。用户已批准下列 8 项推荐方案。所有钱包 Step 都要先读 `.agents/rules/billing.md`，沿用 9.4 节规则：在 CI 的真实数据库（MySQL、PostgreSQL、SQLite）上测试，本地不跑测试。所有钱包 Step 都排在 UP-00 之后，正确性修复优先。
@@ -522,3 +526,4 @@ Playground
 | 2026-10-17 | 计划：新增第 11 节“钱包”——批准 8 项钱包方案（主库 append-only 账本 + 每日对账、64 位 quota、额度分桶与有效期、持久化钱包预扣 + 关机 flush、按组透支上限与欠款只读、存储日结入统一账本、团队预算暂用令牌周期额度、退款/拒付 webhook 冲正与原币收款），追加 WL-01..WL-09，正确性修复排在 UP-00 之后最先执行；UP-08 缩小为令牌侧，UP-05/UP-06/BL-02/BL-03 改为复用钱包账本与预扣。 |
 | 2026-10-17 | 上游同步：merge QuantumNous/new-api main @ `5e9595190`（54 个上游提交，merge 方式，不改写 fork 历史）；冲突按策略解决（语言包取 key 并集，ci.yml 保留 fork 的 checkout 写法，static-keys.ts 两边都保留，代码冲突语义合并）；**行为变化**：4013729f6 fix: disable sensitive word filtering by default and clear the default word list (#7814)；本地未运行测试（CI-only）。 |
 | 2026-10-17 | 计划：新增第 12 节“邀请返利”——批准单层按被邀请人实付充值比例返佣（被邀请人保留固定新人礼；佣金以 WL-07 赠送额度发放、可设有效期、不可提现，现金结算默认关闭并复用 `IsPaymentComplianceConfirmed` 门控）；默认注册后 12 个月内每笔充值返（0=仅首充、-1=永久）；防刷（付费后才发、同 IP/设备/邮箱域限次、禁止自邀、日/月封顶、大额人工审核）；佣金 pending→locked→settled、锁定 14~30 天可配、窗口内退款撤销、已结算走 WL-05 冲正并扣到 0 记欠款（WL-06）；链接+邀请码注册时单次绑定、不可自行改绑；用户端明细+管理端汇总与 CSV 导出；全局默认+用户组+单人覆盖（GroupOverrides）与可选单层推荐官档位（禁止多级）；WL-09 收窄为 aff_code 加长 8~12 位与碰撞重试（#6215）并去掉可选按充值比例返利，追加 RF-02..RF-09 且排在 WL-05/WL-07/WL-08（WL-06 按需）之后。 |
+| 2026-10-17 | UP-01：客户端断开时取消上游请求并停止重试——`relay/channel/api_request.go` 的 `DoApiRequest`/`DoFormRequest` 改用 `http.NewRequestWithContext(c.Request.Context(), ...)`（任务类路径沿用既有 `newTaskAPIRequest` 的上下文绑定，取消发生在提交前即经 `executeTaskSubmission` 退款、已持久化任务不回滚）；`service/relay_error.go` 的 `DecideRelayRetry` 在客户端请求上下文已取消时返回 `stop/client_gone/client`，覆盖常规重试与渠道错误重试，客户端断开后不再切换渠道重试；计费策略不变（零输出中断流照常收 prompt 费用，未改计费路径）；`policy-label.ts` 与七语言新增 `client_gone`/`client` 展示文案（`i18n:sync` missingCount=0、extrasCount=0）；新增 `TestDoRequestCancelsUpstreamWhenClientDisconnects` 与 `TestDecideRelayRetryReasons` 断开用例（CI-only，本地未运行测试）。 |
