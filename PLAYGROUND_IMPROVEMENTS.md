@@ -392,6 +392,10 @@ Playground
 | UP-13 | 稳定分组标识（改名不使令牌失效） | UP-00 | 可选 |
 | UP-14 | Responses → ChatCompletions 协议降级 | UP-00 | 可选 |
 
+Step 进度：
+
+- [x] UP-01：客户端断开时取消上游请求并停止重试 —— `relay/channel/api_request.go` 的 `DoApiRequest`/`DoFormRequest` 改用 `http.NewRequestWithContext(c.Request.Context(), ...)`，客户端断开即取消上游请求，不再让上游继续生成；任务类提交沿用既有 `newTaskAPIRequest` 的上下文绑定与 `executeTaskSubmission`「提交前取消即退款、已持久化任务不回滚」守卫，语义不变；`service/relay_error.go` 的 `DecideRelayRetry` 在客户端请求上下文已取消时返回 `{stop, client_gone, client}`，覆盖常规重试与渠道错误重试；计费策略不变（零输出中断流照常收 prompt 费用，未改计费路径）；管理端请求策略展示补 `client_gone`/`client` 标签与七语言翻译（`i18n:sync` missingCount=0、extrasCount=0）；新增 `TestDoRequestCancelsUpstreamWhenClientDisconnects`（两个请求构造器表格）与 `TestDecideRelayRetryReasons` 断开用例；本地未运行测试（CI-only）。
+
 ## 11. 钱包（2026-10-17 调研与决策）
 
 > 来源：对 newapi-rev 钱包、计费与支付代码的只读调研（main @ `2cbfb4f`），对照 OpenRouter、LobeHub Cloud、one-api 的做法。用户已批准下列 8 项推荐方案。所有钱包 Step 都要先读 `.agents/rules/billing.md`，沿用 9.4 节规则：在 CI 的真实数据库（MySQL、PostgreSQL、SQLite）上测试，本地不跑测试。所有钱包 Step 都排在 UP-00 之后，正确性修复优先。
@@ -473,3 +477,4 @@ Playground
 | 2026-10-17 | P6-03：在画布中增加 `model` 工作流节点与运行/失败重试/任务取消——工作流链为产出节点 → `model`（经 `/pg/chat/completions` 非流式调用）→ `task`（`submitImageGeneration`/`submitVideoGeneration` 提交）→ `task-result`（只在 `ref` 保存 `taskId`/`taskArtifactKey` 引用）；服务端节点类型契约新增 `model`（`controller/playground_canvas_test.go` 覆盖类型接受、未知类型拒绝与节点数据字节上限）；前端 `canvas-workflow.ts` 做无环与输入校验并拓扑排序，`use-canvas-workflow-runner.ts` 顺序执行并对 `running` 步骤轮询 `getUserTaskLogs` durable 行而非重复提交、加载时按 durable 行恢复 `running` 任务节点、失败步骤起重试并复用已存输出、取消本地运行并对未完成任务调用 `cancelPlaygroundTask` 后按 durable 行结算；成功后仅为下游 `task-result` 抓取 `getTaskArtifacts`；运行状态以 `record:false` 写入不入撤销历史，节点/工具栏/Inspector 显示状态、错误、重试与取消；新增 `canvas-workflow.test.ts`、`use-canvas-workflow-runner.test.ts`、`canvas-toolbar.test.tsx`，扩展 `canvas-node.test.tsx`、`canvas-node-inspector.test.tsx`、`use-canvas-editor.test.ts`；补 19 个新键的七语言翻译（`i18n:sync` missingCount=0、extrasCount=0）；无新依赖；本地未运行测试/typecheck/lint/build（CI-only）。 |
 | 2026-10-17 | 计划：新增第 11 节“钱包”——批准 8 项钱包方案（主库 append-only 账本 + 每日对账、64 位 quota、额度分桶与有效期、持久化钱包预扣 + 关机 flush、按组透支上限与欠款只读、存储日结入统一账本、团队预算暂用令牌周期额度、退款/拒付 webhook 冲正与原币收款），追加 WL-01..WL-09，正确性修复排在 UP-00 之后最先执行；UP-08 缩小为令牌侧，UP-05/UP-06/BL-02/BL-03 改为复用钱包账本与预扣。 |
 | 2026-10-17 | 上游同步：merge QuantumNous/new-api main @ `5e9595190`（54 个上游提交，merge 方式，不改写 fork 历史）；冲突按策略解决（语言包取 key 并集，ci.yml 保留 fork 的 checkout 写法，static-keys.ts 两边都保留，代码冲突语义合并）；**行为变化**：4013729f6 fix: disable sensitive word filtering by default and clear the default word list (#7814)；本地未运行测试（CI-only）。 |
+| 2026-10-17 | UP-01：客户端断开时取消上游请求并停止重试——`relay/channel/api_request.go` 的 `DoApiRequest`/`DoFormRequest` 改用 `http.NewRequestWithContext(c.Request.Context(), ...)`（任务类路径沿用既有 `newTaskAPIRequest` 的上下文绑定，取消发生在提交前即经 `executeTaskSubmission` 退款、已持久化任务不回滚）；`service/relay_error.go` 的 `DecideRelayRetry` 在客户端请求上下文已取消时返回 `stop/client_gone/client`，覆盖常规重试与渠道错误重试，客户端断开后不再切换渠道重试；计费策略不变（零输出中断流照常收 prompt 费用，未改计费路径）；`policy-label.ts` 与七语言新增 `client_gone`/`client` 展示文案（`i18n:sync` missingCount=0、extrasCount=0）；新增 `TestDoRequestCancelsUpstreamWhenClientDisconnects` 与 `TestDecideRelayRetryReasons` 断开用例（CI-only，本地未运行测试）。 |
