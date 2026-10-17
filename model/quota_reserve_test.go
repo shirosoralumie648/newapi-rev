@@ -1,14 +1,26 @@
 package model
 
 import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
+	"gorm.io/gorm/schema"
 )
 
 func createReserveTestUser(t *testing.T, quota int) User {
@@ -258,4 +270,154 @@ func TestTokenCacheInitPreservesLiveQuotaAndFenceBlocksStaleSnapshot(t *testing.
 	cached, err = cacheGetTokenByKey(token.Key)
 	require.NoError(t, err)
 	assert.Equal(t, 100, cached.RemainQuota)
+}
+
+// batchFlushTestDB opens an isolated database for the shutdown flush matrix and
+// swaps it into model.DB for the duration of the test.
+func batchFlushTestDB(t *testing.T, dialect string) *gorm.DB {
+	t.Helper()
+	var driver gorm.Dialector
+	switch dialect {
+	case "mysql":
+		dsn := os.Getenv("TEST_MYSQL_DSN")
+		if dsn == "" {
+			t.Skip("TEST_MYSQL_DSN is not configured")
+		}
+		driver = mysql.Open(dsn)
+	case "postgres":
+		dsn := os.Getenv("TEST_POSTGRES_DSN")
+		if dsn == "" {
+			t.Skip("TEST_POSTGRES_DSN is not configured")
+		}
+		driver = postgres.Open(dsn)
+	default:
+		driver = sqlite.Open(filepath.Join(t.TempDir(), "batch_flush.db"))
+	}
+	prefix := fmt.Sprintf("wl02flush_%d_", os.Getpid())
+	db, err := gorm.Open(driver, &gorm.Config{
+		NamingStrategy: schema.NamingStrategy{TablePrefix: prefix},
+		Logger:         gormlogger.Default.LogMode(gormlogger.Silent),
+	})
+	require.NoError(t, err)
+	if dialect == "sqlite" {
+		sqlDB, err := db.DB()
+		require.NoError(t, err)
+		sqlDB.SetMaxOpenConns(1)
+	}
+	previous := DB
+	previousMain, previousLog := common.MainDatabaseType(), common.LogDatabaseType()
+	common.SetDatabaseTypes(common.DatabaseType(dialect), previousLog)
+	DB = db
+	t.Cleanup(func() {
+		require.NoError(t, db.Migrator().DropTable(&User{}, &Token{}, &Channel{}))
+		sqlDB, err := db.DB()
+		require.NoError(t, err)
+		require.NoError(t, sqlDB.Close())
+		DB = previous
+		common.SetDatabaseTypes(previousMain, previousLog)
+	})
+	require.NoError(t, db.AutoMigrate(&User{}, &Token{}, &Channel{}))
+	var version string
+	versionQuery := "SELECT version()"
+	if dialect == "sqlite" {
+		versionQuery = "SELECT sqlite_version()"
+	}
+	require.NoError(t, db.Raw(versionQuery).Scan(&version).Error)
+	t.Logf("database version (%s): %s", dialect, version)
+	return db
+}
+
+func TestBatchUpdateShutdownFlushMatrix(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			batchFlushTestDB(t, dialect)
+			resetBatchUpdateTestState(t)
+			common.BatchUpdateEnabled = true
+
+			user := createReserveTestUser(t, 1000)
+			token := createReserveTestToken(t, 1000)
+			channel := Channel{Name: "flush-channel-" + common.GetRandomString(6), Key: "sk-flush", Status: common.ChannelStatusEnabled}
+			require.NoError(t, DB.Create(&channel).Error)
+
+			require.NoError(t, DecreaseUserQuota(user.Id, 300, false))
+			UpdateUserUsedQuotaAndRequestCount(user.Id, 300)
+			require.NoError(t, DecreaseTokenQuota(token.Id, token.Key, 200))
+			UpdateChannelUsedQuota(channel.Id, 300)
+
+			// Deltas stay queued until a flush runs.
+			assert.Equal(t, 1000, getUserQuotaFromDB(t, user.Id))
+			assert.Equal(t, 1000, getTokenFromDB(t, token.Id).RemainQuota)
+			var reloadedChannel Channel
+			require.NoError(t, DB.First(&reloadedChannel, channel.Id).Error)
+			assert.Zero(t, reloadedChannel.UsedQuota)
+
+			flushCtx, cancelFlush := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancelFlush()
+			require.NoError(t, FlushBatchUpdate(flushCtx))
+
+			var reloadedUser User
+			require.NoError(t, DB.First(&reloadedUser, user.Id).Error)
+			assert.Equal(t, 700, reloadedUser.Quota)
+			assert.Equal(t, 300, reloadedUser.UsedQuota)
+			assert.Equal(t, 1, reloadedUser.RequestCount)
+			reloadedToken := getTokenFromDB(t, token.Id)
+			assert.Equal(t, 800, reloadedToken.RemainQuota)
+			assert.Equal(t, 200, reloadedToken.UsedQuota)
+			require.NoError(t, DB.First(&reloadedChannel, channel.Id).Error)
+			assert.Equal(t, int64(300), reloadedChannel.UsedQuota)
+
+			// An empty flush must not replay the previous deltas.
+			require.NoError(t, FlushBatchUpdate(context.Background()))
+			assert.Equal(t, 700, getUserQuotaFromDB(t, user.Id))
+
+			// Deltas queued after the first flush are drained as well.
+			require.NoError(t, DecreaseUserQuota(user.Id, 50, false))
+			UpdateUserUsedQuota(user.Id, 25)
+			require.NoError(t, FlushBatchUpdate(context.Background()))
+			require.NoError(t, DB.First(&reloadedUser, user.Id).Error)
+			assert.Equal(t, 650, reloadedUser.Quota)
+			assert.Equal(t, 325, reloadedUser.UsedQuota)
+		})
+	}
+}
+
+func TestFlushBatchUpdateTimeoutLogsAndRetainsDeltas(t *testing.T) {
+	truncateTables(t)
+	resetBatchUpdateTestState(t)
+	common.BatchUpdateEnabled = true
+
+	user := createReserveTestUser(t, 1000)
+	require.NoError(t, DecreaseUserQuota(user.Id, 100, false))
+	UpdateUserUsedQuota(user.Id, 100)
+
+	// Fail every user-row update so the flush attempt retains its deltas.
+	injected := errors.New("injected batch flush failure")
+	const callback = "test:wl02_batch_flush_failure"
+	require.NoError(t, DB.Callback().Update().Before("gorm:update").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Table == "users" {
+			tx.AddError(injected)
+		}
+	}))
+	t.Cleanup(func() { _ = DB.Callback().Update().Remove(callback) })
+
+	var logs bytes.Buffer
+	previousWriter := gin.DefaultErrorWriter
+	gin.DefaultErrorWriter = &logs
+	t.Cleanup(func() { gin.DefaultErrorWriter = previousWriter })
+
+	timeoutCtx, cancelTimeout := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancelTimeout()
+	flushErr := FlushBatchUpdate(timeoutCtx)
+	require.ErrorIs(t, flushErr, context.DeadlineExceeded)
+	require.ErrorIs(t, flushErr, injected)
+	assert.Contains(t, logs.String(), "batch update flush failed; pending entries are kept for retry")
+	assert.Contains(t, logs.String(), "batch update flush incomplete")
+
+	// The retained deltas are persisted by the next flush.
+	require.NoError(t, DB.Callback().Update().Remove(callback))
+	require.NoError(t, FlushBatchUpdate(context.Background()))
+	var reloadedUser User
+	require.NoError(t, DB.First(&reloadedUser, user.Id).Error)
+	assert.Equal(t, 900, reloadedUser.Quota)
+	assert.Equal(t, 100, reloadedUser.UsedQuota)
 }

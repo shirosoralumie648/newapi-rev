@@ -127,7 +127,7 @@ func TestSystemTaskClaimPassDispatchesByType(t *testing.T) {
 	_, err := model.CreateSystemTask(handler.taskType, nil, nil)
 	require.NoError(t, err)
 
-	runSystemTaskClaimPass("runner-dispatch")
+	runSystemTaskClaimPass(context.Background(), "runner-dispatch")
 
 	select {
 	case got := <-ran:
@@ -184,7 +184,7 @@ func TestSystemTaskClaimPassDispatchesEarliestPendingByType(t *testing.T) {
 	firstB, err := model.CreateSystemTask(handlerB.taskType, nil, nil)
 	require.NoError(t, err)
 
-	runSystemTaskClaimPass("runner-dispatch")
+	runSystemTaskClaimPass(context.Background(), "runner-dispatch")
 
 	got := map[string]bool{}
 	for range 2 {
@@ -231,4 +231,56 @@ func TestEnqueueSystemTaskReportsCreatedAndExistingActive(t *testing.T) {
 	require.True(t, created)
 	require.NotNil(t, second)
 	assert.NotEqual(t, first.TaskID, second.TaskID)
+}
+
+func TestStopSystemTaskRunnerWaitsForInFlightHandler(t *testing.T) {
+	truncate(t)
+
+	release := make(chan struct{})
+	started := make(chan context.Context, 1)
+	handler := &stubScheduledHandler{
+		taskType: "test_stop_runner",
+		enabled:  false,
+		interval: time.Minute,
+		onRun: func(ctx context.Context, task *model.SystemTask, runnerID string) {
+			started <- ctx
+			<-release
+			_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusSucceeded, nil, "")
+		},
+	}
+	withSystemTaskRegistry(t, handler)
+
+	_, err := model.CreateSystemTask(handler.taskType, nil, nil)
+	require.NoError(t, err)
+
+	StartSystemTaskRunner()
+
+	var handlerCtx context.Context
+	select {
+	case handlerCtx = <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("runner did not dispatch the pending task")
+	}
+
+	// The handler is still running, so a short drain budget must expire and
+	// report the incomplete wait instead of returning success.
+	timeoutCtx, cancelTimeout := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancelTimeout()
+	require.ErrorIs(t, StopSystemTaskRunner(timeoutCtx), context.DeadlineExceeded)
+	select {
+	case <-handlerCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not cancel the in-flight handler context")
+	}
+
+	// Once the handler finishes, stopping again joins it and reports success.
+	close(release)
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelWait()
+	require.NoError(t, StopSystemTaskRunner(waitCtx))
+
+	latest, err := model.GetLatestSystemTask(handler.taskType)
+	require.NoError(t, err)
+	require.NotNil(t, latest)
+	assert.Equal(t, model.SystemTaskStatusSucceeded, latest.Status)
 }

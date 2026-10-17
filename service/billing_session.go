@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -84,6 +85,32 @@ func (s *BillingSession) Settle(actualQuota int) error {
 	return tokenErr
 }
 
+// billingRefundsRunning tracks asynchronous BillingSession.Refund goroutines so
+// shutdown can wait for the wallet and token changes they submit before the
+// final batch update flush.
+var billingRefundsRunning sync.WaitGroup
+
+// WaitBillingRefunds waits for in-flight asynchronous refunds to finish and
+// returns ctx.Err() when the wait budget is exhausted. Shutdown calls it after
+// HTTP handlers and system task handlers stop submitting refunds so every
+// refund delta reaches the final batch flush.
+func WaitBillingRefunds(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	done := make(chan struct{})
+	go func() {
+		billingRefundsRunning.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // Refund 退还所有预扣费，幂等安全，异步执行。
 func (s *BillingSession) Refund(c *gin.Context) {
 	s.mu.Lock()
@@ -109,7 +136,9 @@ func (s *BillingSession) Refund(c *gin.Context) {
 	subscriptionId := s.relayInfo.SubscriptionId
 	funding := s.funding
 
+	billingRefundsRunning.Add(1)
 	gopool.Go(func() {
+		defer billingRefundsRunning.Done()
 		// 1) 退还资金来源
 		if err := funding.Refund(); err != nil {
 			common.SysLog(common.LogText("error refunding billing source: %s", err.Error()))
