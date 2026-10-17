@@ -143,21 +143,25 @@ func CreatePlaygroundSession(userID int, session *PlaygroundSession, messages []
 		session.Title = "New conversation"
 	}
 	err = DB.Transaction(func(tx *gorm.DB) error {
-		// Locking the owner row serializes the conversation count for the whole
-		// account, so concurrent creates cannot both slip past the limit.
-		var owner User
-		if err := lockForUpdate(tx).Where("id = ?", userID).First(&owner).Error; err != nil {
+		policy, err := playgroundPolicyForUser(tx, userID)
+		if err != nil {
 			return err
 		}
-		policy := playground_setting.GetPlaygroundQuotaPolicy(owner.Group)
-		var count int64
-		if err := tx.Model(&PlaygroundSession{}).Where("user_id = ?", userID).Count(&count).Error; err != nil {
+		// The account counter row serializes the conversation count for the
+		// whole account, so concurrent creates cannot both slip past the limit
+		// and the relay's quota settlement on the users row stays untouched.
+		usage, err := lockPlaygroundUserUsage(tx, userID)
+		if err != nil {
 			return err
 		}
-		if count >= int64(policy.SessionMaxCount) {
+		if usage.Sessions >= int64(policy.SessionMaxCount) {
 			return ErrPlaygroundSessionLimit
 		}
 		if err := tx.Create(session).Error; err != nil {
+			return err
+		}
+		usage.apply(playgroundUserUsageDelta{Sessions: 1})
+		if err := savePlaygroundUserUsage(tx, usage); err != nil {
 			return err
 		}
 		return insertPlaygroundMessages(tx, userID, session.ID, messages, policy)
@@ -276,7 +280,13 @@ func DeletePlaygroundSession(userID int, id string) error {
 		if err := tx.Where("session_id = ? AND user_id = ?", id, userID).Delete(&PlaygroundMessage{}).Error; err != nil {
 			return err
 		}
-		return tx.Where("id = ? AND user_id = ?", id, userID).Delete(&PlaygroundSession{}).Error
+		if err := tx.Where("id = ? AND user_id = ?", id, userID).Delete(&PlaygroundSession{}).Error; err != nil {
+			return err
+		}
+		// The cascade released conversations, attachments, artifacts and
+		// messages at once, so the account counters are remeasured from the
+		// remaining rows instead of mirroring every per-table step.
+		return refreshPlaygroundUserUsage(tx, userID)
 	})
 	if err != nil {
 		return err

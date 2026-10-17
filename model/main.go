@@ -455,6 +455,7 @@ func migrateDB() error {
 		&PlaygroundArtifact{},
 		&PlaygroundArtifactVersion{},
 		&PlaygroundAttachment{},
+		&PlaygroundUserUsage{},
 		&PlaygroundCanvasProject{},
 		&PlaygroundCanvasAsset{},
 		&WalletLedgerEntry{},

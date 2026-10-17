@@ -22,7 +22,6 @@ import (
 	"errors"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/setting/playground_setting"
 	"gorm.io/gorm"
 )
 
@@ -58,9 +57,9 @@ type PlaygroundPreset struct {
 	UpdatedAt        int64    `json:"updated_at" gorm:"not null;index"`
 }
 
-// CreatePlaygroundPreset stores a new preset for the account. The owner row is
-// locked first so concurrent creates cannot both slip past the per-account
-// preset budget.
+// CreatePlaygroundPreset stores a new preset for the account. The account
+// counter row is locked first so concurrent creates cannot both slip past the
+// per-account preset budget without touching the users row.
 func CreatePlaygroundPreset(userID int, preset *PlaygroundPreset) error {
 	if userID <= 0 || preset == nil {
 		return errors.New("invalid playground preset")
@@ -75,19 +74,22 @@ func CreatePlaygroundPreset(userID int, preset *PlaygroundPreset) error {
 	preset.CreatedAt = now
 	preset.UpdatedAt = now
 	return DB.Transaction(func(tx *gorm.DB) error {
-		var owner User
-		if err := lockForUpdate(tx).Where("id = ?", userID).First(&owner).Error; err != nil {
+		policy, err := playgroundPolicyForUser(tx, userID)
+		if err != nil {
 			return err
 		}
-		policy := playground_setting.GetPlaygroundQuotaPolicy(owner.Group)
-		var count int64
-		if err := tx.Model(&PlaygroundPreset{}).Where("user_id = ?", userID).Count(&count).Error; err != nil {
+		usage, err := lockPlaygroundUserUsage(tx, userID)
+		if err != nil {
 			return err
 		}
-		if count >= int64(policy.PresetUserMaxCount) {
+		if usage.Presets >= int64(policy.PresetUserMaxCount) {
 			return ErrPlaygroundPresetLimit
 		}
-		return tx.Create(preset).Error
+		if err := tx.Create(preset).Error; err != nil {
+			return err
+		}
+		usage.apply(playgroundUserUsageDelta{Presets: 1})
+		return savePlaygroundUserUsage(tx, usage)
 	})
 }
 
@@ -159,6 +161,14 @@ func DeletePlaygroundPreset(userID int, id string) error {
 		if err != nil {
 			return err
 		}
-		return tx.Where("id = ? AND user_id = ?", id, userID).Delete(&PlaygroundPreset{}).Error
+		usage, err := lockPlaygroundUserUsage(tx, userID)
+		if err != nil {
+			return err
+		}
+		if err := tx.Where("id = ? AND user_id = ?", id, userID).Delete(&PlaygroundPreset{}).Error; err != nil {
+			return err
+		}
+		usage.apply(playgroundUserUsageDelta{Presets: -1})
+		return savePlaygroundUserUsage(tx, usage)
 	})
 }
