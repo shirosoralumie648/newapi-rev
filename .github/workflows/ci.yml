@@ -3,18 +3,21 @@ name: CI
 on:
   pull_request:
     types: [opened, synchronize, closed]
+  push:
+    branches: [main]
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # Group by ref and sha so pushes to main do not cancel each other.
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 
 jobs:
   backend:
     name: Backend vet, build, and test
-    if: github.event.action != 'closed' || github.event.pull_request.merged == true
+    if: github.event_name == 'push' || github.event.action != 'closed' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -24,8 +27,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          repository: ${{ github.event.pull_request.base.repo.full_name }}
-          ref: ${{ github.event.action == 'closed' && github.event.pull_request.base.ref || github.ref }}
+          repository: ${{ github.event.pull_request.base.repo.full_name || github.repository }}
+          ref: ${{ github.event.action == 'closed' && github.event.pull_request.base.ref || github.event_name == 'push' && github.sha || github.ref }}
 
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
@@ -68,7 +71,7 @@ jobs:
 
   frontend:
     name: Frontend typecheck and test
-    if: github.event.action != 'closed' || github.event.pull_request.merged == true
+    if: github.event_name == 'push' || github.event.action != 'closed' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -79,8 +82,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          repository: ${{ github.event.pull_request.base.repo.full_name }}
-          ref: ${{ github.event.action == 'closed' && github.event.pull_request.base.ref || github.ref }}
+          repository: ${{ github.event.pull_request.base.repo.full_name || github.repository }}
+          ref: ${{ github.event.action == 'closed' && github.event.pull_request.base.ref || github.event_name == 'push' && github.sha || github.ref }}
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
