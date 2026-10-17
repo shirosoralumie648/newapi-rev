@@ -262,12 +262,18 @@ export interface PlaygroundAttachmentUploadInput {
   filename?: string
 }
 
+/**
+ * Content URL of one attachment. The `partitionId` is the attachment's owning
+ * resource: a conversation id for a chat upload, or a canvas id for a file
+ * dropped on a board. The server resolves the row by owner and partition and
+ * serves the bytes under the stored media type.
+ */
 export function playgroundAttachmentContentUrl(
-  sessionId: string,
+  partitionId: string,
   attachmentId: string
 ): string {
   return `${API_ENDPOINTS.PLAYGROUND_SESSIONS}/${encodeURIComponent(
-    sessionId
+    partitionId
   )}/attachments/${encodeURIComponent(attachmentId)}/content`
 }
 
@@ -529,13 +535,13 @@ export async function replacePlaygroundMessages(
   return mapMessageSnapshot(response.data.data, sessionId)
 }
 
-export async function uploadPlaygroundAttachment(
-  sessionId: string,
+async function postPlaygroundAttachment(
+  path: string,
   input: PlaygroundAttachmentUploadInput,
   signal?: AbortSignal
 ): Promise<{ attachment: PlaygroundServerAttachment; created: boolean }> {
   const response = await api.post(
-    `${API_ENDPOINTS.PLAYGROUND_SESSIONS}/${encodeURIComponent(sessionId)}/attachments`,
+    path,
     {
       client_key: input.clientKey,
       media_type: input.mediaType,
@@ -549,6 +555,37 @@ export async function uploadPlaygroundAttachment(
     attachment: mapServerAttachment(response.data.data),
     created: response.data.data.created === true,
   }
+}
+
+export function uploadPlaygroundAttachment(
+  sessionId: string,
+  input: PlaygroundAttachmentUploadInput,
+  signal?: AbortSignal
+): Promise<{ attachment: PlaygroundServerAttachment; created: boolean }> {
+  return postPlaygroundAttachment(
+    `${API_ENDPOINTS.PLAYGROUND_SESSIONS}/${encodeURIComponent(sessionId)}/attachments`,
+    input,
+    signal
+  )
+}
+
+/**
+ * Uploads one file of the canvas workspace. A canvas owns its own attachment
+ * partition, so a file dropped on the board is stored without inventing a
+ * conversation for it; the server checks the project for the account first.
+ * The returned attachment carries the canvas id as its partition, which is what
+ * the content route and the node reference use.
+ */
+export function uploadCanvasAttachment(
+  canvasId: string,
+  input: PlaygroundAttachmentUploadInput,
+  signal?: AbortSignal
+): Promise<{ attachment: PlaygroundServerAttachment; created: boolean }> {
+  return postPlaygroundAttachment(
+    `${API_ENDPOINTS.PLAYGROUND_CANVASES}/${encodeURIComponent(canvasId)}/attachments`,
+    input,
+    signal
+  )
 }
 
 export async function deletePlaygroundAttachment(

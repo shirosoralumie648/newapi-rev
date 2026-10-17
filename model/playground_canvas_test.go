@@ -19,7 +19,10 @@ For commercial licensing, please contact support@quantumnous.com
 package model_test
 
 import (
+	"context"
+	"encoding/base64"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -28,6 +31,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/controller"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service/objectstore"
 	"github.com/QuantumNous/new-api/setting/playground_setting"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -194,7 +198,7 @@ func TestPlaygroundCanvasDocumentValidation(t *testing.T) {
 	}
 
 	reject("missing document", map[string]any{"title": "Board"}, http.StatusBadRequest)
-	reject("unknown node type", withDocument(canvasDocument([]any{canvasNode("n1", "video", 0, 0)}, nil)), http.StatusBadRequest)
+	reject("unknown node type", withDocument(canvasDocument([]any{canvasNode("n1", "script", 0, 0)}, nil)), http.StatusBadRequest)
 	reject("duplicate node id", withDocument(canvasDocument([]any{canvasNode("n1", "text", 0, 0), canvasNode("n1", "text", 1, 1)}, nil)), http.StatusBadRequest)
 	reject("dangling edge", withDocument(canvasDocument(
 		[]any{canvasNode("n1", "text", 0, 0)},
@@ -465,6 +469,110 @@ func TestPlaygroundCanvasAttachmentPins(t *testing.T) {
 	deleted, err = model.DeleteOrphanedPlaygroundAttachments(now-3600, 100)
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, deleted)
+}
+
+func playgroundUploadCanvasAttachment(t *testing.T, user int, canvasID, clientKey, mediaType string, data []byte) map[string]any {
+	t.Helper()
+	response := playgroundRequest(t, user, http.MethodPost, "/api/playground/canvases/"+canvasID+"/attachments", map[string]any{
+		"client_key": clientKey, "media_type": mediaType, "filename": "dropped.png",
+		"data": base64.StdEncoding.EncodeToString(data),
+	}, controller.CreatePlaygroundCanvasAttachment)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	return canvasEnvelope(t, response.Body.Bytes())
+}
+
+// A file dropped on the canvas is uploaded into the canvas' own attachment
+// partition: the project row is locked and checked for the account before the
+// bytes are stored, and the saved document pins the attachment so its bytes
+// outlive the upload. The content route resolves a row by owner and partition,
+// so a canvas attachment needs no second read route.
+func TestPlaygroundCanvasAttachmentUpload(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			canvasID := createCanvasProject(t, 7, "canvas-drop")["id"].(string)
+			png := playgroundPNGFixture(64)
+			uploaded := playgroundUploadCanvasAttachment(t, 7, canvasID, "drop-1", "image/png", png)
+			attachmentID, _ := uploaded["id"].(string)
+			require.NotEmpty(t, attachmentID)
+			assert.True(t, strings.HasPrefix(attachmentID, "pgf_"))
+			assert.Equal(t, canvasID, uploaded["session_id"])
+			assert.Equal(t, true, uploaded["created"])
+
+			var stored model.PlaygroundAttachment
+			require.NoError(t, db.Where("id = ?", attachmentID).First(&stored).Error)
+			assert.Equal(t, canvasID, stored.SessionID)
+			assert.Nil(t, stored.Data)
+			objectStore := objectstore.DefaultStore()
+			require.NotNil(t, objectStore)
+			objectReader, _, objectErr := objectStore.Get(context.Background(), stored.ObjectKey)
+			require.NoError(t, objectErr)
+			objectBytes, objectErr := io.ReadAll(objectReader)
+			require.NoError(t, objectErr)
+			require.NoError(t, objectReader.Close())
+			assert.Equal(t, png, objectBytes)
+
+			// The client key is an idempotency key for a canvas upload too.
+			replay := playgroundUploadCanvasAttachment(t, 7, canvasID, "drop-1", "image/png", png)
+			assert.Equal(t, attachmentID, replay["id"])
+			assert.NotEqual(t, true, replay["created"])
+
+			// Content is served byte-exact through the shared partition route.
+			content := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+canvasID+"/attachments/"+attachmentID+"/content", nil, controller.GetPlaygroundAttachmentContent)
+			require.Equal(t, http.StatusOK, content.Code, content.Body.String())
+			assert.Equal(t, png, content.Body.Bytes())
+
+			// A foreign or unknown canvas is rejected before anything is written.
+			for _, foreign := range []struct {
+				user  int
+				param string
+			}{{8, canvasID}, {7, "pgc_missing"}} {
+				response := playgroundRequest(t, foreign.user, http.MethodPost, "/api/playground/canvases/"+foreign.param+"/attachments", map[string]any{
+					"client_key": "drop-foreign", "media_type": "image/png",
+					"data": base64.StdEncoding.EncodeToString(png),
+				}, controller.CreatePlaygroundCanvasAttachment)
+				assert.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
+			}
+			var foreignRows int64
+			require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("user_id = ?", 8).Count(&foreignRows).Error)
+			assert.Zero(t, foreignRows)
+
+			// The saved document pins the attachment; the cleanup task leaves a
+			// pinned attachment alone, and the bytes return to the orphan
+			// countdown once the project is deleted.
+			created := canvasEnvelope(t, playgroundRequest(t, 7, http.MethodPost, "/api/playground/canvases", map[string]any{
+				"title": "Dropped",
+				"document": canvasDocument([]any{
+					canvasRefNode("a1", "attachment", map[string]any{"sessionId": canvasID, "attachmentId": attachmentID}),
+				}, nil),
+			}, controller.CreatePlaygroundCanvasProject).Body.Bytes())
+			boardID := created["id"].(string)
+			var pins int64
+			require.NoError(t, db.Model(&model.PlaygroundCanvasAsset{}).Where("canvas_id = ?", boardID).Count(&pins).Error)
+			assert.EqualValues(t, 1, pins)
+			now := common.GetTimestamp()
+			require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("id = ?", attachmentID).Update("updated_at", now-100000).Error)
+			deleted, err := model.DeleteOrphanedPlaygroundAttachments(now-3600, 100)
+			require.NoError(t, err)
+			assert.Zero(t, deleted)
+
+			// Another account can neither upload into the partition nor
+			// reference the attachment from its own board.
+			cross := playgroundRequest(t, 8, http.MethodPost, "/api/playground/canvases", map[string]any{
+				"title": "Foreign",
+				"document": canvasDocument([]any{
+					canvasRefNode("a1", "attachment", map[string]any{"sessionId": canvasID, "attachmentId": attachmentID}),
+				}, nil),
+			}, controller.CreatePlaygroundCanvasProject)
+			assert.Equal(t, http.StatusBadRequest, cross.Code, cross.Body.String())
+
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodDelete, "/api/playground/canvases/"+boardID, nil, controller.DeletePlaygroundCanvasProject).Code)
+			require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("id = ?", attachmentID).Update("updated_at", now-100000).Error)
+			deleted, err = model.DeleteOrphanedPlaygroundAttachments(now-3600, 100)
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, deleted)
+		})
+	}
 }
 
 // Saving a document that no longer references an attachment releases its pin,

@@ -217,7 +217,7 @@ function useRunnerHarness(
     updateNodeData,
     addLinkedNode,
   })
-  return { nodes, runner }
+  return { nodes, edges, runner }
 }
 
 test('runs a model step into an image step and keeps the preview in memory', async () => {
@@ -506,6 +506,45 @@ test('links a result node to a step that had none', async () => {
     sourceNodeId: 't1',
   })
   expect(created?.data.ref).toBeUndefined()
+  expect(hook.result.current.edges).toContainEqual(
+    expect.objectContaining({ source: 't1', target: created?.id })
+  )
+})
+
+test('links a video node to a video step that had no result node', async () => {
+  vi.spyOn(api, 'post').mockImplementation(async (url) => {
+    if (url === '/pg/videos') return { data: { task_id: 'task-5' } }
+    throw new Error(`Unexpected POST ${url}`)
+  })
+  vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    if (url.startsWith('/api/task/self')) {
+      return taskRowReply('task-5', 'SUCCESS')
+    }
+    if (url === '/api/task/task-5/artifacts') {
+      return artifactReply('task-5', 'out-5')
+    }
+    throw new Error(`Unexpected GET ${url}`)
+  })
+  const chain = videoChain({})
+  const hook = renderHook(() =>
+    useRunnerHarness(
+      chain.nodes.filter((node) => node.id !== 'r1'),
+      chain.edges.filter((edge) => edge.target !== 'r1')
+    )
+  )
+
+  act(() => hook.result.current.runner.run())
+  await waitFor(() => expect(hook.result.current.runner.phase).toBe('idle'))
+
+  const created = hook.result.current.nodes.find(
+    (node) => node.data.kind === 'video'
+  )
+  expect(created).toBeDefined()
+  expect(created?.data.label).toBe('kling-v1 · video')
+  expect(created?.data.ref).toEqual({
+    taskId: 'task-5',
+    taskArtifactKey: 'out-5',
+  })
   expect(hook.result.current.edges).toContainEqual(
     expect.objectContaining({ source: 't1', target: created?.id })
   )

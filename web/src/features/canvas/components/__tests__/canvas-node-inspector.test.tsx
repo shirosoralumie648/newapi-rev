@@ -235,8 +235,8 @@ test('configures the generation parameters and group of a task step', async () =
   render(
     <CanvasNodeInspector
       groups={[
-        { label: 'default', value: 'default' },
-        { label: 'vip', value: 'vip' },
+        { label: 'default', value: 'default', ratio: 1 },
+        { label: 'vip', value: 'vip', ratio: 1 },
       ]}
       models={[{ label: 'gpt-image-1', value: 'gpt-image-1' }]}
       node={makeNode({

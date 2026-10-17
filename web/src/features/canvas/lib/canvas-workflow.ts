@@ -71,9 +71,22 @@ export function isCanvasWorkflowStep(kind: CanvasNodeKind): boolean {
   return kind === 'model' || kind === 'task'
 }
 
-/** The terminal node that receives a durable generation task reference. */
+/** The terminal nodes that receive a durable generation task reference. */
 export function isCanvasWorkflowResult(kind: CanvasNodeKind): boolean {
-  return kind === 'task-result'
+  return kind === 'task-result' || kind === 'video' || kind === 'audio'
+}
+
+/**
+ * The result node kind one settled artifact fills: an image or an unknown
+ * type previews in a `task-result`, while video and audio get a node that
+ * plays the artifact through the controlled task artifact endpoint.
+ */
+export function canvasWorkflowResultKind(
+  artifactType?: string
+): CanvasNodeKind {
+  if (artifactType === 'video') return 'video'
+  if (artifactType === 'audio') return 'audio'
+  return 'task-result'
 }
 
 export function truncateCanvasWorkflowText(

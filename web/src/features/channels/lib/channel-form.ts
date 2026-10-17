@@ -82,6 +82,9 @@ function isOptionalProxyURL(value: string | undefined): boolean {
 export const HTTP_PROTOCOL_AUTO = 'auto'
 export const HTTP_PROTOCOL_HTTP1 = 'http1'
 export const MAX_HTTP2_CONNECTION_SHARDS = 8
+// Mirrors the backend bound in relaykit/dto: the per-channel first-token (TTFB)
+// window, in seconds.
+export const MAX_FIRST_TOKEN_TIMEOUT_SECONDS = 3600
 
 export function normalizeHttpProtocol(
   value: string | undefined | null
@@ -108,6 +111,21 @@ export function normalizeHttp2ConnectionShards(
     return MAX_HTTP2_CONNECTION_SHARDS
   }
   return value
+}
+
+// normalizeFirstTokenTimeout keeps the stored channel value inside the range
+// the backend accepts: whole seconds from zero (use the global default) up to
+// MAX_FIRST_TOKEN_TIMEOUT_SECONDS.
+export function normalizeFirstTokenTimeout(
+  value: number | undefined | null
+): number {
+  if (value == null || !Number.isFinite(value) || value <= 0) {
+    return 0
+  }
+  if (value > MAX_FIRST_TOKEN_TIMEOUT_SECONDS) {
+    return MAX_FIRST_TOKEN_TIMEOUT_SECONDS
+  }
+  return Math.floor(value)
 }
 
 function parseOptionalJson(value: string | undefined): unknown {
@@ -270,6 +288,12 @@ export const channelFormSchema = z
     http_protocol: z.enum(['auto', 'http1']).optional(),
     http2_connection_shards: z.number().int().optional(),
     tls_insecure_skip_verify: z.boolean().optional(),
+    first_token_timeout: z
+      .number()
+      .int()
+      .min(0)
+      .max(MAX_FIRST_TOKEN_TIMEOUT_SECONDS)
+      .optional(),
     pass_through_body_enabled: z.boolean().optional(),
     responses_websocket_enabled: z.boolean().optional(),
     system_prompt: z.string().optional(),
@@ -464,6 +488,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   http_protocol: HTTP_PROTOCOL_AUTO,
   http2_connection_shards: 1,
   tls_insecure_skip_verify: false,
+  first_token_timeout: 0,
   pass_through_body_enabled: false,
   responses_websocket_enabled: false,
   system_prompt: '',
@@ -511,6 +536,7 @@ export function transformChannelToFormDefaults(
     http_protocol: HTTP_PROTOCOL_AUTO as 'auto' | 'http1',
     http2_connection_shards: 1,
     tls_insecure_skip_verify: false,
+    first_token_timeout: 0,
     pass_through_body_enabled: false,
     responses_websocket_enabled: false,
     system_prompt: '',
@@ -533,6 +559,9 @@ export function transformChannelToFormDefaults(
         http_protocol: protocol,
         http2_connection_shards: protocol === HTTP_PROTOCOL_HTTP1 ? 1 : shards,
         tls_insecure_skip_verify: parsed.tls_insecure_skip_verify === true,
+        first_token_timeout: normalizeFirstTokenTimeout(
+          parsed.first_token_timeout
+        ),
         pass_through_body_enabled: parsed.pass_through_body_enabled || false,
         responses_websocket_enabled:
           parsed.responses_websocket_enabled === true,
@@ -694,6 +723,15 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
   }
   if (formData.tls_insecure_skip_verify === true) {
     settingObj.tls_insecure_skip_verify = true
+  }
+
+  // Omit zero so a channel without a window keeps inheriting the global
+  // STREAMING_FIRST_TOKEN_TIMEOUT default.
+  const firstTokenTimeout = normalizeFirstTokenTimeout(
+    formData.first_token_timeout
+  )
+  if (firstTokenTimeout > 0) {
+    settingObj.first_token_timeout = firstTokenTimeout
   }
 
   return JSON.stringify(settingObj)

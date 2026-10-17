@@ -183,6 +183,11 @@ func positiveUserSessionEnv(name string, fallback int) int {
 
 func initConstantEnv() {
 	constant.StreamingTimeout = GetEnvOrDefault("STREAMING_TIMEOUT", 300)
+	// StreamingFirstTokenTimeout bounds the wait for the first streamed data
+	// chunk after upstream response headers arrive. Zero keeps today's behavior:
+	// only STREAMING_TIMEOUT guards that wait, and channels may set their own
+	// first_token_timeout.
+	constant.StreamingFirstTokenTimeout = GetEnvOrDefault("STREAMING_FIRST_TOKEN_TIMEOUT", 0)
 	constant.DifyDebug = GetEnvOrDefaultBool("DIFY_DEBUG", true)
 	constant.MaxFileDownloadMB = GetEnvOrDefault("MAX_FILE_DOWNLOAD_MB", 64)
 	constant.StreamScannerMaxBufferMB = GetEnvOrDefault("STREAM_SCANNER_MAX_BUFFER_MB", 128)

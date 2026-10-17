@@ -119,7 +119,10 @@ func TestLoadTaskArtifactStoreConfigFallsBackToUpstream(t *testing.T) {
 	t.Setenv(TaskArtifactStoreS3PathStyleEnv, "true")
 	config = LoadTaskArtifactStoreConfig()
 
-	assert.Equal(t, TaskArtifactStoreModeUpstream, config.Mode)
+	// A complete configuration enables S3 mode (the mode fallback above only
+	// applies to an invalid or incomplete one); the loader still parses the
+	// S3 settings of that configuration.
+	assert.Equal(t, TaskArtifactStoreModeS3, config.Mode)
 	assert.Equal(t, "https://objects.example.com", config.S3.Endpoint)
 	assert.Equal(t, 600, config.S3PresignTTLSeconds)
 }

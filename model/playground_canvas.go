@@ -23,7 +23,6 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/setting/playground_setting"
 	"gorm.io/gorm"
 )
 
@@ -288,30 +287,33 @@ func CreatePlaygroundCanvasProject(userID int, project *PlaygroundCanvasProject,
 	}
 	created := false
 	err = DB.Transaction(func(tx *gorm.DB) error {
-		var user User
-		if err := lockForUpdate(tx).Where("id = ?", userID).First(&user).Error; err != nil {
+		policy, err := playgroundPolicyForUser(tx, userID)
+		if err != nil {
 			return err
 		}
-		policy := playground_setting.GetPlaygroundQuotaPolicy(user.Group)
-		var count int64
-		if err := tx.Model(&PlaygroundCanvasProject{}).Where("user_id = ?", userID).Count(&count).Error; err != nil {
+		// The account counter row serializes canvas capacity for the whole
+		// account, so concurrent creates cannot slip past the project or byte
+		// budget and the relay's quota settlement on the users row is not
+		// blocked by Playground writes.
+		usage, err := lockPlaygroundUserUsage(tx, userID)
+		if err != nil {
 			return err
 		}
-		if count >= int64(policy.CanvasUserMaxProjects) {
+		if usage.CanvasCount >= int64(policy.CanvasUserMaxProjects) {
 			return ErrPlaygroundCanvasLimit
 		}
-		var stored int64
-		if err := tx.Model(&PlaygroundCanvasProject{}).Where("user_id = ?", userID).
-			Select("COALESCE(SUM(document_bytes), 0)").Scan(&stored).Error; err != nil {
-			return err
-		}
-		if stored+int64(len(project.Document)) > policy.CanvasUserMaxBytes {
+		size := int64(len(project.Document))
+		if usage.CanvasBytes+size > policy.CanvasUserMaxBytes {
 			return ErrPlaygroundCanvasLimit
 		}
 		if err := tx.Create(project).Error; err != nil {
 			return err
 		}
 		if err := syncPlaygroundCanvasAssets(tx, userID, project.ID, attachmentIDs); err != nil {
+			return err
+		}
+		usage.apply(playgroundUserUsageDelta{CanvasCount: 1, CanvasBytes: size})
+		if err := savePlaygroundUserUsage(tx, usage); err != nil {
 			return err
 		}
 		created = true
@@ -339,6 +341,23 @@ func GetPlaygroundCanvasProject(userID int, id string) (*PlaygroundCanvasProject
 		return nil, err
 	}
 	return &project, nil
+}
+
+// lockPlaygroundCanvasProject acquires the canvas row a canvas-scoped child
+// resource (an attachment upload) belongs to. It runs inside the writer's
+// transaction so capacity checks and project deletion serialize against the
+// upload, and a foreign or missing canvas is rejected before any row is
+// written.
+func lockPlaygroundCanvasProject(tx *gorm.DB, userID int, canvasID string) error {
+	if userID <= 0 {
+		return ErrPlaygroundCanvasNotFound
+	}
+	var project PlaygroundCanvasProject
+	err := lockForUpdate(tx).Where("id = ? AND user_id = ?", canvasID, userID).First(&project).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ErrPlaygroundCanvasNotFound
+	}
+	return err
 }
 
 func ListPlaygroundCanvasProjects(userID int, offset, limit int) ([]PlaygroundCanvasProject, int64, error) {
@@ -393,13 +412,18 @@ func UpdatePlaygroundCanvasProject(userID int, id string, revision int64, input 
 				if err != nil {
 					return err
 				}
-				var stored int64
-				if err := tx.Model(&PlaygroundCanvasProject{}).Where("user_id = ? AND id <> ?", userID, id).
-					Select("COALESCE(SUM(document_bytes), 0)").Scan(&stored).Error; err != nil {
+				usage, err := lockPlaygroundUserUsage(tx, userID)
+				if err != nil {
 					return err
 				}
-				if stored+size > policy.CanvasUserMaxBytes {
+				// The counter holds every stored document, this project
+				// included, so only the replaced bytes are weighed for room.
+				if usage.CanvasBytes-project.DocumentBytes+size > policy.CanvasUserMaxBytes {
 					return ErrPlaygroundCanvasLimit
+				}
+				usage.apply(playgroundUserUsageDelta{CanvasBytes: size - project.DocumentBytes})
+				if err := savePlaygroundUserUsage(tx, usage); err != nil {
+					return err
 				}
 			}
 			updates["document"] = *input.Document
@@ -438,12 +462,20 @@ func DeletePlaygroundCanvasProject(userID int, id string) error {
 		if err != nil {
 			return err
 		}
+		usage, err := lockPlaygroundUserUsage(tx, userID)
+		if err != nil {
+			return err
+		}
 		// Deleting the canvas releases every attachment pin it held, so the
 		// orphan cleanup can collect images this board was the last user of.
 		if err := tx.Where("canvas_id = ? AND user_id = ?", id, userID).Delete(&PlaygroundCanvasAsset{}).Error; err != nil {
 			return err
 		}
-		return tx.Where("id = ? AND user_id = ?", id, userID).Delete(&PlaygroundCanvasProject{}).Error
+		if err := tx.Where("id = ? AND user_id = ?", id, userID).Delete(&PlaygroundCanvasProject{}).Error; err != nil {
+			return err
+		}
+		usage.apply(playgroundUserUsageDelta{CanvasCount: -1, CanvasBytes: -project.DocumentBytes})
+		return savePlaygroundUserUsage(tx, usage)
 	})
 }
 

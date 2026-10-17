@@ -20,6 +20,7 @@ import { useEffect, useState } from 'react'
 
 import { playgroundAttachmentContentUrl } from '../api'
 import {
+  getPlaygroundAttachmentDataUrl,
   getPlaygroundAttachmentObjectUrl,
   loadPlaygroundAttachment,
 } from '../lib/attachment-store'
@@ -28,18 +29,25 @@ import {
  * Resolves an attachment's preview through the owner-scoped content endpoint.
  * Callers pass IDs only, so a missing session or attachment simply renders the
  * placeholder and never fetches an unowned URL. Bytes are cached per id, so
- * the canvas node and the asset library share one download.
+ * the canvas node and the asset library share one download; a just-uploaded
+ * attachment renders from the primed copy until its object URL exists.
  */
 export function useAttachmentPreviewUrl(
   sessionId?: string,
   attachmentId?: string
 ): string | undefined {
   const [url, setUrl] = useState<string | undefined>(() =>
-    attachmentId ? getPlaygroundAttachmentObjectUrl(attachmentId) : undefined
+    attachmentId
+      ? (getPlaygroundAttachmentObjectUrl(attachmentId) ??
+        getPlaygroundAttachmentDataUrl(attachmentId))
+      : undefined
   )
 
   useEffect(() => {
-    if (url || !sessionId || !attachmentId) return
+    if (!sessionId || !attachmentId) return
+    // An object URL is the cheapest display form and is never refetched; a
+    // primed data URL shows immediately and is upgraded once by the download.
+    if (getPlaygroundAttachmentObjectUrl(attachmentId)) return
     let active = true
     void loadPlaygroundAttachment(
       playgroundAttachmentContentUrl(sessionId, attachmentId),
@@ -52,7 +60,7 @@ export function useAttachmentPreviewUrl(
     return () => {
       active = false
     }
-  }, [attachmentId, sessionId, url])
+  }, [attachmentId, sessionId])
 
   return url
 }

@@ -42,8 +42,12 @@ type PlaygroundResourceUsage struct {
 }
 
 // PlaygroundUsageForUser reports the caller's Playground storage against the
-// effective quota policy for the caller's group. It is read-only and never
-// mutates state.
+// effective quota policy for the caller's group. Every figure comes from the
+// account's counter row (playground_user_usage), the same counters the write
+// paths enforce, so the view cannot advertise room the server would refuse and
+// the read never aggregates the stored rows. An account that never wrote since
+// the counters were introduced is measured on the fly. It is read-only and
+// never mutates state.
 func PlaygroundUsageForUser(userID int) (*PlaygroundResourceUsage, error) {
 	policy, err := PlaygroundQuotaPolicyForUser(userID)
 	if err != nil {
@@ -71,53 +75,21 @@ func PlaygroundUsageForUser(userID int) (*PlaygroundResourceUsage, error) {
 		},
 	}
 
-	if err := DB.Model(&PlaygroundSession{}).Where("user_id = ?", userID).Count(&usage.Sessions.Used).Error; err != nil {
+	counters, err := playgroundUserUsageCounters(userID)
+	if err != nil {
 		return nil, err
 	}
+	usage.Sessions.Used = counters.Sessions
+	usage.Attachments.Used = counters.AttachmentCount
+	usage.Attachments.UsedBytes = counters.AttachmentBytes
+	usage.Artifacts.Used = counters.ArtifactCount
+	usage.Artifacts.UsedBytes = counters.ArtifactBytes
+	usage.Canvas.Used = counters.CanvasCount
+	usage.Canvas.UsedBytes = counters.CanvasBytes
 
-	var attachments struct {
-		Used      int64
-		UsedBytes int64
-	}
-	if err := DB.Model(&PlaygroundAttachment{}).Where("user_id = ?", userID).
-		Select("COUNT(*) AS used, COALESCE(SUM(byte_size), 0) AS used_bytes").Scan(&attachments).Error; err != nil {
-		return nil, err
-	}
-	usage.Attachments.Used = attachments.Used
-	usage.Attachments.UsedBytes = attachments.UsedBytes
-
-	// Only live artifacts count: a tombstoned artifact has had its versions
-	// removed, so it no longer occupies the account budget.
-	var artifacts struct {
-		Used int64
-	}
-	if err := DB.Model(&PlaygroundArtifact{}).Where("user_id = ? AND deleted_at = 0", userID).
-		Select("COUNT(*) AS used").Scan(&artifacts).Error; err != nil {
-		return nil, err
-	}
-	usage.Artifacts.Used = artifacts.Used
-
-	artifactIDs := DB.Model(&PlaygroundArtifact{}).Select("id").Where("user_id = ?", userID)
-	var artifactBytes struct {
-		UsedBytes int64
-	}
-	if err := DB.Model(&PlaygroundArtifactVersion{}).Where("artifact_id IN (?)", artifactIDs).
-		Select("COALESCE(SUM(byte_size), 0) AS used_bytes").Scan(&artifactBytes).Error; err != nil {
-		return nil, err
-	}
-	usage.Artifacts.UsedBytes = artifactBytes.UsedBytes
-
-	var canvas struct {
-		Used      int64
-		UsedBytes int64
-	}
-	if err := DB.Model(&PlaygroundCanvasProject{}).Where("user_id = ?", userID).
-		Select("COUNT(*) AS used, COALESCE(SUM(document_bytes), 0) AS used_bytes").Scan(&canvas).Error; err != nil {
-		return nil, err
-	}
-	usage.Canvas.Used = canvas.Used
-	usage.Canvas.UsedBytes = canvas.UsedBytes
-
+	// Async generation tasks live outside the Playground tables: their rows are
+	// created, polled and finished by the relay and task pipeline, so the two
+	// task metrics are still measured directly inside the owner scope.
 	activeTasks, err := CountActivePlaygroundTasks(userID)
 	if err != nil {
 		return nil, err

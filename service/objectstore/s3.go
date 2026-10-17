@@ -280,11 +280,10 @@ func prepareUpload(ctx context.Context, body io.Reader) (*uploadStream, error) {
 			_ = os.Remove(file.Name())
 		},
 	}
-	if _, err := copyWithContext(ctx, file, body); err != nil {
-		upload.Close()
-		return nil, fmt.Errorf("object store: spool upload: %w", err)
-	}
-	size, err := seekableLength(file)
+	// The spooled length is the number of bytes just written: the file is at
+	// its end after the copy, so measuring from the current position would
+	// report zero and upload an empty object.
+	written, err := copyWithContext(ctx, file, body)
 	if err != nil {
 		upload.Close()
 		return nil, fmt.Errorf("object store: spool upload: %w", err)
@@ -294,7 +293,7 @@ func prepareUpload(ctx context.Context, body io.Reader) (*uploadStream, error) {
 		return nil, fmt.Errorf("object store: spool upload: %w", err)
 	}
 	upload.ReadSeeker = file
-	upload.size = size
+	upload.size = written
 	return upload, nil
 }
 

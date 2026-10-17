@@ -41,6 +41,9 @@ export const CANVAS_NODE_KINDS = [
   'model',
   'task',
   'task-result',
+  'video',
+  'audio',
+  'group',
 ] as const
 
 // Translation keys for the node kinds. The values double as English source
@@ -57,7 +60,41 @@ export const CANVAS_NODE_KIND_LABELS: Record<CanvasNodeKind, string> = {
   model: 'Model call',
   task: 'Task',
   'task-result': 'Task result',
+  video: 'Video',
+  audio: 'Audio',
+  group: 'Group',
 }
+
+// Editing operations that change the graph (copy/paste and grouping). The
+// clipboard is editor-local: it never claims the system clipboard, and a paste
+// always re-creates node ids so a pasted node can never collide with the one it
+// was copied from.
+export const CANVAS_PASTE_OFFSET = 32
+
+// A group box is drawn around its children with this padding; the children are
+// stored relative to the box, so moving the box moves them all.
+export const CANVAS_GROUP_PADDING = 32
+// Fallback footprint of one node while the browser has not measured it yet, so
+// grouping still produces a box that contains the nodes.
+export const CANVAS_NODE_ESTIMATED_WIDTH = 256
+export const CANVAS_NODE_ESTIMATED_HEIGHT = 140
+// Nested groups are not created by the editor (an imported board may contain
+// them, so traversals stay bounded).
+export const CANVAS_GROUP_MAX_DEPTH = 8
+
+// Files dropped on the pane are uploaded into the canvas' own attachment
+// partition and become one attachment node each, laid out to the right of the
+// drop point. The server re-validates the same bounds.
+export const CANVAS_DROP_NODE_OFFSET_X = 300
+export const CANVAS_DROP_MESSAGES = {
+  UNSUPPORTED_TYPE: 'Only image attachments can be added to the canvas.',
+  TOO_MANY: 'Add at most {{count}} images at a time.',
+  UPLOAD_FAILED: 'The image could not be added to the canvas.',
+} as const
+
+export const CANVAS_EDIT_MESSAGES = {
+  PASTE_NO_ROOM: 'The canvas is full; the selection could not be pasted.',
+} as const
 
 // Workflow run bounds. The resolved input, model output and failure summary a
 // node stores stay small so a board with workflow steps keeps far below the

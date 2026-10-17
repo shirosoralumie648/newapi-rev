@@ -63,6 +63,7 @@ export const API_ENDPOINTS = {
   USER_MODELS: '/api/user/models',
   USER_GROUPS: '/api/user/self/groups',
   PLAYGROUND_SESSIONS: '/api/playground/sessions',
+  PLAYGROUND_CANVASES: '/api/playground/canvases',
   PLAYGROUND_PRESETS: '/api/playground/presets',
   PLAYGROUND_USAGE: '/api/playground/usage',
   PLAYGROUND_MESSAGE_COSTS: '/api/playground/message-costs',

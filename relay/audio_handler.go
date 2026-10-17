@@ -67,6 +67,14 @@ func AudioHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		service.ResetStatusCode(newAPIError, statusCodeMappingStr)
 		return newAPIError
 	}
+
+	if firstTokenErr := helper.FirstTokenTimeoutError(info); firstTokenErr != nil {
+		// The channel never sent a first chunk and nothing reached the client,
+		// so the relay may fall back to another channel.
+		service.ResetStatusCode(firstTokenErr, statusCodeMappingStr)
+		return firstTokenErr
+	}
+
 	if usage.(*dto.Usage).CompletionTokenDetails.AudioTokens > 0 || usage.(*dto.Usage).PromptTokensDetails.AudioTokens > 0 {
 		service.PostAudioConsumeQuota(c, info, usage.(*dto.Usage), nil)
 	} else {

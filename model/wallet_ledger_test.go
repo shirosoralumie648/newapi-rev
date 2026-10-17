@@ -641,16 +641,20 @@ func useWalletOverdraftLimit(t *testing.T, usd float64, groupOverrides map[strin
 func TestWalletDebtSettleRespectsOverdraftLimit(t *testing.T) {
 	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
 		useWalletOverdraftLimit(t, 0.02, nil)
-		require.NoError(t, db.Create(&User{Id: 201, Username: "debt-settle", AffCode: "debt-settle", Quota: 5_000, Group: "default", Status: common.UserStatusEnabled}).Error)
+		createWalletLedgerWallet(t, db, &User{Id: 201, Username: "debt-settle", AffCode: "debt-settle", Quota: 5_000, Group: "default", Status: common.UserStatusEnabled})
 
 		// A pre-consume of the whole balance, then a settlement 3_000 above the
-		// reservation: the credit line (10_000) still covers it.
+		// reservation: the credit line (10_000) still covers it. Each wallet
+		// movement is recorded in the consumption ledger exactly as the service
+		// funding source records it.
 		reserved, err := TryReserveUserQuota(201, 5_000, "debt-settle-a")
 		require.NoError(t, err)
 		require.True(t, reserved)
+		RecordWalletConsumeDelta(201, -5_000)
 		charged, err := SettleWalletHold(201, "debt-settle-a", 3_000)
 		require.NoError(t, err)
 		assert.EqualValues(t, 3_000, charged)
+		RecordWalletConsumeDelta(201, -charged)
 		balance, err := GetUserQuota(201, true)
 		require.NoError(t, err)
 		assert.Equal(t, -3_000, balance)
@@ -666,6 +670,7 @@ func TestWalletDebtSettleRespectsOverdraftLimit(t *testing.T) {
 		charged, err = SettleWalletHold(201, "debt-settle-b", 8_000)
 		require.NoError(t, err)
 		assert.EqualValues(t, 7_000, charged)
+		RecordWalletConsumeDelta(201, -charged)
 		balance, err = GetUserQuota(201, true)
 		require.NoError(t, err)
 		assert.Equal(t, -10_000, balance, "the wallet never goes below its credit line")
@@ -695,19 +700,31 @@ func TestWalletDebtSettleRespectsOverdraftLimit(t *testing.T) {
 func TestWalletDebtConcurrentChargesStayWithinOverdraftLimit(t *testing.T) {
 	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
 		useWalletOverdraftLimit(t, 0.02, nil) // 10_000 quota
-		require.NoError(t, db.Create(&User{Id: 211, Username: "debt-concurrent", AffCode: "debt-concurrent", Quota: 0, Group: "default", Status: common.UserStatusEnabled}).Error)
+		createWalletLedgerWallet(t, db, &User{Id: 211, Username: "debt-concurrent", AffCode: "debt-concurrent", Quota: 0, Group: "default", Status: common.UserStatusEnabled})
 
 		const charges = 5
 		const chargeQuota = 4_000
-		var wg sync.WaitGroup
+		var (
+			mu      sync.Mutex
+			applied int64
+			wg      sync.WaitGroup
+		)
 		for i := range charges {
 			wg.Go(func() {
-				if _, err := SettleWalletHold(211, fmt.Sprintf("debt-concurrent-%d", i), chargeQuota); err != nil {
+				charged, err := SettleWalletHold(211, fmt.Sprintf("debt-concurrent-%d", i), chargeQuota)
+				if err != nil {
 					t.Errorf("concurrent settlement %d failed: %v", i, err)
+					return
 				}
+				mu.Lock()
+				applied += charged
+				mu.Unlock()
 			})
 		}
 		wg.Wait()
+		// The service funding source records exactly the wallet movement of
+		// every settlement in the consumption ledger.
+		RecordWalletConsumeDelta(211, -applied)
 
 		balance, err := GetUserQuota(211, true)
 		require.NoError(t, err)

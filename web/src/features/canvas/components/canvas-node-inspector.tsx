@@ -90,7 +90,8 @@ export function CanvasNodeInspector(props: CanvasNodeInspectorProps) {
   const editable =
     node.data.kind === 'text' ||
     node.data.kind === 'prompt' ||
-    node.data.kind === 'note'
+    node.data.kind === 'note' ||
+    node.data.kind === 'group'
 
   const commitDraft = () => {
     const text = draft.trim()

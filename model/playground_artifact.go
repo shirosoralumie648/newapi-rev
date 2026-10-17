@@ -240,7 +240,7 @@ func validatePlaygroundArtifactSource(tx *gorm.DB, session *PlaygroundSession, s
 	return nil
 }
 
-func checkPlaygroundArtifactCapacity(tx *gorm.DB, userID int, sessionID, artifactID string, addedBytes int64, creating bool, policy playground_setting.PlaygroundQuotaPolicy) error {
+func checkPlaygroundArtifactCapacity(tx *gorm.DB, userID int, sessionID, artifactID string, addedBytes int64, creating bool, policy playground_setting.PlaygroundQuotaPolicy, usage *PlaygroundUserUsage) error {
 	if addedBytes > policy.ArtifactContentMaxBytes {
 		return ErrPlaygroundArtifactLimit
 	}
@@ -256,23 +256,21 @@ func checkPlaygroundArtifactCapacity(tx *gorm.DB, userID int, sessionID, artifac
 		if records >= int64(policy.ArtifactSessionMaxRecords) || active >= int64(policy.ArtifactSessionMaxCount) {
 			return ErrPlaygroundArtifactLimit
 		}
-		var accountActive int64
-		if err := tx.Model(&PlaygroundArtifact{}).Where("user_id = ? AND deleted_at = 0", userID).Count(&accountActive).Error; err != nil {
-			return err
-		}
-		if accountActive >= int64(policy.ArtifactUserMaxCount) {
+		// The account-level count and byte budget come from the locked counter
+		// row, which never aggregates the stored artifacts of the account.
+		if usage.ArtifactCount >= int64(policy.ArtifactUserMaxCount) {
 			return ErrPlaygroundArtifactLimit
 		}
 	} else {
-		var usage struct {
+		var usageCount struct {
 			Count int64
 			Bytes int64
 		}
 		if err := tx.Model(&PlaygroundArtifactVersion{}).Where("artifact_id = ?", artifactID).
-			Select("COUNT(*) AS count, COALESCE(SUM(byte_size), 0) AS bytes").Scan(&usage).Error; err != nil {
+			Select("COUNT(*) AS count, COALESCE(SUM(byte_size), 0) AS bytes").Scan(&usageCount).Error; err != nil {
 			return err
 		}
-		if usage.Count >= int64(policy.ArtifactMaxVersions) || usage.Bytes+addedBytes > policy.ArtifactMaxBytes {
+		if usageCount.Count >= int64(policy.ArtifactMaxVersions) || usageCount.Bytes+addedBytes > policy.ArtifactMaxBytes {
 			return ErrPlaygroundArtifactLimit
 		}
 	}
@@ -284,15 +282,7 @@ func checkPlaygroundArtifactCapacity(tx *gorm.DB, userID int, sessionID, artifac
 	if bytes+addedBytes > policy.ArtifactSessionMaxBytes {
 		return ErrPlaygroundArtifactLimit
 	}
-	// The account-level budget is the second half of the unified Playground
-	// usage view; per-session sums can still grow past it across conversations.
-	accountArtifacts := tx.Model(&PlaygroundArtifact{}).Where("user_id = ?", userID)
-	var accountBytes int64
-	if err := tx.Model(&PlaygroundArtifactVersion{}).Where("artifact_id IN (?)", accountArtifacts.Select("id")).
-		Select("COALESCE(SUM(byte_size), 0)").Scan(&accountBytes).Error; err != nil {
-		return err
-	}
-	if accountBytes+addedBytes > policy.ArtifactUserMaxBytes {
+	if usage.ArtifactBytes+addedBytes > policy.ArtifactUserMaxBytes {
 		return ErrPlaygroundArtifactLimit
 	}
 	return nil
@@ -351,6 +341,10 @@ func CreatePlaygroundArtifact(userID int, sessionID string, input CreatePlaygrou
 		if err != nil {
 			return err
 		}
+		usage, err := lockPlaygroundUserUsage(tx, userID)
+		if err != nil {
+			return err
+		}
 		// Tombstones must be distinguished from a key that has never existed.
 		var count int64
 		if err := tx.Model(&PlaygroundArtifact{}).Where("user_id = ? AND create_request_key = ?", userID, playgroundArtifactHash(input.RequestID)).Count(&count).Error; err != nil {
@@ -363,7 +357,7 @@ func CreatePlaygroundArtifact(userID int, sessionID string, input CreatePlaygrou
 		if err := validatePlaygroundArtifactSource(tx, session, input.Source); err != nil {
 			return err
 		}
-		if err := checkPlaygroundArtifactCapacity(tx, userID, sessionID, "", int64(len(*input.Content)), true, policy); err != nil {
+		if err := checkPlaygroundArtifactCapacity(tx, userID, sessionID, "", int64(len(*input.Content)), true, policy, usage); err != nil {
 			return err
 		}
 		key, err := common.GenerateRandomCharsKey(24)
@@ -382,7 +376,11 @@ func CreatePlaygroundArtifact(userID int, sessionID string, input CreatePlaygrou
 			return err
 		}
 		result, err = appendPlaygroundArtifactVersion(tx, &artifact, input.RequestID, fingerprint, input.Title, input.Language, *input.Content, "")
-		return err
+		if err != nil {
+			return err
+		}
+		usage.apply(playgroundUserUsageDelta{ArtifactCount: 1, ArtifactBytes: int64(len(*input.Content))})
+		return savePlaygroundUserUsage(tx, usage)
 	})
 	if err != nil && !isPlaygroundArtifactDomainError(err) {
 		// PostgreSQL aborts a transaction after a uniqueness violation. Replay
@@ -448,6 +446,10 @@ func writePlaygroundArtifactVersion(userID int, sessionID, artifactID, requestID
 		if _, err := lockPlaygroundArtifactSession(tx, userID, sessionID); err != nil {
 			return err
 		}
+		usage, err := lockPlaygroundUserUsage(tx, userID)
+		if err != nil {
+			return err
+		}
 		artifact, err := lockPlaygroundArtifact(tx, userID, sessionID, artifactID)
 		if err != nil {
 			return err
@@ -469,11 +471,15 @@ func writePlaygroundArtifactVersion(userID int, sessionID, artifactID, requestID
 		if artifact.Revision != revision {
 			return ErrPlaygroundConflict
 		}
-		if err := checkPlaygroundArtifactCapacity(tx, userID, sessionID, artifactID, int64(len(content)), false, policy); err != nil {
+		if err := checkPlaygroundArtifactCapacity(tx, userID, sessionID, artifactID, int64(len(content)), false, policy, usage); err != nil {
 			return err
 		}
 		result, err = appendPlaygroundArtifactVersion(tx, artifact, requestID, fingerprint, title, language, content, restoreID)
-		return err
+		if err != nil {
+			return err
+		}
+		usage.apply(playgroundUserUsageDelta{ArtifactBytes: int64(len(content))})
+		return savePlaygroundUserUsage(tx, usage)
 	})
 	if err != nil && !isPlaygroundArtifactDomainError(err) {
 		replayErr := DB.Transaction(func(tx *gorm.DB) error {
@@ -604,6 +610,10 @@ func DeletePlaygroundArtifact(userID int, sessionID, artifactID string, revision
 		if _, err := lockPlaygroundArtifactSession(tx, userID, sessionID); err != nil {
 			return err
 		}
+		usage, err := lockPlaygroundUserUsage(tx, userID)
+		if err != nil {
+			return err
+		}
 		var artifact PlaygroundArtifact
 		if err := lockForUpdate(tx).Where("id = ? AND user_id = ? AND session_id = ?", artifactID, userID, sessionID).First(&artifact).Error; err != nil {
 			return err
@@ -617,6 +627,15 @@ func DeletePlaygroundArtifact(userID int, sessionID, artifactID string, revision
 		if artifact.Revision != revision {
 			return ErrPlaygroundConflict
 		}
+		// The versions about to be removed are the artifact's whole byte
+		// footprint, so the account counter loses exactly those bytes.
+		var storedBytes struct {
+			UsedBytes int64
+		}
+		if err := tx.Model(&PlaygroundArtifactVersion{}).Where("artifact_id = ?", artifact.ID).
+			Select("COALESCE(SUM(byte_size), 0) AS used_bytes").Scan(&storedBytes).Error; err != nil {
+			return err
+		}
 		if err := tx.Where("artifact_id = ?", artifact.ID).Delete(&PlaygroundArtifactVersion{}).Error; err != nil {
 			return err
 		}
@@ -629,6 +648,7 @@ func DeletePlaygroundArtifact(userID int, sessionID, artifactID string, revision
 		if updated.RowsAffected != 1 {
 			return ErrPlaygroundConflict
 		}
-		return nil
+		usage.apply(playgroundUserUsageDelta{ArtifactCount: -1, ArtifactBytes: -storedBytes.UsedBytes})
+		return savePlaygroundUserUsage(tx, usage)
 	})
 }
