@@ -7659,6 +7659,20 @@
     "Playground system prompt limit exceeded.": "Limite de taille de l'invite système Playground dépassée.",
     "Assistant preset name must contain 1 to 100 characters.": "Le nom de l'assistant prédéfini doit contenir entre 1 et 100 caractères.",
     "Assistant preset avatar must be an emoji or an http(s) image URL.": "L'avatar de l'assistant prédéfini doit être un emoji ou une URL d'image http(s).",
-    "Invalid assistant preset.": "Assistant prédéfini invalide."
+    "Invalid assistant preset.": "Assistant prédéfini invalide.",
+    "Instruction": "Instruction",
+    "Type @ to reference a connected resource.": "Saisissez @ pour référencer une ressource connectée.",
+    "Insert reference": "Insérer une référence",
+    "Connected resources": "Ressources connectées",
+    "Canvas group": "Groupe du canevas",
+    "Channel default": "Valeur par défaut du canal",
+    "Quality": "Qualité",
+    "Video size": "Taille de la vidéo",
+    "Retry generation": "Relancer la génération",
+    "Reference images": "Images de référence",
+    "The canvas is full; the run could not add a result node.": "Le canevas est plein ; l'exécution n'a pas pu ajouter de nœud de résultat.",
+    "The step that produced this result is no longer on the canvas.": "L'étape qui a produit ce résultat n'est plus sur le canevas.",
+    "A connected reference image could not be read.": "Une image de référence connectée n'a pas pu être lue.",
+    "A connected reference image is larger than the 8 MiB limit.": "Une image de référence connectée dépasse la limite de 8 Mio."
   }
 }

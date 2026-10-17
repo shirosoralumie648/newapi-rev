@@ -1020,4 +1020,23 @@ export const STATIC_I18N_KEYS = [
   'Hourly Consumption',
   'Chargeback',
   'Storage Fee',
+  // Canvas workflow run messages: the run reports these keys from constants,
+  // so the literal scan cannot see them.
+  'The canvas is full; the run could not add a result node.',
+  'The step that produced this result is no longer on the canvas.',
+  'A connected reference image could not be read.',
+  'A connected reference image is larger than the 8 MiB limit.',
+  // Canvas node kind and generation labels render through t(label) from
+  // CANVAS_NODE_KIND_LABELS / CANVAS_WORKFLOW_GENERATION_LABELS.
+  'Text',
+  'Note',
+  'Prompt',
+  'Message',
+  'Attachment',
+  'Image',
+  'Artifact',
+  'Model call',
+  'Task',
+  'Task result',
+  'Video',
 ] as const

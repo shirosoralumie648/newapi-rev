@@ -61,16 +61,26 @@ export type CanvasNodeWorkflowState = {
   generation?: CanvasWorkflowGenerationKind
   /** Image size used by an image generation step. */
   size?: string
+  /** Image quality (relay `quality`) used by an image generation step. */
+  quality?: string
+  /** Requested image count (relay `n`) of an image generation step. */
+  imageCount?: number
   /** Video duration in seconds used by a video generation step. */
   duration?: number
+  /** User group the step runs in; empty means the canvas group. */
+  group?: string
   /** Input text resolved on the last attempt, reused by retry. */
   inputText?: string
+  /** Reference images the last attempt read from connected nodes. */
+  inputImageCount?: number
   /** Bounded text output of a model call. */
   output?: string
   /** Number of images the last image generation returned. */
-  imageCount?: number
+  resultImageCount?: number
   /** Public id of the durable generation task the step submitted. */
   taskId?: string
+  /** Canvas-local id of the step that produced a result node. */
+  sourceNodeId?: string
   /** Bounded failure message of the last attempt. */
   error?: string
   /** Attempts made so far, so a retry keeps its history count. */

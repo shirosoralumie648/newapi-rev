@@ -17,11 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
-import { useCallback, useState } from 'react'
-import { afterEach, expect, test, vi } from 'vitest'
+import { useCallback, useRef, useState } from 'react'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
+import { clearPlaygroundAttachmentCache } from '@/features/playground/lib/attachment-store'
 import { api } from '@/lib/api'
 
+import { CANVAS_WORKFLOW_MESSAGES } from '../../constants'
 import { CANVAS_WORKFLOW_ERRORS } from '../../lib/canvas-workflow'
 import type {
   CanvasFlowEdge,
@@ -32,8 +34,23 @@ import type {
 import type { CanvasNodeDataUpdate } from '../use-canvas-editor'
 import { useCanvasWorkflowRunner } from '../use-canvas-workflow-runner'
 
+beforeEach(() => {
+  clearPlaygroundAttachmentCache()
+  if (typeof URL.createObjectURL !== 'function') {
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: () => 'blob:test',
+    })
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      value: () => undefined,
+    })
+  }
+})
+
 afterEach(() => {
   cleanup()
+  clearPlaygroundAttachmentCache()
   vi.restoreAllMocks()
   vi.useRealTimers()
 })
@@ -135,32 +152,67 @@ async function flushWorkflowMicrotasks() {
 
 /**
  * Mirrors the editor contract the runner relies on: node data updates are
- * applied functionally to the latest state and the hook receives the result.
+ * applied functionally to the latest state, a linked node joins the graph
+ * immediately, and the hook receives both results.
  */
 function useRunnerHarness(
   initialNodes: CanvasFlowNode[],
   initialEdges: CanvasFlowEdge[],
-  group = 'default'
+  group = 'default',
+  nodeLimit = Number.POSITIVE_INFINITY
 ) {
   const [nodes, setNodes] = useState(initialNodes)
+  const [edges, setEdges] = useState(initialEdges)
+  const nodesRef = useRef(initialNodes)
+  const edgesRef = useRef(initialEdges)
   const updateNodeData = useCallback(
     (id: string, update: CanvasNodeDataUpdate) => {
-      setNodes((current) =>
-        current.map((node) => {
-          if (node.id !== id) return node
-          const patch =
-            typeof update === 'function' ? update(node.data) : update
-          return { ...node, data: { ...node.data, ...patch } }
-        })
-      )
+      const next = nodesRef.current.map((node) => {
+        if (node.id !== id) return node
+        const patch = typeof update === 'function' ? update(node.data) : update
+        return { ...node, data: { ...node.data, ...patch } }
+      })
+      nodesRef.current = next
+      setNodes(next)
     },
     []
   )
+  const addLinkedNode = useCallback(
+    (
+      kind: CanvasNodeData['kind'],
+      sourceId: string,
+      data: Partial<CanvasNodeData>
+    ): string | null => {
+      if (nodesRef.current.length >= nodeLimit) return null
+      const id = `auto-${nodesRef.current.length + 1}`
+      const source = nodesRef.current.find((node) => node.id === sourceId)
+      const nextNodes = [
+        ...nodesRef.current,
+        {
+          id,
+          type: kind,
+          position: { x: (source?.position.x ?? 0) + 340, y: 0 },
+          data: { kind, ...data },
+        },
+      ]
+      const nextEdges = [
+        ...edgesRef.current,
+        { id: `edge-${id}`, source: sourceId, target: id },
+      ]
+      nodesRef.current = nextNodes
+      edgesRef.current = nextEdges
+      setNodes(nextNodes)
+      setEdges(nextEdges)
+      return id
+    },
+    [nodeLimit]
+  )
   const runner = useCanvasWorkflowRunner({
     nodes,
-    edges: initialEdges,
+    edges,
     group,
     updateNodeData,
+    addLinkedNode,
   })
   return { nodes, runner }
 }
@@ -216,8 +268,9 @@ test('runs a model step into an image step and keeps the preview in memory', asy
   const task = hook.result.current.nodes.find((node) => node.id === 't1')
   expect(task?.data.workflow).toMatchObject({
     status: 'succeeded',
-    imageCount: 1,
+    resultImageCount: 1,
   })
+  expect(task?.data.workflow?.inputText).toBe('fox prompt')
   expect(hook.result.current.runner.results.t1).toEqual([
     'https://cdn.example.com/fox.png',
   ])
@@ -276,7 +329,7 @@ test('a failed step stops the run until it is retried from that step', async () 
   })
   expect(
     hook.result.current.nodes.find((node) => node.id === 't1')?.data.workflow
-  ).toMatchObject({ status: 'succeeded', imageCount: 1 })
+  ).toMatchObject({ status: 'succeeded', resultImageCount: 1 })
 })
 
 test('a video step waits for the durable row and fills the task result node', async () => {
@@ -412,4 +465,395 @@ test('a task left running on load settles from its durable row', async () => {
     taskId: 'task-7',
     taskArtifactKey: 'out-7',
   })
+})
+
+test('links a result node to a step that had none', async () => {
+  vi.spyOn(api, 'post').mockImplementation(async (url) => {
+    if (url === '/pg/images/generations') {
+      return {
+        data: {
+          created: 1,
+          data: [{ url: 'https://cdn.example.com/fox.png' }],
+        },
+      }
+    }
+    throw new Error(`Unexpected POST ${url}`)
+  })
+  const chain = imageChain()
+  const hook = renderHook(() =>
+    useRunnerHarness(
+      chain.nodes.filter((node) => node.id !== 'r1'),
+      chain.edges.filter((edge) => edge.target !== 'r1')
+    )
+  )
+
+  act(() => hook.result.current.runner.run())
+  await waitFor(() => expect(hook.result.current.runner.phase).toBe('idle'))
+
+  const created = hook.result.current.nodes.find(
+    (node) => node.data.kind === 'task-result'
+  )
+  expect(created).toBeDefined()
+  expect(created?.data.label).toBe('gpt-image-1 · Image')
+  expect(created?.data.workflow).toMatchObject({
+    status: 'succeeded',
+    model: 'gpt-image-1',
+    generation: 'image',
+    inputText: 'fox prompt',
+    sourceNodeId: 't1',
+  })
+  expect(created?.data.ref).toBeUndefined()
+  expect(hook.result.current.edges).toContainEqual(
+    expect.objectContaining({ source: 't1', target: created?.id })
+  )
+})
+
+test('sends the configured generation parameters in the step group', async () => {
+  const post = vi.spyOn(api, 'post').mockImplementation(async (url) => {
+    if (url === '/pg/images/generations') {
+      return {
+        data: {
+          created: 1,
+          data: [{ url: 'https://cdn.example.com/fox.png' }],
+        },
+      }
+    }
+    throw new Error(`Unexpected POST ${url}`)
+  })
+  const hook = renderHook(() =>
+    useRunnerHarness(
+      [
+        graphNode('p1', 'prompt', { text: 'a red fox' }),
+        graphNode('t1', 'task', {
+          workflow: {
+            model: 'gpt-image-1',
+            generation: 'image',
+            size: '1792x1024',
+            quality: 'high',
+            imageCount: 3,
+            group: 'vip',
+          },
+        }),
+      ],
+      [{ id: 'e1', source: 'p1', target: 't1' }],
+      'default'
+    )
+  )
+
+  act(() => hook.result.current.runner.run())
+  await waitFor(() => expect(hook.result.current.runner.phase).toBe('idle'))
+
+  expect(post).toHaveBeenCalledWith(
+    '/pg/images/generations',
+    expect.objectContaining({
+      model: 'gpt-image-1',
+      prompt: 'a red fox',
+      group: 'vip',
+      size: '1792x1024',
+      quality: 'high',
+      n: 3,
+    }),
+    expect.anything()
+  )
+  const created = hook.result.current.nodes.find(
+    (node) => node.data.kind === 'task-result'
+  )
+  expect(created?.data.workflow).toMatchObject({
+    group: 'vip',
+    size: '1792x1024',
+    quality: 'high',
+    imageCount: 3,
+    inputText: 'a red fox',
+  })
+})
+
+test('retries a result node through the step that produced it', async () => {
+  const post = vi.spyOn(api, 'post').mockImplementation(async (url) => {
+    if (url === '/pg/images/generations') {
+      return {
+        data: {
+          created: 1,
+          data: [{ url: 'https://cdn.example.com/fox.png' }],
+        },
+      }
+    }
+    if (url === '/pg/chat/completions') {
+      return {
+        data: {
+          choices: [{ message: { role: 'assistant', content: 'fox prompt' } }],
+        },
+      }
+    }
+    throw new Error(`Unexpected POST ${url}`)
+  })
+  const chain = imageChain()
+  const hook = renderHook(() => useRunnerHarness(chain.nodes, chain.edges))
+
+  act(() => hook.result.current.runner.run())
+  await waitFor(() => expect(hook.result.current.runner.phase).toBe('idle'))
+  expect(post).toHaveBeenCalledTimes(2)
+
+  act(() => hook.result.current.runner.retry('r1'))
+  await waitFor(() => expect(hook.result.current.runner.phase).toBe('idle'))
+
+  expect(post).toHaveBeenCalledTimes(3)
+  expect(post).toHaveBeenLastCalledWith(
+    '/pg/images/generations',
+    expect.objectContaining({ model: 'gpt-image-1', prompt: 'fox prompt' }),
+    expect.anything()
+  )
+})
+
+test('refuses to retry a result whose step left the board', () => {
+  const post = vi.spyOn(api, 'post').mockImplementation(() => {
+    throw new Error('Unexpected POST')
+  })
+  const hook = renderHook(() =>
+    useRunnerHarness(
+      [
+        graphNode('r1', 'task-result', {
+          workflow: { sourceNodeId: 'gone', model: 'kling-v1' },
+        }),
+      ],
+      []
+    )
+  )
+
+  act(() => hook.result.current.runner.retry('r1'))
+
+  expect(hook.result.current.runner.message).toBe(
+    CANVAS_WORKFLOW_MESSAGES.RETRY_SOURCE_MISSING
+  )
+  expect(hook.result.current.runner.phase).toBe('idle')
+  expect(post).not.toHaveBeenCalled()
+})
+
+test('reports a full canvas without failing the generation', async () => {
+  vi.spyOn(api, 'post').mockImplementation(async (url) => {
+    if (url === '/pg/images/generations') {
+      return {
+        data: {
+          created: 1,
+          data: [{ url: 'https://cdn.example.com/fox.png' }],
+        },
+      }
+    }
+    throw new Error(`Unexpected POST ${url}`)
+  })
+  const hook = renderHook(() =>
+    useRunnerHarness(
+      [
+        graphNode('p1', 'prompt', { text: 'a red fox' }),
+        graphNode('t1', 'task', {
+          workflow: { model: 'gpt-image-1', generation: 'image' },
+        }),
+      ],
+      [{ id: 'e1', source: 'p1', target: 't1' }],
+      'default',
+      2
+    )
+  )
+
+  act(() => hook.result.current.runner.run())
+  await waitFor(() => expect(hook.result.current.runner.phase).toBe('idle'))
+
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 't1')?.data.workflow
+      ?.status
+  ).toBe('succeeded')
+  expect(hook.result.current.runner.message).toBe(
+    CANVAS_WORKFLOW_MESSAGES.RESULT_NODE_LIMIT
+  )
+  expect(
+    hook.result.current.nodes.some((node) => node.data.kind === 'task-result')
+  ).toBe(false)
+})
+
+test('reads a connected attachment as a reference image input', async () => {
+  const post = vi.spyOn(api, 'post').mockImplementation(async (url) => {
+    if (url === '/pg/images/generations') {
+      return {
+        data: {
+          created: 1,
+          data: [{ url: 'https://cdn.example.com/fox.png' }],
+        },
+      }
+    }
+    throw new Error(`Unexpected POST ${url}`)
+  })
+  vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    if (url === '/api/playground/sessions/pgs_1/attachments/att_1/content') {
+      return {
+        data: new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' }),
+      }
+    }
+    throw new Error(`Unexpected GET ${url}`)
+  })
+  const hook = renderHook(() =>
+    useRunnerHarness(
+      [
+        graphNode('a1', 'attachment', {
+          ref: { sessionId: 'pgs_1', attachmentId: 'att_1' },
+        }),
+        graphNode('t1', 'task', {
+          text: 'paint the photo',
+          workflow: { model: 'gpt-image-1', generation: 'image' },
+        }),
+      ],
+      [{ id: 'e1', source: 'a1', target: 't1' }]
+    )
+  )
+
+  act(() => hook.result.current.runner.run())
+  await waitFor(() => expect(hook.result.current.runner.phase).toBe('idle'))
+
+  const body = post.mock.calls[0][1] as { images?: string[] }
+  expect(body.images).toHaveLength(1)
+  expect(body.images?.[0]).toMatch(/^data:image\/png;base64,/)
+  const task = hook.result.current.nodes.find((node) => node.id === 't1')
+  expect(task?.data.workflow?.inputImageCount).toBe(1)
+})
+
+test('sends a reference image to a model step as content parts', async () => {
+  const post = vi.spyOn(api, 'post').mockImplementation(async (url) => {
+    if (url === '/pg/chat/completions') {
+      return {
+        data: {
+          choices: [{ message: { role: 'assistant', content: 'ok' } }],
+        },
+      }
+    }
+    throw new Error(`Unexpected POST ${url}`)
+  })
+  vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    if (url === '/api/playground/sessions/pgs_1/attachments/att_1/content') {
+      return {
+        data: new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' }),
+      }
+    }
+    throw new Error(`Unexpected GET ${url}`)
+  })
+  const hook = renderHook(() =>
+    useRunnerHarness(
+      [
+        graphNode('a1', 'attachment', {
+          ref: { sessionId: 'pgs_1', attachmentId: 'att_1' },
+        }),
+        graphNode('m1', 'model', {
+          text: 'describe this photo',
+          workflow: { model: 'gpt-4o' },
+        }),
+      ],
+      [{ id: 'e1', source: 'a1', target: 'm1' }]
+    )
+  )
+
+  act(() => hook.result.current.runner.run())
+  await waitFor(() => expect(hook.result.current.runner.phase).toBe('idle'))
+
+  expect(post).toHaveBeenCalledWith(
+    '/pg/chat/completions',
+    expect.objectContaining({
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'describe this photo' },
+            {
+              type: 'image_url',
+              image_url: {
+                url: expect.stringMatching(/^data:image\/png;base64,/),
+              },
+            },
+          ],
+        },
+      ],
+    }),
+    expect.anything()
+  )
+})
+
+test('reports an unreadable reference image without calling the relay', async () => {
+  const post = vi.spyOn(api, 'post').mockImplementation(() => {
+    throw new Error('Unexpected POST')
+  })
+  vi.spyOn(api, 'get').mockImplementation(async () => {
+    throw new Error('attachment is gone')
+  })
+  const hook = renderHook(() =>
+    useRunnerHarness(
+      [
+        graphNode('a1', 'attachment', {
+          ref: { sessionId: 'pgs_1', attachmentId: 'att_1' },
+        }),
+        graphNode('t1', 'task', {
+          text: 'paint the photo',
+          workflow: { model: 'gpt-image-1', generation: 'image' },
+        }),
+      ],
+      [{ id: 'e1', source: 'a1', target: 't1' }]
+    )
+  )
+
+  act(() => hook.result.current.runner.run())
+  await waitFor(() => expect(hook.result.current.runner.phase).toBe('idle'))
+
+  expect(post).not.toHaveBeenCalled()
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 't1')?.data.workflow
+  ).toMatchObject({
+    status: 'failed',
+    error: CANVAS_WORKFLOW_MESSAGES.IMAGE_UNAVAILABLE,
+  })
+})
+
+test('stops the run when the relay refuses the task budget', async () => {
+  const post = vi.spyOn(api, 'post').mockImplementation(async (url) => {
+    if (url === '/pg/videos') {
+      throw {
+        response: {
+          status: 429,
+          data: {
+            error: {
+              code: 'PLAYGROUND_TASK_LIMIT_EXCEEDED',
+              message:
+                'Playground task concurrency limit reached. Wait for a running task to finish.',
+            },
+          },
+        },
+      }
+    }
+    throw new Error(`Unexpected POST ${url}`)
+  })
+  const hook = renderHook(() =>
+    useRunnerHarness(
+      [
+        graphNode('t1', 'task', {
+          text: 'a sailing ship',
+          workflow: { model: 'kling-v1', generation: 'video' },
+        }),
+        graphNode('t2', 'task', {
+          text: 'another ship',
+          workflow: { model: 'kling-v1', generation: 'video' },
+        }),
+      ],
+      [{ id: 'e1', source: 't1', target: 't2' }]
+    )
+  )
+
+  act(() => hook.result.current.runner.run())
+  await waitFor(() => expect(hook.result.current.runner.phase).toBe('idle'))
+
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 't1')?.data.workflow
+  ).toMatchObject({
+    status: 'failed',
+    error:
+      'Playground task concurrency limit reached. Wait for a running task to finish.',
+  })
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 't2')?.data.workflow
+      ?.status
+  ).toBeUndefined()
+  expect(post).toHaveBeenCalledTimes(1)
 })

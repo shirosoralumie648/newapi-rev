@@ -70,6 +70,53 @@ export const CANVAS_WORKFLOW_ERROR_MAX_CHARS = 500
 // The media kinds a generation step can submit through the Playground relay.
 export const CANVAS_WORKFLOW_GENERATIONS = ['image', 'video'] as const
 
+// Generation configuration of a `task` step. Every value describes a request
+// the relay re-validates: the count is bounded server-side by `dto.MaxImageN`,
+// the duration by `relaycommon.MaxTaskDurationSeconds`, and an unknown
+// size/quality is answered by the channel. The size preset carries its aspect
+// ratio so one control expresses both, because the relay only forwards the
+// concrete size to the provider.
+export const CANVAS_WORKFLOW_IMAGE_QUALITIES = [
+  'auto',
+  'low',
+  'medium',
+  'high',
+  'standard',
+  'hd',
+] as const
+export const CANVAS_WORKFLOW_IMAGE_COUNTS = [1, 2, 3, 4] as const
+export const CANVAS_WORKFLOW_IMAGE_SIZE_RATIOS: Record<string, string> = {
+  '1024x1024': '1:1',
+  '1792x1024': '16:9',
+  '1024x1792': '9:16',
+}
+export const CANVAS_WORKFLOW_VIDEO_SIZES = [
+  '1280x720',
+  '720x1280',
+  '1024x1024',
+] as const
+export const CANVAS_WORKFLOW_VIDEO_SIZE_RATIOS: Record<string, string> = {
+  '1280x720': '16:9',
+  '720x1280': '9:16',
+  '1024x1024': '1:1',
+}
+
+// Reference images read from connected upstream nodes. The bytes travel inside
+// the request body, so the count and each image's size stay bounded; the relay
+// reads and forwards the body under its own request-size limit.
+export const CANVAS_WORKFLOW_IMAGE_INPUT_MAX_COUNT = 4
+export const CANVAS_WORKFLOW_IMAGE_INPUT_MAX_BYTES = 8 * 1024 * 1024
+
+// A new linked node (a result node added by a run) is dropped to the right of
+// the step it belongs to.
+export const CANVAS_LINKED_NODE_OFFSET_X = 340
+
+// Mention suggestions shown while typing `@`.
+export const CANVAS_WORKFLOW_MENTION_MAX_MATCHES = 8
+// Mirrors `relaycommon.MaxTaskDurationSeconds` on the server: an imported
+// board's duration is bounded here before it is ever sent.
+export const CANVAS_WORKFLOW_DURATION_MAX_SECONDS = 3600
+
 export const CANVAS_WORKFLOW_GENERATION_LABELS: Record<
   CanvasWorkflowGenerationKind,
   string
@@ -81,6 +128,17 @@ export const CANVAS_WORKFLOW_GENERATION_LABELS: Record<
 // Async generation steps poll the owner-scoped durable task row; terminal
 // states stop the loop.
 export const CANVAS_WORKFLOW_TASK_POLL_INTERVAL_MS = 5000
+
+// Workflow problem keys the run reports. The strings double as English source
+// text and as i18n keys.
+export const CANVAS_WORKFLOW_MESSAGES = {
+  RESULT_NODE_LIMIT: 'The canvas is full; the run could not add a result node.',
+  RETRY_SOURCE_MISSING:
+    'The step that produced this result is no longer on the canvas.',
+  IMAGE_UNAVAILABLE: 'A connected reference image could not be read.',
+  IMAGE_TOO_LARGE:
+    'A connected reference image is larger than the 8 MiB limit.',
+} as const
 
 export const CANVAS_DEFAULT_TITLE = 'New canvas'
 

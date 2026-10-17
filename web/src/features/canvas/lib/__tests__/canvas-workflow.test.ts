@@ -21,19 +21,30 @@ import { expect, test } from 'vitest'
 import {
   CANVAS_WORKFLOW_ERROR_MAX_CHARS,
   CANVAS_WORKFLOW_INPUT_MAX_CHARS,
+  CANVAS_WORKFLOW_MENTION_MAX_MATCHES,
 } from '../../constants'
 import type {
   CanvasFlowEdge,
   CanvasFlowNode,
   CanvasNodeData,
+  CanvasNodeWorkflowState,
 } from '../../types'
 import {
   boundCanvasWorkflowError,
   CANVAS_WORKFLOW_ERRORS,
+  canvasWorkflowGroup,
+  canvasWorkflowMentionMatches,
+  canvasWorkflowMentionQuery,
+  canvasWorkflowMentions,
   canvasWorkflowNodeText,
   canvasWorkflowOutputTargets,
+  canvasWorkflowRetryRecord,
+  canvasWorkflowRetrySource,
   hasCanvasWorkflowInput,
+  insertCanvasWorkflowMention,
   orderCanvasWorkflow,
+  resolveCanvasWorkflowGeneration,
+  resolveCanvasWorkflowImageSources,
   resolveCanvasWorkflowInput,
   validateCanvasWorkflow,
   wouldCreateCanvasWorkflowCycle,
@@ -196,4 +207,292 @@ test('bounds a failure summary before it is stored on a node', () => {
 
   expect(bounded).toHaveLength(CANVAS_WORKFLOW_ERROR_MAX_CHARS)
   expect(boundCanvasWorkflowError('short')).toBe('short')
+})
+
+test('offers only directly connected nodes as mentions', () => {
+  const prompt = flowNode('p1', 'prompt', { text: 'a red fox' })
+  const attachment = flowNode('a1', 'attachment', {
+    label: 'photo.png',
+    ref: { sessionId: 'pgs_1', attachmentId: 'att_1' },
+  })
+  const result = flowNode('r1', 'task-result', {
+    label: 'clip',
+    ref: { taskId: 'task-1', taskArtifactKey: 'out-1' },
+  })
+  const deleted = flowNode('a2', 'image', {
+    label: 'gone.png',
+    sourceDeleted: true,
+    ref: { sessionId: 'pgs_1', attachmentId: 'att_2' },
+  })
+  const unrelated = flowNode('p2', 'prompt', { text: 'not connected' })
+  const step = modelNode('m1', 'gpt-4o')
+  const nodes = [prompt, attachment, result, deleted, unrelated, step]
+  const edges = [
+    flowEdge('p1', 'm1'),
+    flowEdge('a1', 'm1'),
+    flowEdge('r1', 'm1'),
+    flowEdge('a2', 'm1'),
+    flowEdge('a2', 'm1'),
+  ]
+
+  const mentions = canvasWorkflowMentions(step, nodes, edges)
+  expect(mentions.map((mention) => mention.nodeId)).toEqual([
+    'p1',
+    'a1',
+    'r1',
+    'a2',
+  ])
+  expect(mentions[0]).toMatchObject({
+    label: 'Prompt',
+    hasText: true,
+    hasImage: false,
+  })
+  expect(mentions[1]).toMatchObject({
+    label: 'photo.png',
+    hasText: false,
+    hasImage: true,
+  })
+  expect(mentions[2]).toMatchObject({ hasImage: true })
+  // A node the read path already flagged as deleted is not offered as input.
+  expect(mentions[3]).toMatchObject({ hasImage: false })
+})
+
+test('resolves the mention query at the caret only', () => {
+  expect(canvasWorkflowMentionQuery('hello @ph', 9)).toBe('ph')
+  expect(canvasWorkflowMentionQuery('hello @', 7)).toBe('')
+  expect(canvasWorkflowMentionQuery('hello @ph', 6)).toBeNull()
+  expect(canvasWorkflowMentionQuery('mail@example', 12)).toBeNull()
+  expect(canvasWorkflowMentionQuery('no mention', 10)).toBeNull()
+})
+
+test('inserts a mention token and replaces the typed query', () => {
+  expect(
+    insertCanvasWorkflowMention('hello @ph', 9, 'ph', 'photo.png')
+  ).toEqual({ value: 'hello @photo.png ', caret: 17 })
+  expect(insertCanvasWorkflowMention('hello ', 6, '', 'photo.png')).toEqual({
+    value: 'hello @photo.png ',
+    caret: 17,
+  })
+  expect(insertCanvasWorkflowMention('hello', 5, '', 'photo.png')).toEqual({
+    value: 'hello@photo.png ',
+    caret: 16,
+  })
+})
+
+test('matches mention candidates case-insensitively and bounds the list', () => {
+  const mentions = Array.from({ length: 12 }, (_, index) => ({
+    nodeId: `n${index}`,
+    label: `node ${index}`,
+    kind: 'text' as const,
+    hasText: true,
+    hasImage: false,
+  }))
+
+  expect(
+    canvasWorkflowMentionMatches(mentions, 'NODE 1').map((m) => m.nodeId)
+  ).toEqual(['n1', 'n10', 'n11'])
+  expect(canvasWorkflowMentionMatches(mentions, '')).toHaveLength(
+    CANVAS_WORKFLOW_MENTION_MAX_MATCHES
+  )
+})
+
+test('places a mentioned upstream text where the mention stands', () => {
+  const prompt = flowNode('p1', 'prompt', { text: 'a red fox' })
+  const second = flowNode('p2', 'prompt', { label: 'style', text: 'oil paint' })
+  const attachment = flowNode('a1', 'attachment', {
+    label: 'photo.png',
+    ref: { sessionId: 'pgs_1', attachmentId: 'att_1' },
+  })
+  const step = flowNode('m1', 'model', {
+    text: 'Paint @photo.png in the mood of @style',
+    workflow: { model: 'gpt-4o' },
+  })
+  const nodes = [prompt, second, attachment, step]
+  const edges = [
+    flowEdge('p1', 'm1'),
+    flowEdge('p2', 'm1'),
+    flowEdge('a1', 'm1'),
+  ]
+
+  // The mentioned-style node is not appended a second time, the unmentioned
+  // prompt still is, and a node without text is replaced by its label.
+  expect(resolveCanvasWorkflowInput(step, nodes, edges, new Map())).toBe(
+    'Paint photo.png in the mood of oil paint\n\na red fox'
+  )
+
+  const run = new Map([['p2', 'watercolour']])
+  expect(resolveCanvasWorkflowInput(step, nodes, edges, run)).toBe(
+    'Paint photo.png in the mood of watercolour\n\na red fox'
+  )
+})
+
+test('leaves an unknown mention token untouched', () => {
+  const step = flowNode('m1', 'model', {
+    text: 'hello @nobody',
+    workflow: { model: 'gpt-4o' },
+  })
+
+  expect(resolveCanvasWorkflowInput(step, [step], [], new Map())).toBe(
+    'hello @nobody'
+  )
+})
+
+test('collects reference images from connected resources', () => {
+  const attachment = flowNode('a1', 'attachment', {
+    ref: { sessionId: 'pgs_1', attachmentId: 'att_1' },
+  })
+  const image = flowNode('i1', 'image', {
+    ref: { sessionId: 'pgs_1', attachmentId: 'att_2' },
+  })
+  const result = flowNode('r1', 'task-result', {
+    ref: { taskId: 'task-1' },
+  })
+  const keyed = flowNode('r2', 'task-result', {
+    ref: { taskId: 'task-2', taskArtifactKey: 'out-2' },
+  })
+  const deleted = flowNode('a2', 'attachment', {
+    sourceDeleted: true,
+    ref: { sessionId: 'pgs_1', attachmentId: 'att_3' },
+  })
+  const step = flowNode('t1', 'task', {
+    workflow: { model: 'gpt-image-1', generation: 'image' },
+  })
+  const nodes = [attachment, image, result, keyed, deleted, step]
+  const edges = [
+    flowEdge('a1', 't1'),
+    flowEdge('i1', 't1'),
+    flowEdge('r1', 't1'),
+    flowEdge('r2', 't1'),
+    flowEdge('a2', 't1'),
+    flowEdge('a1', 't1'),
+  ]
+
+  expect(resolveCanvasWorkflowImageSources(step, nodes, edges)).toEqual([
+    {
+      nodeId: 'a1',
+      kind: 'attachment',
+      sessionId: 'pgs_1',
+      attachmentId: 'att_1',
+    },
+    {
+      nodeId: 'i1',
+      kind: 'attachment',
+      sessionId: 'pgs_1',
+      attachmentId: 'att_2',
+    },
+    { nodeId: 'r1', kind: 'task-result', taskId: 'task-1' },
+    {
+      nodeId: 'r2',
+      kind: 'task-result',
+      taskId: 'task-2',
+      artifactKey: 'out-2',
+    },
+  ])
+})
+
+test('bounds the generation parameters of an imported step', () => {
+  const step = (workflow: Partial<CanvasNodeWorkflowState>): CanvasFlowNode =>
+    flowNode('t1', 'task', { workflow })
+  const base = { model: 'gpt-image-1' }
+
+  expect(
+    resolveCanvasWorkflowGeneration(
+      step({
+        ...base,
+        generation: 'image',
+        size: '1792x1024',
+        quality: 'high',
+        imageCount: 3,
+      })
+    )
+  ).toEqual({
+    generation: 'image',
+    size: '1792x1024',
+    quality: 'high',
+    imageCount: 3,
+  })
+  expect(
+    resolveCanvasWorkflowGeneration(
+      step({
+        ...base,
+        generation: 'image',
+        size: '4096x4096',
+        quality: 'ultra',
+        imageCount: 99,
+      })
+    )
+  ).toEqual({ generation: 'image' })
+  expect(
+    resolveCanvasWorkflowGeneration(
+      step({
+        ...base,
+        generation: 'image',
+        imageCount: 2.5,
+      })
+    )
+  ).toEqual({ generation: 'image' })
+  expect(
+    resolveCanvasWorkflowGeneration(
+      step({ ...base, generation: 'video', size: '720x1280', duration: 30 })
+    )
+  ).toEqual({ generation: 'video', size: '720x1280', duration: 30 })
+  expect(
+    resolveCanvasWorkflowGeneration(
+      step({ ...base, generation: 'video', duration: 7200 })
+    )
+  ).toEqual({ generation: 'video' })
+})
+
+test('resolves the run group from the step override first', () => {
+  expect(
+    canvasWorkflowGroup(flowNode('m1', 'model', { workflow: {} }), 'default')
+  ).toBe('default')
+  expect(
+    canvasWorkflowGroup(
+      flowNode('m1', 'model', { workflow: { group: 'vip' } }),
+      'default'
+    )
+  ).toBe('vip')
+  expect(
+    canvasWorkflowGroup(
+      flowNode('m1', 'model', { workflow: { group: '  ' } }),
+      'default'
+    )
+  ).toBe('default')
+})
+
+test('records the attempt on a result node for a one-click retry', () => {
+  const step = flowNode('t1', 'task', {
+    workflow: {
+      model: 'kling-v1',
+      generation: 'video',
+      duration: 10,
+      size: '1280x720',
+      attempts: 2,
+    },
+  })
+
+  const record = canvasWorkflowRetryRecord(step, {
+    inputText: 'a sailing ship',
+    group: 'default',
+    inputImageCount: 1,
+  })
+  expect(record).toMatchObject({
+    status: 'succeeded',
+    model: 'kling-v1',
+    generation: 'video',
+    duration: 10,
+    size: '1280x720',
+    inputText: 'a sailing ship',
+    group: 'default',
+    inputImageCount: 1,
+    sourceNodeId: 't1',
+    attempts: 2,
+  })
+
+  const result = flowNode('r1', 'task-result', { workflow: record })
+  expect(canvasWorkflowRetrySource(result)).toBe('t1')
+  expect(
+    canvasWorkflowRetrySource(flowNode('r2', 'task-result', { workflow: {} }))
+  ).toBeNull()
 })

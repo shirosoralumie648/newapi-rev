@@ -7659,6 +7659,20 @@
     "Playground system prompt limit exceeded.": "Превышен лимит размера системной инструкции Playground.",
     "Assistant preset name must contain 1 to 100 characters.": "Название шаблона ассистента должно содержать от 1 до 100 символов.",
     "Assistant preset avatar must be an emoji or an http(s) image URL.": "Аватар шаблона ассистента должен быть эмодзи или URL изображения http(s).",
-    "Invalid assistant preset.": "Недопустимый шаблон ассистента."
+    "Invalid assistant preset.": "Недопустимый шаблон ассистента.",
+    "Instruction": "Инструкция",
+    "Type @ to reference a connected resource.": "Введите @, чтобы сослаться на подключённый ресурс.",
+    "Insert reference": "Вставить ссылку",
+    "Connected resources": "Подключённые ресурсы",
+    "Canvas group": "Группа холста",
+    "Channel default": "По умолчанию канала",
+    "Quality": "Качество",
+    "Video size": "Размер видео",
+    "Retry generation": "Повторить генерацию",
+    "Reference images": "Референсные изображения",
+    "The canvas is full; the run could not add a result node.": "Холст заполнен; запуск не смог добавить узел результата.",
+    "The step that produced this result is no longer on the canvas.": "Шаг, создавший этот результат, больше не находится на холсте.",
+    "A connected reference image could not be read.": "Не удалось прочитать подключённое референсное изображение.",
+    "A connected reference image is larger than the 8 MiB limit.": "Подключённое референсное изображение превышает лимит 8 MiB."
   }
 }

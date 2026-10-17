@@ -17,14 +17,23 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import {
+  CANVAS_NODE_KIND_LABELS,
+  CANVAS_WORKFLOW_DURATION_MAX_SECONDS,
   CANVAS_WORKFLOW_ERROR_MAX_CHARS,
+  CANVAS_WORKFLOW_IMAGE_COUNTS,
+  CANVAS_WORKFLOW_IMAGE_QUALITIES,
+  CANVAS_WORKFLOW_IMAGE_SIZE_RATIOS,
   CANVAS_WORKFLOW_INPUT_MAX_CHARS,
+  CANVAS_WORKFLOW_MENTION_MAX_MATCHES,
+  CANVAS_WORKFLOW_VIDEO_SIZE_RATIOS,
 } from '../constants'
 import type {
   CanvasFlowEdge,
   CanvasFlowNode,
   CanvasNodeData,
   CanvasNodeKind,
+  CanvasNodeWorkflowState,
+  CanvasWorkflowGenerationKind,
   CanvasWorkflowNodeStatus,
 } from '../types'
 
@@ -86,6 +95,143 @@ export function canvasWorkflowNodeText(data: CanvasNodeData): string {
     data.workflow?.output?.trim() ||
     ''
   )
+}
+
+/** The label a mention and the node header use: the authored label first. */
+export function canvasWorkflowNodeLabel(data: CanvasNodeData): string {
+  return data.label?.trim() || CANVAS_NODE_KIND_LABELS[data.kind]
+}
+
+/** Whether a node carries text a mention can substitute. */
+export function canvasWorkflowNodeHasText(data: CanvasNodeData): boolean {
+  return canvasWorkflowNodeText(data) !== ''
+}
+
+/** Whether a node carries image bytes a step can read as reference input. */
+export function canvasWorkflowNodeHasImage(data: CanvasNodeData): boolean {
+  if (data.sourceDeleted === true) return false
+  if (data.kind === 'image' || data.kind === 'attachment') {
+    return Boolean(data.ref?.sessionId && data.ref?.attachmentId)
+  }
+  if (data.kind === 'task-result') {
+    return Boolean(data.ref?.taskId)
+  }
+  return false
+}
+
+/**
+ * A connected upstream node a step's instruction can reference with `@`. Only
+ * directly connected nodes are offered, so a mention can never name a resource
+ * the step does not already consume through an edge.
+ */
+export type CanvasWorkflowMention = {
+  nodeId: string
+  label: string
+  kind: CanvasNodeKind
+  /** Whether the mention substitutes text instead of only naming the node. */
+  hasText: boolean
+  /** Whether the node's bytes become a reference image input. */
+  hasImage: boolean
+}
+
+/**
+ * The upstream nodes a step can reference, in edge order without duplicates.
+ */
+export function canvasWorkflowMentions(
+  node: CanvasFlowNode,
+  nodes: CanvasFlowNode[],
+  edges: CanvasFlowEdge[]
+): CanvasWorkflowMention[] {
+  const byID = new Map(nodes.map((item) => [item.id, item]))
+  const mentions: CanvasWorkflowMention[] = []
+  const seen = new Set<string>()
+  for (const edge of edges) {
+    if (edge.target !== node.id || seen.has(edge.source)) continue
+    const upstream = byID.get(edge.source)
+    if (!upstream) continue
+    seen.add(edge.source)
+    mentions.push({
+      nodeId: upstream.id,
+      label: canvasWorkflowNodeLabel(upstream.data),
+      kind: upstream.data.kind,
+      hasText: canvasWorkflowNodeHasText(upstream.data),
+      hasImage: canvasWorkflowNodeHasImage(upstream.data),
+    })
+  }
+  return mentions
+}
+
+/**
+ * The `@` query the caret sits in, or null when it is not inside a mention. A
+ * mention starts at the beginning of a line or after whitespace and runs to
+ * the caret without another `@`.
+ */
+export function canvasWorkflowMentionQuery(
+  value: string,
+  caret: number
+): string | null {
+  const position = Math.max(0, Math.min(caret, value.length))
+  const match = /(?:^|\s)@([^\s@]{0,40})$/.exec(value.slice(0, position))
+  return match ? match[1] : null
+}
+
+/** Mention candidates matching a query, bounded for the suggestion list. */
+export function canvasWorkflowMentionMatches(
+  mentions: CanvasWorkflowMention[],
+  query: string
+): CanvasWorkflowMention[] {
+  const needle = query.trim().toLowerCase()
+  return mentions
+    .filter((mention) => mention.label.toLowerCase().includes(needle))
+    .slice(0, CANVAS_WORKFLOW_MENTION_MAX_MATCHES)
+}
+
+/**
+ * Replaces the active `@query` at the caret with `@label` and reports the new
+ * caret position. A caret that is not inside a mention (the picker was opened
+ * explicitly) inserts the token there instead. A trailing space keeps a
+ * following word separate from the token.
+ */
+export function insertCanvasWorkflowMention(
+  value: string,
+  caret: number,
+  query: string,
+  label: string
+): { value: string; caret: number } {
+  const position = Math.max(0, Math.min(caret, value.length))
+  const tokenStart = position - query.length - 1
+  const insideToken =
+    tokenStart >= 0 && value.slice(tokenStart, tokenStart + 1) === '@'
+  const from = insideToken ? tokenStart : position
+  const inserted = `@${label} `
+  return {
+    value: value.slice(0, from) + inserted + value.slice(position),
+    caret: from + inserted.length,
+  }
+}
+
+/**
+ * Substitutes every `@label` mention of one instruction with the referenced
+ * node's contribution and reports which nodes were mentioned. Matches run
+ * longest label first so a label that prefixes another cannot shadow it, and a
+ * label that occurs twice resolves to the same node both times.
+ */
+function substituteCanvasWorkflowMentions(
+  text: string,
+  mentions: CanvasWorkflowMention[],
+  contribution: (mention: CanvasWorkflowMention) => string
+): { text: string; mentioned: Set<string> } {
+  const mentioned = new Set<string>()
+  if (!text.includes('@')) return { text, mentioned }
+  let substituted = text
+  const ordered = [...mentions].sort((a, b) => b.label.length - a.label.length)
+  for (const mention of ordered) {
+    const token = `@${mention.label}`
+    if (!substituted.includes(token)) continue
+    substituted = substituted.split(token).join(contribution(mention))
+    mentioned.add(mention.nodeId)
+  }
+  return { text: substituted, mentioned }
 }
 
 type CanvasWorkflowOrder = { steps: string[] } | { error: string }
@@ -212,6 +358,11 @@ export function validateCanvasWorkflow(
  * current run are passed in through `outputs`; a retry falls back to the output
  * the upstream step stored on its node, so a failed step can rerun without
  * recomputing the whole chain.
+ *
+ * An `@label` mention of a connected node places that node's text where the
+ * mention stands instead of appending it at the end, so an instruction can
+ * reference one resource in the middle of a sentence; a node without text is
+ * replaced by its label.
  */
 export function resolveCanvasWorkflowInput(
   node: CanvasFlowNode,
@@ -220,21 +371,195 @@ export function resolveCanvasWorkflowInput(
   outputs: Map<string, string>
 ): string {
   const byID = new Map(nodes.map((item) => [item.id, item]))
+  const connectionText = (nodeId: string, data: CanvasNodeData): string =>
+    outputs.get(nodeId)?.trim() || canvasWorkflowNodeText(data)
+  const mentions = canvasWorkflowMentions(node, nodes, edges)
+  const substituted = substituteCanvasWorkflowMentions(
+    node.data.text ?? '',
+    mentions,
+    (mention) => {
+      const upstream = byID.get(mention.nodeId)
+      if (!upstream) return mention.label
+      return connectionText(mention.nodeId, upstream.data) || mention.label
+    }
+  )
   const parts: string[] = []
-  const own = node.data.text?.trim()
+  const own = substituted.text.trim()
   if (own) parts.push(own)
   for (const edge of edges) {
     if (edge.target !== node.id) continue
     const upstream = byID.get(edge.source)
-    if (!upstream) continue
-    const text =
-      outputs.get(upstream.id)?.trim() || canvasWorkflowNodeText(upstream.data)
+    if (!upstream || substituted.mentioned.has(upstream.id)) continue
+    const text = connectionText(upstream.id, upstream.data)
     if (text) parts.push(text)
   }
   return truncateCanvasWorkflowText(
     parts.join('\n\n'),
     CANVAS_WORKFLOW_INPUT_MAX_CHARS
   )
+}
+
+/**
+ * Where a reference image comes from: an attachment behind the owner-scoped
+ * content endpoint, or the artifact of a settled generation task. Only the
+ * source is described here; the bytes are read by the caller through the
+ * controlled endpoints, so the canvas never stores a URL.
+ */
+export type CanvasWorkflowImageSource =
+  | {
+      nodeId: string
+      kind: 'attachment'
+      sessionId: string
+      attachmentId: string
+    }
+  | {
+      nodeId: string
+      kind: 'task-result'
+      taskId: string
+      artifactKey?: string
+    }
+
+/**
+ * The reference images a step reads from its directly connected upstream
+ * nodes, in edge order without duplicates. A source whose node the read path
+ * already flagged as deleted is skipped; the bytes of the rest are bounded by
+ * the caller before they enter a request.
+ */
+export function resolveCanvasWorkflowImageSources(
+  node: CanvasFlowNode,
+  nodes: CanvasFlowNode[],
+  edges: CanvasFlowEdge[]
+): CanvasWorkflowImageSource[] {
+  const byID = new Map(nodes.map((item) => [item.id, item]))
+  const seen = new Set<string>()
+  const sources: CanvasWorkflowImageSource[] = []
+  for (const edge of edges) {
+    if (edge.target !== node.id || seen.has(edge.source)) continue
+    const upstream = byID.get(edge.source)
+    if (!upstream || upstream.data.sourceDeleted === true) continue
+    const reference = upstream.data.ref
+    if (
+      (upstream.data.kind === 'image' || upstream.data.kind === 'attachment') &&
+      reference?.sessionId &&
+      reference.attachmentId
+    ) {
+      seen.add(upstream.id)
+      sources.push({
+        nodeId: upstream.id,
+        kind: 'attachment',
+        sessionId: reference.sessionId,
+        attachmentId: reference.attachmentId,
+      })
+      continue
+    }
+    if (upstream.data.kind === 'task-result' && reference?.taskId) {
+      seen.add(upstream.id)
+      sources.push({
+        nodeId: upstream.id,
+        kind: 'task-result',
+        taskId: reference.taskId,
+        ...(reference.taskArtifactKey
+          ? { artifactKey: reference.taskArtifactKey }
+          : {}),
+      })
+    }
+  }
+  return sources
+}
+
+/**
+ * The bounded generation configuration of one `task` step. An imported board
+ * can hold any number, so every multiplier is re-bounded here even though the
+ * relay validates the request again (`dto.MaxImageN`,
+ * `relaycommon.MaxTaskDurationSeconds`).
+ */
+export type CanvasWorkflowGenerationConfig = {
+  generation: CanvasWorkflowGenerationKind
+  size?: string
+  quality?: string
+  imageCount?: number
+  duration?: number
+}
+
+export function resolveCanvasWorkflowGeneration(
+  node: CanvasFlowNode
+): CanvasWorkflowGenerationConfig {
+  const workflow = node.data.workflow ?? {}
+  const generation: CanvasWorkflowGenerationKind =
+    workflow.generation === 'video' ? 'video' : 'image'
+  const size = workflow.size?.trim()
+  if (generation === 'video') {
+    return {
+      generation,
+      ...(size && size in CANVAS_WORKFLOW_VIDEO_SIZE_RATIOS ? { size } : {}),
+      ...(Number.isInteger(workflow.duration) &&
+      (workflow.duration ?? 0) > 0 &&
+      (workflow.duration ?? 0) <= CANVAS_WORKFLOW_DURATION_MAX_SECONDS
+        ? { duration: workflow.duration }
+        : {}),
+    }
+  }
+  const quality = workflow.quality?.trim()
+  const maxCount = Math.max(...CANVAS_WORKFLOW_IMAGE_COUNTS)
+  const imageCount = workflow.imageCount
+  return {
+    generation,
+    ...(size && size in CANVAS_WORKFLOW_IMAGE_SIZE_RATIOS ? { size } : {}),
+    ...(quality &&
+    (CANVAS_WORKFLOW_IMAGE_QUALITIES as readonly string[]).includes(quality)
+      ? { quality }
+      : {}),
+    ...(Number.isInteger(imageCount) &&
+    (imageCount ?? 0) > 0 &&
+    (imageCount ?? 0) <= maxCount
+      ? { imageCount }
+      : {}),
+  }
+}
+
+/** The group a step runs in: its own override first, then the canvas group. */
+export function canvasWorkflowGroup(
+  node: CanvasFlowNode,
+  fallback: string
+): string {
+  return node.data.workflow?.group?.trim() || fallback
+}
+
+/** The step a result node points at, if the board still names one. */
+export function canvasWorkflowRetrySource(node: CanvasFlowNode): string | null {
+  return node.data.workflow?.sourceNodeId?.trim() || null
+}
+
+/**
+ * The retry record a result node keeps: the prompt, model, generation
+ * parameters and the id of the step that produced it. Nothing here is a URL or
+ * a credential, so retrying re-issues the same request through /pg and the
+ * server applies its own validation and billing again.
+ */
+export function canvasWorkflowRetryRecord(
+  step: CanvasFlowNode,
+  resolved: {
+    inputText: string
+    group: string
+    inputImageCount: number
+  }
+): CanvasNodeWorkflowState {
+  const workflow = step.data.workflow ?? {}
+  return {
+    status: 'succeeded',
+    ...(workflow.model ? { model: workflow.model } : {}),
+    ...(workflow.generation ? { generation: workflow.generation } : {}),
+    ...(workflow.size ? { size: workflow.size } : {}),
+    ...(workflow.quality ? { quality: workflow.quality } : {}),
+    ...(workflow.imageCount ? { imageCount: workflow.imageCount } : {}),
+    ...(workflow.duration ? { duration: workflow.duration } : {}),
+    ...(resolved.group ? { group: resolved.group } : {}),
+    ...(resolved.inputText ? { inputText: resolved.inputText } : {}),
+    inputImageCount: resolved.inputImageCount,
+    sourceNodeId: step.id,
+    ...(workflow.attempts ? { attempts: workflow.attempts } : {}),
+    updatedAt: Date.now(),
+  }
 }
 
 /**

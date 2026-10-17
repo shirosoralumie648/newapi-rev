@@ -26,8 +26,16 @@ import {
 } from '@xyflow/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { CANVAS_MAX_NODES, CANVAS_NODE_ADD_OFFSET } from '../constants'
-import { createCanvasNode, fromServerDocument } from '../lib/canvas-document'
+import {
+  CANVAS_MAX_EDGES,
+  CANVAS_MAX_NODES,
+  CANVAS_NODE_ADD_OFFSET,
+} from '../constants'
+import {
+  createCanvasEdge,
+  createCanvasNode,
+  fromServerDocument,
+} from '../lib/canvas-document'
 import {
   createCanvasHistory,
   pushCanvasHistory,
@@ -225,6 +233,38 @@ export function useCanvasEditor(
     [commit]
   )
 
+  /**
+   * Adds a node that is fed by an existing one and returns its id, or null when
+   * the canvas is full. The node carries its data from the start, so a caller
+   * that fills a result node needs no second update, and the link is one
+   * history entry like any other structural edit.
+   */
+  const addLinkedNode = useCallback(
+    (
+      kind: CanvasNodeKind,
+      sourceId: string,
+      data: Partial<CanvasNodeData>,
+      position: { x: number; y: number }
+    ): string | null => {
+      const source = nodesRef.current.find((node) => node.id === sourceId)
+      if (!source) return null
+      if (
+        nodesRef.current.length >= CANVAS_MAX_NODES ||
+        edgesRef.current.length >= CANVAS_MAX_EDGES
+      ) {
+        return null
+      }
+      const node = createCanvasNode(kind, position, data)
+      const edge = createCanvasEdge(sourceId, node.id)
+      commit([...nodesRef.current, node], [...edgesRef.current, edge], {
+        record: true,
+        notify: true,
+      })
+      return node.id
+    },
+    [commit]
+  )
+
   const updateNodeData = useCallback(
     (
       id: string,
@@ -338,6 +378,7 @@ export function useCanvasEditor(
     handleEdgesChange,
     handleConnect,
     addNode,
+    addLinkedNode,
     updateNodeData,
     deleteNode,
     undo,

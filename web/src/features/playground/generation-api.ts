@@ -21,7 +21,11 @@ import { z } from 'zod'
 import { api } from '@/lib/api'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
-import { API_ENDPOINTS } from './constants'
+import {
+  API_ENDPOINTS,
+  PLAYGROUND_IMAGE_MAX_COUNT,
+  PLAYGROUND_VIDEO_MAX_DURATION_SECONDS,
+} from './constants'
 
 /** One image the relay returned, either as a URL or as inline Base64. */
 export interface PlaygroundImageResult {
@@ -34,6 +38,11 @@ export interface PlaygroundImageGenerationInput {
   prompt: string
   group: string
   size?: string
+  quality?: string
+  /** Requested image count (the relay `n`); a bounded billing multiplier. */
+  count?: number
+  /** Reference image URLs or data URLs read from connected resources. */
+  images?: string[]
 }
 
 export interface PlaygroundVideoGenerationInput {
@@ -41,6 +50,9 @@ export interface PlaygroundVideoGenerationInput {
   prompt: string
   group: string
   duration?: number
+  size?: string
+  /** Reference images for an image-to-video submission. */
+  images?: string[]
 }
 
 export interface PlaygroundAudioSpeechInput {
@@ -65,6 +77,29 @@ const videoTaskSchema = z.object({
 })
 
 /**
+ * Keeps a user-supplied billing multiplier inside the bound the server
+ * enforces (`dto.MaxImageN`); anything malformed is dropped instead of sent.
+ */
+function boundedImageCount(count: number | undefined): number | undefined {
+  if (count === undefined) return undefined
+  if (!Number.isInteger(count)) return undefined
+  if (count < 1 || count > PLAYGROUND_IMAGE_MAX_COUNT) return undefined
+  return count
+}
+
+/** Same guard for a duration, mirroring `relaycommon.MaxTaskDurationSeconds`. */
+function boundedDurationSeconds(
+  duration: number | undefined
+): number | undefined {
+  if (duration === undefined) return undefined
+  if (!Number.isInteger(duration)) return undefined
+  if (duration < 1 || duration > PLAYGROUND_VIDEO_MAX_DURATION_SECONDS) {
+    return undefined
+  }
+  return duration
+}
+
+/**
  * Starts an image generation through the Playground relay route. The body
  * carries the workspace group so the server applies the same group override
  * the chat workspace uses; channel selection, permissions and billing are the
@@ -74,6 +109,8 @@ export async function submitImageGeneration(
   input: PlaygroundImageGenerationInput,
   signal?: AbortSignal
 ): Promise<PlaygroundImageResult[]> {
+  const count = boundedImageCount(input.count)
+  const images = (input.images ?? []).filter(Boolean)
   const response = await api.post(
     API_ENDPOINTS.IMAGE_GENERATIONS,
     {
@@ -81,6 +118,9 @@ export async function submitImageGeneration(
       prompt: input.prompt,
       group: input.group,
       ...(input.size ? { size: input.size } : {}),
+      ...(input.quality ? { quality: input.quality } : {}),
+      ...(count ? { n: count } : {}),
+      ...(images.length > 0 ? { images } : {}),
     },
     { signal, skipErrorHandler: true }
   )
@@ -103,15 +143,17 @@ export async function submitVideoGeneration(
   input: PlaygroundVideoGenerationInput,
   signal?: AbortSignal
 ): Promise<string> {
+  const duration = boundedDurationSeconds(input.duration)
+  const images = (input.images ?? []).filter(Boolean)
   const response = await api.post(
     API_ENDPOINTS.VIDEO_GENERATIONS,
     {
       model: input.model,
       prompt: input.prompt,
       group: input.group,
-      ...(input.duration && input.duration > 0
-        ? { duration: input.duration }
-        : {}),
+      ...(duration ? { duration } : {}),
+      ...(input.size ? { size: input.size } : {}),
+      ...(images.length > 0 ? { images } : {}),
     },
     { signal, skipErrorHandler: true }
   )

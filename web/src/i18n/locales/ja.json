@@ -7659,6 +7659,20 @@
     "Playground system prompt limit exceeded.": "Playground のシステムプロンプトがサイズ上限を超えています。",
     "Assistant preset name must contain 1 to 100 characters.": "アシスタントプリセット名は 1〜100 文字で入力してください。",
     "Assistant preset avatar must be an emoji or an http(s) image URL.": "アシスタントプリセットのアバターは絵文字または http(s) 画像 URL で入力してください。",
-    "Invalid assistant preset.": "無効なアシスタントプリセットです。"
+    "Invalid assistant preset.": "無効なアシスタントプリセットです。",
+    "Instruction": "指示",
+    "Type @ to reference a connected resource.": "@ を入力すると接続済みのリソースを参照できます。",
+    "Insert reference": "参照を挿入",
+    "Connected resources": "接続済みのリソース",
+    "Canvas group": "キャンバスのグループ",
+    "Channel default": "チャネルの既定値",
+    "Quality": "品質",
+    "Video size": "動画サイズ",
+    "Retry generation": "生成を再試行",
+    "Reference images": "参照画像",
+    "The canvas is full; the run could not add a result node.": "キャンバスが満杯のため、実行は結果ノードを追加できませんでした。",
+    "The step that produced this result is no longer on the canvas.": "この結果を生成したステップはキャンバス上にありません。",
+    "A connected reference image could not be read.": "接続済みの参照画像を読み込めませんでした。",
+    "A connected reference image is larger than the 8 MiB limit.": "接続済みの参照画像が 8 MiB の上限を超えています。"
   }
 }

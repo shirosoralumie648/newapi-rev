@@ -7659,6 +7659,20 @@
     "Playground system prompt limit exceeded.": "Playground system prompt limit exceeded.",
     "Assistant preset name must contain 1 to 100 characters.": "Assistant preset name must contain 1 to 100 characters.",
     "Assistant preset avatar must be an emoji or an http(s) image URL.": "Assistant preset avatar must be an emoji or an http(s) image URL.",
-    "Invalid assistant preset.": "Invalid assistant preset."
+    "Invalid assistant preset.": "Invalid assistant preset.",
+    "Instruction": "Instruction",
+    "Type @ to reference a connected resource.": "Type @ to reference a connected resource.",
+    "Insert reference": "Insert reference",
+    "Connected resources": "Connected resources",
+    "Canvas group": "Canvas group",
+    "Channel default": "Channel default",
+    "Quality": "Quality",
+    "Video size": "Video size",
+    "Retry generation": "Retry generation",
+    "Reference images": "Reference images",
+    "The canvas is full; the run could not add a result node.": "The canvas is full; the run could not add a result node.",
+    "The step that produced this result is no longer on the canvas.": "The step that produced this result is no longer on the canvas.",
+    "A connected reference image could not be read.": "A connected reference image could not be read.",
+    "A connected reference image is larger than the 8 MiB limit.": "A connected reference image is larger than the 8 MiB limit."
   }
 }

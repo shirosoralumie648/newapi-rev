@@ -7659,6 +7659,20 @@
     "Playground system prompt limit exceeded.": "Playground 系统提示词超过大小上限。",
     "Assistant preset name must contain 1 to 100 characters.": "助手预设名称需为 1 到 100 个字符。",
     "Assistant preset avatar must be an emoji or an http(s) image URL.": "助手预设头像需为表情符号或 http(s) 图片 URL。",
-    "Invalid assistant preset.": "无效的助手预设。"
+    "Invalid assistant preset.": "无效的助手预设。",
+    "Instruction": "指令",
+    "Type @ to reference a connected resource.": "输入 @ 可引用已连接的资源。",
+    "Insert reference": "插入引用",
+    "Connected resources": "已连接的资源",
+    "Canvas group": "画布分组",
+    "Channel default": "渠道默认",
+    "Quality": "质量",
+    "Video size": "视频尺寸",
+    "Retry generation": "重试生成",
+    "Reference images": "参考图片",
+    "The canvas is full; the run could not add a result node.": "画布已满，本次运行无法添加结果节点。",
+    "The step that produced this result is no longer on the canvas.": "生成该结果的步骤已不在画布上。",
+    "A connected reference image could not be read.": "无法读取已连接的参考图片。",
+    "A connected reference image is larger than the 8 MiB limit.": "已连接的参考图片超过 8 MiB 上限。"
   }
 }

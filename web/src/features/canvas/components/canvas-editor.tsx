@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { MiniMap, type NodeTypes, type Viewport } from '@xyflow/react'
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -38,6 +38,7 @@ import {
   validateCanvasDocument,
 } from '../lib/canvas-document'
 import type { CanvasSourceTarget } from '../lib/canvas-navigation'
+import { canvasWorkflowMentions } from '../lib/canvas-workflow'
 import type {
   CanvasFlowEdge,
   CanvasFlowNode,
@@ -100,7 +101,19 @@ export function CanvasEditor(props: CanvasEditorProps) {
     edges: editor.edges,
     group: workflowOptions.group,
     updateNodeData: editor.updateNodeData,
+    addLinkedNode: editor.addLinkedNode,
   })
+
+  // The mention menu of the selected step offers only its connected nodes, so
+  // an instruction can never reference a resource the step does not consume.
+  const selectedNode = editor.selectedNode
+  const mentions = useMemo(
+    () =>
+      selectedNode
+        ? canvasWorkflowMentions(selectedNode, editor.nodes, editor.edges)
+        : [],
+    [editor.edges, editor.nodes, selectedNode]
+  )
   const workflowMessage = workflow.message
   const clearWorkflowMessage = workflow.clearMessage
 
@@ -164,6 +177,8 @@ export function CanvasEditor(props: CanvasEditorProps) {
     <div className='bg-muted/10 flex h-full min-h-0 w-full flex-col overflow-hidden border-l'>
       <CanvasNodeInspector
         disabled={props.disabled}
+        groups={workflowOptions.groups}
+        mentions={mentions}
         models={workflowOptions.models}
         node={editor.selectedNode}
         onDelete={editor.deleteNode}

@@ -145,6 +145,11 @@ export const PLAYGROUND_IMAGE_SIZES = [
   '1024x1792',
 ] as const
 export const PLAYGROUND_VIDEO_DURATIONS = [5, 10] as const
+// Mirrors `dto.MaxImageN` (image count is a billing multiplier) and
+// `relaycommon.MaxTaskDurationSeconds`; the client never sends a value outside
+// these bounds even though the relay validates the request again.
+export const PLAYGROUND_IMAGE_MAX_COUNT = 128
+export const PLAYGROUND_VIDEO_MAX_DURATION_SECONDS = 3600
 export const PLAYGROUND_AUDIO_VOICES = [
   'alloy',
   'echo',

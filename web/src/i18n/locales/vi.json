@@ -7659,6 +7659,20 @@
     "Playground system prompt limit exceeded.": "Lời nhắc hệ thống Playground vượt quá giới hạn kích thước.",
     "Assistant preset name must contain 1 to 100 characters.": "Tên trợ lý đặt sẵn phải có từ 1 đến 100 ký tự.",
     "Assistant preset avatar must be an emoji or an http(s) image URL.": "Ảnh đại diện của trợ lý đặt sẵn phải là biểu tượng cảm xúc hoặc URL hình ảnh http(s).",
-    "Invalid assistant preset.": "Trợ lý đặt sẵn không hợp lệ."
+    "Invalid assistant preset.": "Trợ lý đặt sẵn không hợp lệ.",
+    "Instruction": "Chỉ dẫn",
+    "Type @ to reference a connected resource.": "Nhập @ để tham chiếu một tài nguyên đã kết nối.",
+    "Insert reference": "Chèn tham chiếu",
+    "Connected resources": "Tài nguyên đã kết nối",
+    "Canvas group": "Nhóm của canvas",
+    "Channel default": "Mặc định của kênh",
+    "Quality": "Chất lượng",
+    "Video size": "Kích thước video",
+    "Retry generation": "Thử tạo lại",
+    "Reference images": "Ảnh tham chiếu",
+    "The canvas is full; the run could not add a result node.": "Canvas đã đầy; lần chạy không thể thêm nút kết quả.",
+    "The step that produced this result is no longer on the canvas.": "Bước tạo ra kết quả này không còn trên canvas.",
+    "A connected reference image could not be read.": "Không đọc được ảnh tham chiếu đã kết nối.",
+    "A connected reference image is larger than the 8 MiB limit.": "Ảnh tham chiếu đã kết nối vượt quá giới hạn 8 MiB."
   }
 }

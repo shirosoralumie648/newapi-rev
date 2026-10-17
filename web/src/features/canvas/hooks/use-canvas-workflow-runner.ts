@@ -25,6 +25,7 @@ import {
   submitImageGeneration,
   submitVideoGeneration,
 } from '@/features/playground/generation-api'
+import type { ContentPart } from '@/features/playground/types'
 import { getTaskArtifacts, getUserTaskLogs } from '@/features/usage-logs/api'
 import type { TaskArtifact, TaskLog } from '@/features/usage-logs/types'
 import {
@@ -34,23 +35,40 @@ import {
 } from '@/lib/server-error-message'
 
 import {
+  CANVAS_LINKED_NODE_OFFSET_X,
+  CANVAS_WORKFLOW_GENERATION_LABELS,
+  CANVAS_WORKFLOW_IMAGE_INPUT_MAX_COUNT,
+  CANVAS_WORKFLOW_MESSAGES,
   CANVAS_WORKFLOW_OUTPUT_MAX_CHARS,
   CANVAS_WORKFLOW_TASK_POLL_INTERVAL_MS,
 } from '../constants'
 import {
   boundCanvasWorkflowError,
   CANVAS_WORKFLOW_ERRORS,
+  canvasWorkflowGroup,
   canvasWorkflowOutputTargets,
+  canvasWorkflowRetryRecord,
+  canvasWorkflowRetrySource,
+  isCanvasWorkflowResult,
+  isCanvasWorkflowStep,
   orderCanvasWorkflow,
+  resolveCanvasWorkflowGeneration,
+  resolveCanvasWorkflowImageSources,
   resolveCanvasWorkflowInput,
   truncateCanvasWorkflowText,
   validateCanvasWorkflow,
 } from '../lib/canvas-workflow'
+import {
+  CanvasWorkflowImageError,
+  readCanvasWorkflowImages,
+} from '../lib/canvas-workflow-images'
 import type {
   CanvasFlowEdge,
   CanvasFlowNode,
   CanvasNodeData,
+  CanvasNodeKind,
   CanvasNodeWorkflowState,
+  CanvasWorkflowNodeStatus,
 } from '../types'
 import type {
   CanvasNodeDataUpdate,
@@ -60,6 +78,13 @@ import type {
 export type CanvasWorkflowRunPhase = 'idle' | 'running'
 
 type CanvasWorkflowStepOutcome = 'succeeded' | 'failed' | 'canceled'
+
+/** The resolved attempt values a step records and a result node repeats. */
+type CanvasWorkflowAttempt = {
+  inputText: string
+  group: string
+  inputImageCount: number
+}
 
 export interface CanvasWorkflowRunnerOptions {
   nodes: CanvasFlowNode[]
@@ -72,6 +97,13 @@ export interface CanvasWorkflowRunnerOptions {
     update: CanvasNodeDataUpdate,
     options?: CanvasNodeDataUpdateOptions
   ) => void
+  /** Adds a node fed by an existing one; null when the canvas is full. */
+  addLinkedNode: (
+    kind: CanvasNodeKind,
+    sourceId: string,
+    data: Partial<CanvasNodeData>,
+    position: { x: number; y: number }
+  ) => string | null
 }
 
 /**
@@ -158,6 +190,23 @@ function abortError(signal: AbortSignal): Error {
     : new DOMException('Aborted', 'AbortError')
 }
 
+/**
+ * The attempt values stored on a step node. A path that did not resolve them
+ * itself (a late-settled or resumed task) repeats what the original attempt
+ * recorded, so the result node's retry record stays complete.
+ */
+function storedWorkflowAttempt(
+  node: CanvasFlowNode,
+  fallbackGroup: string
+): CanvasWorkflowAttempt {
+  const workflow = node.data.workflow
+  return {
+    inputText: workflow?.inputText?.trim() ?? '',
+    group: workflow?.group?.trim() || fallbackGroup,
+    inputImageCount: workflow?.inputImageCount ?? 0,
+  }
+}
+
 /** A waiting period that ends early when the run is canceled. */
 function cancelableDelay(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -197,11 +246,13 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
   const edgesRef = useRef(options.edges)
   const groupRef = useRef(options.group)
   const updateRef = useRef(options.updateNodeData)
+  const addLinkedNodeRef = useRef(options.addLinkedNode)
   const phaseRef = useRef(phase)
   nodesRef.current = options.nodes
   edgesRef.current = options.edges
   groupRef.current = options.group
   updateRef.current = options.updateNodeData
+  addLinkedNodeRef.current = options.addLinkedNode
   phaseRef.current = phase
 
   const runIdRef = useRef(0)
@@ -252,7 +303,12 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
         markStepCanceled(id)
         return 'canceled'
       }
-      const text = workflowServerErrorText(error)
+      // A local reference-image read failure is not a server answer; its
+      // message is already a translation key.
+      const text =
+        error instanceof CanvasWorkflowImageError
+          ? error.messageKey
+          : workflowServerErrorText(error)
       markStepFailed(id, text)
       setMessage(text)
       return 'failed'
@@ -287,59 +343,144 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
   )
 
   /**
-   * Settles a succeeded generation step: the durable task row is the status
-   * source, and each artifact it exposes fills one downstream `task-result`
-   * node with the task id plus the artifact key. Bytes stay behind the
-   * owner-scoped artifact endpoints; only references are stored.
+   * Records a succeeded step on its downstream result nodes: an existing
+   * `task-result` node is filled, and a step without one gets a result node
+   * added and linked, so a finished run always leaves its prompt, model,
+   * parameters and reference on the board. Each artifact is handed to one
+   * target, and the label names the model plus what the artifact holds.
+   * Nothing here stores a URL; the bytes stay behind the controlled endpoints.
    */
-  const applyTaskSuccess = useCallback(
-    async (node: CanvasFlowNode, taskId: string): Promise<void> => {
+  const recordStepResult = useCallback(
+    (
+      node: CanvasFlowNode,
+      attempt: CanvasWorkflowAttempt,
+      options: { suffix: string; taskId?: string; artifacts?: TaskArtifact[] }
+    ) => {
       const targets = canvasWorkflowOutputTargets(
         node.id,
         nodesRef.current,
         edgesRef.current
       )
-      let artifacts: TaskArtifact[] = []
-      if (targets.length > 0) {
-        try {
-          const projection = await getTaskArtifacts(taskId)
-          artifacts = projection.artifacts
-        } catch {
-          artifacts = []
+      const record = canvasWorkflowRetryRecord(node, attempt)
+      const model = node.data.workflow?.model?.trim() ?? ''
+      const artifacts = options.artifacts ?? []
+      const resultData = (artifact?: TaskArtifact): Partial<CanvasNodeData> => {
+        const label = [model, artifact?.type ?? options.suffix]
+          .filter(Boolean)
+          .join(' · ')
+        return {
+          ...(label ? { label } : {}),
+          ...(options.taskId
+            ? {
+                ref: {
+                  taskId: options.taskId,
+                  ...(artifact?.key ? { taskArtifactKey: artifact.key } : {}),
+                },
+              }
+            : {}),
         }
       }
-      const model = node.data.workflow?.model?.trim() ?? ''
+      if (targets.length === 0) {
+        const created = addLinkedNodeRef.current(
+          'task-result',
+          node.id,
+          { ...resultData(artifacts[0]), workflow: record },
+          {
+            x: node.position.x + CANVAS_LINKED_NODE_OFFSET_X,
+            y: node.position.y,
+          }
+        )
+        if (!created) setMessage(CANVAS_WORKFLOW_MESSAGES.RESULT_NODE_LIMIT)
+        return
+      }
       for (const [index, targetId] of targets.entries()) {
         const artifact =
           artifacts.length > 0 ? artifacts[index % artifacts.length] : undefined
-        const label = [model, artifact?.type].filter(Boolean).join(' · ')
-        patchNode(targetId, () => ({
-          ...(label ? { label } : {}),
-          ref: {
-            taskId,
-            ...(artifact?.key ? { taskArtifactKey: artifact.key } : {}),
-          },
+        patchNode(targetId, (data) => ({
+          ...resultData(artifact),
+          workflow: { ...data.workflow, ...record },
         }))
       }
+    },
+    [patchNode]
+  )
+
+  /**
+   * Settles a succeeded generation task: the durable task row is the status
+   * source, and the artifacts it exposes fill the step's result nodes, which
+   * keep the task id plus the artifact key as the only reference.
+   */
+  const applyTaskSuccess = useCallback(
+    async (
+      node: CanvasFlowNode,
+      taskId: string,
+      attempt: CanvasWorkflowAttempt
+    ): Promise<void> => {
+      let artifacts: TaskArtifact[] = []
+      try {
+        const projection = await getTaskArtifacts(taskId)
+        artifacts = projection.artifacts
+      } catch {
+        artifacts = []
+      }
+      const generation = resolveCanvasWorkflowGeneration(node).generation
+      recordStepResult(node, attempt, {
+        suffix: CANVAS_WORKFLOW_GENERATION_LABELS[generation],
+        taskId,
+        artifacts,
+      })
       markStepSucceeded(node.id, { taskId })
     },
-    [markStepSucceeded, patchNode]
+    [markStepSucceeded, recordStepResult]
+  )
+
+  /**
+   * Reads the reference images a step consumes from its connected nodes. The
+   * count is bounded before the request is built; a read failure fails the step
+   * instead of silently dropping the user's input.
+   */
+  const readStepImages = useCallback(
+    async (node: CanvasFlowNode, signal: AbortSignal): Promise<string[]> => {
+      const sources = resolveCanvasWorkflowImageSources(
+        node,
+        nodesRef.current,
+        edgesRef.current
+      )
+      if (sources.length === 0) return []
+      return readCanvasWorkflowImages(
+        sources.slice(0, CANVAS_WORKFLOW_IMAGE_INPUT_MAX_COUNT),
+        signal
+      )
+    },
+    []
   )
 
   const runModelStep = useCallback(
     async (
       node: CanvasFlowNode,
       input: string,
+      group: string,
       generation: number,
       signal: AbortSignal
     ): Promise<CanvasWorkflowStepOutcome> => {
       const model = node.data.workflow?.model?.trim() ?? ''
       try {
+        const images = await readStepImages(node, signal)
+        const content: string | ContentPart[] =
+          images.length === 0
+            ? input
+            : [
+                { type: 'text', text: input },
+                ...images.map((url) => ({
+                  type: 'image_url' as const,
+                  image_url: { url },
+                })),
+              ]
         const { response } = await sendChatCompletion(
           {
             model,
-            group: groupRef.current,
-            messages: [{ role: 'user', content: input }],
+            group,
+            messages: [{ role: 'user', content }],
             stream: false,
           },
           signal
@@ -355,33 +496,47 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
           CANVAS_WORKFLOW_OUTPUT_MAX_CHARS
         )
         outputsRef.current.set(node.id, bounded)
-        markStepSucceeded(node.id, { inputText: input, output: bounded })
+        markStepSucceeded(node.id, {
+          inputText: input,
+          output: bounded,
+          group,
+          inputImageCount: images.length,
+        })
         return 'succeeded'
       } catch (error) {
         return stepErrorOutcome(node.id, error, generation)
       }
     },
-    [markStepFailed, markStepSucceeded, stepErrorOutcome]
+    [markStepFailed, markStepSucceeded, readStepImages, stepErrorOutcome]
   )
 
   const runTaskStep = useCallback(
     async (
       node: CanvasFlowNode,
       input: string,
+      group: string,
       adoptTaskId: string | null,
       generation: number,
       signal: AbortSignal
     ): Promise<CanvasWorkflowStepOutcome> => {
-      const workflow = node.data.workflow
-      const model = workflow?.model?.trim() ?? ''
-      const group = groupRef.current
+      const config = resolveCanvasWorkflowGeneration(node)
+      const model = node.data.workflow?.model?.trim() ?? ''
       try {
-        if (workflow?.generation !== 'video') {
-          const images = await submitImageGeneration(
-            { model, prompt: input, group, size: workflow?.size },
+        const images = await readStepImages(node, signal)
+        if (config.generation !== 'video') {
+          const results = await submitImageGeneration(
+            {
+              model,
+              prompt: input,
+              group,
+              size: config.size,
+              quality: config.quality,
+              count: config.imageCount,
+              images,
+            },
             signal
           )
-          const previews = images
+          const previews = results
             .map(
               (image) =>
                 image.url ??
@@ -394,9 +549,16 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
             return 'failed'
           }
           setResults((current) => ({ ...current, [node.id]: previews }))
+          recordStepResult(
+            node,
+            { inputText: input, group, inputImageCount: images.length },
+            { suffix: CANVAS_WORKFLOW_GENERATION_LABELS.image }
+          )
           markStepSucceeded(node.id, {
             inputText: input,
-            imageCount: previews.length,
+            group,
+            inputImageCount: images.length,
+            resultImageCount: previews.length,
           })
           return 'succeeded'
         }
@@ -407,9 +569,9 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
               model,
               prompt: input,
               group,
-              ...(workflow?.duration && workflow.duration > 0
-                ? { duration: workflow.duration }
-                : {}),
+              duration: config.duration,
+              size: config.size,
+              images,
             },
             signal
           )
@@ -420,7 +582,13 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
           return 'failed'
         }
         patchNode(node.id, (data) => ({
-          workflow: { ...data.workflow, taskId, inputText: input },
+          workflow: {
+            ...data.workflow,
+            taskId,
+            inputText: input,
+            group,
+            inputImageCount: images.length,
+          },
         }))
         pendingTaskRef.current = { taskId, nodeId: node.id }
         const row = await waitForTask(taskId, signal)
@@ -441,7 +609,11 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
           setMessage(reason)
           return 'failed'
         }
-        await applyTaskSuccess(node, taskId)
+        await applyTaskSuccess(node, taskId, {
+          inputText: input,
+          group,
+          inputImageCount: images.length,
+        })
         return 'succeeded'
       } catch (error) {
         pendingTaskRef.current = null
@@ -454,6 +626,8 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
       markStepFailed,
       markStepSucceeded,
       patchNode,
+      readStepImages,
+      recordStepResult,
       stepErrorOutcome,
       waitForTask,
     ]
@@ -482,8 +656,12 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
             runEdges,
             outputsRef.current
           )
+          // The step's own group override wins over the canvas group; the
+          // server re-validates it against the account's usable groups.
+          const group = canvasWorkflowGroup(node, groupRef.current)
           markStepRunning(id, {
             inputText: input,
+            group,
             ...(node.data.workflow?.model
               ? { model: node.data.workflow.model }
               : {}),
@@ -503,8 +681,15 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
               : null
           const outcome =
             node.data.kind === 'model'
-              ? await runModelStep(node, input, generation, signal)
-              : await runTaskStep(node, input, adoptTaskId, generation, signal)
+              ? await runModelStep(node, input, group, generation, signal)
+              : await runTaskStep(
+                  node,
+                  input,
+                  group,
+                  adoptTaskId,
+                  generation,
+                  signal
+                )
           if (outcome !== 'succeeded') return
         }
       } finally {
@@ -560,9 +745,31 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
     [executeSteps]
   )
 
+  /**
+   * Retries one step. A result node points at the step that produced it, so
+   * one click on a result re-issues the same request; a result whose step is
+   * gone reports why instead of running an unrelated prefix of the board.
+   */
   const retry = useCallback(
     (nodeId: string) => {
-      start(nodeId)
+      const target = nodesRef.current.find((node) => node.id === nodeId)
+      if (!target) {
+        setMessage(CANVAS_WORKFLOW_MESSAGES.RETRY_SOURCE_MISSING)
+        return
+      }
+      if (!isCanvasWorkflowResult(target.data.kind)) {
+        start(nodeId)
+        return
+      }
+      const sourceId = canvasWorkflowRetrySource(target)
+      const source = sourceId
+        ? nodesRef.current.find((node) => node.id === sourceId)
+        : undefined
+      if (!source || !isCanvasWorkflowStep(source.data.kind)) {
+        setMessage(CANVAS_WORKFLOW_MESSAGES.RETRY_SOURCE_MISSING)
+        return
+      }
+      start(source.id)
     },
     [start]
   )
@@ -593,7 +800,13 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
       }
       if (row?.status === 'SUCCESS') {
         const node = nodesRef.current.find((item) => item.id === pending.nodeId)
-        if (node) await applyTaskSuccess(node, pending.taskId)
+        if (node) {
+          await applyTaskSuccess(
+            node,
+            pending.taskId,
+            storedWorkflowAttempt(node, groupRef.current)
+          )
+        }
         return
       }
       markStepCanceled(pending.nodeId)
@@ -624,7 +837,11 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
           )
           return
         }
-        await applyTaskSuccess(node, taskId)
+        await applyTaskSuccess(
+          node,
+          taskId,
+          storedWorkflowAttempt(node, groupRef.current)
+        )
       } catch {
         // Keep the running state; the next load settles from the durable row.
       }

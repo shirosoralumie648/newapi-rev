@@ -55,7 +55,11 @@ export function getPlaygroundAttachmentObjectUrl(
   return cache.get(id)?.objectUrl
 }
 
-function blobToDataUrl(blob: Blob): Promise<string> {
+/**
+ * Encodes blob bytes as a data URL, the request form the model payload and the
+ * canvas reference-image input both use.
+ */
+export function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.addEventListener('loadend', () => resolve(reader.result as string), {

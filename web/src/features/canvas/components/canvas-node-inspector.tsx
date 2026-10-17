@@ -23,7 +23,7 @@ import { useTranslation } from 'react-i18next'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import type { ModelOption } from '@/features/playground/types'
+import type { GroupOption, ModelOption } from '@/features/playground/types'
 
 import { CANVAS_NODE_KIND_LABELS } from '../constants'
 import type {
@@ -35,14 +35,22 @@ import {
   canvasNodeSourceTarget,
   type CanvasSourceTarget,
 } from '../lib/canvas-navigation'
-import { isCanvasWorkflowStep } from '../lib/canvas-workflow'
+import {
+  isCanvasWorkflowResult,
+  isCanvasWorkflowStep,
+  type CanvasWorkflowMention,
+} from '../lib/canvas-workflow'
 import type { CanvasFlowNode } from '../types'
+import { CanvasNodeResultFields } from './canvas-node-result-fields'
 import { CanvasNodeWorkflowFields } from './canvas-node-workflow-fields'
 
 interface CanvasNodeInspectorProps {
   node: CanvasFlowNode | null
   disabled?: boolean
   models?: ModelOption[]
+  groups?: GroupOption[]
+  /** Directly connected upstream nodes the instruction can reference. */
+  mentions?: CanvasWorkflowMention[]
   /** Transient run previews of the selected node; never persisted. */
   previews?: string[]
   runPhase?: CanvasWorkflowRunPhase
@@ -108,11 +116,22 @@ export function CanvasNodeInspector(props: CanvasNodeInspectorProps) {
       {isCanvasWorkflowStep(node.data.kind) && props.onRetry ? (
         <CanvasNodeWorkflowFields
           disabled={props.disabled}
+          groups={props.groups ?? []}
+          mentions={props.mentions ?? []}
           models={props.models ?? []}
           node={node}
           onRetry={props.onRetry}
           onUpdateData={props.onUpdateData}
           previews={props.previews ?? []}
+          runPhase={props.runPhase ?? 'idle'}
+        />
+      ) : null}
+
+      {isCanvasWorkflowResult(node.data.kind) && props.onRetry ? (
+        <CanvasNodeResultFields
+          disabled={props.disabled}
+          node={node}
+          onRetry={props.onRetry}
           runPhase={props.runPhase ?? 'idle'}
         />
       ) : null}

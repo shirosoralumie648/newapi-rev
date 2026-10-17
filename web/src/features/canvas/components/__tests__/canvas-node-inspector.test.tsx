@@ -163,3 +163,185 @@ test('hides the retry action while the workflow is running', () => {
   expect(screen.getByText('Canceled')).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Retry step' })).toBeNull()
 })
+
+test('inserts a mention of a connected resource into the instruction', async () => {
+  const user = userEvent.setup()
+  const onUpdateData = vi.fn()
+  render(
+    <CanvasNodeInspector
+      mentions={[
+        {
+          nodeId: 'p1',
+          label: 'Prompt',
+          kind: 'prompt',
+          hasText: true,
+          hasImage: false,
+        },
+        {
+          nodeId: 'a1',
+          label: 'photo.png',
+          kind: 'attachment',
+          hasText: false,
+          hasImage: true,
+        },
+      ]}
+      models={[{ label: 'gpt-4o', value: 'gpt-4o' }]}
+      node={makeNode({ kind: 'model', workflow: { model: 'gpt-4o' } })}
+      onDelete={vi.fn()}
+      onRetry={vi.fn()}
+      onUpdateData={onUpdateData}
+    />
+  )
+
+  const instruction = screen.getByRole('textbox', { name: 'Instruction' })
+  await user.type(instruction, 'hello @')
+  expect(screen.getByRole('button', { name: /photo\.png/ })).toBeInTheDocument()
+
+  await user.click(screen.getByRole('button', { name: /photo\.png/ }))
+  expect(onUpdateData).toHaveBeenCalledWith('n1', { text: 'hello @photo.png ' })
+})
+
+test('opens the mention picker from the insert reference action', async () => {
+  const user = userEvent.setup()
+  const onUpdateData = vi.fn()
+  render(
+    <CanvasNodeInspector
+      mentions={[
+        {
+          nodeId: 'p1',
+          label: 'Prompt',
+          kind: 'prompt',
+          hasText: true,
+          hasImage: false,
+        },
+      ]}
+      models={[{ label: 'gpt-4o', value: 'gpt-4o' }]}
+      node={makeNode({ kind: 'model', workflow: { model: 'gpt-4o' } })}
+      onDelete={vi.fn()}
+      onRetry={vi.fn()}
+      onUpdateData={onUpdateData}
+    />
+  )
+
+  await user.click(screen.getByRole('button', { name: 'Insert reference' }))
+  await user.click(screen.getByRole('button', { name: /Prompt/ }))
+
+  expect(onUpdateData).toHaveBeenCalledWith('n1', { text: '@Prompt ' })
+})
+
+test('configures the generation parameters and group of a task step', async () => {
+  const user = userEvent.setup()
+  const onUpdateData = vi.fn()
+  render(
+    <CanvasNodeInspector
+      groups={[
+        { label: 'default', value: 'default' },
+        { label: 'vip', value: 'vip' },
+      ]}
+      models={[{ label: 'gpt-image-1', value: 'gpt-image-1' }]}
+      node={makeNode({
+        kind: 'task',
+        workflow: { model: 'gpt-image-1', generation: 'image' },
+      })}
+      onDelete={vi.fn()}
+      onRetry={vi.fn()}
+      onUpdateData={onUpdateData}
+      runPhase='idle'
+    />
+  )
+
+  await user.selectOptions(
+    screen.getByRole('combobox', { name: 'Quality' }),
+    'high'
+  )
+  await user.selectOptions(screen.getByRole('combobox', { name: 'Count' }), '3')
+  await user.selectOptions(
+    screen.getByRole('combobox', { name: 'Group' }),
+    'vip'
+  )
+
+  const patchOf = (index: number) =>
+    onUpdateData.mock.calls[index][1] as (
+      data: CanvasNodeData
+    ) => Partial<CanvasNodeData>
+  const base: CanvasNodeData = {
+    kind: 'task',
+    workflow: { model: 'gpt-image-1', generation: 'image' },
+  }
+  expect(patchOf(0)(base)).toEqual({
+    workflow: { model: 'gpt-image-1', generation: 'image', quality: 'high' },
+  })
+  expect(patchOf(1)(base)).toEqual({
+    workflow: { model: 'gpt-image-1', generation: 'image', imageCount: 3 },
+  })
+  expect(patchOf(2)(base)).toEqual({
+    workflow: { model: 'gpt-image-1', generation: 'image', group: 'vip' },
+  })
+
+  await user.selectOptions(
+    screen.getByRole('combobox', { name: 'Generation type' }),
+    'video'
+  )
+  expect(
+    screen.getByRole('combobox', { name: 'Video size' })
+  ).toBeInTheDocument()
+  expect(screen.queryByRole('combobox', { name: 'Quality' })).toBeNull()
+})
+
+test('shows the generation record of a result node and retries it', async () => {
+  const user = userEvent.setup()
+  const onRetry = vi.fn()
+  render(
+    <CanvasNodeInspector
+      node={makeNode({
+        kind: 'task-result',
+        label: 'kling-v1 · video',
+        ref: { taskId: 'task-1', taskArtifactKey: 'out-1' },
+        workflow: {
+          status: 'succeeded',
+          model: 'kling-v1',
+          generation: 'video',
+          duration: 10,
+          inputText: 'a sailing ship',
+          group: 'vip',
+          sourceNodeId: 't1',
+        },
+      })}
+      onDelete={vi.fn()}
+      onRetry={onRetry}
+      onUpdateData={vi.fn()}
+      runPhase='idle'
+    />
+  )
+
+  expect(screen.getByText('Result')).toBeInTheDocument()
+  expect(screen.getByText('a sailing ship')).toBeInTheDocument()
+  expect(screen.getByText('kling-v1')).toBeInTheDocument()
+  expect(screen.getByText('Video')).toBeInTheDocument()
+  expect(screen.getByText('task-1')).toBeInTheDocument()
+  expect(screen.getByText('out-1')).toBeInTheDocument()
+
+  await user.click(screen.getByRole('button', { name: 'Retry generation' }))
+  expect(onRetry).toHaveBeenCalledWith('n1')
+})
+
+test('hides the result retry while the workflow is running', () => {
+  render(
+    <CanvasNodeInspector
+      node={makeNode({
+        kind: 'task-result',
+        workflow: {
+          status: 'succeeded',
+          model: 'kling-v1',
+          sourceNodeId: 't1',
+        },
+      })}
+      onDelete={vi.fn()}
+      onRetry={vi.fn()}
+      onUpdateData={vi.fn()}
+      runPhase='running'
+    />
+  )
+
+  expect(screen.queryByRole('button', { name: 'Retry generation' })).toBeNull()
+})
