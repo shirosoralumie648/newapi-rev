@@ -210,7 +210,11 @@ func TestNewSelectsLocalBackend(t *testing.T) {
 		PresignTTLSeconds: system_setting.DefaultTaskArtifactStorePresignTTLSeconds,
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	// Store does not own the directory-handle lifecycle, so release it through
+	// the concrete backend type that New selects.
+	local, ok := store.(*Local)
+	require.True(t, ok, "New must return the local backend implementation")
+	t.Cleanup(func() { require.NoError(t, local.Close()) })
 	assert.Equal(t, system_setting.ObjectStoreBackendLocal, store.Backend())
 
 	_, err = New(system_setting.ObjectStoreConfig{
