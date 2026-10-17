@@ -728,7 +728,7 @@ func TestStreamScannerHandler_FirstTokenTimeoutKeepsStreamAfterOutput(t *testing
 	setFirstTokenTimeoutGlobal(t, 1)
 
 	info := &relaycommon.RelayInfo{DisablePing: true, ChannelMeta: &relaycommon.ChannelMeta{}}
-	c, recorder, pw, done := startSilentStream(t, info)
+	_, recorder, pw, done := startSilentStream(t, info)
 
 	_, err := fmt.Fprint(pw, "data: {\"id\":1}\n")
 	require.NoError(t, err)
