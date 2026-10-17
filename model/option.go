@@ -173,6 +173,7 @@ func InitOptionMap() {
 	common.OptionMap["MjModeClearEnabled"] = strconv.FormatBool(setting.MjModeClearEnabled)
 	common.OptionMap["MjForwardUrlEnabled"] = strconv.FormatBool(setting.MjForwardUrlEnabled)
 	common.OptionMap["MjActionCheckSuccessEnabled"] = strconv.FormatBool(setting.MjActionCheckSuccessEnabled)
+	common.OptionMap["MjImageAccessMode"] = setting.MjImageAccessMode
 	common.OptionMap["CheckSensitiveEnabled"] = strconv.FormatBool(setting.CheckSensitiveEnabled)
 	common.OptionMap["DemoSiteEnabled"] = strconv.FormatBool(operation_setting.DemoSiteEnabled)
 	common.OptionMap["SelfUseModeEnabled"] = strconv.FormatBool(operation_setting.SelfUseModeEnabled)
@@ -486,6 +487,11 @@ func updateOptionMap(key string, value string) (err error) {
 		common.SMTPToken = value
 	case "ServerAddress":
 		system_setting.ServerAddress = value
+	case "MjImageAccessMode":
+		// Store the normalized mode so an unrecognized stored value never
+		// reaches the admin UI or reopens the route with a bad default.
+		setting.MjImageAccessMode = setting.NormalizeMjImageAccessMode(value)
+		common.OptionMap[key] = setting.MjImageAccessMode
 	case "TaskPublicAddress":
 		system_setting.TaskPublicAddress = value
 	case "WorkerUrl":

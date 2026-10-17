@@ -43,6 +43,7 @@ const defaultContentSettings: ContentSettings = {
   MjForwardUrlEnabled: false,
   MjModeClearEnabled: false,
   MjActionCheckSuccessEnabled: false,
+  MjImageAccessMode: 'auth',
 }
 
 function resolveContentSettings(
