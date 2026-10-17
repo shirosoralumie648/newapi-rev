@@ -427,11 +427,11 @@ func encodePlaygroundContextSummary(raw json.RawMessage) (encoded string, clear 
 	if err := validatePlaygroundMessageUsage(summary.RequestID, summary.Usage); err != nil {
 		return "", false, err
 	}
-	encoded, err = common.Marshal(summary)
+	payload, err := common.Marshal(summary)
 	if err != nil {
 		return "", false, err
 	}
-	return encoded, false, nil
+	return string(payload), false, nil
 }
 
 // encodePlaygroundSettings validates the session settings one request may
