@@ -61,15 +61,23 @@ function readStoredProjectId(key: string | null): string | null {
   }
 }
 
+/**
+ * Owns the canvas project list, the active project, autosave with revision
+ * compare-and-swap and the unsaved-edit guard. Every project operation stays
+ * scoped to the signed-in account through the localStorage key and the
+ * server-side owner filter.
+ */
 export function useCanvasProject(userId: number | null) {
   const [projects, setProjects] = useState<CanvasProjectSummary[]>([])
   const [project, setProject] = useState<CanvasServerProject | null>(null)
   const [status, setStatus] = useState<CanvasSaveStatus>('idle')
   const [error, setError] = useState<Error | null>(null)
+  const [dirty, setDirty] = useState(false)
 
   const mounted = useRef(true)
   const generation = useRef(0)
   const projectRef = useRef<CanvasServerProject | null>(null)
+  const projectsRef = useRef<CanvasProjectSummary[]>([])
   const revisionRef = useRef(0)
   const pendingDocument = useRef<CanvasServerDocument | null>(null)
   const savingRef = useRef(false)
@@ -77,6 +85,11 @@ export function useCanvasProject(userId: number | null) {
   const lastProjectKey = userId
     ? `${CANVAS_STORAGE_LAST_PROJECT}:${userId}`
     : null
+
+  const applyProjects = useCallback((next: CanvasProjectSummary[]) => {
+    projectsRef.current = next
+    setProjects(next)
+  }, [])
 
   useEffect(() => {
     mounted.current = true
@@ -114,6 +127,7 @@ export function useCanvasProject(userId: number | null) {
         const loaded = await getCanvasProject(projectId)
         if (!mounted.current || generation.current !== current) return
         pendingDocument.current = null
+        setDirty(false)
         setActiveProject(loaded)
         setStatus('ready')
       } catch (loadError) {
@@ -129,27 +143,30 @@ export function useCanvasProject(userId: number | null) {
     async (preferredId?: string | null): Promise<CanvasProjectSummary[]> => {
       const rows = await listCanvasProjects()
       if (!mounted.current) return rows
-      setProjects(rows)
+      applyProjects(rows)
       const wanted = preferredId ?? readStoredProjectId(lastProjectKey)
       const next = rows.find((row) => row.id === wanted) ?? rows[0] ?? null
       if (next) {
         await loadProject(next.id)
       } else {
         setActiveProject(null)
+        pendingDocument.current = null
+        setDirty(false)
         setStatus('ready')
       }
       return rows
     },
-    [lastProjectKey, loadProject, setActiveProject]
+    [applyProjects, lastProjectKey, loadProject, setActiveProject]
   )
 
   // (re)load whenever the account changes; the account-keyed route remounts
   // on sign-in but the hook also guards in-place account switches.
   useEffect(() => {
     if (!userId) {
-      setProjects([])
+      applyProjects([])
       setActiveProject(null)
       pendingDocument.current = null
+      setDirty(false)
       setStatus('idle')
       return
     }
@@ -158,7 +175,7 @@ export function useCanvasProject(userId: number | null) {
       setError(toError(loadError))
       setStatus('error')
     })
-  }, [userId, refreshProjects, setActiveProject])
+  }, [userId, refreshProjects, setActiveProject, applyProjects])
 
   const flush = useCallback(async () => {
     const active = projectRef.current
@@ -186,9 +203,10 @@ export function useCanvasProject(userId: number | null) {
       )
       if (pendingDocument.current === document) {
         pendingDocument.current = null
+        setDirty(false)
       }
-      setProjects((current) =>
-        current.map((row) =>
+      applyProjects(
+        projectsRef.current.map((row) =>
           row.id === updated.id
             ? {
                 ...row,
@@ -222,11 +240,12 @@ export function useCanvasProject(userId: number | null) {
         }, CANVAS_AUTOSAVE_DELAY_MS)
       }
     }
-  }, [])
+  }, [applyProjects])
 
   const scheduleSave = useCallback(
     (document: CanvasServerDocument) => {
       pendingDocument.current = document
+      setDirty(true)
       if (savingRef.current || timerRef.current !== null) return
       timerRef.current = window.setTimeout(() => {
         timerRef.current = null
@@ -245,80 +264,115 @@ export function useCanvasProject(userId: number | null) {
   }, [flush])
 
   const createNewProject = useCallback(
-    async (document?: CanvasServerDocument, title?: string) => {
+    async (title?: string) => {
+      await flush()
       const created = await createCanvasProject({
         clientId: nanoid(),
         title: title ?? CANVAS_DEFAULT_TITLE,
-        document: document ?? createEmptyCanvasDocument(),
+        document: createEmptyCanvasDocument(),
       })
       if (!mounted.current) return created
       pendingDocument.current = null
+      setDirty(false)
       setActiveProject(created)
       setStatus('ready')
       setError(null)
-      setProjects((current) => [
+      applyProjects([
         created,
-        ...current.filter((row) => row.id !== created.id),
+        ...projectsRef.current.filter((row) => row.id !== created.id),
       ])
       return created
     },
-    [setActiveProject]
+    [applyProjects, flush, setActiveProject]
   )
 
-  const renameProject = useCallback(async (title: string) => {
-    const active = projectRef.current
-    if (!active) return
-    const updated = await updateCanvasProject(active.id, {
-      revision: revisionRef.current,
-      title,
-    })
-    if (!mounted.current) return
-    revisionRef.current = updated.revision
-    const current = projectRef.current
-    if (current && current.id === updated.id) {
-      projectRef.current = {
-        ...current,
-        title: updated.title,
-        revision: updated.revision,
-      }
-    }
-    setProject((current) =>
-      current?.id === updated.id
-        ? { ...current, title: updated.title, revision: updated.revision }
-        : current
-    )
-    setProjects((current) =>
-      current.map((row) =>
-        row.id === updated.id ? { ...row, title: updated.title } : row
-      )
-    )
-  }, [])
+  const selectProject = useCallback(
+    async (id: string) => {
+      if (projectRef.current?.id === id) return
+      // Persist the current board before switching so autosave cannot target
+      // the freshly opened project.
+      await flush()
+      await loadProject(id)
+    },
+    [flush, loadProject]
+  )
 
-  const deleteProject = useCallback(async () => {
-    const active = projectRef.current
-    if (!active) return
-    await deleteCanvasProject(active.id)
-    if (!mounted.current) return
-    pendingDocument.current = null
-    setActiveProject(null)
-    setStatus('loading')
-    await refreshProjects()
-  }, [refreshProjects, setActiveProject])
+  const renameProject = useCallback(
+    async (id: string, title: string) => {
+      // A pending autosave shares the revision counter; settle it first so the
+      // rename does not race the save into a conflict.
+      if (projectRef.current?.id === id) await flush()
+      const active = projectRef.current
+      const summary = projectsRef.current.find((row) => row.id === id)
+      const revision =
+        active?.id === id ? revisionRef.current : summary?.revision
+      if (revision === undefined) return
+      const updated = await updateCanvasProject(id, { revision, title })
+      if (!mounted.current) return
+      if (active?.id === id) {
+        revisionRef.current = updated.revision
+        projectRef.current = {
+          ...active,
+          title: updated.title,
+          revision: updated.revision,
+        }
+        setProject((current) =>
+          current?.id === id
+            ? { ...current, title: updated.title, revision: updated.revision }
+            : current
+        )
+      }
+      applyProjects(
+        projectsRef.current.map((row) =>
+          row.id === id
+            ? { ...row, title: updated.title, revision: updated.revision }
+            : row
+        )
+      )
+    },
+    [applyProjects, flush]
+  )
+
+  const deleteProject = useCallback(
+    async (id: string) => {
+      await deleteCanvasProject(id)
+      if (!mounted.current) return
+      const remaining = projectsRef.current.filter((row) => row.id !== id)
+      applyProjects(remaining)
+      if (projectRef.current?.id !== id) return
+      pendingDocument.current = null
+      setDirty(false)
+      const next = remaining[0] ?? null
+      if (next) {
+        await loadProject(next.id)
+      } else {
+        setActiveProject(null)
+        setStatus('ready')
+      }
+    },
+    [applyProjects, loadProject, setActiveProject]
+  )
 
   const discardLocalChanges = useCallback(async () => {
     const active = projectRef.current
     if (!active) return
     pendingDocument.current = null
+    setDirty(false)
     setStatus('loading')
     setError(null)
-    const reloaded = await getCanvasProject(active.id)
-    if (!mounted.current) return
-    setActiveProject(reloaded)
-    setStatus('ready')
+    try {
+      const reloaded = await getCanvasProject(active.id)
+      if (!mounted.current) return
+      setActiveProject(reloaded)
+      setStatus('ready')
+    } catch (loadError) {
+      if (!mounted.current) return
+      setError(toError(loadError))
+      setStatus('error')
+    }
   }, [setActiveProject])
 
   // A pending write means local edits would be lost on navigation.
-  const dirty = pendingDocument.current !== null
   useEffect(() => {
     if (!dirty) return
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -328,7 +382,7 @@ export function useCanvasProject(userId: number | null) {
     }
     window.addEventListener('beforeunload', handleBeforeUnload)
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-  }, [dirty, status])
+  }, [dirty])
 
   return {
     projects,
@@ -338,6 +392,7 @@ export function useCanvasProject(userId: number | null) {
     dirty,
     conflict: status === 'conflict',
     loadProject,
+    selectProject,
     refreshProjects,
     createNewProject,
     renameProject,

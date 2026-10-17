@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { CanvasNodeKind } from './types'
 
 // Mirror of the server-side canvas document contract. The server validates
 // the same bounds again; the client copy keeps import and edit feedback local.
@@ -38,6 +39,22 @@ export const CANVAS_NODE_KINDS = [
   'task',
 ] as const
 
+// Translation keys for the node kinds. The values double as English source
+// text and as i18n keys, so the node header always follows the interface
+// language.
+export const CANVAS_NODE_KIND_LABELS: Record<CanvasNodeKind, string> = {
+  text: 'Text',
+  prompt: 'Prompt',
+  image: 'Image',
+  artifact: 'Artifact',
+  message: 'Message',
+  task: 'Task',
+}
+
 export const CANVAS_DEFAULT_TITLE = 'New canvas'
 
 export const CANVAS_MESSAGE_SNAPSHOT_MAX_CHARS = 1000
+
+// A new node is dropped at a small cascade near the top-left of the pane so
+// repeated adds do not stack on the exact same position.
+export const CANVAS_NODE_ADD_OFFSET = 32
