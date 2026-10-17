@@ -26,9 +26,11 @@ import {
   completeReasoningTiming,
   startReasoningTiming,
 } from './message-timing-utils'
+import { applyResponseToolCalls } from './message-tool-call-utils'
 import {
   getCurrentVersion,
   hasMessageContent,
+  hasToolCallPayload,
   updateCurrentVersionContent,
 } from './message-utils'
 
@@ -188,11 +190,13 @@ export function applyChatCompletionChoice(
   message: Message,
   choice: ChatCompletionChoice
 ): Message {
+  const finalized = finalizeMessage(
+    updateCurrentVersionContent(message, choice.message?.content || ''),
+    choice.message?.reasoning_content
+  )
+
   return completeAssistantTiming({
-    ...finalizeMessage(
-      updateCurrentVersionContent(message, choice.message?.content || ''),
-      choice.message?.reasoning_content
-    ),
+    ...applyResponseToolCalls(finalized, choice.message?.tool_calls),
     status: MESSAGE_STATUS.COMPLETE,
   })
 }
@@ -231,9 +235,10 @@ export function sanitizeMessagesOnLoad(messages: Message[]): Message[] {
   const finalized = finalizeMessage(messages[targetIndex])
   const hasContent = hasMessageContent(finalized)
   const hasReasoning = finalized.reasoning?.content?.trim()
+  const hasToolCalls = hasToolCallPayload(finalized)
 
   const sanitized: Message =
-    hasContent || hasReasoning
+    hasContent || hasReasoning || hasToolCalls
       ? completeAssistantTiming({
           ...finalized,
           status: MESSAGE_STATUS.COMPLETE,

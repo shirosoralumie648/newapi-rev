@@ -62,10 +62,31 @@ const messageAttachmentSchema = z.object({
   byteSize: z.number().int().nonnegative().optional(),
 })
 
+const messageToolCallStatusSchema = z.enum([
+  'pending',
+  'completed',
+  'denied',
+  'error',
+])
+
+// Bounds stay permissive on purpose: rejecting a snapshot would drop the whole
+// stored conversation. The server policy limits stay authoritative.
+const messageToolCallSchema = z.object({
+  id: z.string().max(500),
+  name: z.string().max(500),
+  arguments: z.string(),
+  status: messageToolCallStatusSchema,
+  result: z.string().optional(),
+  errorMessage: z.string().optional(),
+  createdAt: z.number().finite().optional(),
+  completedAt: z.number().finite().optional(),
+})
+
 const messageVersionSchema = z.object({
   id: z.string().min(1).max(200),
   content: z.string(),
   attachments: z.array(messageAttachmentSchema).optional(),
+  toolCalls: z.array(messageToolCallSchema).optional(),
 })
 
 const sourceSchema = z.object({

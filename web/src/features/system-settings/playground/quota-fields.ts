@@ -24,6 +24,9 @@ export const PLAYGROUND_QUOTA_FIELD_KEYS = [
   'message_max_count',
   'message_max_versions',
   'message_max_bytes',
+  'tool_call_max_count',
+  'tool_call_arguments_max_bytes',
+  'tool_call_result_max_bytes',
   'attachment_max_count',
   'attachment_max_file_bytes',
   'attachment_user_max_count',
@@ -52,6 +55,7 @@ export type PlaygroundQuotaFieldKey =
 export const PLAYGROUND_QUOTA_GROUPS = [
   { id: 'conversations', labelKey: 'Conversations' },
   { id: 'messages', labelKey: 'Messages' },
+  { id: 'tools', labelKey: 'Tool calls' },
   { id: 'attachments', labelKey: 'Attachments' },
   { id: 'artifacts', labelKey: 'Artifacts' },
   { id: 'canvas', labelKey: 'Canvas' },
@@ -88,6 +92,23 @@ export const PLAYGROUND_QUOTA_FIELDS: readonly PlaygroundQuotaField[] = [
     key: 'message_max_bytes',
     group: 'messages',
     labelKey: 'Message snapshot bytes per conversation',
+    bytes: true,
+  },
+  {
+    key: 'tool_call_max_count',
+    group: 'tools',
+    labelKey: 'Tool calls per message version',
+  },
+  {
+    key: 'tool_call_arguments_max_bytes',
+    group: 'tools',
+    labelKey: 'Tool call arguments size limit',
+    bytes: true,
+  },
+  {
+    key: 'tool_call_result_max_bytes',
+    group: 'tools',
+    labelKey: 'Tool call result size limit',
     bytes: true,
   },
   {

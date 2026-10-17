@@ -260,6 +260,98 @@ func TestPlaygroundRejectsInvalidSnapshotsWithoutReplacingHistory(t *testing.T) 
 	}
 }
 
+// Tool call snapshots keep the requested call and the user-provided result
+// verbatim. The gateway only bounds the state: calls on non-assistant messages,
+// excess counts, duplicate or missing identities, oversized payloads and
+// unknown statuses are rejected while the stored history stays intact, and no
+// call is ever executed.
+func TestPlaygroundToolCallSnapshots(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			playgroundTestDB(t, dialect)
+			policy := playground_setting.GetPlaygroundQuotaPolicy("default")
+			session := createPlayground(t, 7, "tool-calls")
+			path := "/api/playground/sessions/" + session["id"].(string) + "/messages"
+			result := "Sunny, 21 C (obtained elsewhere)"
+			accepted := map[string]any{"revision": 0, "messages": []any{map[string]any{
+				"client_key": "assistant-tools",
+				"payload": map[string]any{
+					"key": "assistant-tools", "from": "assistant", "status": "complete",
+					"versions": []any{map[string]any{"id": "a1", "content": "", "toolCalls": []any{
+						map[string]any{"id": "call_weather", "name": "get_weather", "arguments": `{"city":"Paris"}`, "status": "completed", "result": result},
+						map[string]any{"id": "call_time", "name": "get_time", "arguments": `{"zone":"UTC"}`, "status": "denied"},
+						map[string]any{"id": "call_search", "name": "search", "arguments": `{"q":"golang"}`, "status": "pending"},
+					}}},
+				},
+			}}}
+			response := playgroundRequest(t, 7, http.MethodPut, path, accepted, controller.ReplacePlaygroundMessages)
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			messages, revision, err := model.ListPlaygroundMessages(7, session["id"].(string))
+			require.NoError(t, err)
+			require.EqualValues(t, 1, revision)
+			require.Len(t, messages, 1)
+			var stored struct {
+				From     string `json:"from"`
+				Versions []struct {
+					ToolCalls []struct {
+						ID     string  `json:"id"`
+						Status string  `json:"status"`
+						Result *string `json:"result"`
+					} `json:"toolCalls"`
+				} `json:"versions"`
+			}
+			require.NoError(t, common.UnmarshalJsonStr(string(messages[0].Payload), &stored))
+			assert.Equal(t, "assistant", stored.From)
+			require.Len(t, stored.Versions, 1)
+			require.Len(t, stored.Versions[0].ToolCalls, 3)
+			assert.Equal(t, "pending", stored.Versions[0].ToolCalls[2].Status)
+			assert.Nil(t, stored.Versions[0].ToolCalls[2].Result)
+			assert.Equal(t, "denied", stored.Versions[0].ToolCalls[1].Status)
+			require.NotNil(t, stored.Versions[0].ToolCalls[0].Result)
+			assert.Equal(t, result, *stored.Versions[0].ToolCalls[0].Result)
+
+			tooMany := make([]any, policy.ToolCallMaxCount+1)
+			for index := range tooMany {
+				tooMany[index] = map[string]any{"id": fmt.Sprintf("call_%d", index), "name": "tool", "arguments": `{}`, "status": "pending"}
+			}
+			rejects := []struct {
+				name  string
+				from  string
+				calls []any
+			}{
+				{"calls on a user message", "user", []any{map[string]any{"id": "call_1", "name": "tool", "arguments": `{}`, "status": "pending"}}},
+				{"excess call count", "assistant", tooMany},
+				{"duplicate call ids", "assistant", []any{
+					map[string]any{"id": "call_1", "name": "tool", "arguments": `{}`, "status": "pending"},
+					map[string]any{"id": "call_1", "name": "tool", "arguments": `{}`, "status": "pending"},
+				}},
+				{"missing call id", "assistant", []any{map[string]any{"id": "", "name": "tool", "arguments": `{}`, "status": "pending"}}},
+				{"oversized arguments", "assistant", []any{map[string]any{"id": "call_1", "name": "tool", "arguments": strings.Repeat("a", int(policy.ToolCallArgumentsMaxBytes)+1), "status": "pending"}}},
+				{"oversized result", "assistant", []any{map[string]any{"id": "call_1", "name": "tool", "arguments": `{}`, "status": "completed", "result": strings.Repeat("b", int(policy.ToolCallResultMaxBytes)+1)}}},
+				{"unknown status", "assistant", []any{map[string]any{"id": "call_1", "name": "tool", "arguments": `{}`, "status": "running"}}},
+			}
+			for _, test := range rejects {
+				t.Run(test.name, func(t *testing.T) {
+					body := map[string]any{"revision": 1, "messages": []any{map[string]any{
+						"client_key": "assistant-tools",
+						"payload": map[string]any{
+							"key": "assistant-tools", "from": test.from, "status": "complete",
+							"versions": []any{map[string]any{"id": "a1", "content": "", "toolCalls": test.calls}},
+						},
+					}}}
+					rejected := playgroundRequest(t, 7, http.MethodPut, path, body, controller.ReplacePlaygroundMessages)
+					assert.Equal(t, http.StatusBadRequest, rejected.Code, rejected.Body.String())
+					messages, revision, err := model.ListPlaygroundMessages(7, session["id"].(string))
+					require.NoError(t, err)
+					require.EqualValues(t, 1, revision)
+					require.Len(t, messages, 1)
+					assert.Contains(t, string(messages[0].Payload), "call_weather")
+				})
+			}
+		})
+	}
+}
+
 func TestPlaygroundMigrationCreateIsAtomicAndReplayDoesNotOverwriteMessages(t *testing.T) {
 	db := playgroundTestDB(t, "sqlite")
 	body := map[string]any{"title": "迁移会话", "client_id": "migration", "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "user", "versions": []any{map[string]any{"id": "v", "content": "Imported history"}}}}}}
