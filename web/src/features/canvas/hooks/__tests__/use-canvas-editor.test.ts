@@ -144,6 +144,78 @@ test('handleConnect rejects a connection that would close a cycle', () => {
   expect(onChange).not.toHaveBeenCalled()
 })
 
+test('addLinkedNode appends a result node wired to its step and becomes undoable', () => {
+  const onChange = vi.fn()
+  const hook = renderHook(() => useCanvasEditor(LINKED_DOCUMENT, onChange))
+
+  let created: string | null = null
+  act(() => {
+    created = hook.result.current.addLinkedNode(
+      'task-result',
+      'b',
+      { workflow: { status: 'succeeded', sourceNodeId: 'b' } },
+      { x: 400, y: 0 }
+    )
+  })
+
+  expect(created).not.toBeNull()
+  expect(hook.result.current.nodes).toHaveLength(3)
+  expect(hook.result.current.edges).toContainEqual(
+    expect.objectContaining({ source: 'b', target: created })
+  )
+  const linked = hook.result.current.nodes.find((node) => node.id === created)
+  expect(linked?.type).toBe('task-result')
+  expect(linked?.data.workflow).toMatchObject({ sourceNodeId: 'b' })
+  expect(onChange).toHaveBeenCalledTimes(1)
+
+  act(() => hook.result.current.undo())
+  expect(hook.result.current.nodes).toHaveLength(2)
+  expect(hook.result.current.edges).toHaveLength(1)
+})
+
+test('addLinkedNode refuses a full canvas or an unknown source without a commit', () => {
+  const unknownOnChange = vi.fn()
+  const unknown = renderHook(() =>
+    useCanvasEditor(LINKED_DOCUMENT, unknownOnChange)
+  )
+
+  let created: string | null = null
+  act(() => {
+    created = unknown.result.current.addLinkedNode(
+      'task-result',
+      'missing',
+      {},
+      { x: 0, y: 0 }
+    )
+  })
+  expect(created).toBeNull()
+  expect(unknown.result.current.nodes).toHaveLength(2)
+  expect(unknownOnChange).not.toHaveBeenCalled()
+
+  const fullDocument: CanvasServerDocument = {
+    nodes: Array.from({ length: CANVAS_MAX_NODES }, (_, index) => ({
+      id: `node-${index}`,
+      type: 'task' as const,
+      position: { x: index, y: index },
+    })),
+    edges: [],
+  }
+  const fullOnChange = vi.fn()
+  const full = renderHook(() => useCanvasEditor(fullDocument, fullOnChange))
+
+  act(() => {
+    created = full.result.current.addLinkedNode(
+      'task-result',
+      'node-0',
+      {},
+      { x: 0, y: 0 }
+    )
+  })
+  expect(created).toBeNull()
+  expect(full.result.current.nodes).toHaveLength(CANVAS_MAX_NODES)
+  expect(fullOnChange).not.toHaveBeenCalled()
+})
+
 test('updateNodeData merges a functional update without recording history', () => {
   const onChange = vi.fn()
   const hook = renderHook(() => useCanvasEditor(LINKED_DOCUMENT, onChange))

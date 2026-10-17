@@ -68,7 +68,6 @@ import type {
   CanvasNodeData,
   CanvasNodeKind,
   CanvasNodeWorkflowState,
-  CanvasWorkflowNodeStatus,
 } from '../types'
 import type {
   CanvasNodeDataUpdate,

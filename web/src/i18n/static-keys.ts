@@ -1029,14 +1029,11 @@ export const STATIC_I18N_KEYS = [
   // Canvas node kind and generation labels render through t(label) from
   // CANVAS_NODE_KIND_LABELS / CANVAS_WORKFLOW_GENERATION_LABELS.
   'Text',
-  'Note',
   'Prompt',
   'Message',
   'Attachment',
-  'Image',
   'Artifact',
   'Model call',
   'Task',
   'Task result',
-  'Video',
 ] as const
