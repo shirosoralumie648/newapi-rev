@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"gorm.io/gorm"
 )
 
@@ -75,6 +76,67 @@ func migratePlaygroundMessageUniqueness(db *gorm.DB) error {
 			return fmt.Errorf("remove duplicate playground messages: %w", err)
 		}
 		common.SysLog(common.LogText("removed %d duplicate Playground message rows for session %s", len(ids), duplicate.SessionID))
+	}
+	return nil
+}
+
+// migratePlaygroundAttachmentStorage relaxes the data column of
+// playground_attachments before AutoMigrate runs. The release that moved
+// attachment bytes into the object store writes NULL there for every new
+// upload, but GORM only alters a column when the database is stricter than the
+// model: a shipped NOT NULL column would reject those NULLs, so the constraint
+// is dropped explicitly here (MySQL MODIFY, PostgreSQL DROP NOT NULL, SQLite
+// table rebuild; AutoMigrate recreates the indexes the SQLite rebuild drops).
+// The migration is a no-op on a fresh database and once the column is
+// nullable.
+func migratePlaygroundAttachmentStorage(db *gorm.DB) error {
+	if db == nil {
+		return fmt.Errorf("migrate playground attachment storage: database is nil")
+	}
+	if !db.Migrator().HasTable(&PlaygroundAttachment{}) {
+		return nil
+	}
+	columnTypes, err := db.Migrator().ColumnTypes(&PlaygroundAttachment{})
+	if err != nil {
+		return fmt.Errorf("inspect playground attachment columns: %w", err)
+	}
+	for _, columnType := range columnTypes {
+		if columnType.Name() != "data" {
+			continue
+		}
+		nullable, ok := columnType.Nullable()
+		if !ok || nullable {
+			return nil
+		}
+		if err := db.Migrator().AlterColumn(&PlaygroundAttachment{}, "Data"); err != nil {
+			return fmt.Errorf("make playground attachment data column nullable: %w", err)
+		}
+		return nil
+	}
+	return nil
+}
+
+// ensurePlaygroundAttachmentStorageBackend marks rows written before the
+// object store existed (and rows that an older node of a rolling upgrade kept
+// writing) as database-backed after AutoMigrate added the column. AutoMigrate
+// leaves upgraded rows NULL, so both NULL and the empty string count as
+// unmarked. The update skips UpdatedAt so it never resets the orphan countdown
+// of an unreferenced attachment.
+func ensurePlaygroundAttachmentStorageBackend(db *gorm.DB) error {
+	if db == nil {
+		return fmt.Errorf("ensure playground attachment storage backend: database is nil")
+	}
+	unmarked := "storage_backend IS NULL OR storage_backend = ?"
+	var legacy int64
+	if err := db.Model(&PlaygroundAttachment{}).Where(unmarked, "").Count(&legacy).Error; err != nil {
+		return fmt.Errorf("count legacy playground attachments: %w", err)
+	}
+	if legacy == 0 {
+		return nil
+	}
+	if err := db.Model(&PlaygroundAttachment{}).Where(unmarked, "").
+		UpdateColumn("storage_backend", system_setting.ObjectStoreBackendDB).Error; err != nil {
+		return fmt.Errorf("mark legacy playground attachments as database-backed: %w", err)
 	}
 	return nil
 }

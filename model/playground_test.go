@@ -20,10 +20,12 @@ package model_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -37,7 +39,9 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/router"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/service/objectstore"
 	"github.com/QuantumNous/new-api/setting/playground_setting"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -49,9 +53,37 @@ import (
 	"gorm.io/gorm/schema"
 )
 
+// installPlaygroundTestObjectStore points the process-wide object store at a
+// temporary directory so attachment tests exercise the real write, read, and
+// delete paths instead of the legacy inline payload.
+func installPlaygroundTestObjectStore(t *testing.T) {
+	t.Helper()
+	previousStore := objectstore.DefaultStore()
+	previousTTL := objectstore.DefaultPresignTTL()
+	store, err := objectstore.NewLocal(system_setting.ObjectStoreConfig{
+		Backend:           system_setting.ObjectStoreBackendLocal,
+		LocalDir:          t.TempDir(),
+		PresignTTLSeconds: 60,
+	})
+	require.NoError(t, err)
+	objectstore.SetDefaultStore(store, time.Minute)
+	t.Cleanup(func() {
+		objectstore.SetDefaultStore(previousStore, previousTTL)
+		_ = store.Close()
+	})
+}
+
+// playgroundContentHashHex mirrors the content hash the model stores so tests
+// can insert database-backed rows and corrupt them deliberately.
+func playgroundContentHashHex(data []byte) string {
+	hash := sha256.Sum256(data)
+	return hex.EncodeToString(hash[:])
+}
+
 func playgroundTestDB(t *testing.T, dialect string) *gorm.DB {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
+	installPlaygroundTestObjectStore(t)
 	var driver gorm.Dialector
 	switch dialect {
 	case "mysql":
@@ -868,6 +900,23 @@ func TestPlaygroundAttachmentPersistenceMatrix(t *testing.T) {
 			assert.EqualValues(t, len(png), uploaded["byte_size"])
 			assert.Equal(t, "image/png", uploaded["media_type"])
 
+			// New uploads keep only metadata in the database; the bytes live in
+			// the object store under the key the row records.
+			var stored model.PlaygroundAttachment
+			require.NoError(t, db.Where("id = ?", attachmentID).First(&stored).Error)
+			assert.Equal(t, system_setting.ObjectStoreBackendLocal, stored.StorageBackend)
+			assert.True(t, strings.HasPrefix(stored.ObjectKey, "pg/7/attachment/"), stored.ObjectKey)
+			assert.Nil(t, stored.Data)
+			objectStore := objectstore.DefaultStore()
+			require.NotNil(t, objectStore)
+			objectReader, objectInfo, objectErr := objectStore.Get(context.Background(), stored.ObjectKey)
+			require.NoError(t, objectErr)
+			objectBytes, objectErr := io.ReadAll(objectReader)
+			require.NoError(t, objectErr)
+			require.NoError(t, objectReader.Close())
+			assert.Equal(t, png, objectBytes)
+			assert.EqualValues(t, len(png), objectInfo.Size)
+
 			// Idempotent replay acknowledges the stored attachment; different
 			// bytes under the same client key are a conflict.
 			replay := playgroundUploadAttachment(t, 7, id, "file-1", "image/png", png)
@@ -906,11 +955,14 @@ func TestPlaygroundAttachmentPersistenceMatrix(t *testing.T) {
 			crossSession := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+otherID+"/attachments/"+attachmentID, nil, controller.GetPlaygroundAttachment)
 			assert.Equal(t, http.StatusNotFound, crossSession.Code)
 
-			// Deleting the conversation cascades into its attachments.
+			// Deleting the conversation cascades into its attachments and
+			// their stored objects.
 			require.NoError(t, model.DeletePlaygroundSession(7, id))
 			var count int64
 			require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("session_id = ?", id).Count(&count).Error)
 			assert.Zero(t, count)
+			_, _, objectErr = objectStore.Head(context.Background(), stored.ObjectKey)
+			assert.ErrorIs(t, objectErr, objectstore.ErrObjectNotFound)
 		})
 	}
 }
@@ -953,6 +1005,11 @@ func TestPlaygroundAttachmentMessageReferences(t *testing.T) {
 	first := playgroundUploadAttachment(t, 7, id, "ref-a", "image/png", png)
 	second := playgroundUploadAttachment(t, 7, id, "ref-b", "image/png", png)
 	firstID, secondID := first["id"].(string), second["id"].(string)
+	var firstRow, secondRow model.PlaygroundAttachment
+	require.NoError(t, db.Where("id = ?", firstID).First(&firstRow).Error)
+	require.NoError(t, db.Where("id = ?", secondID).First(&secondRow).Error)
+	objectStore := objectstore.DefaultStore()
+	require.NotNil(t, objectStore)
 
 	message := func(key string, from string, attachments []map[string]any) map[string]any {
 		version := map[string]any{"id": key + "-v1", "content": "look at this"}
@@ -972,11 +1029,16 @@ func TestPlaygroundAttachmentMessageReferences(t *testing.T) {
 	assert.Contains(t, response.Body.String(), `"filename":"image.png"`)
 	assert.NotContains(t, response.Body.String(), "spoofed")
 
-	// A referenced attachment cannot be deleted; an unrelated one still can.
+	// A referenced attachment cannot be deleted; an unrelated one still can,
+	// and deleting it removes its stored object.
 	inUse := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+id+"/attachments/"+firstID, nil, controller.DeletePlaygroundAttachment)
 	assert.Equal(t, http.StatusConflict, inUse.Code, inUse.Body.String())
+	_, _, objectErr := objectStore.Head(context.Background(), firstRow.ObjectKey)
+	require.NoError(t, objectErr, "a referenced attachment keeps its object")
 	unused := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+id+"/attachments/"+secondID, nil, controller.DeletePlaygroundAttachment)
 	assert.Equal(t, http.StatusOK, unused.Code, unused.Body.String())
+	_, _, objectErr = objectStore.Head(context.Background(), secondRow.ObjectKey)
+	assert.ErrorIs(t, objectErr, objectstore.ErrObjectNotFound)
 	missing := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+id+"/attachments/"+secondID, nil, controller.DeletePlaygroundAttachment)
 	assert.Equal(t, http.StatusNotFound, missing.Code)
 
@@ -985,6 +1047,8 @@ func TestPlaygroundAttachmentMessageReferences(t *testing.T) {
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	released := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+id+"/attachments/"+firstID, nil, controller.DeletePlaygroundAttachment)
 	assert.Equal(t, http.StatusOK, released.Code, released.Body.String())
+	_, _, objectErr = objectStore.Head(context.Background(), firstRow.ObjectKey)
+	assert.ErrorIs(t, objectErr, objectstore.ErrObjectNotFound)
 
 	// Invalid references never replace the stored history.
 	kept := playgroundRequest(t, 7, http.MethodPut, path, map[string]any{"revision": 2, "messages": []any{message("u2", "user", []map[string]any{{"id": firstID}})}}, controller.ReplacePlaygroundMessages)
@@ -1022,6 +1086,9 @@ func TestPlaygroundAttachmentOrphanCleanup(t *testing.T) {
 	orphan := playgroundUploadAttachment(t, 7, id, "cleanup-a", "image/png", png)
 	referenced := playgroundUploadAttachment(t, 7, id, "cleanup-b", "image/png", png)
 	orphanID, referencedID := orphan["id"].(string), referenced["id"].(string)
+	var orphanRow, referencedRow model.PlaygroundAttachment
+	require.NoError(t, db.Where("id = ?", orphanID).First(&orphanRow).Error)
+	require.NoError(t, db.Where("id = ?", referencedID).First(&referencedRow).Error)
 	response := playgroundRequest(t, 7, http.MethodPut, "/api/playground/sessions/"+id+"/messages", map[string]any{
 		"revision": 0, "messages": []any{map[string]any{"client_key": "u1", "payload": map[string]any{
 			"key": "u1", "from": "user", "versions": []any{map[string]any{"id": "v1", "content": "keep", "attachments": []any{map[string]any{"id": referencedID}}}},
@@ -1029,7 +1096,8 @@ func TestPlaygroundAttachmentOrphanCleanup(t *testing.T) {
 	}, controller.ReplacePlaygroundMessages)
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 
-	// Age both rows: only the unreferenced one may be collected.
+	// Age both rows: only the unreferenced one may be collected, and its stored
+	// object goes with it while the referenced attachment keeps its bytes.
 	now := common.GetTimestamp()
 	require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("session_id = ?", id).Update("updated_at", now-100000).Error)
 	deleted, err := model.DeleteOrphanedPlaygroundAttachments(now-3600, 100)
@@ -1041,6 +1109,167 @@ func TestPlaygroundAttachmentOrphanCleanup(t *testing.T) {
 	assert.Equal(t, referencedID, remaining[0].ID)
 	_, err = model.GetPlaygroundAttachment(7, id, orphanID)
 	assert.ErrorIs(t, err, model.ErrPlaygroundAttachmentNotFound)
+	objectStore := objectstore.DefaultStore()
+	require.NotNil(t, objectStore)
+	_, _, objectErr := objectStore.Head(context.Background(), orphanRow.ObjectKey)
+	assert.ErrorIs(t, objectErr, objectstore.ErrObjectNotFound)
+	_, _, objectErr = objectStore.Head(context.Background(), referencedRow.ObjectKey)
+	require.NoError(t, objectErr)
+}
+
+// insertLegacyPlaygroundAttachment writes a row the way releases before the
+// object store did: the canonical base64 payload lives in data and the row is
+// marked database-backed.
+func insertLegacyPlaygroundAttachment(t *testing.T, db *gorm.DB, userID int, sessionID, id string, data []byte, createdAt int64) model.PlaygroundAttachment {
+	t.Helper()
+	encoded := model.LongText(base64.StdEncoding.EncodeToString(data))
+	row := model.PlaygroundAttachment{
+		ID: id, UserID: userID, SessionID: sessionID,
+		MediaType: "image/png", Filename: "legacy.png",
+		ByteSize: int64(len(data)), ContentHash: playgroundContentHashHex(data),
+		ClientKeyHash:  playgroundContentHashHex([]byte("client-" + id)),
+		StorageBackend: system_setting.ObjectStoreBackendDB,
+		Data:           &encoded,
+		CreatedAt:      createdAt, UpdatedAt: createdAt,
+	}
+	require.NoError(t, db.Create(&row).Error)
+	return row
+}
+
+// presigningPlaygroundStore delegates every backend operation to a real store
+// and only overrides PresignGet, so one test can exercise an S3-style backend
+// without the S3 implementation.
+type presigningPlaygroundStore struct {
+	objectstore.Store
+	location string
+	err      error
+}
+
+func (store presigningPlaygroundStore) PresignGet(context.Context, string, time.Duration) (string, error) {
+	return store.location, store.err
+}
+
+// Attachment content is served from its storage backend: object-backed rows
+// stream through the gateway, presign-capable backends redirect with a
+// short-lived link, and rows written before the object store existed are still
+// served from their inline payload.
+func TestPlaygroundAttachmentObjectStoreContentServing(t *testing.T) {
+	db := playgroundTestDB(t, "sqlite")
+	session := createPlayground(t, 7, "attachment-serving")
+	id := session["id"].(string)
+	png := playgroundPNGFixture(64)
+	objectStore := objectstore.DefaultStore()
+	require.NotNil(t, objectStore)
+
+	uploaded := playgroundUploadAttachment(t, 7, id, "serving-object", "image/png", png)
+	objectID := uploaded["id"].(string)
+	content := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+id+"/attachments/"+objectID+"/content", nil, controller.GetPlaygroundAttachmentContent)
+	require.Equal(t, http.StatusOK, content.Code, content.Body.String())
+	assert.Equal(t, png, content.Body.Bytes())
+	assert.Equal(t, "image/png", content.Header().Get("Content-Type"))
+	assert.Equal(t, "nosniff", content.Header().Get("X-Content-Type-Options"))
+	assert.Equal(t, "private, no-store", content.Header().Get("Cache-Control"))
+
+	// A pre-migration row is served from the database until the background
+	// migration moves it.
+	legacyData := playgroundPNGFixture(32)
+	legacy := insertLegacyPlaygroundAttachment(t, db, 7, id, "pgf_legacy-serving", legacyData, common.GetTimestamp())
+	legacyContent := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+id+"/attachments/"+legacy.ID+"/content", nil, controller.GetPlaygroundAttachmentContent)
+	require.Equal(t, http.StatusOK, legacyContent.Code, legacyContent.Body.String())
+	assert.Equal(t, legacyData, legacyContent.Body.Bytes())
+
+	// An S3-style backend hands the browser a short-lived presigned URL.
+	presigned := presigningPlaygroundStore{Store: objectStore, location: "https://objects.example.test/attachments/presigned?signature=test"}
+	objectstore.SetDefaultStore(presigned, 5*time.Minute)
+	redirect := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+id+"/attachments/"+objectID+"/content", nil, controller.GetPlaygroundAttachmentContent)
+	require.Equal(t, http.StatusFound, redirect.Code, redirect.Body.String())
+	assert.Equal(t, presigned.location, redirect.Header().Get("Location"))
+	assert.Equal(t, "private, no-store", redirect.Header().Get("Cache-Control"))
+
+	// A presign failure falls back to gateway streaming; a backend that does
+	// not presign at all (the local backend) never redirects.
+	objectstore.SetDefaultStore(presigningPlaygroundStore{Store: objectStore, err: objectstore.ErrPresignUnsupported}, time.Minute)
+	fallback := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+id+"/attachments/"+objectID+"/content", nil, controller.GetPlaygroundAttachmentContent)
+	require.Equal(t, http.StatusOK, fallback.Code, fallback.Body.String())
+	assert.Equal(t, png, fallback.Body.Bytes())
+
+	// Only absolute http(s) locations are trusted as redirect targets.
+	objectstore.SetDefaultStore(presigningPlaygroundStore{Store: objectStore, location: "javascript:alert(1)"}, time.Minute)
+	untrusted := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+id+"/attachments/"+objectID+"/content", nil, controller.GetPlaygroundAttachmentContent)
+	require.Equal(t, http.StatusOK, untrusted.Code, untrusted.Body.String())
+	assert.Equal(t, png, untrusted.Body.Bytes())
+	objectstore.SetDefaultStore(objectStore, time.Minute)
+}
+
+// The background migration moves database-backed bytes into the object store
+// after verifying the content hash, keeps corrupt rows untouched for a later
+// retry, and the rollback path restores database bytes and removes the
+// objects.
+func TestPlaygroundAttachmentObjectStoreMigration(t *testing.T) {
+	db := playgroundTestDB(t, "sqlite")
+	store := objectstore.DefaultStore()
+	require.NotNil(t, store)
+	session := createPlayground(t, 7, "attachment-migration")
+	id := session["id"].(string)
+	png := playgroundPNGFixture(48)
+	legacy := insertLegacyPlaygroundAttachment(t, db, 7, id, "pgf_legacy-migrate", png, 1_700_000_000)
+	brokenData := playgroundPNGFixture(16)
+	broken := insertLegacyPlaygroundAttachment(t, db, 7, id, "pgf_legacy-broken", brokenData, 1_700_000_100)
+	require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("id = ?", broken.ID).UpdateColumn("content_hash", strings.Repeat("0", 64)).Error)
+
+	result, err := model.MigratePlaygroundAttachmentsToObjectStore(store, 10)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, result.Moved)
+	assert.EqualValues(t, 1, result.Failed)
+
+	row, err := model.GetPlaygroundAttachment(7, id, legacy.ID)
+	require.NoError(t, err)
+	assert.Equal(t, system_setting.ObjectStoreBackendLocal, row.StorageBackend)
+	assert.True(t, strings.HasPrefix(row.ObjectKey, "pg/7/attachment/"), row.ObjectKey)
+	assert.Nil(t, row.Data)
+	reader, _, err := store.Get(context.Background(), row.ObjectKey)
+	require.NoError(t, err)
+	body, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.NoError(t, reader.Close())
+	assert.Equal(t, png, body)
+
+	// The corrupt row keeps its payload and stays retryable.
+	brokenRow, err := model.GetPlaygroundAttachment(7, id, broken.ID)
+	require.NoError(t, err)
+	assert.True(t, brokenRow.StoredInDatabase())
+	require.NotNil(t, brokenRow.Data)
+	assert.Equal(t, base64.StdEncoding.EncodeToString(brokenData), string(*brokenRow.Data))
+	_, _, headErr := store.Head(context.Background(), row.ObjectKey)
+	require.NoError(t, headErr)
+
+	// Migrated content is still served byte-exact.
+	content := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+id+"/attachments/"+legacy.ID+"/content", nil, controller.GetPlaygroundAttachmentContent)
+	require.Equal(t, http.StatusOK, content.Code, content.Body.String())
+	assert.Equal(t, png, content.Body.Bytes())
+
+	// Once the metadata is fixed the next run migrates the retried row.
+	require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("id = ?", broken.ID).UpdateColumn("content_hash", playgroundContentHashHex(brokenData)).Error)
+	result, err = model.MigratePlaygroundAttachmentsToObjectStore(store, 10)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, result.Moved)
+	assert.Zero(t, result.Failed)
+
+	// The rollback path restores database bytes and deletes the objects, so a
+	// downgrade can read every attachment.
+	result, err = model.RestorePlaygroundAttachmentsToDatabase(store, 10)
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, result.Moved)
+	restored, err := model.GetPlaygroundAttachment(7, id, legacy.ID)
+	require.NoError(t, err)
+	assert.True(t, restored.StoredInDatabase())
+	require.NotNil(t, restored.Data)
+	assert.Equal(t, base64.StdEncoding.EncodeToString(png), string(*restored.Data))
+	_, _, headErr = store.Head(context.Background(), row.ObjectKey)
+	assert.ErrorIs(t, headErr, objectstore.ErrObjectNotFound)
+	content = playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+id+"/attachments/"+legacy.ID+"/content", nil, controller.GetPlaygroundAttachmentContent)
+	require.Equal(t, http.StatusOK, content.Code, content.Body.String())
+	assert.Equal(t, png, content.Body.Bytes())
 }
 
 // The asset library lists the owner's attachments and artifacts with a kind

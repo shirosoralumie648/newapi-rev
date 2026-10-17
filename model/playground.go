@@ -226,7 +226,8 @@ func UpdatePlaygroundSessionFields(userID int, id string, revision int64, update
 }
 
 func DeletePlaygroundSession(userID int, id string) error {
-	return DB.Transaction(func(tx *gorm.DB) error {
+	var removedAttachments []PlaygroundAttachment
+	err := DB.Transaction(func(tx *gorm.DB) error {
 		var session PlaygroundSession
 		if err := lockForUpdate(tx).Where("id = ? AND user_id = ?", id, userID).First(&session).Error; err != nil {
 			return err
@@ -241,7 +242,12 @@ func DeletePlaygroundSession(userID int, id string) error {
 			return err
 		}
 		// The pins of this conversation's attachments go with the attachments,
-		// so a later canvas read reports the node as "source deleted".
+		// so a later canvas read reports the node as "source deleted". The
+		// stored objects are deleted after the database commit.
+		if err := tx.Select("id", "storage_backend", "object_key").
+			Where("session_id = ? AND user_id = ?", id, userID).Find(&removedAttachments).Error; err != nil {
+			return err
+		}
 		attachmentIDs := tx.Model(&PlaygroundAttachment{}).Select("id").Where("session_id = ? AND user_id = ?", id, userID)
 		if err := tx.Where("attachment_id IN (?)", attachmentIDs).Delete(&PlaygroundCanvasAsset{}).Error; err != nil {
 			return err
@@ -254,6 +260,13 @@ func DeletePlaygroundSession(userID int, id string) error {
 		}
 		return tx.Where("id = ? AND user_id = ?", id, userID).Delete(&PlaygroundSession{}).Error
 	})
+	if err != nil {
+		return err
+	}
+	for index := range removedAttachments {
+		deletePlaygroundAttachmentObject(nil, &removedAttachments[index])
+	}
+	return nil
 }
 
 func insertPlaygroundMessages(tx *gorm.DB, userID int, sessionID string, messages []PlaygroundMessage, policy playground_setting.PlaygroundQuotaPolicy) error {

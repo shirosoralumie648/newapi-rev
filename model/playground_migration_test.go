@@ -19,10 +19,13 @@ For commercial licensing, please contact support@quantumnous.com
 package model
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -65,7 +68,7 @@ func playgroundMigrationDB(t *testing.T, dialect string) *gorm.DB {
 		sqlDB.SetMaxOpenConns(1)
 	}
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&PlaygroundMessage{}))
+		require.NoError(t, db.Migrator().DropTable(&PlaygroundMessage{}, &PlaygroundAttachment{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
@@ -112,6 +115,83 @@ func TestPlaygroundMessageUniquenessMigration(t *testing.T) {
 				SessionID: "pgs_legacy", UserID: 7, ClientKey: "m2", Position: 4,
 				Payload: `{"key":"m2","from":"user","versions":[{"id":"v","content":"duplicate"}]}`, CreatedAt: 4, UpdatedAt: 4,
 			}).Error)
+		})
+	}
+}
+
+// A database written before attachments moved to the object store has a NOT
+// NULL data column. The pre-AutoMigrate migration must relax it so object
+// backed rows can store NULL, AutoMigrate must add the storage columns without
+// touching the stored payload, and repeating the migration must change
+// nothing.
+func TestPlaygroundAttachmentStorageSchemaMigration(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundMigrationDB(t, dialect)
+			// A fresh database has no attachment table; the migration is a
+			// no-op and AutoMigrate creates the schema.
+			require.NoError(t, migratePlaygroundAttachmentStorage(db))
+
+			quote := "`"
+			if dialect == "postgres" {
+				quote = `"`
+			}
+			table := db.NamingStrategy.TableName("PlaygroundAttachment")
+			q := func(name string) string { return quote + name + quote }
+			legacyColumns := []string{"id", "user_id", "session_id", "media_type", "filename", "byte_size", "content_hash", "client_key_hash", "data", "referenced_at", "created_at", "updated_at"}
+			legacyTypes := []string{"varchar(32) PRIMARY KEY", "integer NOT NULL", "varchar(128) NOT NULL", "varchar(100) NOT NULL", "varchar(255) NOT NULL", "bigint NOT NULL", "varchar(64) NOT NULL", "varchar(64) NOT NULL", "text NOT NULL", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL"}
+			definitions := make([]string, len(legacyColumns))
+			quoted := make([]string, len(legacyColumns))
+			for index, name := range legacyColumns {
+				definitions[index] = q(name) + " " + legacyTypes[index]
+				quoted[index] = q(name)
+			}
+			require.NoError(t, db.Exec("CREATE TABLE "+q(table)+" ("+strings.Join(definitions, ", ")+")").Error)
+
+			payload := base64.StdEncoding.EncodeToString([]byte("legacy payload"))
+			require.NoError(t, db.Exec("INSERT INTO "+q(table)+" ("+strings.Join(quoted, ", ")+") VALUES ("+strings.Repeat("?,", len(legacyColumns)-1)+"?)",
+				"pgf_legacy-schema", 7, "pgs_legacy", "image/png", "legacy.png", 14,
+				strings.Repeat("a", 64), strings.Repeat("b", 64), payload, 0, 111, 111).Error)
+
+			require.NoError(t, migratePlaygroundAttachmentStorage(db))
+			require.NoError(t, db.AutoMigrate(&PlaygroundAttachment{}))
+			require.NoError(t, ensurePlaygroundAttachmentStorageBackend(db))
+
+			columnTypes, err := db.Migrator().ColumnTypes(&PlaygroundAttachment{})
+			require.NoError(t, err)
+			dataNullable := false
+			for _, columnType := range columnTypes {
+				if columnType.Name() != "data" {
+					continue
+				}
+				nullable, ok := columnType.Nullable()
+				require.True(t, ok, "the driver must report data nullability")
+				dataNullable = nullable
+			}
+			assert.True(t, dataNullable, "data must accept NULL after the migration")
+
+			var stored PlaygroundAttachment
+			require.NoError(t, db.Where("id = ?", "pgf_legacy-schema").First(&stored).Error)
+			require.NotNil(t, stored.Data)
+			assert.Equal(t, payload, string(*stored.Data))
+			assert.Equal(t, system_setting.ObjectStoreBackendDB, stored.StorageBackend)
+			assert.True(t, db.Migrator().HasIndex(&PlaygroundAttachment{}, "uk_playground_attachment_client"))
+
+			// Object-backed rows store NULL and no payload, and repeating the
+			// migration plus AutoMigrate keeps both states intact.
+			require.NoError(t, db.Create(&PlaygroundAttachment{
+				ID: "pgf_new-schema", UserID: 7, SessionID: "pgs_legacy", MediaType: "image/png",
+				Filename: "new.png", ByteSize: 4, ContentHash: strings.Repeat("c", 64), ClientKeyHash: strings.Repeat("d", 64),
+				StorageBackend: system_setting.ObjectStoreBackendLocal, ObjectKey: "pg/7/attachment/2026/10/pgf_new-schema",
+				CreatedAt: 222, UpdatedAt: 222,
+			}).Error)
+			require.NoError(t, migratePlaygroundAttachmentStorage(db))
+			require.NoError(t, ensurePlaygroundAttachmentStorageBackend(db))
+			require.NoError(t, db.AutoMigrate(&PlaygroundAttachment{}))
+			require.NoError(t, db.Where("id = ?", "pgf_legacy-schema").First(&stored).Error)
+			require.NotNil(t, stored.Data)
+			assert.Equal(t, payload, string(*stored.Data))
+			assert.Equal(t, system_setting.ObjectStoreBackendDB, stored.StorageBackend)
 		})
 	}
 }

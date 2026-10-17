@@ -275,8 +275,8 @@ jobs:
           mkdir -p web/dist
           touch web/dist/index.html
 
-      - name: Test batch update flush, token quota adjustments, wallet debt, and Playground message deltas on SQLite, MySQL, and PostgreSQL
-        run: go test ./model/ -run 'TestBatchUpdateShutdownFlushMatrix|TestFlushBatchUpdateTimeoutLogsAndRetainsDeltas|TestTokenQuotaUpdatePreservesConcurrentDeductions|TestPlaygroundMessageDelta|TestPlaygroundMessageUniquenessMigration|TestPlaygroundMessageCostLookup|TestPlaygroundMessageVersionBranches|TestPlaygroundWalletDebt' -count=1 -v
+      - name: Test batch update flush, token quota adjustments, wallet debt, Playground message deltas, and attachment storage on SQLite, MySQL, and PostgreSQL
+        run: go test ./model/ -run 'TestBatchUpdateShutdownFlushMatrix|TestFlushBatchUpdateTimeoutLogsAndRetainsDeltas|TestTokenQuotaUpdatePreservesConcurrentDeductions|TestPlaygroundMessageDelta|TestPlaygroundMessageUniquenessMigration|TestPlaygroundMessageCostLookup|TestPlaygroundMessageVersionBranches|TestPlaygroundWalletDebt|TestPlaygroundAttachmentPersistenceMatrix|TestPlaygroundAttachmentStorageSchemaMigration' -count=1 -v
 
   frontend:
     name: Frontend typecheck and test

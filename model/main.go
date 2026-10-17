@@ -392,6 +392,11 @@ func migrateDB() error {
 	if err := migratePlaygroundMessageUniqueness(DB); err != nil {
 		return err
 	}
+	// Attachment bytes moved to the object store, so the data column must
+	// accept NULL before AutoMigrate compares the model with the schema.
+	if err := migratePlaygroundAttachmentStorage(DB); err != nil {
+		return err
+	}
 	// Migrate price_amount column from float/double to decimal for existing tables
 	migrateSubscriptionPlanPriceAmount()
 	// Migrate model_limits column from varchar to text for existing tables
@@ -461,6 +466,11 @@ func migrateDB() error {
 	// The widening above must have produced 64-bit quota columns; a schema that
 	// would still overflow refuses to start.
 	if err := ensureQuotaColumns(DB, common.MainDatabaseType()); err != nil {
+		return err
+	}
+	// AutoMigrate just added storage_backend/object_key to upgraded databases;
+	// rows that predate the columns hold their bytes in data.
+	if err := ensurePlaygroundAttachmentStorageBackend(DB); err != nil {
 		return err
 	}
 	if _, err := EnsureWalletLedgerOpeningBalances(); err != nil {
