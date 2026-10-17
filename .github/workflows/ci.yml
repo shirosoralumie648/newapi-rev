@@ -14,6 +14,8 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 
+# Checkout the event commit in both jobs. A PR merge ref can disappear while
+# queued runs start, and a base branch can advance after the merge event.
 jobs:
   backend:
     name: Backend vet, build, and test
