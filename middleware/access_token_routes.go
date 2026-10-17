@@ -79,6 +79,11 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/playground/sessions/:id/attachments/:attachmentId":                 accessTokenSessionRule,
 	"GET /api/playground/sessions/:id/attachments/:attachmentId/content":         accessTokenSessionRule,
 	"DELETE /api/playground/sessions/:id/attachments/:attachmentId":              accessTokenSessionRule,
+	"GET /api/playground/canvases":                                               accessTokenSessionRule,
+	"POST /api/playground/canvases":                                              accessTokenSessionRule,
+	"GET /api/playground/canvases/:canvasId":                                     accessTokenSessionRule,
+	"PATCH /api/playground/canvases/:canvasId":                                   accessTokenSessionRule,
+	"DELETE /api/playground/canvases/:canvasId":                                  accessTokenSessionRule,
 
 	// router/api-router.go: /api/user (self)
 	"GET /api/user/sessions":                       accessTokenSessionRule,

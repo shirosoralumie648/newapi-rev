@@ -95,6 +95,11 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.GET("/sessions/:id/attachments/:attachmentId", controller.GetPlaygroundAttachment)
 			playgroundRoute.GET("/sessions/:id/attachments/:attachmentId/content", controller.GetPlaygroundAttachmentContent)
 			playgroundRoute.DELETE("/sessions/:id/attachments/:attachmentId", controller.DeletePlaygroundAttachment)
+			playgroundRoute.GET("/canvases", controller.ListPlaygroundCanvasProjects)
+			playgroundRoute.POST("/canvases", controller.CreatePlaygroundCanvasProject)
+			playgroundRoute.GET("/canvases/:canvasId", controller.GetPlaygroundCanvasProject)
+			playgroundRoute.PATCH("/canvases/:canvasId", controller.UpdatePlaygroundCanvasProject)
+			playgroundRoute.DELETE("/canvases/:canvasId", controller.DeletePlaygroundCanvasProject)
 		}
 
 		userRoute := apiRouter.Group("/user")

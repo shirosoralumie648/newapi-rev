@@ -81,14 +81,14 @@ func playgroundTestDB(t *testing.T, dialect string) *gorm.DB {
 	common.SetDatabaseTypes(common.DatabaseType(dialect), previousLog)
 	model.DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundMessage{}, &model.PlaygroundSession{}, &model.User{}))
+		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundCanvasProject{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundMessage{}, &model.PlaygroundSession{}, &model.User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
 		model.DB = previous
 		common.SetDatabaseTypes(previousMain, previousLog)
 	})
-	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundCanvasProject{}, &model.User{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -121,6 +121,9 @@ func playgroundRequest(t *testing.T, user int, method, path string, body any, ha
 	parts := strings.Split(parsed.Path, "/")
 	if len(parts) > 4 {
 		c.Params = gin.Params{{Key: "id", Value: parts[4]}}
+		if parts[3] == "canvases" {
+			c.Params = append(c.Params, gin.Param{Key: "canvasId", Value: parts[4]})
+		}
 	}
 	if len(parts) > 6 {
 		c.Params = append(c.Params, gin.Param{Key: "artifactId", Value: parts[6]})
@@ -157,8 +160,8 @@ func TestPlaygroundPersistenceMatrix(t *testing.T) {
 			id := session["id"].(string)
 			assert.Equal(t, id, createPlayground(t, 7, "local-session")["id"])
 			assert.NotEqual(t, id, createPlayground(t, 8, "local-session")["id"])
-			require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.User{}))
-			require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.User{}))
+			require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundCanvasProject{}, &model.User{}))
+			require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundCanvasProject{}, &model.User{}))
 			reloaded, err := model.GetPlaygroundSession(7, id)
 			require.NoError(t, err)
 			assert.Equal(t, "Conversation", reloaded.Title)
@@ -283,8 +286,8 @@ func TestPlaygroundMigrationCreateIsAtomicAndReplayDoesNotOverwriteMessages(t *t
 	require.Len(t, messages, 1)
 	assert.Contains(t, string(messages[0].Payload), "Imported history")
 	// Repeated startup migrations retain populated payloads and the owner/client uniqueness guarantee.
-	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.User{}))
-	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundCanvasProject{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundCanvasProject{}, &model.User{}))
 	messages, _, err = model.ListPlaygroundMessages(7, first.Data.ID)
 	require.NoError(t, err)
 	require.Len(t, messages, 1)
@@ -1015,6 +1018,35 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	content := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, attachmentBase+"/"+uploaded.Data.ID+"/content", nil)
 	require.Equal(t, 200, content.Code)
 	assert.Equal(t, png, content.Body.Bytes())
+
+	// Canvas routes share the same session-only authentication contract.
+	canvasBase := "/api/playground/canvases"
+	for _, route := range []struct{ method, path string }{
+		{http.MethodGet, canvasBase}, {http.MethodPost, canvasBase},
+		{http.MethodGet, canvasBase + "/missing"}, {http.MethodPatch, canvasBase + "/missing"},
+		{http.MethodDelete, canvasBase + "/missing"},
+	} {
+		response := playgroundAuthenticatedRequest(t, engine, "", route.method, route.path, upload)
+		assert.Equal(t, 401, response.Code, response.Body.String())
+		assert.Contains(t, response.Header().Get("Cache-Control"), "no-store")
+		response = playgroundAuthenticatedRequest(t, engine, patRaw, route.method, route.path, upload)
+		assert.Equal(t, 403, response.Code, response.Body.String())
+		assert.Contains(t, response.Body.String(), "AUTH_SESSION_REQUIRED")
+	}
+	canvasCreated := playgroundAuthenticatedRequest(t, engine, token, http.MethodPost, canvasBase, map[string]any{
+		"client_id": "router-canvas",
+		"title":     "Router board",
+		"document":  canvasDocument(nil, nil),
+	})
+	require.Equal(t, 200, canvasCreated.Code, canvasCreated.Body.String())
+	var canvasEnvelope struct {
+		Data struct{ ID string }
+	}
+	require.NoError(t, common.Unmarshal(canvasCreated.Body.Bytes(), &canvasEnvelope))
+	require.NotEmpty(t, canvasEnvelope.Data.ID)
+	canvasDetail := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, canvasBase+"/"+canvasEnvelope.Data.ID, nil)
+	require.Equal(t, 200, canvasDetail.Code, canvasDetail.Body.String())
+	require.Equal(t, 200, playgroundAuthenticatedRequest(t, engine, token, http.MethodDelete, canvasBase+"/"+canvasEnvelope.Data.ID, nil).Code)
 	// Ambient cookies are not accepted as authorization by these bearer APIs.
 	cookieOnly := httptest.NewRequest(http.MethodGet, base, nil)
 	cookieOnly.AddCookie(&http.Cookie{Name: "refresh_token", Value: "not-authority"})
