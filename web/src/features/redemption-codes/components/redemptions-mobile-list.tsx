@@ -34,9 +34,17 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { formatQuota } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
-import { REDEMPTION_STATUS, REDEMPTION_STATUSES } from '../constants'
-import { isRedemptionExpired } from '../lib'
-import type { Redemption } from '../types'
+import {
+  REDEMPTION_STATUS,
+  REDEMPTION_STATUSES,
+  REDEMPTION_TYPES,
+} from '../constants'
+import { formatRedemptionDuration, isRedemptionExpired } from '../lib'
+import {
+  REDEMPTION_TYPE_SUBSCRIPTION,
+  redemptionTypeOf,
+  type Redemption,
+} from '../types'
 import { DataTableRowActions } from './data-table-row-actions'
 
 const MOBILE_SKELETON_KEYS = [
@@ -73,11 +81,13 @@ function RedemptionsMobileSkeleton() {
 interface RedemptionsMobileListProps {
   table: TanstackTable<Redemption>
   isLoading: boolean
+  planTitles?: Map<number, string>
 }
 
 export function RedemptionsMobileList(props: RedemptionsMobileListProps) {
   const { t } = useTranslation()
   const rows = props.table.getRowModel().rows
+  const planTitles = props.planTitles ?? new Map<number, string>()
 
   if (props.isLoading) return <RedemptionsMobileSkeleton />
 
@@ -128,7 +138,8 @@ export function RedemptionsMobileList(props: RedemptionsMobileListProps) {
                   {redemption.name}
                 </div>
                 <div className='text-muted-foreground text-[11px]'>
-                  {t('Redemption Code')}
+                  {t('Redemption Code')} ·{' '}
+                  {t(REDEMPTION_TYPES[redemptionTypeOf(redemption)].labelKey)}
                 </div>
               </div>
               {expired ? (
@@ -161,12 +172,30 @@ export function RedemptionsMobileList(props: RedemptionsMobileListProps) {
               <DataTableRowActions row={row} />
             </div>
 
-            <div className='flex items-center justify-between gap-2 text-xs'>
-              <span className='text-muted-foreground'>{t('Quota')}</span>
-              <span className='font-medium tabular-nums'>
-                {formatQuota(redemption.quota)}
-              </span>
-            </div>
+            {redemptionTypeOf(redemption) === REDEMPTION_TYPE_SUBSCRIPTION ? (
+              <div className='space-y-1 text-xs'>
+                <div className='flex items-center justify-between gap-2'>
+                  <span className='text-muted-foreground'>{t('Plan')}</span>
+                  <span className='truncate font-medium'>
+                    {planTitles.get(redemption.plan_id) ??
+                      t('Plan #{{id}}', { id: redemption.plan_id })}
+                  </span>
+                </div>
+                <div className='flex items-center justify-between gap-2'>
+                  <span className='text-muted-foreground'>{t('Duration')}</span>
+                  <span className='font-medium'>
+                    {formatRedemptionDuration(redemption, t)}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div className='flex items-center justify-between gap-2 text-xs'>
+                <span className='text-muted-foreground'>{t('Quota')}</span>
+                <span className='font-medium tabular-nums'>
+                  {formatQuota(redemption.quota)}
+                </span>
+              </div>
+            )}
           </div>
         )
       })}

@@ -27,6 +27,8 @@ import { afterEach, describe, expect, test } from 'vitest'
 
 import type { Redemption } from '../../types'
 
+const { QueryClient, QueryClientProvider } =
+  await import('@tanstack/react-query')
 const i18n = (await import('i18next')).default
 const { I18nextProvider, initReactI18next } = await import('react-i18next')
 const { Toaster, toast } = await import('sonner')
@@ -34,6 +36,8 @@ const { api } = await import('@/lib/api')
 const { useSystemConfigStore } = await import('@/stores/system-config-store')
 const { RedemptionsProvider } = await import('../redemptions-provider')
 const { RedemptionsMutateDrawer } = await import('../redemptions-mutate-drawer')
+
+type QueryClientInstance = InstanceType<typeof QueryClient>
 
 await i18n.use(initReactI18next).init({
   lng: 'en',
@@ -53,9 +57,11 @@ type ApiMethod = (url: string, data?: unknown) => Promise<{ data: unknown }>
 type MockableApi = {
   get: ApiMethod
   put: ApiMethod
+  post: ApiMethod
 }
 type RenderedDrawer = {
   result: RenderResult
+  client: QueryClientInstance
 }
 type CurrencyFixture = {
   quotaDisplayType: 'USD' | 'CNY'
@@ -65,6 +71,7 @@ type CurrencyFixture = {
 const apiClient = api as unknown as MockableApi
 const originalGet = apiClient.get
 const originalPut = apiClient.put
+const originalPost = apiClient.post
 const originalConsoleLog = Reflect.get(console, 'log')
 let renderedDrawer: RenderedDrawer | null = null
 
@@ -76,6 +83,11 @@ function redemption(id: number, quota = 500001): Redemption {
     key: `key-${id}`,
     status: 1,
     quota,
+    type: 'quota',
+    plan_id: 0,
+    duration_unit: '',
+    duration_value: 0,
+    duration_seconds: 0,
     created_time: 1,
     redeemed_time: 0,
     expired_time: 0,
@@ -93,19 +105,38 @@ function deferred<T>() {
   return { promise, reject, resolve }
 }
 
-function drawerTree(currentRow: Redemption) {
+function drawerTree(currentRow: Redemption, client: QueryClientInstance) {
   return (
-    <I18nextProvider i18n={i18n}>
-      <RedemptionsProvider>
-        <RedemptionsMutateDrawer
-          open
-          currentRow={currentRow}
-          onOpenChange={() => undefined}
-        />
-      </RedemptionsProvider>
-      <Toaster duration={60_000} />
-    </I18nextProvider>
+    <QueryClientProvider client={client}>
+      <I18nextProvider i18n={i18n}>
+        <RedemptionsProvider>
+          <RedemptionsMutateDrawer
+            open
+            currentRow={currentRow}
+            onOpenChange={() => undefined}
+          />
+        </RedemptionsProvider>
+        <Toaster duration={60_000} />
+      </I18nextProvider>
+    </QueryClientProvider>
   )
+}
+
+function createDrawerTree(client: QueryClientInstance) {
+  return (
+    <QueryClientProvider client={client}>
+      <I18nextProvider i18n={i18n}>
+        <RedemptionsProvider>
+          <RedemptionsMutateDrawer open onOpenChange={() => undefined} />
+        </RedemptionsProvider>
+        <Toaster duration={60_000} />
+      </I18nextProvider>
+    </QueryClientProvider>
+  )
+}
+
+function createQueryClient(): QueryClientInstance {
+  return new QueryClient({ defaultOptions: { queries: { retry: false } } })
 }
 
 async function renderDrawer(
@@ -126,14 +157,31 @@ async function renderDrawer(
     },
   })
 
-  renderedDrawer = { result: render(drawerTree(currentRow)) }
+  const client = createQueryClient()
+  renderedDrawer = { result: render(drawerTree(currentRow, client)), client }
 }
 
 async function rerenderDrawer(currentRow: Redemption): Promise<void> {
   if (!renderedDrawer) {
     throw new Error('Expected a rendered redemption drawer')
   }
-  renderedDrawer.result.rerender(drawerTree(currentRow))
+  renderedDrawer.result.rerender(drawerTree(currentRow, renderedDrawer.client))
+}
+
+async function renderCreateDrawer(): Promise<void> {
+  useSystemConfigStore.getState().setConfig({
+    currency: {
+      displayInCurrency: true,
+      quotaDisplayType: 'USD',
+      quotaPerUnit: 500000,
+      usdExchangeRate: 1,
+      customCurrencySymbol: '¤',
+      customCurrencyExchangeRate: 1,
+    },
+  })
+
+  const client = createQueryClient()
+  renderedDrawer = { result: render(createDrawerTree(client)), client }
 }
 
 function getSaveButton(): HTMLButtonElement {
@@ -180,9 +228,11 @@ async function waitForLoadedForm(): Promise<void> {
 afterEach(() => {
   apiClient.get = originalGet
   apiClient.put = originalPut
+  apiClient.post = originalPost
   Reflect.set(console, 'log', originalConsoleLog)
   toast.dismiss()
   localStorage.clear()
+  renderedDrawer?.client.clear()
   renderedDrawer = null
 })
 
@@ -314,5 +364,32 @@ describe('redemption drawer', () => {
 
     expect(updates[0]?.id).toBe(2)
     expect(updates[0]?.quota).toBe(1000001)
+  })
+
+  test('swaps the quota input for the subscription plan fields', async () => {
+    apiClient.get = async (url) => {
+      if (url === '/api/subscription/admin/plans') {
+        return {
+          data: {
+            success: true,
+            data: [{ plan: { id: 7, title: 'Pro plan' } }],
+          },
+        }
+      }
+      throw new Error(`Unexpected GET ${url}`)
+    }
+
+    await renderCreateDrawer()
+    await waitForLoadedForm()
+    expect(getControlByLabel('Quota (USD)')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Subscription' }))
+
+    await waitFor(() =>
+      expect(screen.queryByLabelText('Quota (USD)')).not.toBeInTheDocument()
+    )
+    expect(screen.getByText('Subscription plan')).toBeInTheDocument()
+    expect(screen.getByText('Duration override')).toBeInTheDocument()
+    expect(screen.queryByText('Duration Value')).not.toBeInTheDocument()
   })
 })

@@ -17,7 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
-import { type FormEvent, useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { type FormEvent, useEffect, useId, useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -41,6 +42,16 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   Sheet,
   SheetClose,
@@ -50,6 +61,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
+import { getAdminPlans } from '@/features/subscriptions/api'
 import {
   formatQuotaWithCurrency,
   getCurrencyDisplay,
@@ -61,18 +73,27 @@ import {
   parseQuotaFromDollars,
 } from '@/lib/format'
 import { handleServerError } from '@/lib/handle-server-error'
+import { requireServerSuccess } from '@/lib/server-error-message'
 import { addTimeToDate } from '@/lib/time'
 
 import { createRedemption, updateRedemption, getRedemption } from '../api'
-import { SUCCESS_MESSAGES } from '../constants'
 import {
+  SUCCESS_MESSAGES,
+  getRedemptionDurationUnitOptions,
+} from '../constants'
+import {
+  formatRedemptionDuration,
   getRedemptionFormSchema,
   type RedemptionFormValues,
   REDEMPTION_FORM_DEFAULT_VALUES,
   transformFormDataToPayload,
   transformRedemptionToFormDefaults,
 } from '../lib'
-import type { Redemption } from '../types'
+import {
+  REDEMPTION_TYPE_QUOTA,
+  REDEMPTION_TYPE_SUBSCRIPTION,
+  type Redemption,
+} from '../types'
 import {
   RedemptionsExportDialog,
   type RedemptionExportData,
@@ -91,6 +112,7 @@ export function RedemptionsMutateDrawer({
   currentRow,
 }: RedemptionsMutateDrawerProps) {
   const { t } = useTranslation()
+  const typeOptionId = useId()
   const isUpdate = !!currentRow
   const redemptionId = currentRow?.id
   const { triggerRefresh } = useRedemptions()
@@ -109,6 +131,45 @@ export function RedemptionsMutateDrawer({
     resolver: zodResolver(getRedemptionFormSchema(t)),
     defaultValues: REDEMPTION_FORM_DEFAULT_VALUES,
   })
+
+  const redemptionType = form.watch('type')
+  const planId = form.watch('plan_id')
+  const durationUnit = form.watch('duration_unit')
+  const isSubscriptionCode = redemptionType === REDEMPTION_TYPE_SUBSCRIPTION
+
+  // The plan list is only needed for subscription codes, so quota codes never
+  // issue an extra admin request.
+  const { data: plans } = useQuery({
+    queryKey: ['admin-subscription-plans', 'redemption-codes'],
+    queryFn: async () => {
+      const result = requireServerSuccess(await getAdminPlans())
+      return (result.data || []).map((record) => record.plan)
+    },
+    enabled: open && isSubscriptionCode,
+    staleTime: 60_000,
+  })
+
+  const planOptions = useMemo(() => {
+    const options = (plans || []).map((plan) => ({
+      value: String(plan.id),
+      label: plan.title,
+    }))
+    if (
+      planId > 0 &&
+      !options.some((option) => option.value === String(planId))
+    ) {
+      options.push({
+        value: String(planId),
+        label: t('Plan #{{id}}', { id: planId }),
+      })
+    }
+    return options
+  }, [plans, planId, t])
+
+  const durationUnitOptions = useMemo(
+    () => getRedemptionDurationUnitOptions(t),
+    [t]
+  )
 
   // Load existing data when updating
   useEffect(() => {
@@ -176,12 +237,17 @@ export function RedemptionsMutateDrawer({
       const basePayload = transformFormDataToPayload(data)
 
       if (isUpdate && currentRow && loadedRedemption) {
-        const quota = form.getFieldState('quota_dollars').isDirty
+        // Keep the stored quota unless the type or the quota itself changed;
+        // subscription codes always carry a zero quota.
+        const quotaFieldDirty =
+          form.getFieldState('type').isDirty ||
+          form.getFieldState('quota_dollars').isDirty
+        const quota = quotaFieldDirty
           ? basePayload.quota
           : loadedRedemption.quota
         const result = await updateRedemption({
           ...basePayload,
-          quota,
+          quota: basePayload.type === REDEMPTION_TYPE_SUBSCRIPTION ? 0 : quota,
           id: currentRow.id,
         })
         if (result.success) {
@@ -210,6 +276,22 @@ export function RedemptionsMutateDrawer({
               quota: formatQuotaWithCurrency(basePayload.quota, {
                 abbreviate: false,
               }),
+              type: basePayload.type,
+              planTitle: isSubscriptionCode
+                ? planOptions.find(
+                    (option) => option.value === String(basePayload.plan_id)
+                  )?.label
+                : undefined,
+              duration: isSubscriptionCode
+                ? formatRedemptionDuration(
+                    {
+                      duration_unit: basePayload.duration_unit || '',
+                      duration_value: basePayload.duration_value || 0,
+                      duration_seconds: basePayload.duration_seconds || 0,
+                    },
+                    t
+                  )
+                : undefined,
             })
           }
           onOpenChange(false)
@@ -317,34 +399,243 @@ export function RedemptionsMutateDrawer({
 
                   <FormField
                     control={form.control}
-                    name='quota_dollars'
+                    name='type'
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>{quotaLabel}</FormLabel>
+                        <FormLabel>{t('Redemption type')}</FormLabel>
                         <FormControl>
-                          <Input
-                            {...field}
-                            type='number'
-                            step={quotaStep}
-                            placeholder={quotaPlaceholder}
-                            onChange={(e) =>
-                              field.onChange(
-                                Number.parseFloat(e.target.value) || 0
-                              )
-                            }
-                          />
+                          <RadioGroup
+                            value={field.value}
+                            onValueChange={(value) => {
+                              if (
+                                value === REDEMPTION_TYPE_QUOTA ||
+                                value === REDEMPTION_TYPE_SUBSCRIPTION
+                              ) {
+                                field.onChange(value)
+                              }
+                            }}
+                            aria-label={t('Redemption type')}
+                            className='flex flex-wrap gap-x-5 gap-y-3'
+                          >
+                            {[
+                              {
+                                value: REDEMPTION_TYPE_QUOTA,
+                                label: t('Quota'),
+                              },
+                              {
+                                value: REDEMPTION_TYPE_SUBSCRIPTION,
+                                label: t('Subscription'),
+                              },
+                            ].map((option) => (
+                              <div
+                                key={option.value}
+                                className='flex items-center gap-2'
+                              >
+                                <RadioGroupItem
+                                  value={option.value}
+                                  id={`${typeOptionId}-${option.value}`}
+                                />
+                                <Label
+                                  htmlFor={`${typeOptionId}-${option.value}`}
+                                >
+                                  {option.label}
+                                </Label>
+                              </div>
+                            ))}
+                          </RadioGroup>
                         </FormControl>
                         <FormDescription>
-                          {tokensOnly
-                            ? t('Enter the quota amount in tokens')
-                            : t('Enter the quota amount in {{currency}}', {
-                                currency: currencyLabel,
-                              })}
+                          {t(
+                            'Quota codes top up the wallet balance; subscription codes activate a subscription plan.'
+                          )}
                         </FormDescription>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
+
+                  {isSubscriptionCode ? (
+                    <>
+                      <FormField
+                        control={form.control}
+                        name='plan_id'
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>{t('Subscription plan')}</FormLabel>
+                            <Select
+                              items={planOptions}
+                              value={field.value > 0 ? String(field.value) : ''}
+                              onValueChange={(value) => {
+                                if (value) {
+                                  field.onChange(Number(value))
+                                }
+                              }}
+                            >
+                              <FormControl>
+                                <SelectTrigger>
+                                  <SelectValue
+                                    placeholder={t(
+                                      'Select a subscription plan'
+                                    )}
+                                  />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent alignItemWithTrigger={false}>
+                                <SelectGroup>
+                                  {planOptions.map((option) => (
+                                    <SelectItem
+                                      key={option.value}
+                                      value={option.value}
+                                    >
+                                      {option.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectGroup>
+                              </SelectContent>
+                            </Select>
+                            <FormDescription>
+                              {t(
+                                'Redeeming this code activates the selected plan for the user.'
+                              )}
+                            </FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name='duration_unit'
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>{t('Duration override')}</FormLabel>
+                            <Select
+                              items={durationUnitOptions}
+                              value={field.value}
+                              onValueChange={field.onChange}
+                            >
+                              <FormControl>
+                                <SelectTrigger>
+                                  <SelectValue />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent alignItemWithTrigger={false}>
+                                <SelectGroup>
+                                  {durationUnitOptions.map((option) => (
+                                    <SelectItem
+                                      key={option.value}
+                                      value={option.value}
+                                    >
+                                      {option.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectGroup>
+                              </SelectContent>
+                            </Select>
+                            <FormDescription>
+                              {t(
+                                'Leave empty to grant the plan duration; otherwise the code grants the entered duration.'
+                              )}
+                            </FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      {durationUnit !== '' && durationUnit !== 'custom' && (
+                        <FormField
+                          control={form.control}
+                          name='duration_value'
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>{t('Duration Value')}</FormLabel>
+                              <FormControl>
+                                <Input
+                                  {...field}
+                                  type='number'
+                                  min='1'
+                                  placeholder={t('Enter a duration')}
+                                  onChange={(e) =>
+                                    field.onChange(
+                                      Number.parseInt(e.target.value, 10) || 0
+                                    )
+                                  }
+                                />
+                              </FormControl>
+                              <FormDescription>
+                                {t(
+                                  'Duration granted by this code, in the selected unit.'
+                                )}
+                              </FormDescription>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      )}
+
+                      {durationUnit === 'custom' && (
+                        <FormField
+                          control={form.control}
+                          name='duration_seconds'
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>{t('Duration (seconds)')}</FormLabel>
+                              <FormControl>
+                                <Input
+                                  {...field}
+                                  type='number'
+                                  min='1'
+                                  placeholder={t('Enter a duration')}
+                                  onChange={(e) =>
+                                    field.onChange(
+                                      Number.parseInt(e.target.value, 10) || 0
+                                    )
+                                  }
+                                />
+                              </FormControl>
+                              <FormDescription>
+                                {t(
+                                  'Duration granted by this code, in seconds.'
+                                )}
+                              </FormDescription>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      )}
+                    </>
+                  ) : (
+                    <FormField
+                      control={form.control}
+                      name='quota_dollars'
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{quotaLabel}</FormLabel>
+                          <FormControl>
+                            <Input
+                              {...field}
+                              type='number'
+                              step={quotaStep}
+                              placeholder={quotaPlaceholder}
+                              onChange={(e) =>
+                                field.onChange(
+                                  Number.parseFloat(e.target.value) || 0
+                                )
+                              }
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            {tokensOnly
+                              ? t('Enter the quota amount in tokens')
+                              : t('Enter the quota amount in {{currency}}', {
+                                  currency: currencyLabel,
+                                })}
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
 
                   <FormField
                     control={form.control}

@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -10,19 +11,142 @@ import (
 	"gorm.io/gorm"
 )
 
+// Redemption code types: a code either credits wallet quota (the legacy
+// default) or grants a subscription plan.
+const (
+	RedemptionTypeQuota        = "quota"
+	RedemptionTypeSubscription = "subscription"
+)
+
+// RedemptionDurationMaxYears bounds a subscription duration override so a code
+// can never grant an effectively permanent subscription.
+const RedemptionDurationMaxYears = 10
+
+var (
+	// ErrRedemptionDurationInvalid reports an unknown duration unit, a
+	// non-positive value, or stray values without a unit.
+	ErrRedemptionDurationInvalid = errors.New("redemption duration override is invalid")
+	// ErrRedemptionDurationTooLong reports an override beyond ten years.
+	ErrRedemptionDurationTooLong = errors.New("redemption duration override is too long")
+	// ErrRedemptionPlanUnavailable reports a code whose subscription plan is
+	// missing.
+	ErrRedemptionPlanUnavailable = errors.New("redemption subscription plan is unavailable")
+)
+
 type Redemption struct {
-	Id           int            `json:"id"`
-	UserId       int            `json:"user_id"`
-	Key          string         `json:"key" gorm:"type:char(32);uniqueIndex"`
-	Status       int            `json:"status" gorm:"default:1"`
-	Name         string         `json:"name" gorm:"index"`
-	Quota        int            `json:"quota" gorm:"type:bigint;default:100"`
-	CreatedTime  int64          `json:"created_time" gorm:"bigint"`
-	RedeemedTime int64          `json:"redeemed_time" gorm:"bigint"`
-	Count        int            `json:"count" gorm:"-:all"` // only for api request
-	UsedUserId   int            `json:"used_user_id"`
-	DeletedAt    gorm.DeletedAt `gorm:"index"`
-	ExpiredTime  int64          `json:"expired_time" gorm:"bigint"` // 过期时间，0 表示不过期
+	Id     int    `json:"id"`
+	UserId int    `json:"user_id"`
+	Key    string `json:"key" gorm:"type:char(32);uniqueIndex"`
+	Status int    `json:"status" gorm:"default:1"`
+	Name   string `json:"name" gorm:"index"`
+	Quota  int    `json:"quota" gorm:"type:bigint;default:100"`
+	// Type is "quota" (credit Quota) or "subscription" (grant PlanId). Rows
+	// created before this column existed read back as empty and are treated
+	// as quota codes.
+	Type string `json:"type" gorm:"type:varchar(16);default:'quota'"`
+	// PlanId is the subscription plan granted by a "subscription" code.
+	PlanId int `json:"plan_id" gorm:"index"`
+	// Optional duration override for a "subscription" code. An empty unit
+	// uses the plan's own duration; otherwise the code grants DurationValue
+	// of DurationUnit (or DurationSeconds when the unit is "custom").
+	DurationUnit    string         `json:"duration_unit" gorm:"type:varchar(16);default:''"`
+	DurationValue   int            `json:"duration_value" gorm:"default:0"`
+	DurationSeconds int64          `json:"duration_seconds" gorm:"type:bigint;default:0"`
+	CreatedTime     int64          `json:"created_time" gorm:"bigint"`
+	RedeemedTime    int64          `json:"redeemed_time" gorm:"bigint"`
+	Count           int            `json:"count" gorm:"-:all"` // only for api request
+	UsedUserId      int            `json:"used_user_id"`
+	DeletedAt       gorm.DeletedAt `gorm:"index"`
+	ExpiredTime     int64          `json:"expired_time" gorm:"bigint"` // 过期时间，0 表示不过期
+}
+
+// NormalizeRedemptionType maps an empty (legacy) value to the quota type and
+// reports whether the value names a supported type.
+func NormalizeRedemptionType(redemptionType string) (string, bool) {
+	switch strings.TrimSpace(redemptionType) {
+	case "", RedemptionTypeQuota:
+		return RedemptionTypeQuota, true
+	case RedemptionTypeSubscription:
+		return RedemptionTypeSubscription, true
+	default:
+		return "", false
+	}
+}
+
+// NormalizedType returns the stored type, treating a legacy empty value as a
+// quota code.
+func (redemption *Redemption) NormalizedType() string {
+	if redemption == nil {
+		return RedemptionTypeQuota
+	}
+	if strings.TrimSpace(redemption.Type) == RedemptionTypeSubscription {
+		return RedemptionTypeSubscription
+	}
+	return RedemptionTypeQuota
+}
+
+// ValidateRedemptionDuration validates an optional subscription duration
+// override. An empty unit means the code uses the plan's own duration and
+// carries no value; otherwise the unit must be one of the plan duration units
+// with a positive value bounded to ten years.
+func ValidateRedemptionDuration(unit string, value int, seconds int64) error {
+	maxValue := 0
+	switch strings.TrimSpace(unit) {
+	case "":
+		if value != 0 || seconds != 0 {
+			return ErrRedemptionDurationInvalid
+		}
+		return nil
+	case SubscriptionDurationYear:
+		maxValue = RedemptionDurationMaxYears
+	case SubscriptionDurationMonth:
+		maxValue = RedemptionDurationMaxYears * 12
+	case SubscriptionDurationDay:
+		maxValue = RedemptionDurationMaxYears * 365
+	case SubscriptionDurationHour:
+		maxValue = RedemptionDurationMaxYears * 365 * 24
+	case SubscriptionDurationCustom:
+		if seconds < 1 {
+			return ErrRedemptionDurationInvalid
+		}
+		if seconds > int64(RedemptionDurationMaxYears)*365*24*60*60 {
+			return ErrRedemptionDurationTooLong
+		}
+		return nil
+	default:
+		return ErrRedemptionDurationInvalid
+	}
+	if value < 1 {
+		return ErrRedemptionDurationInvalid
+	}
+	if value > maxValue {
+		return ErrRedemptionDurationTooLong
+	}
+	return nil
+}
+
+// subscriptionPlanWithRedemptionDuration returns a copy of the plan whose
+// duration is replaced by the code's optional override.
+func subscriptionPlanWithRedemptionDuration(plan *SubscriptionPlan, redemption *Redemption) (*SubscriptionPlan, error) {
+	if plan == nil || redemption == nil {
+		return nil, ErrRedemptionDurationInvalid
+	}
+	effective := *plan
+	unit := strings.TrimSpace(redemption.DurationUnit)
+	if unit == "" {
+		return &effective, nil
+	}
+	if err := ValidateRedemptionDuration(unit, redemption.DurationValue, redemption.DurationSeconds); err != nil {
+		return nil, err
+	}
+	effective.DurationUnit = unit
+	if unit == SubscriptionDurationCustom {
+		effective.DurationValue = 0
+		effective.CustomSeconds = redemption.DurationSeconds
+	} else {
+		effective.DurationValue = redemption.DurationValue
+	}
+	return &effective, nil
 }
 
 func GetAllRedemptions(startIdx int, num int) (redemptions []*Redemption, total int64, err error) {
@@ -59,7 +183,7 @@ func GetAllRedemptions(startIdx int, num int) (redemptions []*Redemption, total 
 	return redemptions, total, nil
 }
 
-func SearchRedemptions(keyword string, status string, startIdx int, num int) (redemptions []*Redemption, total int64, err error) {
+func SearchRedemptions(keyword string, status string, redemptionType string, startIdx int, num int) (redemptions []*Redemption, total int64, err error) {
 	tx := DB.Begin()
 	if tx.Error != nil {
 		return nil, 0, tx.Error
@@ -102,6 +226,15 @@ func SearchRedemptions(keyword string, status string, startIdx int, num int) (re
 		}
 	}
 
+	if normalized, ok := NormalizeRedemptionType(redemptionType); ok && strings.TrimSpace(redemptionType) != "" {
+		if normalized == RedemptionTypeQuota {
+			// Legacy rows predate the type column and carry no value.
+			query = query.Where("type = ? OR type = '' OR type IS NULL", RedemptionTypeQuota)
+		} else {
+			query = query.Where("type = ?", normalized)
+		}
+	}
+
 	// Get total count
 	err = query.Count(&total).Error
 	if err != nil {
@@ -133,12 +266,22 @@ func GetRedemptionById(id int) (*Redemption, error) {
 	return &redemption, err
 }
 
-func Redeem(key string, userId int) (quota int, err error) {
+// RedeemResult describes what a successful redemption granted.
+type RedeemResult struct {
+	Type           string `json:"type"`
+	Quota          int    `json:"quota"`
+	PlanId         int    `json:"plan_id"`
+	PlanTitle      string `json:"plan_title"`
+	SubscriptionId int    `json:"subscription_id"`
+	EndTime        int64  `json:"end_time"`
+}
+
+func Redeem(key string, userId int) (*RedeemResult, error) {
 	if key == "" {
-		return 0, errors.New("redemption code not provided")
+		return nil, errors.New("redemption code not provided")
 	}
 	if userId == 0 {
-		return 0, errors.New("invalid user id")
+		return nil, errors.New("invalid user id")
 	}
 	redemption := &Redemption{}
 
@@ -147,7 +290,9 @@ func Redeem(key string, userId int) (quota int, err error) {
 		keyCol = `"key"`
 	}
 	common.RandomSleep()
-	err = DB.Transaction(func(tx *gorm.DB) error {
+	var result *RedeemResult
+	groupUpgraded := false
+	err := DB.Transaction(func(tx *gorm.DB) error {
 		err := lockForUpdate(tx).Where(keyCol+" = ?", key).First(redemption).Error
 		if err != nil {
 			return errors.New("invalid redemption code")
@@ -161,40 +306,115 @@ func Redeem(key string, userId int) (quota int, err error) {
 		// Compare-and-swap on status: only the transaction that flips
 		// enabled -> used may credit quota, so a concurrent redeem of the
 		// same code loses here even without a row lock (e.g. on SQLite).
-		result := tx.Model(&Redemption{}).
+		claim := tx.Model(&Redemption{}).
 			Where("id = ? AND status = ?", redemption.Id, common.RedemptionCodeStatusEnabled).
 			Updates(map[string]any{
 				"redeemed_time": common.GetTimestamp(),
 				"status":        common.RedemptionCodeStatusUsed,
 				"used_user_id":  userId,
 			})
-		if result.Error != nil {
-			return result.Error
+		if claim.Error != nil {
+			return claim.Error
 		}
-		if result.RowsAffected == 0 {
+		if claim.RowsAffected == 0 {
 			return errors.New("redemption code already used")
 		}
-		return creditTopUpQuota(tx, userId, redemption.Quota, WalletLedgerKindRedeem, WalletLedgerRefRedeem, strconv.Itoa(redemption.Id), nil)
+		switch redemption.NormalizedType() {
+		case RedemptionTypeSubscription:
+			// Lock the user row first so the per-plan purchase limit check
+			// serializes per user, exactly like paid and admin subscriptions.
+			var userRow User
+			if err := lockForUpdate(tx).Select("id").Where("id = ?", userId).First(&userRow).Error; err != nil {
+				return err
+			}
+			plan, err := getSubscriptionPlanByIdTx(tx, redemption.PlanId)
+			if err != nil {
+				return ErrRedemptionPlanUnavailable
+			}
+			effectivePlan, err := subscriptionPlanWithRedemptionDuration(plan, redemption)
+			if err != nil {
+				return err
+			}
+			subscription, err := CreateUserSubscriptionFromPlanTx(tx, userId, effectivePlan, SubscriptionSourceRedemption)
+			if err != nil {
+				return err
+			}
+			groupUpgraded = subscription.PrevUserGroup != ""
+			result = &RedeemResult{
+				Type:           RedemptionTypeSubscription,
+				PlanId:         plan.Id,
+				PlanTitle:      plan.Title,
+				SubscriptionId: subscription.Id,
+				EndTime:        subscription.EndTime,
+			}
+		default:
+			if redemption.Quota <= 0 {
+				return errors.New("invalid redemption code")
+			}
+			if err := creditTopUpQuota(tx, userId, redemption.Quota, WalletLedgerKindRedeem, WalletLedgerRefRedeem, strconv.Itoa(redemption.Id), nil); err != nil {
+				return err
+			}
+			result = &RedeemResult{Type: RedemptionTypeQuota, Quota: redemption.Quota}
+		}
+		return nil
 	})
 	if err != nil {
 		common.SysError(common.LogText("redemption failed: %s", err.Error()))
-		return 0, ErrRedeemFailed
+		return nil, ErrRedeemFailed
+	}
+	if result.Type == RedemptionTypeSubscription {
+		// A subscription grant does not move the wallet balance, so it writes
+		// no wallet ledger row (the ledger identity is sum(entries) = balance);
+		// the subscription row and the top-up log below are its audit trail.
+		if groupUpgraded {
+			refreshSubscriptionUserGroupCache(userId, common.LogText("redemption subscription"))
+		}
+		RecordLog(userId, LogTypeTopup, common.NewMessage("Subscription redeemed with a redemption code, plan: {{plan}}, code ID {{id}}", map[string]any{"plan": result.PlanTitle, "id": redemption.Id}))
+		return result, nil
 	}
 	syncCreditUserQuotaCache(userId, redemption.Quota, common.LogText("redemption"))
 	RecordLog(userId, LogTypeTopup, common.NewMessage("Topped up {{quota}} with a redemption code, code ID {{id}}", map[string]any{"quota": logger.FormatQuota(redemption.Quota), "id": redemption.Id}))
-	return redemption.Quota, nil
+	return result, nil
 }
 
-func (redemption *Redemption) Insert() error {
+// validatePayload normalizes and validates the fields shared by create and
+// update. It mutates the redemption in place so stored rows never carry a
+// mismatched type and payload.
+func (redemption *Redemption) validatePayload() error {
+	redemptionType, ok := NormalizeRedemptionType(redemption.Type)
+	if !ok {
+		return errors.New("invalid redemption code type")
+	}
+	redemption.Type = redemptionType
+	if redemptionType == RedemptionTypeSubscription {
+		if redemption.PlanId <= 0 {
+			return errors.New("redemption code requires a subscription plan")
+		}
+		if _, err := GetSubscriptionPlanById(redemption.PlanId); err != nil {
+			return ErrRedemptionPlanUnavailable
+		}
+		redemption.Quota = 0
+		redemption.DurationUnit = strings.TrimSpace(redemption.DurationUnit)
+		return ValidateRedemptionDuration(redemption.DurationUnit, redemption.DurationValue, redemption.DurationSeconds)
+	}
 	if redemption.Quota <= 0 {
 		return errors.New("redemption quota must be positive")
 	}
 	if err := common.ValidateWalletQuota(redemption.Quota); err != nil {
 		return err
 	}
-	var err error
-	err = DB.Create(redemption).Error
-	return err
+	redemption.PlanId = 0
+	redemption.DurationUnit = ""
+	redemption.DurationValue = 0
+	redemption.DurationSeconds = 0
+	return nil
+}
+
+func (redemption *Redemption) Insert() error {
+	if err := redemption.validatePayload(); err != nil {
+		return err
+	}
+	return DB.Create(redemption).Error
 }
 
 func (redemption *Redemption) SelectUpdate() error {
@@ -204,15 +424,10 @@ func (redemption *Redemption) SelectUpdate() error {
 
 // Update Make sure your token's fields is completed, because this will update non-zero values
 func (redemption *Redemption) Update() error {
-	if redemption.Quota <= 0 {
-		return errors.New("redemption quota must be positive")
-	}
-	if err := common.ValidateWalletQuota(redemption.Quota); err != nil {
+	if err := redemption.validatePayload(); err != nil {
 		return err
 	}
-	var err error
-	err = DB.Model(redemption).Select("name", "status", "quota", "redeemed_time", "expired_time").Updates(redemption).Error
-	return err
+	return DB.Model(redemption).Select("name", "status", "quota", "type", "plan_id", "duration_unit", "duration_value", "duration_seconds", "redeemed_time", "expired_time").Updates(redemption).Error
 }
 
 func (redemption *Redemption) Delete() error {
