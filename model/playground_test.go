@@ -3210,8 +3210,8 @@ func TestPlaygroundTaskArtifactRecordsAndPins(t *testing.T) {
 			videoRecord, videoOK := recordsByKey["video"]
 			thumbRecord, thumbOK := recordsByKey["thumb"]
 			require.True(t, videoOK && thumbOK)
-			require.NoError(t, model.MarkPlaygroundTaskArtifactStored(videoRecord.ID, "local", "pg/7/task/x/video", "video/mp4", 2048, "hash-video", expiresAt))
-			require.NoError(t, model.MarkPlaygroundTaskArtifactStored(thumbRecord.ID, "local", "pg/7/task/x/thumb", "image/png", 1024, "hash-thumb", expiresAt))
+			require.NoError(t, model.MarkPlaygroundTaskArtifactStored(videoRecord.ID, "local", "pg/7/task/x/video", "video/mp4", 2048, "hash-video", expiresAt, "https://upstream.invalid/video.mp4"))
+			require.NoError(t, model.MarkPlaygroundTaskArtifactStored(thumbRecord.ID, "local", "pg/7/task/x/thumb", "image/png", 1024, "hash-thumb", expiresAt, "https://upstream.invalid/thumb.png"))
 			storedBytes, err := model.PlaygroundTaskArtifactStoredBytes(7)
 			require.NoError(t, err)
 			assert.EqualValues(t, 3072, storedBytes)

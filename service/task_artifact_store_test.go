@@ -343,7 +343,7 @@ func TestS3TaskArtifactStorePersistsRecordsAndServes(t *testing.T) {
 	records, err := model.EnsurePlaygroundTaskArtifacts(7, "task-1", []model.PlaygroundTaskArtifactSeed{{Key: "video", Type: "video", MimeType: "video/mp4"}})
 	require.NoError(t, err)
 	require.Len(t, records, 1)
-	require.NoError(t, model.MarkPlaygroundTaskArtifactStored(records[0].ID, ref.Backend, ref.ObjectKey, ref.MimeType, ref.Size, "hash", common.GetTimestamp()+3600))
+	require.NoError(t, model.MarkPlaygroundTaskArtifactStored(records[0].ID, ref.Backend, ref.ObjectKey, ref.MimeType, ref.Size, "hash", common.GetTimestamp()+3600, ""))
 
 	resolved, err = store.Resolve(t.Context(), task, artifact)
 	require.NoError(t, err)
@@ -724,7 +724,7 @@ func TestDeleteExpiredTaskArtifactObjectsSkipsPinnedResults(t *testing.T) {
 		objectKey := "pg/7/task/2026/10/" + task.TaskID + "/" + records[index].ArtifactKey
 		_, err := store.Put(t.Context(), objectKey, bytes.NewReader(mp4Fixture(64)))
 		require.NoError(t, err)
-		require.NoError(t, model.MarkPlaygroundTaskArtifactStored(records[index].ID, store.Backend(), objectKey, "video/mp4", 64, "hash", expiredAt))
+		require.NoError(t, model.MarkPlaygroundTaskArtifactStored(records[index].ID, store.Backend(), objectKey, "video/mp4", 64, "hash", expiredAt, ""))
 	}
 	require.NoError(t, model.SetPlaygroundTaskArtifactPin(7, task.TaskID, "thumb", true))
 

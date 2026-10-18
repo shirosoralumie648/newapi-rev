@@ -293,7 +293,7 @@ func storeOneTaskArtifact(ctx context.Context, collector TaskArtifactCollector, 
 		return settleTaskArtifactFailure(ctx, record, taskArtifactUpstreamRef(source), err)
 	}
 	expiresAt := common.GetTimestamp() + int64(TaskArtifactRetention().Seconds())
-	if err := model.MarkPlaygroundTaskArtifactStored(record.ID, ref.Backend, ref.ObjectKey, fetched.mimeType, fetched.size, fetched.hash, expiresAt); err != nil {
+	if err := model.MarkPlaygroundTaskArtifactStored(record.ID, ref.Backend, ref.ObjectKey, fetched.mimeType, fetched.size, fetched.hash, expiresAt, taskArtifactUpstreamRef(source)); err != nil {
 		// The object exists but no record points at it; remove it instead of
 		// leaking bytes that only a retry could reach.
 		if store := taskArtifactObjectStore(); store != nil {

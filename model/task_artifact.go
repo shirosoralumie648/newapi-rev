@@ -182,7 +182,9 @@ func GetPlaygroundTaskArtifact(userID int, taskID, artifactKey string) (*Playgro
 // MarkPlaygroundTaskArtifactStored switches a pending artifact to its stored
 // object. Only a pending row is transitioned, so a retry after a partial
 // failure cannot overwrite the metadata of bytes that are already persisted.
-func MarkPlaygroundTaskArtifactStored(recordID int64, backend, objectKey, mimeType string, byteSize int64, contentHash string, expiresAt int64) error {
+// The provider reference stays in UpstreamRef for operators, exactly as on the
+// expired transition, so every record keeps where its bytes came from.
+func MarkPlaygroundTaskArtifactStored(recordID int64, backend, objectKey, mimeType string, byteSize int64, contentHash string, expiresAt int64, upstreamRef string) error {
 	if recordID <= 0 {
 		return ErrPlaygroundTaskArtifactInvalid
 	}
@@ -196,6 +198,7 @@ func MarkPlaygroundTaskArtifactStored(recordID int64, backend, objectKey, mimeTy
 			"mime_type":    mimeType,
 			"byte_size":    byteSize,
 			"content_hash": contentHash,
+			"upstream_ref": truncateTaskArtifactReason(upstreamRef, 2048),
 			"expires_at":   expiresAt,
 			"stored_at":    now,
 			"updated_at":   now,

@@ -784,7 +784,7 @@ func TestTaskArtifactResponsesReportPersistenceState(t *testing.T) {
 	for index := range records {
 		recordsByKey[records[index].ArtifactKey] = records[index]
 	}
-	require.NoError(t, model.MarkPlaygroundTaskArtifactStored(recordsByKey["video"].ID, "local", "pg/7/task/x/video", "video/mp4", 2048, "hash", expiresAt))
+	require.NoError(t, model.MarkPlaygroundTaskArtifactStored(recordsByKey["video"].ID, "local", "pg/7/task/x/video", "video/mp4", 2048, "hash", expiresAt, "https://upstream.invalid/video.mp4?signature=secret"))
 	require.NoError(t, model.MarkPlaygroundTaskArtifactExpired(recordsByKey["audio"].ID, "https://upstream.invalid/audio.mp3?signature=secret", "storage limit"))
 	require.NoError(t, model.SetPlaygroundTaskArtifactPin(task.UserId, task.TaskID, "video", true))
 
@@ -841,7 +841,7 @@ func TestTaskArtifactContentServesStoredResultWithoutProvider(t *testing.T) {
 	objectKey := "pg/7/task/2026/10/" + task.TaskID + "/video"
 	_, err = store.Put(context.Background(), objectKey, bytes.NewReader(payload))
 	require.NoError(t, err)
-	require.NoError(t, model.MarkPlaygroundTaskArtifactStored(records[0].ID, store.Backend(), objectKey, "video/mp4", int64(len(payload)), "hash", common.GetTimestamp()+3600))
+	require.NoError(t, model.MarkPlaygroundTaskArtifactStored(records[0].ID, store.Backend(), objectKey, "video/mp4", int64(len(payload)), "hash", common.GetTimestamp()+3600, provider.URL+"/result.mp4"))
 
 	contentRecorder := httptest.NewRecorder()
 	contentContext, _ := gin.CreateTestContext(contentRecorder)
