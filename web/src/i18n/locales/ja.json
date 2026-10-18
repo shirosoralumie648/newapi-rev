@@ -3656,6 +3656,7 @@
     "Invalid Playground artifact request.": "Playground の成果物リクエストが無効です。",
     "Invalid Playground asset query.": "Playground の素材クエリが無効です。",
     "Invalid Playground attachment.": "Playground の添付ファイルが無効です。",
+    "Invalid Playground canvas archive.": "Playground のキャンバスアーカイブが無効です。",
     "Invalid Playground canvas project.": "Playground キャンバスプロジェクトが無効です。",
     "Invalid Playground configuration.": "Playground の設定が無効です。",
     "Invalid Playground message.": "Playground のメッセージが無効です。",

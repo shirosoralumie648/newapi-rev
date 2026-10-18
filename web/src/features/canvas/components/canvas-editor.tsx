@@ -93,6 +93,11 @@ interface CanvasEditorProps {
   disabled?: boolean
   onChange: (document: CanvasServerDocument) => void
   onImportArchive: (file: File) => void
+  /**
+   * Persists pending edits before an archive export, so the server builds the
+   * zip from the latest saved document.
+   */
+  onBeforeExportArchive?: () => Promise<void>
   onOpenSource?: (target: CanvasSourceTarget) => void
 }
 
@@ -267,6 +272,7 @@ export function CanvasEditor(props: CanvasEditorProps) {
   const handleExportArchive = useCallback(
     async (nodeIds?: string[]) => {
       try {
+        await props.onBeforeExportArchive?.()
         const archive = await exportCanvasArchive(props.project.id, nodeIds)
         downloadCanvasFile(archive.filename, archive.blob)
       } catch (error) {
@@ -278,7 +284,7 @@ export function CanvasEditor(props: CanvasEditorProps) {
         )
       }
     },
-    [props.project.id, t]
+    [props.onBeforeExportArchive, props.project.id, t]
   )
 
   const handleImportFile = useCallback(

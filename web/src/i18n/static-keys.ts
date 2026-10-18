@@ -94,6 +94,7 @@ export const STATIC_I18N_KEYS = [
   'Invalid assistant preset.',
 
   'Authentication required.',
+  'Invalid Playground canvas archive.',
   'Invalid Playground configuration.',
   'Invalid Playground message.',
   'Invalid Playground pagination.',
