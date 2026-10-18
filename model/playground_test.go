@@ -475,10 +475,12 @@ func TestPlaygroundArtifactPersistenceMatrix(t *testing.T) {
 	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
 		t.Run(dialect, func(t *testing.T) {
 			db := playgroundTestDB(t, dialect)
+			sessionID, input := playgroundArtifactSourceFixture(t, 7, "artifact-upgrade")
 			// Upgrade a populated Phase 2 schema, then migrate populated artifacts
 			// twice. This is not a substitute for the latest released-schema matrix.
+			// The requests above need the schema AutoMigrate already established at
+			// startup, so the drop simulates the missing tables only from here on.
 			require.NoError(t, db.Migrator().DropTable(&model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}))
-			sessionID, input := playgroundArtifactSourceFixture(t, 7, "artifact-upgrade")
 			require.NoError(t, db.AutoMigrate(&model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}))
 			path := "/api/playground/sessions/" + sessionID + "/artifacts"
 			created := artifactResult(t, playgroundRequest(t, 7, http.MethodPost, path, input, controller.CreatePlaygroundArtifact))
@@ -2364,15 +2366,17 @@ func TestPlaygroundUserUsageBudgetSerialization(t *testing.T) {
 
 			outcomes := make(chan error, 2)
 			start := make(chan struct{})
-			upload := func(partition, clientKey string) {
+			upload := func(create func(context.Context, int, string, model.PlaygroundAttachmentInput) (*model.PlaygroundAttachment, bool, error), partition, clientKey string) {
 				<-start
-				_, _, err := model.CreatePlaygroundAttachment(context.Background(), 7, partition, model.PlaygroundAttachmentInput{
+				_, _, err := create(context.Background(), 7, partition, model.PlaygroundAttachmentInput{
 					ClientKey: clientKey, MediaType: "image/png", Filename: "image.png", Data: playgroundPNGFixture(64),
 				})
 				outcomes <- err
 			}
-			go upload(sessionID, "usage-budget-a")
-			go upload(canvasID, "usage-budget-b")
+			// Each upload locks its own partition first, so the two only
+			// serialize on the shared account counter row.
+			go upload(model.CreatePlaygroundAttachment, sessionID, "usage-budget-a")
+			go upload(model.CreatePlaygroundCanvasAttachment, canvasID, "usage-budget-b")
 			close(start)
 			first, second := <-outcomes, <-outcomes
 			if first == nil {

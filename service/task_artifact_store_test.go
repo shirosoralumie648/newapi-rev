@@ -368,7 +368,7 @@ func TestS3TaskArtifactStorePersistsRecordsAndServes(t *testing.T) {
 	require.NotEmpty(t, location)
 	assert.Contains(t, location, "X-Amz-Signature=")
 	assert.Contains(t, location, "X-Amz-Expires=900")
-	assert.Contains(t, location, "/artifact-bucket/tasks/v1/pg/7/2026/10/task-1/video")
+	assert.Contains(t, location, "/artifact-bucket/tasks/v1/pg/7/task/2026/10/task-1/video")
 
 	// A record whose object vanished is not served, so the caller falls back.
 	require.NoError(t, store.(*objectTaskArtifactStore).objects.Delete(t.Context(), ref.ObjectKey))
@@ -562,7 +562,11 @@ func TestPlaygroundTaskArtifactStoreRejectsUnsupportedProviderContent(t *testing
 				for name, value := range testCase.headers {
 					w.Header().Set(name, value)
 				}
-				w.WriteHeader(testCase.status)
+				// A zero status means the case serves a plain 200; writing it
+				// would panic the handler and turn the case into a dead link.
+				if testCase.status != 0 {
+					w.WriteHeader(testCase.status)
+				}
 				_, _ = w.Write(testCase.payload)
 			}))
 			defer provider.Close()
