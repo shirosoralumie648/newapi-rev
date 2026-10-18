@@ -8020,6 +8020,14 @@
     "Deleted conversations and canvases stay recoverable until the retention period ends.": "Les conversations et canevas supprimés restent récupérables jusqu’à la fin de la période de conservation.",
     "Trashed items still count toward your storage and are removed after {{days}} days.": "Les éléments dans la corbeille sont toujours comptés dans votre stockage et sont supprimés après {{days}} jours.",
     "Deleted {{date}}": "Supprimé le {{date}}",
-    "Removed after {{date}}": "Supprimé après le {{date}}"
+    "Removed after {{date}}": "Supprimé après le {{date}}",
+    "JSON file": "Fichier JSON",
+    "ZIP archive": "Archive ZIP",
+    "ZIP archive of selected nodes": "Archive ZIP des nœuds sélectionnés",
+    "Import canvas JSON file": "Importer un fichier JSON de canevas",
+    "Import canvas archive file": "Importer une archive de canevas",
+    "Canvas archive imported.": "Archive de canevas importée.",
+    "Canvas archive imported, but some resources could not be restored.": "Archive de canevas importée, mais certaines ressources n'ont pas pu être restaurées.",
+    "The canvas archive could not be downloaded.": "L'archive de canevas n'a pas pu être téléchargée."
   }
 }

@@ -8020,6 +8020,14 @@
     "Deleted conversations and canvases stay recoverable until the retention period ends.": "削除された会話とキャンバスは、保持期間が終わるまで復元できます。",
     "Trashed items still count toward your storage and are removed after {{days}} days.": "ゴミ箱の項目は引き続きストレージに計上され、{{days}} 日後に削除されます。",
     "Deleted {{date}}": "{{date}}に削除",
-    "Removed after {{date}}": "{{date}}以降に削除"
+    "Removed after {{date}}": "{{date}}以降に削除",
+    "JSON file": "JSON ファイル",
+    "ZIP archive": "ZIP アーカイブ",
+    "ZIP archive of selected nodes": "選択したノードの ZIP アーカイブ",
+    "Import canvas JSON file": "キャンバスの JSON ファイルをインポート",
+    "Import canvas archive file": "キャンバスのアーカイブファイルをインポート",
+    "Canvas archive imported.": "キャンバスのアーカイブをインポートしました。",
+    "Canvas archive imported, but some resources could not be restored.": "キャンバスのアーカイブをインポートしましたが、一部のリソースを復元できませんでした。",
+    "The canvas archive could not be downloaded.": "キャンバスのアーカイブをダウンロードできませんでした。"
   }
 }

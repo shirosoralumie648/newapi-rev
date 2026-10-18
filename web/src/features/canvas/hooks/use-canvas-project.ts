@@ -25,9 +25,11 @@ import {
   createCanvasProject,
   deleteCanvasProject,
   getCanvasProject,
+  importCanvasArchive,
   listCanvasProjects,
   restoreCanvasSnapshot,
   updateCanvasProject,
+  type CanvasArchiveImportResult,
 } from '../api'
 import {
   CANVAS_AUTOSAVE_DELAY_MS,
@@ -310,6 +312,28 @@ export function useCanvasProject(
     [flush, loadProject]
   )
 
+  const importProjectArchive = useCallback(
+    async (file: File): Promise<CanvasArchiveImportResult> => {
+      // Restoring creates a canvas under the signed-in account with every
+      // carried resource re-uploaded; persist the current board first so no
+      // pending edit races the switch to the restored project.
+      await flush()
+      const imported = await importCanvasArchive(file)
+      if (!mounted.current) return imported
+      pendingDocument.current = null
+      setDirty(false)
+      setActiveProject(imported.project)
+      setStatus('ready')
+      setError(null)
+      applyProjects([
+        imported.project,
+        ...projectsRef.current.filter((row) => row.id !== imported.project.id),
+      ])
+      return imported
+    },
+    [applyProjects, flush, setActiveProject]
+  )
+
   const renameProject = useCallback(
     async (id: string, title: string) => {
       // A pending autosave shares the revision counter; settle it first so the
@@ -444,6 +468,7 @@ export function useCanvasProject(
     conflict: status === 'conflict',
     loadProject,
     selectProject,
+    importProjectArchive,
     refreshProjects,
     createNewProject,
     renameProject,

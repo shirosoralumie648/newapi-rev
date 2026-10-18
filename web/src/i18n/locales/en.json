@@ -8020,6 +8020,14 @@
     "Deleted conversations and canvases stay recoverable until the retention period ends.": "Deleted conversations and canvases stay recoverable until the retention period ends.",
     "Trashed items still count toward your storage and are removed after {{days}} days.": "Trashed items still count toward your storage and are removed after {{days}} days.",
     "Deleted {{date}}": "Deleted {{date}}",
-    "Removed after {{date}}": "Removed after {{date}}"
+    "Removed after {{date}}": "Removed after {{date}}",
+    "JSON file": "JSON file",
+    "ZIP archive": "ZIP archive",
+    "ZIP archive of selected nodes": "ZIP archive of selected nodes",
+    "Import canvas JSON file": "Import canvas JSON file",
+    "Import canvas archive file": "Import canvas archive file",
+    "Canvas archive imported.": "Canvas archive imported.",
+    "Canvas archive imported, but some resources could not be restored.": "Canvas archive imported, but some resources could not be restored.",
+    "The canvas archive could not be downloaded.": "The canvas archive could not be downloaded."
   }
 }

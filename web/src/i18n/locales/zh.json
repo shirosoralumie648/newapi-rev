@@ -8020,6 +8020,14 @@
     "Deleted conversations and canvases stay recoverable until the retention period ends.": "已删除的对话和画布在保留期结束前均可恢复。",
     "Trashed items still count toward your storage and are removed after {{days}} days.": "回收站中的内容仍计入你的存储配额，并将在 {{days}} 天后被删除。",
     "Deleted {{date}}": "删除于 {{date}}",
-    "Removed after {{date}}": "{{date}} 之后删除"
+    "Removed after {{date}}": "{{date}} 之后删除",
+    "JSON file": "JSON 文件",
+    "ZIP archive": "ZIP 压缩包",
+    "ZIP archive of selected nodes": "所选节点的 ZIP 压缩包",
+    "Import canvas JSON file": "导入画布 JSON 文件",
+    "Import canvas archive file": "导入画布压缩包文件",
+    "Canvas archive imported.": "画布压缩包已导入。",
+    "Canvas archive imported, but some resources could not be restored.": "画布压缩包已导入，但部分资源无法恢复。",
+    "The canvas archive could not be downloaded.": "无法下载画布压缩包。"
   }
 }

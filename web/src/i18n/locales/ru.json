@@ -8020,6 +8020,14 @@
     "Deleted conversations and canvases stay recoverable until the retention period ends.": "Удалённые разговоры и холсты можно восстановить до окончания срока хранения.",
     "Trashed items still count toward your storage and are removed after {{days}} days.": "Элементы в корзине по-прежнему учитываются в хранилище и удаляются через {{days}} дней.",
     "Deleted {{date}}": "Удалено {{date}}",
-    "Removed after {{date}}": "Удаление после {{date}}"
+    "Removed after {{date}}": "Удаление после {{date}}",
+    "JSON file": "Файл JSON",
+    "ZIP archive": "ZIP-архив",
+    "ZIP archive of selected nodes": "ZIP-архив выбранных узлов",
+    "Import canvas JSON file": "Импорт файла JSON холста",
+    "Import canvas archive file": "Импорт архива холста",
+    "Canvas archive imported.": "Архив холста импортирован.",
+    "Canvas archive imported, but some resources could not be restored.": "Архив холста импортирован, но некоторые ресурсы не удалось восстановить.",
+    "The canvas archive could not be downloaded.": "Не удалось скачать архив холста."
   }
 }

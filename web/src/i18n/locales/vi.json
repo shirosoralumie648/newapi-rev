@@ -8020,6 +8020,14 @@
     "Deleted conversations and canvases stay recoverable until the retention period ends.": "Các cuộc trò chuyện và bảng vẽ đã xóa vẫn có thể khôi phục cho đến khi hết thời hạn lưu.",
     "Trashed items still count toward your storage and are removed after {{days}} days.": "Các mục trong thùng rác vẫn được tính vào dung lượng lưu trữ và sẽ bị xóa sau {{days}} ngày.",
     "Deleted {{date}}": "Đã xóa {{date}}",
-    "Removed after {{date}}": "Xóa sau {{date}}"
+    "Removed after {{date}}": "Xóa sau {{date}}",
+    "JSON file": "Tệp JSON",
+    "ZIP archive": "Tệp nén ZIP",
+    "ZIP archive of selected nodes": "Tệp nén ZIP của các nút đã chọn",
+    "Import canvas JSON file": "Nhập tệp JSON của bảng vẽ",
+    "Import canvas archive file": "Nhập tệp nén của bảng vẽ",
+    "Canvas archive imported.": "Đã nhập tệp nén của bảng vẽ.",
+    "Canvas archive imported, but some resources could not be restored.": "Đã nhập tệp nén của bảng vẽ, nhưng một số tài nguyên không thể khôi phục.",
+    "The canvas archive could not be downloaded.": "Không thể tải xuống tệp nén của bảng vẽ."
   }
 }

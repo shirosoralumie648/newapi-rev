@@ -27,6 +27,7 @@ function toolbarProps(runPhase: CanvasWorkflowRunPhase = 'idle') {
   return {
     assistantOpen: false,
     canCopy: false,
+    canExportSelection: false,
     canGroup: false,
     canPaste: false,
     canRedo: false,
@@ -43,8 +44,11 @@ function toolbarProps(runPhase: CanvasWorkflowRunPhase = 'idle') {
     onCancelRun: vi.fn(),
     onCopy: vi.fn(),
     onExport: vi.fn(),
+    onExportArchive: vi.fn(),
+    onExportSelectionArchive: vi.fn(),
     onGroupChange: vi.fn(),
     onGroupSelection: vi.fn(),
+    onImportArchiveFile: vi.fn(),
     onImportFile: vi.fn(),
     onPaste: vi.fn(),
     onRedo: vi.fn(),
@@ -152,4 +156,57 @@ test('toggles the assistant view and reports its pressed state', async () => {
     'aria-pressed',
     'true'
   )
+})
+
+test('exports the document as JSON, an archive or a selection archive', async () => {
+  const user = userEvent.setup()
+  const props = { ...toolbarProps(), canExportSelection: true }
+  render(<CanvasToolbar {...props} />)
+
+  await user.click(screen.getByRole('button', { name: 'Export' }))
+  await user.click(screen.getByRole('menuitem', { name: 'JSON file' }))
+  expect(props.onExport).toHaveBeenCalledTimes(1)
+
+  await user.click(screen.getByRole('button', { name: 'Export' }))
+  await user.click(screen.getByRole('menuitem', { name: 'ZIP archive' }))
+  expect(props.onExportArchive).toHaveBeenCalledTimes(1)
+
+  await user.click(screen.getByRole('button', { name: 'Export' }))
+  await user.click(
+    screen.getByRole('menuitem', { name: 'ZIP archive of selected nodes' })
+  )
+  expect(props.onExportSelectionArchive).toHaveBeenCalledTimes(1)
+})
+
+test('disables the selection archive while nothing is selected', async () => {
+  const user = userEvent.setup()
+  const props = toolbarProps()
+  render(<CanvasToolbar {...props} />)
+
+  await user.click(screen.getByRole('button', { name: 'Export' }))
+  expect(
+    screen.getByRole('menuitem', { name: 'ZIP archive of selected nodes' })
+  ).toHaveAttribute('aria-disabled', 'true')
+  expect(
+    screen.getByRole('menuitem', { name: 'ZIP archive' })
+  ).not.toHaveAttribute('aria-disabled', 'true')
+})
+
+test('imports the chosen JSON or archive file', async () => {
+  const user = userEvent.setup()
+  const props = toolbarProps()
+  render(<CanvasToolbar {...props} />)
+
+  const json = new File(['{"version":1}'], 'canvas.json', {
+    type: 'application/json',
+  })
+  await user.upload(screen.getByLabelText('Import canvas JSON file'), json)
+  expect(props.onImportFile).toHaveBeenCalledWith(json)
+
+  const archive = new File(['zip'], 'canvas.zip', { type: 'application/zip' })
+  await user.upload(
+    screen.getByLabelText('Import canvas archive file'),
+    archive
+  )
+  expect(props.onImportArchiveFile).toHaveBeenCalledWith(archive)
 })

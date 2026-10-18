@@ -35,6 +35,7 @@ import {
   translateServerText,
 } from '@/lib/server-error-message'
 
+import { exportCanvasArchive } from '../api'
 import { CANVAS_DROP_MESSAGES, CANVAS_EDIT_MESSAGES } from '../constants'
 import {
   useCanvasAssistant,
@@ -91,7 +92,18 @@ interface CanvasEditorProps {
   project: CanvasServerProject
   disabled?: boolean
   onChange: (document: CanvasServerDocument) => void
+  onImportArchive: (file: File) => void
   onOpenSource?: (target: CanvasSourceTarget) => void
+}
+
+/** Saves one generated canvas file through a transient object URL. */
+function downloadCanvasFile(filename: string, blob: Blob) {
+  const url = URL.createObjectURL(blob)
+  const anchor = window.document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  anchor.click()
+  URL.revokeObjectURL(url)
 }
 
 export function CanvasEditor(props: CanvasEditorProps) {
@@ -246,15 +258,28 @@ export function CanvasEditor(props: CanvasEditorProps) {
       viewportRef.current
     )
     const text = serializeCanvasExport(props.project.title, canvasDocument)
-    const url = URL.createObjectURL(
+    downloadCanvasFile(
+      `${props.project.title || 'canvas'}.json`,
       new Blob([text], { type: 'application/json' })
     )
-    const anchor = window.document.createElement('a')
-    anchor.href = url
-    anchor.download = `${props.project.title || 'canvas'}.json`
-    anchor.click()
-    URL.revokeObjectURL(url)
   }, [editor.edges, editor.nodes, props.project.title])
+
+  const handleExportArchive = useCallback(
+    async (nodeIds?: string[]) => {
+      try {
+        const archive = await exportCanvasArchive(props.project.id, nodeIds)
+        downloadCanvasFile(archive.filename, archive.blob)
+      } catch (error) {
+        toast.error(
+          translateServerText(
+            t,
+            getServerMessage(error) ?? CANVAS_ERRORS.ARCHIVE_EXPORT_FAILED
+          )
+        )
+      }
+    },
+    [props.project.id, t]
+  )
 
   const handleImportFile = useCallback(
     async (file: File) => {
@@ -358,6 +383,7 @@ export function CanvasEditor(props: CanvasEditorProps) {
                   <CanvasToolbar
                     assistantOpen={inspectorView === 'assistant'}
                     canCopy={editor.selectedCount > 0}
+                    canExportSelection={editor.selectedCount > 0}
                     canGroup={editor.canGroup}
                     canPaste={editor.hasClipboard}
                     canRedo={editor.canRedo}
@@ -371,8 +397,17 @@ export function CanvasEditor(props: CanvasEditorProps) {
                     onCancelRun={() => void workflow.cancel()}
                     onCopy={() => void editor.copySelection()}
                     onExport={handleExport}
+                    onExportArchive={() => void handleExportArchive()}
+                    onExportSelectionArchive={() =>
+                      void handleExportArchive(
+                        editor.nodes
+                          .filter((node) => node.selected === true)
+                          .map((node) => node.id)
+                      )
+                    }
                     onGroupChange={workflowOptions.setGroup}
                     onGroupSelection={() => void editor.groupSelection()}
+                    onImportArchiveFile={(file) => props.onImportArchive(file)}
                     onImportFile={handleImportFile}
                     onPaste={handlePaste}
                     onRedo={editor.redo}
