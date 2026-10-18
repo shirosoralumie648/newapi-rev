@@ -482,6 +482,7 @@ func migrateDB() error {
 		&WalletDebt{},
 		&CreditGrant{},
 		&ReferralBinding{},
+		&ReferralCommission{},
 	)
 	if err != nil {
 		return err

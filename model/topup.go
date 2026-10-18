@@ -103,6 +103,13 @@ func creditTopUpQuota(tx *gorm.DB, userId int, creditedQuota int, kind string, r
 		// The reference was already credited; nothing to apply.
 		return nil
 	}
+	// The commission event of a paid order is written in the same transaction
+	// that credited the wallet, keyed by the order so a replayed payment
+	// webhook cannot commission twice. The event only records money owed
+	// (RF-04 settles it), so no balance moves here.
+	if _, err := RecordReferralCommissionTx(tx, userId, ReferralCommissionSourceTopUp, int64(creditedQuota), refType, refId); err != nil {
+		return err
+	}
 	if len(updates) > 0 {
 		if err := tx.Model(&User{}).Where("id = ?", userId).Updates(updates).Error; err != nil {
 			return err
