@@ -276,4 +276,10 @@ const (
 	TopUpStatusSuccess = "success"
 	TopUpStatusFailed  = "failed"
 	TopUpStatusExpired = "expired"
+	// TopUpStatusRefunded marks a paid order whose payment was refunded by the
+	// payment provider (or by an administrator). TopUpStatusDisputed marks a
+	// paid order in a provider chargeback dispute. Both reverse the credited
+	// wallet quota down to zero and record any remainder as wallet debt.
+	TopUpStatusRefunded = "refunded"
+	TopUpStatusDisputed = "disputed"
 )

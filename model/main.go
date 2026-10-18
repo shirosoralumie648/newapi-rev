@@ -410,6 +410,8 @@ func migrateDB() error {
 	}
 	// Migrate price_amount column from float/double to decimal for existing tables
 	migrateSubscriptionPlanPriceAmount()
+	// Migrate payment money columns from float/double to exact decimal
+	migratePaymentMoneyColumns()
 	// Migrate model_limits column from varchar to text for existing tables
 	if err := migrateTokenModelLimitsToText(); err != nil {
 		return err
@@ -781,6 +783,67 @@ func migrateTokenModelLimitsToText() error {
 		common.SysLog(common.LogText("Successfully migrated %s.%s to text", tableName, columnName))
 	}
 	return nil
+}
+
+// migratePaymentMoneyColumns moves the payment money columns of upgraded
+// databases from float/double to exact decimal(20,6). Refunds reverse the
+// amount the order actually collected, so the stored value must not round-trip
+// through a binary float. It is safe to run multiple times: a column that is
+// already decimal is left alone, and SQLite keeps its NUMERIC affinity.
+func migratePaymentMoneyColumns() {
+	if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
+		return
+	}
+	migratePaymentMoneyColumn(&TopUp{}, "top_ups", "money")
+	migratePaymentMoneyColumn(&SubscriptionOrder{}, "subscription_orders", "money")
+}
+
+// migratePaymentMoneyColumn widens one money column to decimal(20,6) when the
+// existing column still stores a floating-point type.
+func migratePaymentMoneyColumn(model any, tableName string, columnName string) {
+	if !DB.Migrator().HasTable(tableName) {
+		return
+	}
+	if !DB.Migrator().HasColumn(model, columnName) {
+		return
+	}
+
+	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
+		var dataType string
+		if err := DB.Raw(`SELECT data_type FROM information_schema.columns
+			WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?`,
+			tableName, columnName).Scan(&dataType).Error; err != nil {
+			common.SysLog(common.LogText("Warning: failed to query metadata for %s.%s: %v", tableName, columnName, err))
+			return
+		}
+		if dataType == "numeric" {
+			return
+		}
+	} else if common.UsingMainDatabase(common.DatabaseTypeMySQL) {
+		var columnType string
+		if err := DB.Raw(`SELECT COLUMN_TYPE FROM information_schema.columns
+				WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`,
+			tableName, columnName).Scan(&columnType).Error; err != nil {
+			common.SysLog(common.LogText("Warning: failed to query metadata for %s.%s: %v", tableName, columnName, err))
+			return
+		}
+		if strings.HasPrefix(strings.ToLower(columnType), "decimal") {
+			return
+		}
+	} else {
+		return
+	}
+
+	alterSQL := fmt.Sprintf("ALTER TABLE %s MODIFY COLUMN %s decimal(20,6) NOT NULL DEFAULT 0", tableName, columnName)
+	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
+		alterSQL = fmt.Sprintf(`ALTER TABLE %s ALTER COLUMN %s TYPE decimal(20,6) USING %s::decimal(20,6)`,
+			tableName, columnName, columnName)
+	}
+	if err := DB.Exec(alterSQL).Error; err != nil {
+		common.SysLog(common.LogText("Warning: failed to migrate %s.%s to decimal(20,6): %v", tableName, columnName, err))
+		return
+	}
+	common.SysLog(common.LogText("Successfully migrated %s.%s to decimal(20,6)", tableName, columnName))
 }
 
 // migrateSubscriptionPlanPriceAmount migrates price_amount column from float/double to decimal(10,6)

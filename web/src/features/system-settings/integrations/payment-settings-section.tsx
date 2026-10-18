@@ -149,6 +149,7 @@ const paymentSchema = z.object({
   StripeUnitPrice: z.coerce.number().min(0),
   StripeMinTopUp: z.coerce.number().min(0),
   StripePromotionCodesEnabled: z.boolean(),
+  StripeAutoInvoiceEnabled: z.boolean(),
   CreemApiKey: z.string(),
   CreemWebhookSecret: z.string(),
   CreemTestMode: z.boolean(),
@@ -435,6 +436,7 @@ export function PaymentSettingsSection({
       StripeUnitPrice: values.StripeUnitPrice,
       StripeMinTopUp: values.StripeMinTopUp,
       StripePromotionCodesEnabled: values.StripePromotionCodesEnabled,
+      StripeAutoInvoiceEnabled: values.StripeAutoInvoiceEnabled,
       CreemApiKey: values.CreemApiKey.trim(),
       CreemWebhookSecret: values.CreemWebhookSecret.trim(),
       CreemTestMode: values.CreemTestMode,
@@ -480,6 +482,7 @@ export function PaymentSettingsSection({
       StripeMinTopUp: initialRef.current.StripeMinTopUp,
       StripePromotionCodesEnabled:
         initialRef.current.StripePromotionCodesEnabled,
+      StripeAutoInvoiceEnabled: initialRef.current.StripeAutoInvoiceEnabled,
       CreemApiKey: initialRef.current.CreemApiKey.trim(),
       CreemWebhookSecret: initialRef.current.CreemWebhookSecret.trim(),
       CreemTestMode: initialRef.current.CreemTestMode,
@@ -600,6 +603,15 @@ export function PaymentSettingsSection({
       updates.push({
         key: 'StripePromotionCodesEnabled',
         value: sanitized.StripePromotionCodesEnabled,
+      })
+    }
+
+    if (
+      sanitized.StripeAutoInvoiceEnabled !== initial.StripeAutoInvoiceEnabled
+    ) {
+      updates.push({
+        key: 'StripeAutoInvoiceEnabled',
+        value: sanitized.StripeAutoInvoiceEnabled,
       })
     }
 
@@ -1435,6 +1447,29 @@ export function PaymentSettingsSection({
                           <FormLabel>{t('Promotion codes')}</FormLabel>
                           <FormDescription>
                             {t('Allow users to enter promo codes')}
+                          </FormDescription>
+                        </SettingsSwitchContent>
+                        <FormControl>
+                          <Switch
+                            checked={field.value}
+                            onCheckedChange={field.onChange}
+                          />
+                        </FormControl>
+                      </SettingsSwitchItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name='StripeAutoInvoiceEnabled'
+                    render={({ field }) => (
+                      <SettingsSwitchItem>
+                        <SettingsSwitchContent>
+                          <FormLabel>{t('Automatic invoice')}</FormLabel>
+                          <FormDescription>
+                            {t(
+                              'Ask Stripe to generate an invoice for each top-up checkout session'
+                            )}
                           </FormDescription>
                         </SettingsSwitchContent>
                         <FormControl>

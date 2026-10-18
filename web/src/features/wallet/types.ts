@@ -258,7 +258,12 @@ export interface UserWalletData {
 /**
  * Topup record status
  */
-export type TopupStatus = 'success' | 'pending' | 'expired'
+export type TopupStatus =
+  | 'success'
+  | 'pending'
+  | 'expired'
+  | 'refunded'
+  | 'disputed'
 
 /**
  * Topup billing record
@@ -270,8 +275,13 @@ export interface TopupRecord {
   user_id: number
   /** Topup amount (quota) */
   amount: number
-  /** Payment amount (actual money paid) */
-  money: number
+  /**
+   * Payment amount actually charged, stored as an exact decimal and
+   * serialized by the backend as a string (legacy records may be numbers).
+   */
+  money: string | number
+  /** ISO 4217 currency the payment was collected in, when the provider reported one */
+  currency?: string
   /** Trade/order number */
   trade_no: string
   /** Payment method type */
@@ -282,6 +292,10 @@ export interface TopupRecord {
   complete_time?: number
   /** Payment status */
   status: TopupStatus
+  /** Provider-side payment reference (e.g. Stripe payment intent) */
+  provider_payment_id?: string
+  /** Timestamp of the provider refund or chargeback, when reversed */
+  refund_time?: number
 }
 
 /**

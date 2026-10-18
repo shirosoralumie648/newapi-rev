@@ -46,10 +46,10 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { formatCurrencyFromUSD } from '@/lib/currency'
-import { formatNumber } from '@/lib/format'
 
 import { useBillingHistory } from '../../hooks/use-billing-history'
 import {
+  formatPaymentAmount,
   getStatusConfig,
   getPaymentMethodName,
   formatTimestamp,
@@ -73,14 +73,17 @@ export function BillingHistoryDialog({
     keyword,
     loading,
     completing,
+    refunding,
     isAdmin,
     handlePageChange,
     handlePageSizeChange,
     handleSearch,
     handleCompleteOrder,
+    handleRefundOrder,
   } = useBillingHistory()
 
   const [confirmTradeNo, setConfirmTradeNo] = useState<string | null>(null)
+  const [refundTradeNo, setRefundTradeNo] = useState<string | null>(null)
   const { copyToClipboard, copiedText } = useCopyToClipboard({ notify: false })
 
   const totalPages = Math.ceil(total / pageSize)
@@ -90,6 +93,15 @@ export function BillingHistoryDialog({
       const success = await handleCompleteOrder(confirmTradeNo)
       if (success) {
         setConfirmTradeNo(null)
+      }
+    }
+  }
+
+  const handleConfirmRefund = async () => {
+    if (refundTradeNo) {
+      const success = await handleRefundOrder(refundTradeNo)
+      if (success) {
+        setRefundTradeNo(null)
       }
     }
   }
@@ -260,7 +272,7 @@ export function BillingHistoryDialog({
                             {t('Payment')}
                           </Label>
                           <div className='text-sm font-semibold text-red-600'>
-                            {formatNumber(record.money)}
+                            {formatPaymentAmount(record.money, record.currency)}
                           </div>
                         </div>
                       </div>
@@ -275,6 +287,18 @@ export function BillingHistoryDialog({
                             disabled={completing}
                           >
                             {t('Complete Order')}
+                          </Button>
+                        </div>
+                      )}
+                      {isAdmin && record.status === 'success' && (
+                        <div className='mt-4 flex justify-end'>
+                          <Button
+                            size='sm'
+                            variant='outline'
+                            onClick={() => setRefundTradeNo(record.trade_no)}
+                            disabled={refunding}
+                          >
+                            {t('Refund Unused Balance')}
                           </Button>
                         </div>
                       )}
@@ -345,6 +369,34 @@ export function BillingHistoryDialog({
               disabled={completing}
             >
               {completing ? t('Processing...') : t('Confirm')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Confirm Refund Dialog */}
+      <AlertDialog
+        open={!!refundTradeNo}
+        onOpenChange={(open) => !open && setRefundTradeNo(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('Refund Unused Balance')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t(
+                'Refund the unused balance of this order and deduct it from the user? Orders whose credit has already been consumed are rejected.'
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={refunding}>
+              {t('Cancel')}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmRefund}
+              disabled={refunding}
+            >
+              {refunding ? t('Processing...') : t('Confirm')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
