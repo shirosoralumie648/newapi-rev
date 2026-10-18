@@ -757,6 +757,10 @@ func (user *User) TransferAffQuotaToQuota(quota int) error {
 	if !applied {
 		return errors.New("wallet ledger reference conflict")
 	}
+	// 转入的邀请额度进入 invite 桶，按配置的邀请额度有效期生效。
+	if _, err := createCreditGrantTx(tx, user.Id, operation_setting.CreditGrantSourceInvite, int64(quota), CreditGrantExpiryFor(operation_setting.CreditGrantSourceInvite, common.GetTimestamp()), ""); err != nil {
+		return err
+	}
 
 	// 提交事务
 	return tx.Commit().Error
@@ -864,7 +868,7 @@ func (user *User) finishInsert(inviterId int) {
 	}
 	if inviterId != 0 && operation_setting.IsPaymentComplianceConfirmed() {
 		if common.QuotaForInvitee > 0 {
-			if err := GrantWalletQuota(user.Id, common.QuotaForInvitee, WalletLedgerRefInviteeBonus, strconv.Itoa(user.Id)); err != nil {
+			if err := GrantWalletQuotaWithSource(user.Id, common.QuotaForInvitee, operation_setting.CreditGrantSourceInvite, WalletLedgerRefInviteeBonus, strconv.Itoa(user.Id)); err != nil {
 				common.SysLog(common.LogText("failed to grant invitee bonus to user %d: %s", user.Id, err.Error()))
 			}
 			RecordLog(user.Id, LogTypeSystem, common.NewMessage("Invitation code bonus {{quota}}", map[string]any{"quota": logger.FormatQuota(common.QuotaForInvitee)}))
@@ -925,7 +929,7 @@ func (user *User) FinalizeOAuthUserCreation(inviterId int) {
 	}
 	if inviterId != 0 && operation_setting.IsPaymentComplianceConfirmed() {
 		if common.QuotaForInvitee > 0 {
-			if err := GrantWalletQuota(user.Id, common.QuotaForInvitee, WalletLedgerRefInviteeBonus, strconv.Itoa(user.Id)); err != nil {
+			if err := GrantWalletQuotaWithSource(user.Id, common.QuotaForInvitee, operation_setting.CreditGrantSourceInvite, WalletLedgerRefInviteeBonus, strconv.Itoa(user.Id)); err != nil {
 				common.SysLog(common.LogText("failed to grant invitee bonus to user %d: %s", user.Id, err.Error()))
 			}
 			RecordLog(user.Id, LogTypeSystem, common.NewMessage("Invitation code bonus {{quota}}", map[string]any{"quota": logger.FormatQuota(common.QuotaForInvitee)}))
@@ -1549,9 +1553,15 @@ func DecreaseUserQuota(id int, quota int, db bool) (err error) {
 	})
 	if !db && common.BatchUpdateEnabled {
 		addNewRecord(BatchUpdateTypeUserQuota, id, -quota)
+		// Attribute the charge to the account's credit grants (spending order).
+		ClaimCreditGrantsForCharge(id, quota)
 		return nil
 	}
-	return decreaseUserQuota(id, quota)
+	if err := decreaseUserQuota(id, quota); err != nil {
+		return err
+	}
+	ClaimCreditGrantsForCharge(id, quota)
+	return nil
 }
 
 func decreaseUserQuota(id int, quota int) (err error) {

@@ -25,6 +25,7 @@ import { PaymentSettingsSection } from '../integrations/payment-settings-section
 import { RatioSettingsCard } from '../models/ratio-settings-card'
 import type { BillingSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
+import { CreditGrantValiditySection } from './credit-grant-validity-section'
 import { WalletOverdraftSection } from './wallet-overdraft-section'
 
 const getModelDefaults = (settings: BillingSettings) => ({
@@ -210,6 +211,18 @@ const BILLING_SECTIONS = [
       <WalletOverdraftSection
         defaultUsd={settings['quota_setting.overdraft_limit_usd']}
         groupOverridesJson={settings['quota_setting.overdraft_group_overrides']}
+      />
+    ),
+  },
+  {
+    id: 'credit-grants',
+    titleKey: 'Credit grants',
+    build: (settings: BillingSettings) => (
+      <CreditGrantValiditySection
+        defaultDays={settings['credit_grant_setting.default_expiry_days']}
+        sourceExpiryDaysJson={
+          settings['credit_grant_setting.source_expiry_days']
+        }
       />
     ),
   },

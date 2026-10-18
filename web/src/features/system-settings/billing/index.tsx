@@ -34,6 +34,8 @@ const defaultBillingSettings: BillingSettings = {
   'quota_setting.pre_consume_multiplier': 1,
   'quota_setting.overdraft_limit_usd': 0,
   'quota_setting.overdraft_group_overrides': '{}',
+  'credit_grant_setting.default_expiry_days': 0,
+  'credit_grant_setting.source_expiry_days': '{}',
   QuotaPerUnit: 500000,
   USDExchangeRate: 7,
   'general_setting.quota_display_type': 'USD',

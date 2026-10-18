@@ -41,6 +41,11 @@ const (
 	// storage settlement (BL-02) record through these kinds.
 	WalletLedgerKindChargeback   = "chargeback"
 	WalletLedgerKindStorageDaily = "storage_daily"
+	// WalletLedgerKindGrantExpire records the unspent remainder of a credit
+	// grant (sign-in, invitation, redemption, promotion, gift) that reached its
+	// expiry and was voided. The movement reduces both the wallet balance and
+	// the grant's claim, so Σ non-debt rows still equals User.Quota.
+	WalletLedgerKindGrantExpire = "grant_expire"
 )
 
 // Reference namespaces used by the unique idempotency index.
@@ -61,6 +66,12 @@ const (
 	// collection (WM-06 overdraft accounting).
 	WalletLedgerRefWalletDebt      = "wallet_debt"
 	WalletLedgerRefWalletDebtRepay = "wallet_debt_repay"
+	// WalletLedgerRefGrantExpire namespaces credit grant expiry movements; each
+	// void uses a unique reference, because a grant can receive a refunded
+	// claim after it expired and be voided a second time.
+	WalletLedgerRefGrantExpire = "grant_expire"
+	// WalletLedgerRefAdminGrant namespaces administrator-issued credit grants.
+	WalletLedgerRefAdminGrant = "admin_grant"
 )
 
 // walletLedgerConsumeHourSeconds is the aggregation window for API consumption.
@@ -214,6 +225,21 @@ func GrantWalletQuota(userId int, amount int, refType string, refId string) erro
 		syncCreditUserQuotaCache(userId, amount, refType)
 	}
 	return nil
+}
+
+// GrantWalletQuotaWithSource credits a system grant into the credit grant
+// bucket of one source, so the credit carries that source's validity, and
+// records the matching ledger row. The ledger reference keeps a replay a no-op.
+func GrantWalletQuotaWithSource(userId int, amount int, source string, refType string, refId string) error {
+	if amount <= 0 {
+		return nil
+	}
+	if err := common.ValidateWalletQuota(amount); err != nil {
+		return err
+	}
+	now := common.GetTimestamp()
+	_, err := IssueCreditGrant(userId, source, amount, CreditGrantExpiryFor(source, now), WalletLedgerKindSystemGrant, refType, refId, "")
+	return err
 }
 
 // RefundWalletQuota returns quota to the wallet for a refundable reference.

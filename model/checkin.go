@@ -100,8 +100,11 @@ func userCheckinWithTransaction(checkin *Checkin, userId int, quotaAwarded int) 
 			return common.NewMessage("Check-in failed, please try again later")
 		}
 
-		// 步骤2: 在事务中增加用户额度（账本行与余额变更同一事务）
-		if _, err := ApplyWalletLedgerDelta(tx, userId, WalletLedgerKindCheckin, int64(quotaAwarded), WalletLedgerRefCheckin, strconv.Itoa(checkin.Id), ""); err != nil {
+		// 步骤2: 在事务中增加用户额度（账本行与余额变更同一事务），签到奖励进入
+		// checkin 额度桶，按配置的签到额度有效期生效。
+		source := operation_setting.CreditGrantSourceCheckin
+		expiresAt := operation_setting.GetCreditGrantSetting().ExpiryTimestampFor(source, common.GetTimestamp())
+		if _, err := IssueCreditGrantTx(tx, userId, source, quotaAwarded, expiresAt, WalletLedgerKindCheckin, WalletLedgerRefCheckin, strconv.Itoa(checkin.Id), ""); err != nil {
 			return common.NewMessage("Check-in failed: quota update error")
 		}
 
@@ -128,16 +131,14 @@ func userCheckinWithoutTransaction(checkin *Checkin, userId int, quotaAwarded in
 		return nil, common.NewMessage("Check-in failed, please try again later")
 	}
 
-	// 步骤2: 增加用户额度（SQLite 无嵌套事务，账本应用使用独立事务）
+	// 步骤2: 增加用户额度（SQLite 无嵌套事务，账本与额度桶使用独立事务）
 	// 账本应用失败时回滚签到记录，保持余额与账本一致。
-	applied, err := ApplyWalletLedgerDeltaDB(userId, WalletLedgerKindCheckin, int64(quotaAwarded), WalletLedgerRefCheckin, strconv.Itoa(checkin.Id), "")
-	if err != nil {
+	source := operation_setting.CreditGrantSourceCheckin
+	expiresAt := operation_setting.GetCreditGrantSetting().ExpiryTimestampFor(source, common.GetTimestamp())
+	if _, err := IssueCreditGrant(userId, source, quotaAwarded, expiresAt, WalletLedgerKindCheckin, WalletLedgerRefCheckin, strconv.Itoa(checkin.Id), ""); err != nil {
 		// 如果增加额度失败，需要回滚签到记录
 		DB.Delete(checkin)
 		return nil, common.NewMessage("Check-in failed: quota update error")
-	}
-	if applied {
-		syncCreditUserQuotaCache(userId, quotaAwarded, "checkin")
 	}
 
 	return checkin, nil

@@ -29,6 +29,7 @@ import {
   Link2,
   CreditCard,
   ScrollText,
+  Gift,
 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -49,6 +50,7 @@ import {
 } from '@/components/ui/tooltip'
 import type { AdminUserManageAction } from '@/features/auth/secure-verification'
 import { UserSubscriptionsDialog } from '@/features/subscriptions/components/dialogs/user-subscriptions-dialog'
+import { CreditGrantDialog } from '@/features/wallet/components/dialogs/credit-grant-dialog'
 import { WalletLedgerDialog } from '@/features/wallet/components/dialogs/wallet-ledger-dialog'
 import { handleServerError } from '@/lib/handle-server-error'
 import { AuthOperationError } from '@/lib/secure-verification'
@@ -91,6 +93,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const [bindingDialogOpen, setBindingDialogOpen] = useState(false)
   const [subscriptionsDialogOpen, setSubscriptionsDialogOpen] = useState(false)
   const [ledgerDialogOpen, setLedgerDialogOpen] = useState(false)
+  const [creditGrantDialogOpen, setCreditGrantDialogOpen] = useState(false)
 
   const handleEdit = () => {
     setCurrentRow(user)
@@ -290,6 +293,18 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
           </DropdownMenuShortcut>
         </DropdownMenuItem>
 
+        <DropdownMenuItem
+          onSelect={(event) => {
+            event.preventDefault()
+            setCreditGrantDialogOpen(true)
+          }}
+        >
+          {t('Credit grants')}
+          <DropdownMenuShortcut>
+            <Gift size={16} />
+          </DropdownMenuShortcut>
+        </DropdownMenuItem>
+
         <DropdownMenuSeparator />
 
         <DropdownMenuItem
@@ -373,6 +388,13 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
       <WalletLedgerDialog
         open={ledgerDialogOpen}
         onOpenChange={setLedgerDialogOpen}
+        userId={user.id}
+        username={user.username}
+      />
+
+      <CreditGrantDialog
+        open={creditGrantDialogOpen}
+        onOpenChange={setCreditGrantDialogOpen}
         userId={user.id}
         username={user.username}
       />

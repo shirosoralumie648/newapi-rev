@@ -6,6 +6,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"gorm.io/gorm"
 )
@@ -174,7 +175,13 @@ func Redeem(key string, userId int) (quota int, err error) {
 		if result.RowsAffected == 0 {
 			return errors.New("redemption code already used")
 		}
-		return creditTopUpQuota(tx, userId, redemption.Quota, WalletLedgerKindRedeem, WalletLedgerRefRedeem, strconv.Itoa(redemption.Id), nil)
+		// 兑换码额度进入 redeem 桶，按配置的兑换码额度有效期生效。
+		source := operation_setting.CreditGrantSourceRedeem
+		expiresAt := operation_setting.GetCreditGrantSetting().ExpiryTimestampFor(source, common.GetTimestamp())
+		if _, err := IssueCreditGrantTx(tx, userId, source, redemption.Quota, expiresAt, WalletLedgerKindRedeem, WalletLedgerRefRedeem, strconv.Itoa(redemption.Id), ""); err != nil {
+			return err
+		}
+		return nil
 	})
 	if err != nil {
 		common.SysError(common.LogText("redemption failed: %s", err.Error()))

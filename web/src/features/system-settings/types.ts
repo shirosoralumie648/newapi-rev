@@ -282,6 +282,8 @@ export type BillingSettings = {
   'quota_setting.pre_consume_multiplier': number
   'quota_setting.overdraft_limit_usd': number
   'quota_setting.overdraft_group_overrides': string
+  'credit_grant_setting.default_expiry_days': number
+  'credit_grant_setting.source_expiry_days': string
   QuotaPerUnit: number
   USDExchangeRate: number
   'general_setting.quota_display_type': string

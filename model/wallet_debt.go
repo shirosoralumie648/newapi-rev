@@ -346,7 +346,8 @@ func chargeWalletQuotaTx(tx *gorm.DB, userId int, charge int64, limit int64, req
 
 // SettleWalletCharge applies a final wallet charge that has no durable hold
 // (legacy requests without a request id): the wallet is debited down to the
-// credit line and the remainder becomes debt. It returns the amount that
+// credit line and the remainder becomes debt. The charge is attributed to the
+// account's credit grants first, in spending order. It returns the amount that
 // actually left the wallet.
 func SettleWalletCharge(userId int, amount int) (int, error) {
 	if amount <= 0 {
@@ -357,7 +358,18 @@ func SettleWalletCharge(userId int, amount int) (int, error) {
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var applyErr error
 		applied, _, applyErr = chargeWalletQuotaTx(tx, userId, int64(amount), limit, "")
-		return applyErr
+		if applyErr != nil {
+			return applyErr
+		}
+		if applied <= 0 {
+			return nil
+		}
+		grants, err := lockCreditGrantsTx(tx, userId)
+		if err != nil {
+			return err
+		}
+		_, _, err = claimCreditGrantsTx(tx, userId, applied, grants, common.GetTimestamp())
+		return err
 	})
 	if err != nil {
 		return 0, err

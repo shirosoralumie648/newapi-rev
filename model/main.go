@@ -463,7 +463,9 @@ func migrateDB() error {
 		&PlaygroundTaskArtifactSync{},
 		&WalletLedgerEntry{},
 		&WalletHold{},
+		&WalletHoldGrant{},
 		&WalletDebt{},
+		&CreditGrant{},
 	)
 	if err != nil {
 		return err

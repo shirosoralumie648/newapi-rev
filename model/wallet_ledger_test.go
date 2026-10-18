@@ -63,7 +63,7 @@ func accountingTestDB(t *testing.T, dialect string) *gorm.DB {
 	DB = db
 	LOG_DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&WalletLedgerEntry{}, &WalletHold{}, &WalletDebt{}, &SubscriptionPreConsumeRecord{}, &UserSubscription{}, &SubscriptionPlan{}, &User{}))
+		require.NoError(t, db.Migrator().DropTable(&WalletLedgerEntry{}, &WalletHold{}, &WalletHoldGrant{}, &WalletDebt{}, &CreditGrant{}, &SubscriptionPreConsumeRecord{}, &UserSubscription{}, &SubscriptionPlan{}, &User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
@@ -76,8 +76,8 @@ func accountingTestDB(t *testing.T, dialect string) *gorm.DB {
 
 	// A fresh migration and a repeated migration both succeed, so the new
 	// tables are created idempotently on every engine.
-	require.NoError(t, db.AutoMigrate(&User{}, &WalletLedgerEntry{}, &WalletHold{}, &WalletDebt{}, &SubscriptionPlan{}, &UserSubscription{}, &SubscriptionPreConsumeRecord{}))
-	require.NoError(t, db.AutoMigrate(&User{}, &WalletLedgerEntry{}, &WalletHold{}, &WalletDebt{}, &SubscriptionPlan{}, &UserSubscription{}, &SubscriptionPreConsumeRecord{}))
+	require.NoError(t, db.AutoMigrate(&User{}, &WalletLedgerEntry{}, &WalletHold{}, &WalletHoldGrant{}, &WalletDebt{}, &CreditGrant{}, &SubscriptionPlan{}, &UserSubscription{}, &SubscriptionPreConsumeRecord{}))
+	require.NoError(t, db.AutoMigrate(&User{}, &WalletLedgerEntry{}, &WalletHold{}, &WalletHoldGrant{}, &WalletDebt{}, &CreditGrant{}, &SubscriptionPlan{}, &UserSubscription{}, &SubscriptionPreConsumeRecord{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -866,5 +866,348 @@ func TestWalletDebtLegacySettlementClampsAtCreditLine(t *testing.T) {
 		debt, err := WalletDebtForUser(251)
 		require.NoError(t, err)
 		assert.EqualValues(t, 500, debt)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Credit grants (source and validity buckets)
+// ---------------------------------------------------------------------------
+
+// grantRemaining reads one grant's unspent remainder.
+func grantRemaining(t *testing.T, grantId int) int64 {
+	t.Helper()
+	var grant CreditGrant
+	require.NoError(t, DB.Select("id", "remaining").Where("id = ?", grantId).First(&grant).Error)
+	return grant.Remaining
+}
+
+// creditGrantWalletForTest seeds one wallet with a paid top-up and grant
+// credits, so every later assertion only has to describe reservations.
+func creditGrantWalletForTest(t *testing.T, userId int, paid int, grants []struct {
+	source    string
+	amount    int
+	expiresAt int64
+}) []int {
+	t.Helper()
+	_, err := ApplyWalletLedgerDeltaDB(userId, WalletLedgerKindTopUp, int64(paid), WalletLedgerRefTopUp, fmt.Sprintf("%d-topup", userId), "")
+	require.NoError(t, err)
+	grantIds := make([]int, 0, len(grants))
+	for index, grant := range grants {
+		refId := fmt.Sprintf("%d-grant-%d", userId, index)
+		_, err := IssueCreditGrant(userId, grant.source, grant.amount, grant.expiresAt, WalletLedgerKindSystemGrant, WalletLedgerRefAdminGrant, refId, "")
+		require.NoError(t, err)
+		var stored CreditGrant
+		require.NoError(t, DB.Where("user_id = ? AND source = ? AND amount = ?", userId, grant.source, grant.amount).First(&stored).Error)
+		grantIds = append(grantIds, stored.Id)
+	}
+	return grantIds
+}
+
+// Credit is spent subscription -> grants (earliest expiry first) -> paid
+// balance, and a refund returns the money to exactly the buckets it came from:
+// a full refund restores every claim, a settlement refund gives up the
+// unattributed part first and then the claims in reverse spending order.
+func TestCreditGrantSpendOrderAndRefundReturnsToTheBucket(t *testing.T) {
+	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
+		useWalletOverdraftLimit(t, 0, nil)
+		require.NoError(t, db.Create(&User{Id: 301, Username: "grant-order", AffCode: "grant-order", Quota: 0, Group: "default", Status: common.UserStatusEnabled}).Error)
+		now := common.GetTimestamp()
+		grantIds := creditGrantWalletForTest(t, 301, 500, []struct {
+			source    string
+			amount    int
+			expiresAt int64
+		}{
+			{operation_setting.CreditGrantSourceCheckin, 100, now + 3_600},
+			{operation_setting.CreditGrantSourceInvite, 100, now + 7_200},
+			{operation_setting.CreditGrantSourceGift, 100, 0},
+		})
+		checkin, invite, gift := grantIds[0], grantIds[1], grantIds[2]
+
+		var user User
+		require.NoError(t, db.Select("quota").First(&user, 301).Error)
+		assert.Equal(t, 800, user.Quota, "grant credits and the paid balance share the wallet balance")
+
+		// A reservation of 400 spends every grant, earliest expiry first, and
+		// only the remaining 100 from the paid balance.
+		reserved, err := TryReserveUserQuota(301, 400, "grant-order-a")
+		require.NoError(t, err)
+		require.True(t, reserved)
+		RecordWalletConsumeDelta(301, -400)
+		require.NoError(t, db.Select("quota").First(&user, 301).Error)
+		assert.Equal(t, 400, user.Quota)
+		assert.Zero(t, grantRemaining(t, checkin))
+		assert.Zero(t, grantRemaining(t, invite))
+		assert.Zero(t, grantRemaining(t, gift))
+		hold, err := GetWalletHoldByRequestId("grant-order-a")
+		require.NoError(t, err)
+		claims, err := lockWalletHoldGrantClaimsTx(db, hold.Id)
+		require.NoError(t, err)
+		assert.EqualValues(t, 300, holdGrantClaimTotal(claims), "the hold records the grant composition of the reservation")
+
+		// The refund restores each claim to its own bucket.
+		applied, err := RefundWalletHold(301, "grant-order-a", 400)
+		require.NoError(t, err)
+		require.True(t, applied)
+		require.NoError(t, db.Select("quota").First(&user, 301).Error)
+		assert.Equal(t, 800, user.Quota)
+		assert.EqualValues(t, 100, grantRemaining(t, checkin))
+		assert.EqualValues(t, 100, grantRemaining(t, invite))
+		assert.EqualValues(t, 100, grantRemaining(t, gift))
+
+		// A settlement below the reservation returns the unattributed part
+		// first: the 100 paid quota comes back while the grants stay spent.
+		reserved, err = TryReserveUserQuota(301, 400, "grant-order-b")
+		require.NoError(t, err)
+		require.True(t, reserved)
+		RecordWalletConsumeDelta(301, -400)
+		charged, err := SettleWalletHold(301, "grant-order-b", -100)
+		require.NoError(t, err)
+		assert.EqualValues(t, -100, charged)
+		RecordWalletConsumeDelta(301, 100)
+		require.NoError(t, db.Select("quota").First(&user, 301).Error)
+		assert.Equal(t, 500, user.Quota)
+		assert.Zero(t, grantRemaining(t, checkin))
+		assert.Zero(t, grantRemaining(t, invite))
+		assert.Zero(t, grantRemaining(t, gift))
+
+		// A settlement above the reservation spends the newly available grant
+		// first, and the refusal of an unaffordable reservation leaves the
+		// buckets untouched.
+		promoIds := creditGrantWalletForTest(t, 301, 0, []struct {
+			source    string
+			amount    int
+			expiresAt int64
+		}{
+			{operation_setting.CreditGrantSourcePromo, 150, 0},
+		})
+		promo := promoIds[0]
+		reserved, err = TryReserveUserQuota(301, 100, "grant-order-c")
+		require.NoError(t, err)
+		require.True(t, reserved)
+		RecordWalletConsumeDelta(301, -100)
+		assert.Zero(t, grantRemaining(t, promo))
+		reserved, err = TryReserveUserQuota(301, 900, "grant-order-d")
+		require.NoError(t, err)
+		assert.False(t, reserved, "the paid balance cannot cover a reservation the grants no longer cover")
+		assert.Zero(t, grantRemaining(t, promo))
+		charged, err = SettleWalletHold(301, "grant-order-c", 50)
+		require.NoError(t, err)
+		assert.EqualValues(t, 50, charged)
+		RecordWalletConsumeDelta(301, -50)
+		require.NoError(t, db.Select("quota").First(&user, 301).Error)
+		assert.Equal(t, 500, user.Quota)
+		assert.Zero(t, grantRemaining(t, promo))
+
+		view, err := CreditGrantWalletForUser(301, common.GetTimestamp())
+		require.NoError(t, err)
+		assert.EqualValues(t, 500, view.TotalQuota)
+		assert.EqualValues(t, 500, view.PaidQuota)
+		assert.Zero(t, view.GrantQuota)
+		assert.Zero(t, view.ExpiredQuota)
+		assert.Empty(t, view.Grants)
+
+		reconciliation, err := ReconcileWalletLedgerForUser(301)
+		require.NoError(t, err)
+		assert.True(t, reconciliation.Reconciled, "deviation=%d", reconciliation.Deviation)
+	})
+}
+
+// holdGrantClaimTotal sums the grant-attributed part of one hold's claims.
+func holdGrantClaimTotal(claims []WalletHoldGrant) int64 {
+	total := int64(0)
+	for i := range claims {
+		total += claims[i].Amount
+	}
+	return total
+}
+
+// The expiry sweep voids the unspent remainder of a grant, reduces the balance
+// with a wallet ledger row, never takes the balance below zero, never voids the
+// same remainder twice, and leaves the expired credit unspendable until it runs.
+func TestCreditGrantExpiryVoidsAndStaysOutOfDebt(t *testing.T) {
+	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
+		useWalletOverdraftLimit(t, 0, nil)
+		require.NoError(t, db.Create(&User{Id: 311, Username: "grant-expiry", AffCode: "grant-expiry", Quota: 0, Group: "default", Status: common.UserStatusEnabled}).Error)
+		now := common.GetTimestamp()
+		grantIds := creditGrantWalletForTest(t, 311, 200, []struct {
+			source    string
+			amount    int
+			expiresAt int64
+		}{
+			{operation_setting.CreditGrantSourceCheckin, 300, now - 60},
+		})
+		expiredGrant := grantIds[0]
+
+		var user User
+		require.NoError(t, db.Select("quota").First(&user, 311).Error)
+		assert.Equal(t, 500, user.Quota)
+
+		// The expired remainder is not spendable even before the sweep writes
+		// it off.
+		reserved, err := TryReserveUserQuota(311, 300, "grant-expiry-a")
+		require.NoError(t, err)
+		assert.False(t, reserved)
+		reserved, err = TryReserveUserQuota(311, 200, "grant-expiry-b")
+		require.NoError(t, err)
+		require.True(t, reserved)
+		RecordWalletConsumeDelta(311, -200)
+		require.NoError(t, db.Select("quota").First(&user, 311).Error)
+		assert.Equal(t, 300, user.Quota)
+
+		result, err := VoidExpiredCreditGrants(now, 200)
+		require.NoError(t, err)
+		assert.Equal(t, 1, result.ScannedCount)
+		assert.Equal(t, 1, result.VoidedCount)
+		assert.EqualValues(t, 300, result.VoidedQuota)
+		assert.EqualValues(t, 300, result.DeductedQuota)
+		assert.Zero(t, result.ClampedCount)
+		assert.Zero(t, result.FailedCount)
+		require.NoError(t, db.Select("quota").First(&user, 311).Error)
+		assert.Zero(t, user.Quota)
+		assert.Zero(t, grantRemaining(t, expiredGrant))
+
+		var expiryEntry WalletLedgerEntry
+		require.NoError(t, db.Where("user_id = ? AND kind = ?", 311, WalletLedgerKindGrantExpire).First(&expiryEntry).Error)
+		assert.EqualValues(t, -300, expiryEntry.Amount)
+		assert.Equal(t, WalletLedgerRefGrantExpire, expiryEntry.RefType)
+
+		// A second sweep finds nothing: the claim is gone and the balance moved
+		// exactly once.
+		result, err = VoidExpiredCreditGrants(now+3_600, 200)
+		require.NoError(t, err)
+		assert.Zero(t, result.ScannedCount)
+		require.NoError(t, db.Select("quota").First(&user, 311).Error)
+		assert.Zero(t, user.Quota)
+		reconciliation, err := ReconcileWalletLedgerForUser(311)
+		require.NoError(t, err)
+		assert.True(t, reconciliation.Reconciled, "deviation=%d", reconciliation.Deviation)
+
+		// A claim that outlived the money it refers to is given up without
+		// taking the balance below zero.
+		require.NoError(t, db.Create(&User{Id: 312, Username: "grant-expiry-clamp", AffCode: "grant-expiry-clamp", Quota: 100, Group: "default", Status: common.UserStatusEnabled}).Error)
+		clampedIds := creditGrantWalletForTest(t, 312, 0, []struct {
+			source    string
+			amount    int
+			expiresAt int64
+		}{
+			{operation_setting.CreditGrantSourcePromo, 300, now - 60},
+		})
+		// A legacy charge spent 300 of the balance without attributing it to
+		// the claim, so the grant claims more than the wallet still holds.
+		require.NoError(t, db.Model(&User{}).Where("id = ?", 312).Update("quota", 100).Error)
+		RecordWalletConsumeDelta(312, -300)
+		result, err = VoidExpiredCreditGrants(now, 200)
+		require.NoError(t, err)
+		assert.Equal(t, 1, result.VoidedCount)
+		assert.EqualValues(t, 300, result.VoidedQuota)
+		assert.EqualValues(t, 100, result.DeductedQuota)
+		assert.Equal(t, 1, result.ClampedCount)
+		require.NoError(t, db.Select("quota").First(&user, 312).Error)
+		assert.Zero(t, user.Quota)
+		assert.Zero(t, grantRemaining(t, clampedIds[0]))
+	})
+}
+
+// An issuance replays as a no-op, and the wallet view reports the paid balance,
+// the spendable buckets with their validity and the expired remainder that the
+// sweep has still to void.
+func TestCreditGrantIssuanceIsIdempotentAndVisible(t *testing.T) {
+	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
+		useWalletOverdraftLimit(t, 0, nil)
+		require.NoError(t, db.Create(&User{Id: 321, Username: "grant-issue", AffCode: "grant-issue", Quota: 0, Group: "default", Status: common.UserStatusEnabled}).Error)
+		now := common.GetTimestamp()
+
+		applied, err := IssueCreditGrant(321, operation_setting.CreditGrantSourceRedeem, 400, now+86_400, WalletLedgerKindRedeem, WalletLedgerRefRedeem, "redeem-321", "note")
+		require.NoError(t, err)
+		require.True(t, applied)
+		applied, err = IssueCreditGrant(321, operation_setting.CreditGrantSourceRedeem, 400, now+86_400, WalletLedgerKindRedeem, WalletLedgerRefRedeem, "redeem-321", "note")
+		require.NoError(t, err)
+		assert.False(t, applied, "a replayed ledger reference never grants the credit twice")
+		var user User
+		require.NoError(t, db.Select("quota").First(&user, 321).Error)
+		assert.Equal(t, 400, user.Quota)
+		var grants []CreditGrant
+		require.NoError(t, db.Where("user_id = ?", 321).Find(&grants).Error)
+		require.Len(t, grants, 1)
+		assert.EqualValues(t, 400, grants[0].Amount)
+		assert.EqualValues(t, 400, grants[0].Remaining)
+
+		_, err = IssueCreditGrant(321, operation_setting.CreditGrantSourcePromo, 100, now-60, WalletLedgerKindSystemGrant, WalletLedgerRefAdminGrant, "promo-321", "")
+		require.NoError(t, err)
+		view, err := CreditGrantWalletForUser(321, common.GetTimestamp())
+		require.NoError(t, err)
+		assert.EqualValues(t, 500, view.TotalQuota)
+		assert.EqualValues(t, 400, view.GrantQuota)
+		assert.EqualValues(t, 100, view.ExpiredQuota)
+		assert.Zero(t, view.PaidQuota)
+		require.Len(t, view.Grants, 1)
+		assert.Equal(t, operation_setting.CreditGrantSourceRedeem, view.Grants[0].Source)
+		assert.EqualValues(t, 400, view.Grants[0].Remaining)
+		assert.EqualValues(t, now+86_400, view.Grants[0].ExpiresAt)
+
+		applied, err = IssueCreditGrant(321, "unsupported", 10, 0, WalletLedgerKindSystemGrant, WalletLedgerRefAdminGrant, "bad-source", "")
+		require.ErrorIs(t, err, ErrCreditGrantSourceInvalid)
+		assert.False(t, applied)
+	})
+}
+
+// The administrator overview reports money that entered through top-ups,
+// granted credit broken down by source, consumption, refunds and the credit
+// that expired unused.
+func TestCreditGrantStatisticsBySource(t *testing.T) {
+	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
+		useWalletOverdraftLimit(t, 0, nil)
+		require.NoError(t, db.Create(&User{Id: 331, Username: "grant-stats", AffCode: "grant-stats", Quota: 0, Group: "default", Status: common.UserStatusEnabled}).Error)
+		require.NoError(t, db.Create(&User{Id: 332, Username: "grant-stats-b", AffCode: "grant-stats-b", Quota: 0, Group: "default", Status: common.UserStatusEnabled}).Error)
+		now := common.GetTimestamp()
+
+		_, err := ApplyWalletLedgerDeltaDB(331, WalletLedgerKindTopUp, 1_000, WalletLedgerRefTopUp, "stats-topup", "")
+		require.NoError(t, err)
+		_, err = IssueCreditGrant(331, operation_setting.CreditGrantSourceCheckin, 200, 0, WalletLedgerKindCheckin, WalletLedgerRefCheckin, "stats-checkin", "")
+		require.NoError(t, err)
+		_, err = IssueCreditGrant(332, operation_setting.CreditGrantSourceCheckin, 100, 0, WalletLedgerKindCheckin, WalletLedgerRefCheckin, "stats-checkin-b", "")
+		require.NoError(t, err)
+		_, err = IssueCreditGrant(331, operation_setting.CreditGrantSourceInvite, 300, now-60, WalletLedgerKindAffiliateTransfer, WalletLedgerRefAffiliate, "stats-invite", "")
+		require.NoError(t, err)
+
+		// Consume 500 from the wallet and refund 100 of it.
+		reserved, err := TryReserveUserQuota(331, 500, "stats-consume")
+		require.NoError(t, err)
+		require.True(t, reserved)
+		RecordWalletConsumeDelta(331, -500)
+		require.NoError(t, RefundWalletQuota(331, 100, WalletLedgerRefRequestRefund, "stats-refund"))
+
+		// The invitation credit expires unused.
+		result, err := VoidExpiredCreditGrants(now, 200)
+		require.NoError(t, err)
+		assert.Equal(t, 1, result.VoidedCount)
+		assert.EqualValues(t, 300, result.VoidedQuota)
+
+		stats, err := CreditGrantStatistics()
+		require.NoError(t, err)
+		assert.EqualValues(t, 1_000, stats.TotalTopUp)
+		assert.EqualValues(t, 600, stats.TotalGranted)
+		assert.EqualValues(t, 100, stats.TotalRemaining)
+		assert.EqualValues(t, 500, stats.TotalSpent)
+		assert.EqualValues(t, 300, stats.TotalExpired)
+		assert.EqualValues(t, 500, stats.TotalConsumed)
+		assert.EqualValues(t, 100, stats.TotalRefunded)
+
+		bySource := map[string]CreditGrantSourceStats{}
+		for _, entry := range stats.Sources {
+			bySource[entry.Source] = entry
+		}
+		assert.EqualValues(t, 300, bySource[operation_setting.CreditGrantSourceCheckin].Granted)
+		assert.EqualValues(t, 100, bySource[operation_setting.CreditGrantSourceCheckin].Remaining)
+		assert.EqualValues(t, 200, bySource[operation_setting.CreditGrantSourceCheckin].Spent)
+		assert.EqualValues(t, 2, bySource[operation_setting.CreditGrantSourceCheckin].Accounts)
+		assert.EqualValues(t, 300, bySource[operation_setting.CreditGrantSourceInvite].Granted)
+		assert.Zero(t, bySource[operation_setting.CreditGrantSourceInvite].Remaining)
+		assert.EqualValues(t, 300, bySource[operation_setting.CreditGrantSourceInvite].Spent)
+		assert.Len(t, stats.Sources, 2)
+
+		reconciliation, err := ReconcileWalletLedgerForUser(331)
+		require.NoError(t, err)
+		assert.True(t, reconciliation.Reconciled, "deviation=%d", reconciliation.Deviation)
 	})
 }
