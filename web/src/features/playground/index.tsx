@@ -1001,6 +1001,7 @@ function PlaygroundContent(props: {
               contextPlan={contextController.plan}
               contextSettings={context}
               contextSummary={contextSummary}
+              sessionId={activeSession?.id}
               disabled={
                 isGenerating ||
                 isComparing ||

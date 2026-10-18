@@ -39,12 +39,13 @@ Object.defineProperty(HTMLElement.prototype, 'getAnimations', {
 function renderTools(
   onClearMessages = vi.fn(),
   onSystemPromptChange = vi.fn(),
-  systemPrompt = ''
+  systemPrompt = '',
+  config = DEFAULT_CONFIG
 ) {
   render(
     <PromptInputProvider>
       <PlaygroundInputTools
-        config={DEFAULT_CONFIG}
+        config={config}
         contextPlan={planPlaygroundContext({
           messages: [],
           settings: DEFAULT_CONTEXT_SETTINGS,
@@ -58,6 +59,7 @@ function renderTools(
         onClearMessages={onClearMessages}
         onConfigChange={() => undefined}
         onContextSettingsChange={() => undefined}
+        onInsertText={() => undefined}
         onParameterEnabledChange={() => undefined}
         onRemoveContextSummary={() => undefined}
         onSummarizeContext={() => undefined}
@@ -76,6 +78,9 @@ beforeAll(() => {
     Clear: 'Clear',
     'Clear chat history': 'Clear chat history',
     'Clear chat history?': 'Clear chat history?',
+    Parameters: 'Parameters',
+    'Prompt snippets': 'Prompt snippets',
+    'Reasoning Effort': 'Reasoning Effort',
     Save: 'Save',
     Search: 'Search',
     'System prompt': 'System prompt',
@@ -123,4 +128,23 @@ test('clearing the stored system prompt persists an empty value', async () => {
   await user.click(await screen.findByRole('button', { name: 'Clear' }))
 
   expect(onSystemPromptChange).toHaveBeenCalledWith('')
+})
+
+test('offers the reasoning effort control for a model that accepts an effort', async () => {
+  const user = userEvent.setup()
+  renderTools(vi.fn(), vi.fn(), '', { ...DEFAULT_CONFIG, model: 'gpt-5' })
+
+  await user.click(screen.getByRole('button', { name: 'Parameters' }))
+
+  expect(await screen.findByText('Reasoning Effort')).toBeVisible()
+})
+
+test('hides the reasoning effort control for a model without an effort', async () => {
+  const user = userEvent.setup()
+  renderTools()
+
+  await user.click(screen.getByRole('button', { name: 'Parameters' }))
+  await screen.findByText('Temperature')
+
+  expect(screen.queryByText('Reasoning Effort')).toBeNull()
 })

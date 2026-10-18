@@ -45,6 +45,7 @@ import type {
 import { PlaygroundComparePanel } from './playground-compare-panel'
 import { PlaygroundContextPanel } from './playground-context-panel'
 import { PlaygroundParameterPanel } from './playground-parameter-panel'
+import { PlaygroundSnippetPanel } from './playground-snippet-panel'
 import { PlaygroundSystemPromptPanel } from './playground-system-prompt-panel'
 
 type PlaygroundInputToolsProps = {
@@ -67,6 +68,8 @@ type PlaygroundInputToolsProps = {
   parameterEnabled: ParameterEnabled
   systemPrompt: string
   onSystemPromptChange: (value: string) => void
+  /** Appends a prompt snippet to the composer draft. */
+  onInsertText: (content: string) => void
   contextSettings: PlaygroundContextSettings
   contextPlan: PlaygroundContextPlan
   contextSummary: PlaygroundContextSummary | null
@@ -89,6 +92,7 @@ export function PlaygroundInputTools({
   parameterEnabled,
   systemPrompt,
   onSystemPromptChange,
+  onInsertText,
   contextSettings,
   contextPlan,
   contextSummary,
@@ -172,6 +176,11 @@ export function PlaygroundInputTools({
           disabled={disabled}
           onSystemPromptChange={onSystemPromptChange}
           systemPrompt={systemPrompt}
+        />
+
+        <PlaygroundSnippetPanel
+          disabled={disabled}
+          onInsertSnippet={onInsertText}
         />
 
         <PlaygroundContextPanel

@@ -36,6 +36,7 @@ import {
   PLAYGROUND_ATTACHMENT_MAX_BYTES,
   PLAYGROUND_ATTACHMENT_MAX_COUNT,
 } from '../../constants'
+import { usePlaygroundComposerMemory } from '../../hooks'
 import type { PlaygroundContextPlan } from '../../lib'
 import type {
   ModelOption,
@@ -50,6 +51,8 @@ import { PlaygroundInputTools } from './playground-input-tools'
 
 interface PlaygroundInputProps {
   config: PlaygroundConfig
+  /** Active conversation the draft is stored under. */
+  sessionId?: string | null
   onSubmit: (
     text: string,
     files: (FileUIPart & { id?: string })[]
@@ -101,6 +104,7 @@ interface PlaygroundInputProps {
 
 export function PlaygroundInput({
   config,
+  sessionId,
   onSubmit,
   onStop,
   disabled,
@@ -134,16 +138,15 @@ export function PlaygroundInput({
   onPendingTextConsumed,
 }: PlaygroundInputProps) {
   const { t } = useTranslation()
-  const [text, setText] = useState('')
+  const { text, updateText, appendText, handleKeyDown, rememberSubmittedText } =
+    usePlaygroundComposerMemory(sessionId)
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
     if (pendingText == null) return
-    setText((current) =>
-      current ? `${current}\n\n${pendingText}` : pendingText
-    )
+    appendText(pendingText)
     onPendingTextConsumed?.()
-  }, [onPendingTextConsumed, pendingText])
+  }, [appendText, onPendingTextConsumed, pendingText])
 
   const handleSubmit = async (message: PromptInputMessage) => {
     if (disabled || submitting) return
@@ -155,7 +158,8 @@ export function PlaygroundInput({
       // Clear only after the send (including any upload) succeeds so a failed
       // message stays recoverable in the input.
       await onSubmit(message.text ?? '', files)
-      setText('')
+      rememberSubmittedText(message.text ?? '')
+      updateText('')
     } finally {
       setSubmitting(false)
     }
@@ -192,7 +196,8 @@ export function PlaygroundInput({
           spellCheck={false}
           className='min-h-20 px-5 pt-4 pb-3 leading-7 md:min-h-24 md:text-base'
           disabled={disabled}
-          onChange={(event) => setText(event.target.value)}
+          onChange={(event) => updateText(event.target.value)}
+          onKeyDown={handleKeyDown}
           placeholder={t('Ask anything')}
           value={text}
         />
@@ -225,6 +230,7 @@ export function PlaygroundInput({
                 onClearMessages={onClearMessages}
                 onConfigChange={onConfigChange}
                 onContextSettingsChange={onContextSettingsChange}
+                onInsertText={appendText}
                 onParameterEnabledChange={onParameterEnabledChange}
                 onRemoveContextSummary={onRemoveContextSummary}
                 onSummarizeContext={onSummarizeContext}

@@ -814,6 +814,7 @@ export type PromptInputTextareaProps = ComponentProps<typeof InputGroupTextarea>
 
 export const PromptInputTextarea = ({
   onChange,
+  onKeyDown,
   className,
   placeholder,
   ...props
@@ -825,6 +826,14 @@ export const PromptInputTextarea = ({
   const [isComposing, setIsComposing] = useState(false)
 
   const handleKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
+    // A caller-owned handler runs first and can claim a key with
+    // preventDefault (for example the Playground input history); the built-in
+    // Enter/Backspace behavior then only applies to unclaimed keys.
+    onKeyDown?.(e)
+    if (e.defaultPrevented) {
+      return
+    }
+
     if (e.key === 'Enter') {
       if (isComposing || e.nativeEvent.isComposing) {
         return
