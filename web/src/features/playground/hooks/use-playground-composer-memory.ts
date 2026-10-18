@@ -121,7 +121,7 @@ export function usePlaygroundComposerMemory(
     []
   )
 
-  const scheduleDraftSave = useCallback((value: string) => {
+  const scheduleDraftSave = useCallback(() => {
     const sessionIdValue = activeSessionRef.current
     if (!sessionIdValue) return
     if (saveTimerRef.current !== null) {
@@ -138,7 +138,7 @@ export function usePlaygroundComposerMemory(
       navigationIndexRef.current = null
       textRef.current = value
       setText(value)
-      scheduleDraftSave(value)
+      scheduleDraftSave()
     },
     [scheduleDraftSave]
   )
@@ -163,7 +163,7 @@ export function usePlaygroundComposerMemory(
       navigationIndexRef.current = index
       textRef.current = value
       setText(value)
-      scheduleDraftSave(value)
+      scheduleDraftSave()
     },
     [scheduleDraftSave]
   )
@@ -199,7 +199,7 @@ export function usePlaygroundComposerMemory(
           const restored = stagedTextRef.current
           textRef.current = restored
           setText(restored)
-          scheduleDraftSave(restored)
+          scheduleDraftSave()
           return
         }
         recallHistoryEntry(navigation - 1)
