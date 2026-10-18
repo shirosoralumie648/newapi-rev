@@ -35,6 +35,8 @@ interface AffiliateRewardsCardProps {
   onTransfer: () => void
   /** Opens the read-only list of the caller's invitees. */
   onViewReferrals: () => void
+  /** Opens the dedicated referral program page with the caller's agent profile. */
+  onOpenProgram: () => void
   complianceConfirmed?: boolean
   loading?: boolean
 }
@@ -119,6 +121,14 @@ export function AffiliateRewardsCard(props: AffiliateRewardsCardProps) {
             size='sm'
           >
             {t('View invitees')}
+          </Button>
+          <Button
+            variant='outline'
+            onClick={props.onOpenProgram}
+            className='bg-background h-9 shrink-0 px-3'
+            size='sm'
+          >
+            {t('Open referral program')}
           </Button>
           {hasRewards && (
             <Button
