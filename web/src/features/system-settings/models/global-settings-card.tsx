@@ -55,7 +55,7 @@ const thinkingBlacklistExample = JSON.stringify(
   2
 )
 
-const chatToResponsesPolicyExample = JSON.stringify(
+const protocolPolicyExample = JSON.stringify(
   {
     enabled: true,
     all_channels: false,
@@ -66,7 +66,7 @@ const chatToResponsesPolicyExample = JSON.stringify(
   2
 )
 
-const chatToResponsesPolicyAllChannelsExample = JSON.stringify(
+const protocolPolicyAllChannelsExample = JSON.stringify(
   {
     enabled: true,
     all_channels: true,
@@ -92,6 +92,7 @@ const schema = z.object({
     pass_through_request_enabled: z.boolean(),
     thinking_model_blacklist: jsonString,
     chat_completions_to_responses_policy: jsonString,
+    responses_to_chat_completions_policy: jsonString,
   }),
   general_setting: z.object({
     ping_interval_enabled: z.boolean(),
@@ -106,6 +107,7 @@ type FlatGlobalModelSettings = {
   'global.pass_through_request_enabled': boolean
   'global.thinking_model_blacklist': string
   'global.chat_completions_to_responses_policy': string
+  'global.responses_to_chat_completions_policy': string
   'general_setting.ping_interval_enabled': boolean
   'general_setting.ping_interval_seconds': number
 }
@@ -121,6 +123,10 @@ const flattenGlobalValues = (
   ),
   'global.chat_completions_to_responses_policy': normalizeJsonText(
     values.global.chat_completions_to_responses_policy,
+    '{}'
+  ),
+  'global.responses_to_chat_completions_policy': normalizeJsonText(
+    values.global.responses_to_chat_completions_policy,
     '{}'
   ),
   'general_setting.ping_interval_enabled':
@@ -274,7 +280,7 @@ export function GlobalSettingsCard({ defaultValues }: GlobalSettingsCardProps) {
                       name={field.name}
                       onBlur={field.onBlur}
                       textareaRef={field.ref}
-                      placeholder={`${t('Example (specific channels):')}\n${chatToResponsesPolicyExample}\n\n${t('Example (all channels):')}\n${chatToResponsesPolicyAllChannelsExample}`}
+                      placeholder={`${t('Example (specific channels):')}\n${protocolPolicyExample}\n\n${t('Example (all channels):')}\n${protocolPolicyAllChannelsExample}`}
                     />
                   </FormControl>
                   <FormDescription>
@@ -288,7 +294,7 @@ export function GlobalSettingsCard({ defaultValues }: GlobalSettingsCardProps) {
                       onClick={() =>
                         form.setValue(
                           'global.chat_completions_to_responses_policy',
-                          chatToResponsesPolicyExample,
+                          protocolPolicyExample,
                           { shouldDirty: true }
                         )
                       }
@@ -302,7 +308,87 @@ export function GlobalSettingsCard({ defaultValues }: GlobalSettingsCardProps) {
                       onClick={() =>
                         form.setValue(
                           'global.chat_completions_to_responses_policy',
-                          chatToResponsesPolicyAllChannelsExample,
+                          protocolPolicyAllChannelsExample,
+                          { shouldDirty: true }
+                        )
+                      }
+                    >
+                      {t('Fill example (all channels)')}
+                    </Button>
+                  </div>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+
+          <Separator />
+
+          <div className='space-y-4'>
+            <div className='flex items-center gap-2'>
+              <h3 className='text-base font-semibold'>
+                {t('Responses -> ChatCompletions Compatibility')}
+              </h3>
+              <StatusBadge
+                label={t('Preview')}
+                variant='neutral'
+                copyable={false}
+              />
+            </div>
+
+            <Alert>
+              <AlertTitle>{t('Warning')}</AlertTitle>
+              <AlertDescription>
+                {t(
+                  'This feature is experimental. Configuration format and behavior may change.'
+                )}
+              </AlertDescription>
+            </Alert>
+
+            <FormField
+              control={form.control}
+              name='global.responses_to_chat_completions_policy'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Policy JSON')}</FormLabel>
+                  <FormControl>
+                    <JsonCodeEditor
+                      value={field.value}
+                      onChange={(value) => field.onChange(value)}
+                      name={field.name}
+                      onBlur={field.onBlur}
+                      textareaRef={field.ref}
+                      placeholder={`${t('Example (specific channels):')}\n${protocolPolicyExample}\n\n${t('Example (all channels):')}\n${protocolPolicyAllChannelsExample}`}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'Matching Responses requests are sent upstream as Chat Completions requests. Fields that cannot be represented in Chat Completions are rejected with an error.'
+                    )}
+                  </FormDescription>
+                  <div className='flex flex-wrap gap-2'>
+                    <Button
+                      type='button'
+                      variant='outline'
+                      size='sm'
+                      onClick={() =>
+                        form.setValue(
+                          'global.responses_to_chat_completions_policy',
+                          protocolPolicyExample,
+                          { shouldDirty: true }
+                        )
+                      }
+                    >
+                      {t('Fill example (specific channels)')}
+                    </Button>
+                    <Button
+                      type='button'
+                      variant='outline'
+                      size='sm'
+                      onClick={() =>
+                        form.setValue(
+                          'global.responses_to_chat_completions_policy',
+                          protocolPolicyAllChannelsExample,
                           { shouldDirty: true }
                         )
                       }
