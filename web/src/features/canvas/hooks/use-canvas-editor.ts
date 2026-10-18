@@ -29,6 +29,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   CANVAS_MAX_EDGES,
   CANVAS_MAX_NODES,
+  CANVAS_NODE_ADD_BASE,
   CANVAS_NODE_ADD_OFFSET,
 } from '../constants'
 import {
@@ -265,7 +266,10 @@ export function useCanvasEditor(
         addNodes([
           {
             kind,
-            position: position ?? { x: 96 + cascade, y: 96 + cascade },
+            position: position ?? {
+              x: CANVAS_NODE_ADD_BASE + cascade,
+              y: CANVAS_NODE_ADD_BASE + cascade,
+            },
           },
         ]) > 0
       )

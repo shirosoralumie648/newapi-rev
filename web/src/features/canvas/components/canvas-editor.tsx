@@ -22,7 +22,7 @@ import {
   type NodeTypes,
   type Viewport,
 } from '@xyflow/react'
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -36,6 +36,10 @@ import {
 } from '@/lib/server-error-message'
 
 import { CANVAS_DROP_MESSAGES, CANVAS_EDIT_MESSAGES } from '../constants'
+import {
+  useCanvasAssistant,
+  type CanvasAssistantMessage,
+} from '../hooks/use-canvas-assistant'
 import {
   useCanvasEditor,
   type CanvasAddedNode,
@@ -55,11 +59,14 @@ import { canvasWorkflowMentions } from '../lib/canvas-workflow'
 import type {
   CanvasFlowEdge,
   CanvasFlowNode,
+  CanvasInspectorView,
   CanvasNodeKind,
   CanvasServerDocument,
   CanvasServerProject,
 } from '../types'
+import { CanvasAssistantPanel } from './canvas-assistant-panel'
 import { CanvasDropZone } from './canvas-drop-zone'
+import { CanvasInspectorViewToggle } from './canvas-inspector-view-toggle'
 import { CanvasFlowNodeView, CanvasGroupNodeView } from './canvas-node'
 import { CanvasNodeInspector } from './canvas-node-inspector'
 import { CanvasToolbar } from './canvas-toolbar'
@@ -121,6 +128,20 @@ export function CanvasEditor(props: CanvasEditorProps) {
     addLinkedNode: editor.addLinkedNode,
   })
 
+  const [inspectorView, setInspectorView] =
+    useState<CanvasInspectorView>('details')
+
+  const assistant = useCanvasAssistant({
+    nodes: editor.nodes,
+    edges: editor.edges,
+    anchorNode: editor.selectedNode,
+    group: workflowOptions.group,
+    models: workflowOptions.models,
+    addLinkedNode: editor.addLinkedNode,
+    addNodes: editor.addNodes,
+    runWorkflow: workflow.run,
+  })
+
   // The mention menu of the selected step offers only its connected nodes, so
   // an instruction can never reference a resource the step does not consume.
   const selectedNode = editor.selectedNode
@@ -140,6 +161,40 @@ export function CanvasEditor(props: CanvasEditorProps) {
     clearWorkflowMessage()
   }, [clearWorkflowMessage, t, workflowMessage])
   useEffect(notifyWorkflow, [notifyWorkflow])
+
+  const assistantMessage = assistant.message
+  const clearAssistantMessage = assistant.clearMessage
+  const notifyAssistant = useCallback(() => {
+    if (!assistantMessage) return
+    toast.error(translateServerText(t, assistantMessage))
+    clearAssistantMessage()
+  }, [assistantMessage, clearAssistantMessage, t])
+  useEffect(notifyAssistant, [notifyAssistant])
+
+  const handleInsertAssistantReply = useCallback(
+    (message: CanvasAssistantMessage) => {
+      if (assistant.insertReply(message.content)) {
+        toast.success(t('Added the reply to the canvas.'))
+      }
+    },
+    [assistant, t]
+  )
+
+  const handleGenerateAssistantReply = useCallback(
+    (message: CanvasAssistantMessage) => {
+      assistant.generate(message.content)
+    },
+    [assistant]
+  )
+
+  const handleToggleAssistant = useCallback(() => {
+    setInspectorView((view) => (view === 'assistant' ? 'details' : 'assistant'))
+  }, [])
+
+  const handleCloseInspector = useCallback(() => {
+    editor.clearSelection()
+    setInspectorView('details')
+  }, [editor])
 
   const handleMoveEnd = useCallback(
     (_event: MouseEvent | TouchEvent | null, viewport: Viewport) => {
@@ -219,32 +274,67 @@ export function CanvasEditor(props: CanvasEditorProps) {
 
   const inspector = (
     <div className='bg-muted/10 flex h-full min-h-0 w-full flex-col overflow-hidden border-l'>
-      <CanvasNodeInspector
-        disabled={props.disabled}
-        groups={workflowOptions.groups}
-        mentions={mentions}
-        models={workflowOptions.models}
-        node={editor.selectedNode}
-        onDelete={editor.deleteNode}
-        onOpenSource={props.onOpenSource}
-        onRetry={workflow.retry}
-        onUpdateData={editor.updateNodeData}
-        previews={
-          editor.selectedNode
-            ? (workflow.results[editor.selectedNode.id] ?? [])
-            : []
-        }
-        runPhase={workflow.phase}
-      />
+      {isMobile ? (
+        <div className='shrink-0 border-b p-2'>
+          <CanvasInspectorViewToggle
+            onViewChange={setInspectorView}
+            view={inspectorView}
+          />
+        </div>
+      ) : null}
+      {inspectorView === 'assistant' ? (
+        <CanvasAssistantPanel
+          anchorLabel={assistant.anchorLabel}
+          canGenerate={assistant.canGenerate}
+          contextCount={assistant.contextCount}
+          disabled={props.disabled}
+          messages={assistant.messages}
+          mode={assistant.mode}
+          model={assistant.model}
+          models={workflowOptions.models}
+          onGenerate={handleGenerateAssistantReply}
+          onInsertReply={handleInsertAssistantReply}
+          onModeChange={assistant.setMode}
+          onModelChange={assistant.setModel}
+          onSend={assistant.send}
+          onStop={assistant.stop}
+          streaming={assistant.streaming}
+          workflowPhase={workflow.phase}
+        />
+      ) : (
+        <CanvasNodeInspector
+          disabled={props.disabled}
+          groups={workflowOptions.groups}
+          mentions={mentions}
+          models={workflowOptions.models}
+          node={editor.selectedNode}
+          onDelete={editor.deleteNode}
+          onOpenSource={props.onOpenSource}
+          onRetry={workflow.retry}
+          onUpdateData={editor.updateNodeData}
+          previews={
+            editor.selectedNode
+              ? (workflow.results[editor.selectedNode.id] ?? [])
+              : []
+          }
+          runPhase={workflow.phase}
+        />
+      )}
     </div>
   )
 
   return (
     <div className='flex min-h-0 flex-1 overflow-hidden'>
       <WorkspaceInspector
-        open={isMobile ? editor.selectedNode !== null : true}
-        onClose={editor.clearSelection}
-        title={t('Node details')}
+        open={
+          isMobile
+            ? inspectorView === 'assistant' || editor.selectedNode !== null
+            : true
+        }
+        onClose={handleCloseInspector}
+        title={
+          inspectorView === 'assistant' ? t('Assistant') : t('Node details')
+        }
         main={
           <ReactFlowProvider>
             <CanvasDropZone
@@ -266,6 +356,7 @@ export function CanvasEditor(props: CanvasEditorProps) {
               >
                 <Panel position='top-left'>
                   <CanvasToolbar
+                    assistantOpen={inspectorView === 'assistant'}
                     canCopy={editor.selectedCount > 0}
                     canGroup={editor.canGroup}
                     canPaste={editor.hasClipboard}
@@ -287,6 +378,7 @@ export function CanvasEditor(props: CanvasEditorProps) {
                     onRedo={editor.redo}
                     onRunWorkflow={() => workflow.run()}
                     onSelectAll={editor.selectAll}
+                    onToggleAssistant={handleToggleAssistant}
                     onUndo={editor.undo}
                     onUngroupSelection={() => void editor.ungroupSelection()}
                     runPhase={workflow.phase}

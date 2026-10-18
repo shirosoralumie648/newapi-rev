@@ -16,7 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { CanvasNodeKind, CanvasWorkflowGenerationKind } from './types'
+import type {
+  CanvasAssistantMode,
+  CanvasNodeKind,
+  CanvasWorkflowGenerationKind,
+} from './types'
 
 // Mirror of the server-side canvas document contract. The server validates
 // the same bounds again; the client copy keeps import and edit feedback local.
@@ -184,4 +188,50 @@ export const CANVAS_MESSAGE_SNAPSHOT_MAX_CHARS = 1000
 
 // A new node is dropped at a small cascade near the top-left of the pane so
 // repeated adds do not stack on the exact same position.
+export const CANVAS_NODE_ADD_BASE = 96
 export const CANVAS_NODE_ADD_OFFSET = 32
+
+// The canvas assistant chats about the selected node and its transitive
+// upstream chain. The walk is bounded in depth and node count and every node
+// contributes a bounded text, so a large board cannot overshoot the relay's
+// request budget; media references stay ids and never become URLs.
+export const CANVAS_ASSISTANT_CONTEXT_MAX_NODES = 24
+export const CANVAS_ASSISTANT_CONTEXT_MAX_DEPTH = 8
+export const CANVAS_ASSISTANT_CONTEXT_NODE_MAX_CHARS = 600
+
+// Prior turns one request replays; the panel keeps showing every message.
+export const CANVAS_ASSISTANT_HISTORY_MAX_MESSAGES = 20
+
+// One instruction is bounded like a workflow input, because an image/video
+// reply reuses it as the generation step's own text.
+export const CANVAS_ASSISTANT_INPUT_MAX_CHARS = 4000
+
+export const CANVAS_ASSISTANT_MODES = ['chat', 'image', 'video'] as const
+
+// Translation keys for the assistant modes. The values double as English
+// source text and as i18n keys.
+export const CANVAS_ASSISTANT_MODE_LABELS: Record<CanvasAssistantMode, string> =
+  {
+    chat: 'Chat',
+    image: 'Image',
+    video: 'Video',
+  }
+
+// Assistant problem keys the panel reports. The strings double as English
+// source text and as i18n keys.
+export const CANVAS_ASSISTANT_MESSAGES = {
+  ANCHOR_REQUIRED: 'Select a node to generate a result from.',
+  NO_MODEL: 'Choose a model for the canvas assistant.',
+  REQUEST_FAILED: 'The assistant request failed.',
+} as const
+
+// Translation keys for the one action a settled reply offers per mode. The
+// values double as English source text and as i18n keys.
+export const CANVAS_ASSISTANT_REPLY_LABELS: Record<
+  CanvasAssistantMode,
+  string
+> = {
+  chat: 'Insert into canvas',
+  image: 'Generate image',
+  video: 'Generate video',
+}

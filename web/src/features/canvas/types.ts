@@ -49,6 +49,18 @@ export type CanvasWorkflowNodeStatus =
 export type CanvasWorkflowGenerationKind = 'image' | 'video'
 
 /**
+ * What the canvas assistant offers for one reply: insert the text back onto
+ * the canvas as a new node, or start an image/video generation step from it.
+ */
+export type CanvasAssistantMode = 'chat' | 'image' | 'video'
+
+/**
+ * Which view the canvas inspector shows: the selected node's details, or the
+ * assistant conversation about the selection and its upstream chain.
+ */
+export type CanvasInspectorView = 'details' | 'assistant'
+
+/**
  * The workflow configuration and last-run state of one step node. Only
  * configuration and ID references live here: a model id, generation parameters,
  * the resolved input text, a bounded output/error summary and the public id of

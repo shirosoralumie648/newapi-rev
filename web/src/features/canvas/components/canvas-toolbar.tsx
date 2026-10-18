@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import {
+  Bot,
   Download,
   Pencil,
   Play,
@@ -53,6 +54,8 @@ interface CanvasToolbarProps {
   canGroup: boolean
   canUngroup: boolean
   runPhase: CanvasWorkflowRunPhase
+  /** Whether the inspector shows the assistant instead of node details. */
+  assistantOpen: boolean
   group: string
   groups: GroupOption[]
   onGroupChange: (group: string) => void
@@ -66,6 +69,7 @@ interface CanvasToolbarProps {
   onUngroupSelection: () => void
   onImportFile: (file: File) => void
   onExport: () => void
+  onToggleAssistant: () => void
   onRunWorkflow: () => void
   onCancelRun: () => void
 }
@@ -154,6 +158,18 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <Button
+        aria-pressed={props.assistantOpen}
+        disabled={props.disabled}
+        onClick={props.onToggleAssistant}
+        size='sm'
+        type='button'
+        variant={props.assistantOpen ? 'secondary' : 'outline'}
+      >
+        <Bot aria-hidden='true' />
+        {t('Assistant')}
+      </Button>
 
       <input
         accept='application/json,.json'

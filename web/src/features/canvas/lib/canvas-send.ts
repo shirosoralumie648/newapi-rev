@@ -27,6 +27,7 @@ import {
 } from '../api'
 import {
   CANVAS_MESSAGE_SNAPSHOT_MAX_CHARS,
+  CANVAS_NODE_ADD_BASE,
   CANVAS_NODE_ADD_OFFSET,
 } from '../constants'
 import type {
@@ -185,7 +186,11 @@ export function buildCanvasSendNodes(
   return seeds.map((seed, index) => {
     const cascade = CANVAS_NODE_ADD_OFFSET * ((existingCount + index) % 8)
     const { kind, ...data } = seed
-    return createCanvasNode(kind, { x: 96 + cascade, y: 96 + cascade }, data)
+    return createCanvasNode(
+      kind,
+      { x: CANVAS_NODE_ADD_BASE + cascade, y: CANVAS_NODE_ADD_BASE + cascade },
+      data
+    )
   })
 }
 

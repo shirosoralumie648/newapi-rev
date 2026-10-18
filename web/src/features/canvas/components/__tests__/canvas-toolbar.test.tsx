@@ -25,6 +25,7 @@ import { CanvasToolbar } from '../canvas-toolbar'
 
 function toolbarProps(runPhase: CanvasWorkflowRunPhase = 'idle') {
   return {
+    assistantOpen: false,
     canCopy: false,
     canGroup: false,
     canPaste: false,
@@ -49,6 +50,7 @@ function toolbarProps(runPhase: CanvasWorkflowRunPhase = 'idle') {
     onRedo: vi.fn(),
     onRunWorkflow: vi.fn(),
     onSelectAll: vi.fn(),
+    onToggleAssistant: vi.fn(),
     onUndo: vi.fn(),
     onUngroupSelection: vi.fn(),
     runPhase,
@@ -132,4 +134,22 @@ test('runs the edit actions the selection allows', async () => {
   await user.click(screen.getByRole('button', { name: 'Edit' }))
   await user.click(screen.getByRole('menuitem', { name: 'Select all' }))
   expect(props.onSelectAll).toHaveBeenCalledTimes(1)
+})
+
+test('toggles the assistant view and reports its pressed state', async () => {
+  const user = userEvent.setup()
+  const props = toolbarProps()
+  const { rerender } = render(<CanvasToolbar {...props} />)
+
+  const toggle = screen.getByRole('button', { name: 'Assistant' })
+  expect(toggle).toHaveAttribute('aria-pressed', 'false')
+
+  await user.click(toggle)
+  expect(props.onToggleAssistant).toHaveBeenCalledTimes(1)
+
+  rerender(<CanvasToolbar {...props} assistantOpen />)
+  expect(screen.getByRole('button', { name: 'Assistant' })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  )
 })

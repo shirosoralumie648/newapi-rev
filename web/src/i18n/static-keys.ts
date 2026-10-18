@@ -1070,6 +1070,16 @@ export const STATIC_I18N_KEYS = [
   'Video',
   'Audio',
   'Group',
+  // Canvas assistant: the mode labels and the one reply action per mode render
+  // through t(label) from CANVAS_ASSISTANT_MODE_LABELS /
+  // CANVAS_ASSISTANT_REPLY_LABELS, and the problem messages come from
+  // CANVAS_ASSISTANT_MESSAGES, so the literal scan cannot see them.
+  'Insert into canvas',
+  'Generate image',
+  'Generate video',
+  'Select a node to generate a result from.',
+  'Choose a model for the canvas assistant.',
+  'The assistant request failed.',
   // Subscription redemption code server messages and the redemption log
   // sentence: they are returned from Go, so the literal scan cannot see them.
   'Redemption code type must be quota or subscription',
