@@ -44,6 +44,7 @@ const defaultSecuritySettings: SecuritySettings = {
   'token_setting.max_user_tokens': 1000,
   'playground_setting.defaults': '{}',
   'playground_setting.group_overrides': '{}',
+  'playground_setting.sandbox_preview_enabled': false,
 }
 
 export function SecuritySettings() {

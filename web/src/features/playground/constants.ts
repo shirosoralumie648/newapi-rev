@@ -77,6 +77,7 @@ export const API_ENDPOINTS = {
   PLAYGROUND_PRESETS: '/api/playground/presets',
   PLAYGROUND_SNIPPETS: '/api/playground/snippets',
   PLAYGROUND_USAGE: '/api/playground/usage',
+  PLAYGROUND_SETTINGS: '/api/playground/settings',
   PLAYGROUND_MESSAGE_COSTS: '/api/playground/message-costs',
   PLAYGROUND_ASSETS: '/api/playground/assets',
   PLAYGROUND_TASKS: '/api/playground/tasks',

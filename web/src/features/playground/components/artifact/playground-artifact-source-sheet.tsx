@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/sheet'
 import { getServerMessage } from '@/lib/server-error-message'
 
+import type { PlaygroundArtifactKind } from '../../artifact-api'
 import type { CapturedArtifactSource } from '../../hooks/use-playground-artifacts'
 import { getPlaygroundCodeSelections } from '../../lib/artifact-utils'
 
@@ -43,7 +44,7 @@ interface PlaygroundArtifactSourceSheetProps {
   onOpenChange: (open: boolean) => void
   onCreate: (
     selection: {
-      kind: 'markdown' | 'code'
+      kind: PlaygroundArtifactKind
       title: string
       language: string
       content: string
@@ -66,7 +67,7 @@ export function PlaygroundArtifactSourceSheet(
 
   const createArtifact = async (
     selection: {
-      kind: 'markdown' | 'code'
+      kind: PlaygroundArtifactKind
       title: string
       language: string
       content: string
@@ -161,6 +162,11 @@ export function PlaygroundArtifactSourceSheet(
             ) : (
               codeBlocks.map((block) => {
                 const key = `code-${block.index}`
+                // An html or svg fence is previewable in the sandbox, so it is
+                // stored as that kind instead of a generic code artifact.
+                let kind: PlaygroundArtifactKind = 'code'
+                if (block.language === 'html') kind = 'html'
+                if (block.language === 'svg') kind = 'svg'
                 return (
                   <Button
                     className='h-auto justify-start p-3 text-left whitespace-normal'
@@ -169,7 +175,7 @@ export function PlaygroundArtifactSourceSheet(
                     onClick={() =>
                       void createArtifact(
                         {
-                          kind: 'code',
+                          kind,
                           title: t('New {{language}} artifact', {
                             language: block.language,
                           }),

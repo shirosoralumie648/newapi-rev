@@ -655,6 +655,10 @@ const playgroundUsageSchema = z.object({
   tasks: playgroundUsageMetricSchema,
 })
 
+const playgroundSettingsSchema = z.object({
+  sandbox_preview_enabled: z.boolean(),
+})
+
 export interface PlaygroundUsageMetric {
   used: number
   limit: number
@@ -742,6 +746,25 @@ export async function getPlaygroundUsage(
     storage: toMetric(metrics.storage),
     tasks: toMetric(metrics.tasks),
   }
+}
+
+/**
+ * Server-side Playground feature switches. `sandboxPreviewEnabled` is the
+ * administrator opt-in for rendering HTML/SVG artifact content inside the
+ * sandboxed preview; while it is false the browser must keep artifact content
+ * inert.
+ */
+export interface PlaygroundServerSettings {
+  sandboxPreviewEnabled: boolean
+}
+
+export async function getPlaygroundSettings(
+  signal?: AbortSignal
+): Promise<PlaygroundServerSettings> {
+  const response = await api.get(API_ENDPOINTS.PLAYGROUND_SETTINGS, { signal })
+  requireServerSuccess(response.data)
+  const settings = playgroundSettingsSchema.parse(response.data.data)
+  return { sandboxPreviewEnabled: settings.sandbox_preview_enabled }
 }
 
 const serverPresetSchema = z.object({

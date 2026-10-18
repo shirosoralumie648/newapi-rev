@@ -86,6 +86,11 @@ type PlaygroundQuotaPolicy struct {
 type PlaygroundSetting struct {
 	Defaults       *PlaygroundQuotaPolicy           `json:"defaults"`
 	GroupOverrides map[string]PlaygroundQuotaPolicy `json:"group_overrides"`
+	// SandboxPreviewEnabled turns on the sandboxed preview of HTML and SVG
+	// artifacts. It stays off by default: artifact content is model output the
+	// account did not author, so an administrator must opt in before the
+	// Playground mounts it inside the sandboxed iframe.
+	SandboxPreviewEnabled bool `json:"sandbox_preview_enabled"`
 }
 
 var playgroundSetting = newPlaygroundSetting()
@@ -166,6 +171,13 @@ func builtinPlaygroundQuotaPolicy() PlaygroundQuotaPolicy {
 
 func GetPlaygroundSetting() *PlaygroundSetting {
 	return &playgroundSetting
+}
+
+// IsSandboxPreviewEnabled reports whether administrators enabled the sandboxed
+// HTML/SVG artifact preview. A zero value (the shipped default) means the
+// browser must not render artifact content at all.
+func IsSandboxPreviewEnabled() bool {
+	return playgroundSetting.SandboxPreviewEnabled
 }
 
 // GetPlaygroundQuotaPolicy resolves the effective budget for a user group:
