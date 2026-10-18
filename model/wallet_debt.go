@@ -302,6 +302,19 @@ func chargeWalletQuotaTx(tx *gorm.DB, userId int, charge int64, limit int64, req
 	if err != nil {
 		return 0, 0, err
 	}
+	return applyLockedWalletChargeTx(tx, userId, balance, debt, charge, limit, requestId)
+}
+
+// applyLockedWalletChargeTx applies one charge on an already locked wallet
+// (hold -> user -> debt order) and records everything beyond the credit line
+// as debt. It returns the wallet and the debt part so the caller can account
+// only the wallet movement as consumption. Daily settlement uses it directly
+// because it claims its idempotency reference between the wallet lock and the
+// charge.
+func applyLockedWalletChargeTx(tx *gorm.DB, userId int, balance int64, debt *WalletDebt, charge int64, limit int64, requestId string) (int64, int64, error) {
+	if charge <= 0 {
+		return 0, 0, nil
+	}
 	outstanding := int64(0)
 	if debt != nil {
 		outstanding = debt.Amount

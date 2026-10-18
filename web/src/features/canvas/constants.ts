@@ -97,6 +97,11 @@ export const CANVAS_DROP_MESSAGES = {
   UPLOAD_FAILED: 'The file could not be added to the canvas.',
 } as const
 
+// A small image keeps the one-request base64 path: the bytes are already primed
+// for an instant preview. Everything larger goes through the reservation flow
+// so the file never travels inside a JSON body.
+export const CANVAS_ATTACHMENT_INLINE_MAX_BYTES = 1024 * 1024
+
 export const CANVAS_EDIT_MESSAGES = {
   PASTE_NO_ROOM: 'The canvas is full; the selection could not be pasted.',
 } as const
@@ -148,6 +153,46 @@ export const CANVAS_WORKFLOW_VIDEO_SIZE_RATIOS: Record<string, string> = {
 // reads and forwards the body under its own request-size limit.
 export const CANVAS_WORKFLOW_IMAGE_INPUT_MAX_COUNT = 4
 export const CANVAS_WORKFLOW_IMAGE_INPUT_MAX_BYTES = 8 * 1024 * 1024
+
+// Image tools of one image node. Crop and local upscale transform the bytes in
+// the browser and save the result as a new canvas attachment; redraw sends the
+// image plus a painted mask through the existing /pg/images/edits relay route,
+// so billing, permissions and channel selection stay server-side. Every tool
+// adds its result as a new image node linked to the node it started from.
+export const CANVAS_IMAGE_TOOL_UPSCALE_FACTORS = [2, 3, 4] as const
+// Longest edge of an image a tool draws or returns. It bounds the local upscale
+// and the canvas a redraw composes, so a huge source cannot exhaust browser
+// memory; the text of the related messages mirrors this value.
+export const CANVAS_IMAGE_TOOL_MAX_EDGE = 4096
+// Smallest crop edge a tool submits, in source pixels.
+export const CANVAS_IMAGE_TOOL_CROP_MIN_SIZE = 8
+// Brush diameters in source pixels: a fine stroke, the default and a broad one.
+export const CANVAS_IMAGE_TOOL_BRUSH_SIZES = [12, 24, 48] as const
+
+// Translation keys for the image tool dialogs. The values double as English
+// source text and as i18n keys.
+export const CANVAS_IMAGE_TOOL_TITLES = {
+  crop: 'Crop image',
+  redraw: 'Redraw image area',
+  upscale: 'Upscale image',
+} as const
+
+// Image tool problem keys the hook reports. The strings double as English
+// source text and as i18n keys. The size limit mirrors
+// CANVAS_WORKFLOW_IMAGE_INPUT_MAX_BYTES, which the read path enforces.
+export const CANVAS_IMAGE_TOOL_MESSAGES = {
+  SOURCE_UNREADABLE: 'The image could not be read from this node.',
+  SOURCE_TOO_LARGE: 'The image is larger than the 8 MiB limit.',
+  CROP_TOO_SMALL: 'The crop area is too small.',
+  UPSCALE_UNAVAILABLE:
+    'The image cannot be upscaled within the 4096-pixel limit.',
+  MASK_EMPTY: 'Paint over the area you want to change.',
+  PROMPT_REQUIRED: 'Describe the change for the painted area.',
+  MODEL_REQUIRED: 'Choose a model for the redraw.',
+  RESULT_UNREADABLE: 'The generated image could not be added to the canvas.',
+  NODE_LIMIT: 'The canvas is full; the result could not be added.',
+  FAILED: 'The image operation failed.',
+} as const
 
 // A new linked node (a result node added by a run) is dropped to the right of
 // the step it belongs to.

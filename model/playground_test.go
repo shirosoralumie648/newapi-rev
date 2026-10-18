@@ -115,14 +115,14 @@ func playgroundTestDB(t *testing.T, dialect string) *gorm.DB {
 	common.SetDatabaseTypes(common.DatabaseType(dialect), previousLog)
 	model.DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundUserUsage{}, &model.PlaygroundUpload{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMessage{}, &model.PlaygroundSession{}, &model.Task{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundUserUsage{}, &model.PlaygroundUpload{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMessage{}, &model.PlaygroundSession{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
 		model.DB = previous
 		common.SetDatabaseTypes(previousMain, previousLog)
 	})
-	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUpload{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.Task{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUpload{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -1093,6 +1093,23 @@ func usePlaygroundGroupQuota(t *testing.T, group string, override playground_set
 			return
 		}
 		delete(settings.GroupOverrides, group)
+	})
+}
+
+// usePlaygroundStorageBilling overrides the optional metered storage tier for
+// one test and restores it afterwards, group free-allowance overrides included.
+func usePlaygroundStorageBilling(t *testing.T, mutate func(setting *playground_setting.PlaygroundStorageBillingSetting)) {
+	t.Helper()
+	setting := playground_setting.GetPlaygroundStorageBillingSetting()
+	previous := *setting
+	previousGroupFreeGB := make(map[string]float64, len(setting.GroupFreeGB))
+	for group, freeGB := range setting.GroupFreeGB {
+		previousGroupFreeGB[group] = freeGB
+	}
+	mutate(setting)
+	t.Cleanup(func() {
+		*setting = previous
+		setting.GroupFreeGB = previousGroupFreeGB
 	})
 }
 
@@ -4366,6 +4383,243 @@ func TestPlaygroundTrashLifecycle(t *testing.T) {
 			require.Equal(t, http.StatusOK, playgroundRequest(t, 9, http.MethodPost, "/api/playground/sessions/"+groupID+"/restore", nil, controller.RestorePlaygroundSession).Code)
 			_, err = model.GetPlaygroundSession(9, groupID)
 			require.NoError(t, err)
+		})
+	}
+}
+
+// The optional metered storage tier samples each account's peak footprint into
+// one row per account and day, charges finished days exactly once to the same
+// wallet the relay consumes from, records the charge in the unified wallet
+// ledger and turns an uncovered remainder into wallet debt that locks the
+// account read-only until it is paid. Sampling, replay and the daily reference
+// are all idempotent, and the (user_id, date) unique index keeps the day row
+// single.
+func TestPlaygroundStorageBillingSettlement(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			previousLog := model.LOG_DB
+			model.LOG_DB = db
+			require.NoError(t, db.AutoMigrate(&model.Log{}))
+			t.Cleanup(func() {
+				model.LOG_DB = previousLog
+				require.NoError(t, db.Migrator().DropTable(&model.Log{}))
+			})
+			// The uncovered charge of the second account can only become debt
+			// when its overdraft credit line is zero.
+			previousQuotaSetting := *operation_setting.GetQuotaSetting()
+			operation_setting.GetQuotaSetting().OverdraftLimitUSD = 0
+			operation_setting.GetQuotaSetting().OverdraftGroupOverrides = nil
+			t.Cleanup(func() { *operation_setting.GetQuotaSetting() = previousQuotaSetting })
+
+			usePlaygroundStorageBilling(t, func(setting *playground_setting.PlaygroundStorageBillingSetting) {
+				setting.Enabled = true
+				setting.PriceUSDPerGBMonth = 15
+				setting.FreeGB = 0
+				setting.GroupFreeGB = map[string]float64{}
+				setting.ApplyGroupRatio = false
+				setting.GraceDays = 7
+				setting.Egress = playground_setting.PlaygroundStorageEgressSetting{
+					Mode:          playground_setting.PlaygroundStorageEgressModeMetered,
+					PriceUSDPerGB: 1,
+				}
+			})
+
+			// Account 7 stores one GiB and can pay; account 8 stores two GiB
+			// and holds nothing, so its whole charge becomes debt.
+			session := createPlayground(t, 7, "storage-billing")
+			require.NotEmpty(t, session["id"])
+			require.NoError(t, db.Model(&model.User{}).Where("id = ?", 7).Update("quota", 1_000_000).Error)
+			usage7 := model.PlaygroundUserUsage{UserID: 7}
+			require.NoError(t, db.Where("user_id = ?", 7).Assign(map[string]any{"attachment_bytes": int64(1) << 30}).FirstOrCreate(&usage7).Error)
+			usage8 := model.PlaygroundUserUsage{UserID: 8}
+			require.NoError(t, db.Where("user_id = ?", 8).Assign(map[string]any{"attachment_bytes": int64(2) << 30}).FirstOrCreate(&usage8).Error)
+
+			now := common.GetTimestamp()
+			today := time.Unix(now, 0).Format("2006-01-02")
+			yesterday := time.Unix(now, 0).AddDate(0, 0, -1).Format("2006-01-02")
+
+			// The hourly sampler folds the measured footprint into today's row
+			// as a running peak.
+			sampled, err := model.SamplePlaygroundStoragePeaks(now)
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, sampled)
+			var todayRow model.PlaygroundStorageLedger
+			require.NoError(t, db.Where("user_id = ? AND date = ?", 7, today).First(&todayRow).Error)
+			assert.EqualValues(t, int64(1)<<30, todayRow.PeakBytes)
+			assert.Equal(t, model.PlaygroundStorageLedgerStatusPending, todayRow.Status)
+
+			// One row per account and day is a database guarantee.
+			require.Error(t, db.Create(&model.PlaygroundStorageLedger{UserId: 7, Date: today, Status: model.PlaygroundStorageLedgerStatusPending}).Error)
+
+			// A finished day bills storage and metered egress exactly once:
+			// one GiB stored is 0.5 USD and one GiB served is 1 USD, so the day
+			// charges 1.5 USD = 750000 quota from the wallet.
+			require.NoError(t, db.Create(&model.PlaygroundStorageLedger{
+				UserId: 7, Date: yesterday, PeakBytes: int64(1) << 30, EgressBytes: int64(1) << 30,
+				Status: model.PlaygroundStorageLedgerStatusPending,
+			}).Error)
+			require.NoError(t, db.Create(&model.PlaygroundStorageLedger{
+				UserId: 8, Date: yesterday, PeakBytes: int64(2) << 30,
+				Status: model.PlaygroundStorageLedgerStatusPending,
+			}).Error)
+
+			report, err := model.SettlePlaygroundStorageLedgers(now, 10)
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, report.SettledCount)
+			assert.EqualValues(t, 1, report.GraceCount)
+			assert.EqualValues(t, 750_000, report.ChargedQuota)
+			assert.EqualValues(t, 500_000, report.GraceQuota)
+
+			var settled model.PlaygroundStorageLedger
+			require.NoError(t, db.Where("user_id = ? AND date = ?", 7, yesterday).First(&settled).Error)
+			assert.Equal(t, model.PlaygroundStorageLedgerStatusSettled, settled.Status)
+			assert.EqualValues(t, 750_000, settled.Quota)
+			assert.Zero(t, settled.DebtQuota)
+			assert.EqualValues(t, 500_000, settled.EgressQuota)
+			assert.EqualValues(t, int64(1)<<30, settled.BillableBytes)
+			balance, err := model.GetUserQuota(7, true)
+			require.NoError(t, err)
+			assert.EqualValues(t, 250_000, balance)
+
+			// The charge is one wallet-account movement under the (user, date)
+			// reference that makes the day replay-safe.
+			var entries []model.WalletLedgerEntry
+			require.NoError(t, db.Where("user_id = ? AND ref_type = ?", 7, model.WalletLedgerRefStorageDaily).Find(&entries).Error)
+			require.Len(t, entries, 1)
+			assert.Equal(t, model.WalletLedgerKindStorageDaily, entries[0].Kind)
+			assert.EqualValues(t, -750_000, entries[0].Amount)
+			assert.Equal("7:"+yesterday, entries[0].RefId)
+
+			// The settlement is visible as an ordinary consume log.
+			var logs []model.Log
+			require.NoError(t, db.Where("user_id = ? AND type = ?", 7, model.LogTypeConsume).Find(&logs).Error)
+			require.Len(t, logs, 1)
+			assert.Equal(t, model.PlaygroundStorageBillingModelName, logs[0].ModelName)
+			assert.Equal(t, 750_000, logs[0].Quota)
+			assert.Contains(t, logs[0].Other, "storage_date")
+
+			// Replaying the pass charges nothing again.
+			replay, err := model.SettlePlaygroundStorageLedgers(now, 10)
+			require.NoError(t, err)
+			assert.Zero(t, replay.SettledCount)
+			assert.Zero(t, replay.ChargedQuota)
+			balance, err = model.GetUserQuota(7, true)
+			require.NoError(t, err)
+			assert.EqualValues(t, 250_000, balance)
+			require.NoError(t, db.Where("user_id = ? AND ref_type = ?", 7, model.WalletLedgerRefStorageDaily).Find(&entries).Error)
+			assert.Len(t, entries, 1)
+
+			// The ledger agrees with the unified wallet ledger.
+			reconcile, err := model.ReconcilePlaygroundStorageBilling(50, 0)
+			require.NoError(t, err)
+			assert.Zero(t, reconcile.DeviationCount, "%+v", reconcile.Deviations)
+
+			// Even a row forced back to pending cannot charge twice: the
+			// claimed wallet reference refuses the replay.
+			require.NoError(t, db.Model(&model.PlaygroundStorageLedger{}).Where("user_id = ? AND date = ?", 7, yesterday).Update("status", model.PlaygroundStorageLedgerStatusPending).Error)
+			forced, err := model.SettlePlaygroundStorageLedgers(now, 10)
+			require.NoError(t, err)
+			assert.Zero(t, forced.ChargedQuota)
+			balance, err = model.GetUserQuota(7, true)
+			require.NoError(t, err)
+			assert.EqualValues(t, 250_000, balance)
+			require.NoError(t, db.Where("user_id = ? AND ref_type = ?", 7, model.WalletLedgerRefStorageDaily).Find(&entries).Error)
+			assert.Len(t, entries, 1)
+
+			// Account 8's uncovered day is debt and mirrors the shared
+			// read-only lock: the workspace status reports it and new billable
+			// work is refused until the wallet pays.
+			var graced model.PlaygroundStorageLedger
+			require.NoError(t, db.Where("user_id = ? AND date = ?", 8, yesterday).First(&graced).Error)
+			assert.Equal(t, model.PlaygroundStorageLedgerStatusGrace, graced.Status)
+			assert.EqualValues(t, 500_000, graced.DebtQuota)
+			assert.Zero(t, graced.Quota)
+			assert.EqualValues(t, now+7*24*60*60, graced.GraceUntil)
+			debt, readOnly, err := model.ResolveWalletDebtStatus(8)
+			require.NoError(t, err)
+			assert.EqualValues(t, 500_000, debt)
+			assert.True(t, readOnly)
+
+			status := playgroundRequest(t, 8, http.MethodGet, "/api/playground/storage/billing", nil, controller.GetPlaygroundStorageBilling)
+			require.Equal(t, http.StatusOK, status.Code, status.Body.String())
+			assert.Contains(t, status.Body.String(), `"read_only":true`)
+			assert.Contains(t, status.Body.String(), `"debt_quota":500000`)
+			blocked := playgroundRequest(t, 8, http.MethodPost, "/v1/videos", map[string]any{"model": "kling-v1", "prompt": "fox"}, controller.PlaygroundVideoTask)
+			assert.Equal(t, http.StatusForbidden, blocked.Code, blocked.Body.String())
+			assert.Contains(t, blocked.Body.String(), controller.PlaygroundWalletDebtErrorCode)
+
+			// A recharge pays the debt and the lock clears by itself.
+			_, err = model.ApplyWalletLedgerDeltaDB(8, model.WalletLedgerKindTopUp, 500_000, model.WalletLedgerRefTopUp, "pg-storage-topup", "")
+			require.NoError(t, err)
+			debt, readOnly, err = model.ResolveWalletDebtStatus(8)
+			require.NoError(t, err)
+			assert.Zero(t, debt)
+			assert.False(t, readOnly)
+			balance, err = model.GetUserQuota(8, true)
+			require.NoError(t, err)
+			assert.Zero(t, balance, "the recharge paid the debt instead of becoming spendable")
+		})
+	}
+}
+
+// The metered tier bounds attachment downloads per day: the byte and request
+// ceilings refuse the transfer that would cross them before a byte is served,
+// the served volume is accumulated for settlement, and the enforcement only
+// applies while the tier is enabled.
+func TestPlaygroundStorageBillingEgressLimits(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			png := playgroundPNGFixture(64)
+			usePlaygroundStorageBilling(t, func(setting *playground_setting.PlaygroundStorageBillingSetting) {
+				setting.Enabled = true
+				setting.FreeGB = 0
+				setting.GroupFreeGB = map[string]float64{}
+				setting.Egress = playground_setting.PlaygroundStorageEgressSetting{
+					Mode:               playground_setting.PlaygroundStorageEgressModeMetered,
+					PriceUSDPerGB:      1,
+					DailyBytesLimit:    int64(len(png)) + 8,
+					DailyRequestsLimit: 3,
+				}
+			})
+			session := createPlayground(t, 7, "storage-egress")
+			id := session["id"].(string)
+			uploaded := playgroundUploadAttachment(t, 7, id, "egress-1", "image/png", png)
+			attachmentID, _ := uploaded["id"].(string)
+			require.NotEmpty(t, attachmentID)
+			contentPath := "/api/playground/sessions/" + id + "/attachments/" + attachmentID + "/content"
+
+			content := playgroundRequest(t, 7, http.MethodGet, contentPath, nil, controller.GetPlaygroundAttachmentContent)
+			require.Equal(t, http.StatusOK, content.Code, content.Body.String())
+			assert.Equal(t, png, content.Body.Bytes())
+
+			// The next full download would cross the daily byte budget.
+			refused := playgroundRequest(t, 7, http.MethodGet, contentPath, nil, controller.GetPlaygroundAttachmentContent)
+			assert.Equal(t, http.StatusTooManyRequests, refused.Code, refused.Body.String())
+			assert.Contains(t, refused.Body.String(), controller.PlaygroundEgressLimitErrorCode)
+
+			today := time.Unix(common.GetTimestamp(), 0).Format("2006-01-02")
+			var row model.PlaygroundStorageLedger
+			require.NoError(t, db.Where("user_id = ? AND date = ?", 7, today).First(&row).Error)
+			assert.EqualValues(t, len(png), row.EgressBytes)
+			assert.EqualValues(t, 1, row.EgressRequests)
+
+			// The request ceiling refuses independently of the byte budget.
+			setting := playground_setting.GetPlaygroundStorageBillingSetting()
+			setting.Egress.DailyBytesLimit = 0
+			setting.Egress.DailyRequestsLimit = 1
+			refused = playgroundRequest(t, 7, http.MethodGet, contentPath, nil, controller.GetPlaygroundAttachmentContent)
+			assert.Equal(t, http.StatusTooManyRequests, refused.Code, refused.Body.String())
+			assert.Contains(t, refused.Body.String(), controller.PlaygroundEgressLimitErrorCode)
+			require.NoError(t, db.Where("user_id = ? AND date = ?", 7, today).First(&row).Error)
+			assert.EqualValues(t, 1, row.EgressRequests)
+
+			// Disabling the tier lifts the limits without deleting anything.
+			setting.Enabled = false
+			content = playgroundRequest(t, 7, http.MethodGet, contentPath, nil, controller.GetPlaygroundAttachmentContent)
+			require.Equal(t, http.StatusOK, content.Code, content.Body.String())
+			assert.Equal(t, png, content.Body.Bytes())
 		})
 	}
 }

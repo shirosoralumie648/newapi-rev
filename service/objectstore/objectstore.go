@@ -80,6 +80,15 @@ type MultipartAborter interface {
 	AbortMultipartUploads(ctx context.Context, key string) error
 }
 
+// ObjectLister is an optional Store capability for backends that can enumerate
+// the stored objects below one logical key prefix. Reconciliation compares what
+// the backend holds with the database rows that own it; a backend without this
+// capability cannot run that comparison. The callback receives logical keys,
+// never backend storage paths, and a non-nil error from it stops the listing.
+type ObjectLister interface {
+	List(ctx context.Context, prefix string, fn func(ObjectInfo) error) error
+}
+
 // ServeOptions controls the response headers used when Serve streams an
 // object. Filename is sanitized and escaped before it is written to
 // Content-Disposition.

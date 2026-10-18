@@ -229,6 +229,12 @@ export interface AmountRequest {
 export interface AffiliateTransferRequest {
   /** Quota amount to transfer */
   quota: number
+  /**
+   * Idempotency key of one transfer attempt. The server stores it in the
+   * wallet ledger, so a repeated request reports the first outcome without
+   * moving quota twice.
+   */
+  request_id?: string
 }
 
 /**

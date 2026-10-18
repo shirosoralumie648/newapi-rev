@@ -544,22 +544,24 @@ func releaseFailedPlaygroundUpload(store objectstore.Store, upload *PlaygroundUp
 }
 
 // ReleasePlaygroundUpload cancels one reservation: the row and its quota are
-// released in one transaction and the object (a partial direct upload included)
-// is removed afterwards. Releasing an unknown, foreign or already finished
-// upload answers exactly like a missing one.
+// released in one transaction, which also queues the object deletion, and the
+// object (a partial direct upload included) is removed right after the commit.
+// Releasing an unknown, foreign or already finished upload answers exactly like
+// a missing one.
 func ReleasePlaygroundUpload(userID int, uploadID string) error {
-	released, err := claimPlaygroundUpload(userID, uploadID)
+	queued, err := claimPlaygroundUpload(userID, uploadID)
 	if err != nil {
 		return err
 	}
-	deletePlaygroundUploadObject(nil, released)
+	drainPlaygroundObjectDeletes(nil, queued)
 	return nil
 }
 
 // claimPlaygroundUpload deletes one reservation and releases the quota it
-// reserved, returning the removed row so the caller can drop its bytes.
-func claimPlaygroundUpload(userID int, uploadID string) (*PlaygroundUpload, error) {
-	var released PlaygroundUpload
+// reserved, returning the queued object deletion the caller drains after the
+// commit.
+func claimPlaygroundUpload(userID int, uploadID string) ([]playgroundQueuedObjectDelete, error) {
+	var queued []playgroundQueuedObjectDelete
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		usage, err := lockPlaygroundUserUsage(tx, userID)
 		if err != nil {
@@ -576,17 +578,20 @@ func claimPlaygroundUpload(userID int, uploadID string) (*PlaygroundUpload, erro
 		if err := tx.Where("id = ? AND user_id = ?", upload.ID, userID).Delete(&PlaygroundUpload{}).Error; err != nil {
 			return err
 		}
+		queued, err = enqueuePlaygroundObjectDeletes(tx, []playgroundStoredObject{{ObjectKey: upload.ObjectKey}}, playgroundObjectOriginUpload)
+		if err != nil {
+			return err
+		}
 		usage.apply(playgroundUserUsageDelta{AttachmentPendingCount: -1, AttachmentPendingBytes: -upload.ByteSize})
 		if err := savePlaygroundUserUsage(tx, usage); err != nil {
 			return err
 		}
-		released = upload
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return &released, nil
+	return queued, nil
 }
 
 // DeleteExpiredPlaygroundUploads releases reservations whose upload window
@@ -605,15 +610,15 @@ func DeleteExpiredPlaygroundUploads(expiredBefore int64, batchSize int) (int64, 
 			return total, err
 		}
 		for index := range rows {
-			released, err := claimExpiredPlaygroundUpload(&rows[index], expiredBefore)
+			queued, claimed, err := claimExpiredPlaygroundUpload(&rows[index], expiredBefore)
 			if err != nil {
 				return total, err
 			}
-			if released == nil {
+			if !claimed {
 				continue
 			}
 			total++
-			deletePlaygroundUploadObject(nil, released)
+			drainPlaygroundObjectDeletes(nil, queued)
 		}
 		if len(rows) < batchSize {
 			return total, nil
@@ -622,10 +627,12 @@ func DeleteExpiredPlaygroundUploads(expiredBefore int64, batchSize int) (int64, 
 }
 
 // claimExpiredPlaygroundUpload deletes one expired reservation under its expiry
-// guard and releases its quota, returning nil when another writer already
-// claimed the row.
-func claimExpiredPlaygroundUpload(row *PlaygroundUpload, expiredBefore int64) (*PlaygroundUpload, error) {
-	var released *PlaygroundUpload
+// guard and releases its quota, returning the queued object deletion and
+// whether this call claimed the row; a row another writer already claimed
+// reports false.
+func claimExpiredPlaygroundUpload(row *PlaygroundUpload, expiredBefore int64) ([]playgroundQueuedObjectDelete, bool, error) {
+	var queued []playgroundQueuedObjectDelete
+	claimed := false
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		usage, err := lockPlaygroundUserUsage(tx, row.UserID)
 		if err != nil {
@@ -639,46 +646,52 @@ func claimExpiredPlaygroundUpload(row *PlaygroundUpload, expiredBefore int64) (*
 		if result.RowsAffected == 0 {
 			return nil
 		}
+		queued, err = enqueuePlaygroundObjectDeletes(tx, []playgroundStoredObject{{ObjectKey: row.ObjectKey}}, playgroundObjectOriginUpload)
+		if err != nil {
+			return err
+		}
 		usage.apply(playgroundUserUsageDelta{AttachmentPendingCount: -1, AttachmentPendingBytes: -row.ByteSize})
 		if err := savePlaygroundUserUsage(tx, usage); err != nil {
 			return err
 		}
-		released = row
+		claimed = true
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return released, nil
+	return queued, claimed, nil
 }
 
 // deletePlaygroundUploadObject drops the bytes a reservation wrote and aborts
 // every multipart upload that still targets the same key, so an interrupted
-// direct upload releases its parts too. Failure is logged, never returned: the
-// database is the authority, and a leftover object is reconciled by later
-// maintenance instead of failing a request whose database state already
-// committed.
-func deletePlaygroundUploadObject(store objectstore.Store, upload *PlaygroundUpload) {
+// direct upload releases its parts too. The delete error is returned to the
+// delete-outbox caller, which keeps its queued entry for the retry worker; an
+// abort failure is only logged, because the object itself is already gone.
+func deletePlaygroundUploadObject(store objectstore.Store, upload *PlaygroundUpload) error {
 	if upload == nil || upload.ObjectKey == "" {
-		return
+		return nil
 	}
 	if store == nil {
 		store = objectstore.DefaultStore()
 	}
 	if store == nil {
 		common.SysError(common.LogText("failed to delete Playground upload object %s: object store is not configured", upload.ObjectKey))
-		return
+		return ErrPlaygroundPayloadStorage
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), playgroundAttachmentObjectTimeout)
 	defer cancel()
+	var deleteErr error
 	if err := store.Delete(ctx, upload.ObjectKey); err != nil && !errors.Is(err, objectstore.ErrObjectNotFound) {
 		common.SysError(common.LogText("failed to delete Playground upload object %s: %s", upload.ObjectKey, err.Error()))
+		deleteErr = err
 	}
 	aborter, ok := store.(objectstore.MultipartAborter)
 	if !ok {
-		return
+		return deleteErr
 	}
 	if err := aborter.AbortMultipartUploads(ctx, upload.ObjectKey); err != nil {
 		common.SysError(common.LogText("failed to abort multipart uploads of %s: %s", upload.ObjectKey, err.Error()))
 	}
+	return deleteErr
 }

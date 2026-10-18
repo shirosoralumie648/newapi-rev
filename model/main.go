@@ -484,6 +484,8 @@ func migrateDB() error {
 		&PlaygroundTaskArtifact{},
 		&PlaygroundTaskArtifactPin{},
 		&PlaygroundTaskArtifactSync{},
+		&PlaygroundStorageLedger{},
+		&PlaygroundObjectDeleteOutbox{},
 		&WalletLedgerEntry{},
 		&WalletHold{},
 		&WalletHoldGrant{},
@@ -511,6 +513,16 @@ func migrateDB() error {
 	}
 	if _, err := EnsureWalletLedgerOpeningBalances(); err != nil {
 		return fmt.Errorf("seed wallet ledger opening balances: %w", err)
+	}
+	// 存量邀请关系与存量邀请额度在首次升级时导入一次；打开余额先行，使被导入的
+	// 钱包保留一条基线流水加一条导入流水。
+	legacyReferral, err := MigrateLegacyReferralData()
+	if err != nil {
+		return fmt.Errorf("import the legacy referral data: %w", err)
+	}
+	if !legacyReferral.Skipped {
+		common.SysLog(common.LogText("legacy referral import: %d relations backfilled, %d accounts and %d quota imported",
+			legacyReferral.RelationCount, legacyReferral.MigratedUsers, legacyReferral.MigratedQuota))
 	}
 	if err := InitializeUserAuthVersions(); err != nil {
 		return err

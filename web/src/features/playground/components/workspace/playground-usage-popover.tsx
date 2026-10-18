@@ -32,7 +32,7 @@ import { Progress } from '@/components/ui/progress'
 import { toIntlLocale } from '@/i18n/languages'
 import { formatBytes, formatNumber } from '@/lib/format'
 
-import { usePlaygroundUsage } from '../../hooks'
+import { usePlaygroundStorageBilling, usePlaygroundUsage } from '../../hooks'
 
 function usedPercent(used: number, limit: number): number {
   if (limit <= 0) return 0
@@ -153,6 +153,56 @@ function PlaygroundUsageSummary(props: { userId: number | null }) {
           )}
         </div>
       ))}
+      <PlaygroundStorageBillingSummary userId={props.userId} />
+    </div>
+  )
+}
+
+/**
+ * The optional metered storage tier, rendered only while an administrator has
+ * enabled it. The line shows today's accruing peak together with the read-only
+ * warning an unpaid settlement raises; a disabled tier or an unavailable
+ * status leaves the popover unchanged.
+ */
+function PlaygroundStorageBillingSummary(props: { userId: number | null }) {
+  const { t, i18n } = useTranslation()
+  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
+  const query = usePlaygroundStorageBilling(props.userId)
+
+  if (query.isError || !query.data || !query.data.enabled) {
+    return null
+  }
+  const peakBytes = query.data.today?.peakBytes ?? 0
+  const egressBytes = query.data.today?.egressBytes ?? 0
+
+  return (
+    <div className='flex flex-col gap-1.5 border-t pt-3'>
+      <span className='font-medium'>{t('Storage billing')}</span>
+      <div className='flex items-center justify-between gap-3'>
+        <span className='text-muted-foreground text-xs'>
+          {t('Peak stored today')}
+        </span>
+        <span className='text-muted-foreground text-xs tabular-nums'>
+          {formatBytes(peakBytes, locale)}
+        </span>
+      </div>
+      {egressBytes > 0 && (
+        <div className='flex items-center justify-between gap-3'>
+          <span className='text-muted-foreground text-xs'>
+            {t('Downloaded today')}
+          </span>
+          <span className='text-muted-foreground text-xs tabular-nums'>
+            {formatBytes(egressBytes, locale)}
+          </span>
+        </div>
+      )}
+      {query.data.readOnly && (
+        <p className='text-destructive text-xs'>
+          {t(
+            'Your wallet has an unpaid balance, so uploading new Playground data is read-only until you top up.'
+          )}
+        </p>
+      )}
     </div>
   )
 }

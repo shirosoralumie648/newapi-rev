@@ -33,6 +33,7 @@ export const REFERRAL_SOURCE_LABEL_KEYS: Record<string, string> = {
   code: 'Invitation Code',
   oauth: 'OAuth',
   admin: 'Admin',
+  legacy: 'Legacy',
 }
 
 /** Commission states of one invitation or event, mapped to their translation key. */
@@ -68,6 +69,7 @@ export const REFERRAL_SOURCE_FILTER_VALUES = [
   'code',
   'oauth',
   'admin',
+  'legacy',
 ] as const
 
 /** Commission-status filter options of the administrator invitation list. */

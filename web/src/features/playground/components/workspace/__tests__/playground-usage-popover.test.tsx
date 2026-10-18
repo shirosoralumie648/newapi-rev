@@ -59,6 +59,40 @@ const usage = {
   tasks: { used: 1, limit: 3, used_bytes: 4096, limit_bytes: 64 * 1024 * 1024 },
 }
 
+const storageBilling = {
+  enabled: true,
+  group: 'pro',
+  price_usd_per_gb_month: 0.015,
+  free_bytes: 1024 * 1024 * 1024,
+  apply_group_ratio: false,
+  grace_days: 7,
+  egress_mode: 'unmetered',
+  egress_price_usd_per_gb: 0,
+  egress_daily_bytes_limit: 0,
+  egress_daily_requests_limit: 0,
+  today: {
+    id: 1,
+    user_id: 7,
+    date: '2026-10-18',
+    peak_bytes: 2 * 1024 * 1024 * 1024,
+    free_bytes: 1024 * 1024 * 1024,
+    billable_bytes: 1024 * 1024 * 1024,
+    egress_bytes: 3 * 1024 * 1024,
+    egress_requests: 2,
+    quota: 0,
+    debt_quota: 0,
+    egress_quota: 0,
+    status: 'pending',
+    grace_until: 0,
+    settled_at: 0,
+    created_at: 1,
+    updated_at: 1,
+  },
+  debt_quota: 0,
+  grace_until: 0,
+  read_only: false,
+}
+
 let testI18n: i18n
 
 function renderPopover(userId: number | null = 7, onOpenUpgrade?: () => void) {
@@ -167,4 +201,65 @@ test('a failed usage request shows the error state instead of the summary', asyn
     'Resource usage could not be loaded.'
   )
   expect(screen.queryByText('Conversations')).not.toBeInTheDocument()
+})
+
+test('the popover shows the metered storage line while the tier is enabled', async () => {
+  vi.spyOn(api, 'get').mockImplementation((url: string) => {
+    if (url === '/api/playground/storage/billing') {
+      return Promise.resolve({ data: { success: true, data: storageBilling } })
+    }
+    return Promise.resolve({ data: { success: true, data: usage } })
+  })
+  const user = userEvent.setup()
+  renderPopover()
+
+  await user.click(screen.getByRole('button', { name: 'Resource usage' }))
+
+  expect(await screen.findByText('Storage billing')).toBeVisible()
+  expect(screen.getByText('Peak stored today')).toBeVisible()
+  expect(screen.getByText('2 GiB')).toBeVisible()
+  expect(screen.getByText('Downloaded today')).toBeVisible()
+  expect(screen.getByText('3 MiB')).toBeVisible()
+})
+
+test('an unpaid storage day marks the popover read-only', async () => {
+  vi.spyOn(api, 'get').mockImplementation((url: string) => {
+    if (url === '/api/playground/storage/billing') {
+      return Promise.resolve({
+        data: {
+          success: true,
+          data: { ...storageBilling, debt_quota: 500000, read_only: true },
+        },
+      })
+    }
+    return Promise.resolve({ data: { success: true, data: usage } })
+  })
+  const user = userEvent.setup()
+  renderPopover()
+
+  await user.click(screen.getByRole('button', { name: 'Resource usage' }))
+
+  expect(
+    await screen.findByText(
+      'Your wallet has an unpaid balance, so uploading new Playground data is read-only until you top up.'
+    )
+  ).toBeVisible()
+})
+
+test('a disabled storage tier leaves the popover unchanged', async () => {
+  vi.spyOn(api, 'get').mockImplementation((url: string) => {
+    if (url === '/api/playground/storage/billing') {
+      return Promise.resolve({
+        data: { success: true, data: { ...storageBilling, enabled: false } },
+      })
+    }
+    return Promise.resolve({ data: { success: true, data: usage } })
+  })
+  const user = userEvent.setup()
+  renderPopover()
+
+  await user.click(screen.getByRole('button', { name: 'Resource usage' }))
+
+  expect(await screen.findByText('Conversations')).toBeVisible()
+  expect(screen.queryByText('Storage billing')).not.toBeInTheDocument()
 })
