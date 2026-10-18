@@ -7828,6 +7828,18 @@
     "Users who purchase this plan join {{group}}. These Playground storage limits apply to that group; leave a field empty to inherit the global default.": "Les utilisateurs qui achètent ce forfait rejoignent {{group}}. Ces limites de stockage Playground s'appliquent à ce groupe ; laissez un champ vide pour hériter de la valeur globale par défaut.",
     "Request timing": "Détail des durées",
     "Upstream first byte": "Premier octet amont",
-    "Retries": "Nouvelles tentatives"
+    "Retries": "Nouvelles tentatives",
+    "Compare models": "Comparer les modèles",
+    "Comparing {{count}} models": "Comparaison de {{count}} modèles",
+    "Models to compare": "Modèles à comparer",
+    "Playground parallel comparison limit exceeded.": "Limite de comparaison parallèle du Playground dépassée.",
+    "Reply from {{model}}": "Réponse de {{model}}",
+    "Retry this reply": "Réessayer cette réponse",
+    "Select at least two models to compare": "Sélectionnez au moins deux modèles à comparer",
+    "Select at least two models to compare. Each reply is sent and billed as its own request.": "Sélectionnez au moins deux modèles à comparer. Chaque réponse est envoyée et facturée comme une requête distincte.",
+    "Select one reply to continue the conversation": "Sélectionnez une réponse pour poursuivre la conversation",
+    "Sending the same message to each selected model. Every reply is billed separately.": "Le même message est envoyé à chaque modèle sélectionné. Chaque réponse est facturée séparément.",
+    "Use this reply": "Utiliser cette réponse",
+    "You can compare up to {{count}} models at once": "Vous pouvez comparer jusqu'à {{count}} modèles à la fois"
   }
 }

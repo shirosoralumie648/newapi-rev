@@ -24,6 +24,7 @@ import {
   createUserMessage,
   getMessageContent,
 } from './message-utils'
+import { isParallelMessage } from './parallel-compare-utils'
 
 type ApplyMessageEditResult = {
   messages: Message[]
@@ -59,6 +60,9 @@ function startAssistantReply(
 // The generated reply must stay the last message because streaming handlers
 // target the final assistant message. Reuse the reply that follows the user
 // message as a new version when present; otherwise append a loading reply.
+// A comparison group cannot take one more version — its versions are labelled
+// models — so editing and resubmitting replaces the group like any other
+// regenerated reply instead of corrupting it with a streamed single answer.
 function regenerateAssistantReply(
   messages: Message[],
   userMessageIndex: number,
@@ -67,7 +71,10 @@ function regenerateAssistantReply(
   const assistantIndex = userMessageIndex + 1
   const assistant = messages[assistantIndex]
 
-  if (assistant?.from === MESSAGE_ROLES.ASSISTANT) {
+  if (
+    assistant?.from === MESSAGE_ROLES.ASSISTANT &&
+    !isParallelMessage(assistant)
+  ) {
     return [
       ...messages.slice(0, assistantIndex),
       startAssistantReply(assistant, startedAt),

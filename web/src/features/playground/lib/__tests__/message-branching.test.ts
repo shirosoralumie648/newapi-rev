@@ -32,8 +32,8 @@ import {
   setActiveMessageVersion,
   updateCurrentVersionContent,
 } from '../message/message-utils'
-import { messagesSchema } from '../storage/storage-schema'
 import { normalizeMessagesForStorage } from '../storage/storage'
+import { messagesSchema } from '../storage/storage-schema'
 
 function userMessage(overrides: Partial<Message> = {}): Message {
   return {
@@ -154,6 +154,44 @@ describe('edit and regenerate branch history', () => {
     expect(regenerated.versions).toHaveLength(2)
     expect(regenerated.versions[0].content).toBe('Original answer')
     expect(regenerated.activeVersionIndex).toBe(1)
+  })
+
+  test('submitting an edit before a comparison replaces the group with one plain reply', () => {
+    const group: Message = {
+      key: 'assistant-group',
+      from: 'assistant',
+      parallel: true,
+      status: 'complete',
+      isContentComplete: true,
+      versions: [
+        {
+          id: 'g1',
+          content: 'Answer from GPT',
+          model: 'gpt-4o',
+          status: 'complete',
+        },
+        {
+          id: 'g2',
+          content: 'Answer from Claude',
+          model: 'claude-3',
+          status: 'complete',
+        },
+      ],
+    }
+
+    const result = applyMessageEdit(
+      [userMessage(), group],
+      'user-1',
+      'Edited prompt',
+      true
+    )
+
+    expect(result?.shouldSend).toBe(true)
+    expect(result?.messages).toHaveLength(2)
+    const regenerated = result?.messages[1] as Message
+    expect(regenerated.parallel).toBeUndefined()
+    expect(regenerated.status).toBe('loading')
+    expect(regenerated.versions).toHaveLength(1)
   })
 
   test('regenerating an assistant reply keeps the previous answer as a branch', () => {

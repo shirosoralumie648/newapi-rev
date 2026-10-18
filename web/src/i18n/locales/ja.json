@@ -7828,6 +7828,18 @@
     "Users who purchase this plan join {{group}}. These Playground storage limits apply to that group; leave a field empty to inherit the global default.": "このプランを購入したユーザーは {{group}} に所属します。これらの Playground ストレージ上限はそのグループに適用されます。空欄の項目はグローバル既定値を継承します。",
     "Request timing": "リクエスト処理時間",
     "Upstream first byte": "アップストリーム初回バイト",
-    "Retries": "再試行回数"
+    "Retries": "再試行回数",
+    "Compare models": "モデルを比較",
+    "Comparing {{count}} models": "{{count}} 個のモデルを比較中",
+    "Models to compare": "比較するモデル",
+    "Playground parallel comparison limit exceeded.": "Playground の並列比較の上限を超えました。",
+    "Reply from {{model}}": "{{model}} からの回答",
+    "Retry this reply": "この回答を再試行",
+    "Select at least two models to compare": "比較するモデルを 2 つ以上選択してください",
+    "Select at least two models to compare. Each reply is sent and billed as its own request.": "比較するモデルを 2 つ以上選択してください。各回答は個別のリクエストとして送信され、個別に課金されます。",
+    "Select one reply to continue the conversation": "会話を続ける回答を 1 つ選択してください",
+    "Sending the same message to each selected model. Every reply is billed separately.": "同じメッセージが選択した各モデルに送信されます。各回答は個別に課金されます。",
+    "Use this reply": "この回答を使用",
+    "You can compare up to {{count}} models at once": "一度に最大 {{count}} 個のモデルを比較できます"
   }
 }

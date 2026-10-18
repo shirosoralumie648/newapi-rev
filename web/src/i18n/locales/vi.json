@@ -7828,6 +7828,18 @@
     "Users who purchase this plan join {{group}}. These Playground storage limits apply to that group; leave a field empty to inherit the global default.": "Người dùng mua gói này sẽ tham gia {{group}}. Các hạn mức lưu trữ Playground này áp dụng cho nhóm đó; để trống để kế thừa giá trị mặc định toàn cục.",
     "Request timing": "Thời gian xử lý yêu cầu",
     "Upstream first byte": "Byte đầu tiên của thượng nguồn",
-    "Retries": "Số lần thử lại"
+    "Retries": "Số lần thử lại",
+    "Compare models": "So sánh các mô hình",
+    "Comparing {{count}} models": "Đang so sánh {{count}} mô hình",
+    "Models to compare": "Các mô hình để so sánh",
+    "Playground parallel comparison limit exceeded.": "Đã vượt giới hạn so sánh song song của Playground.",
+    "Reply from {{model}}": "Phản hồi từ {{model}}",
+    "Retry this reply": "Thử lại phản hồi này",
+    "Select at least two models to compare": "Chọn ít nhất hai mô hình để so sánh",
+    "Select at least two models to compare. Each reply is sent and billed as its own request.": "Chọn ít nhất hai mô hình để so sánh. Mỗi phản hồi được gửi và tính phí như một yêu cầu riêng.",
+    "Select one reply to continue the conversation": "Chọn một phản hồi để tiếp tục cuộc trò chuyện",
+    "Sending the same message to each selected model. Every reply is billed separately.": "Cùng một tin nhắn được gửi đến từng mô hình đã chọn. Mỗi phản hồi được tính phí riêng.",
+    "Use this reply": "Dùng phản hồi này",
+    "You can compare up to {{count}} models at once": "Bạn có thể so sánh tối đa {{count}} mô hình cùng lúc"
   }
 }

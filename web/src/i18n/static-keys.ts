@@ -74,6 +74,10 @@ export const STATIC_I18N_KEYS = [
   'Assistant preset limit exceeded.',
   'Playground system prompt limit exceeded.',
   'Playground context summary limit exceeded.',
+  // Client-side feedback of the composer's parallel comparison selection.
+  'Select at least two models to compare',
+  'You can compare up to {{count}} models at once',
+  'Sending the same message to each selected model. Every reply is billed separately.',
   'Assistant preset name must contain 1 to 100 characters.',
   'Assistant preset avatar must be an emoji or an http(s) image URL.',
   'Invalid assistant preset.',

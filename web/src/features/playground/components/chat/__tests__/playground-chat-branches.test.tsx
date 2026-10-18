@@ -33,6 +33,8 @@ beforeAll(() => {
   i18next.addResourceBundle('en', 'translation', {
     'Compressed {{messages}} earlier messages':
       'Compressed {{messages}} earlier messages',
+    'Comparing {{count}} models': 'Comparing {{count}} models',
+    'Reply from {{model}}': 'Reply from {{model}}',
   })
 })
 
@@ -54,6 +56,50 @@ describe('PlaygroundChat branch history', () => {
 
     expect(screen.getByText('Regenerated answer')).toBeInTheDocument()
     expect(screen.getByText('2 of 2')).toBeInTheDocument()
+  })
+
+  test('renders the comparison view for a parallel message group', async () => {
+    const user = userEvent.setup()
+    const onSelectVersion = vi.fn()
+    const group: Message = {
+      key: 'parallel-1',
+      from: 'assistant',
+      parallel: true,
+      status: 'complete',
+      isContentComplete: true,
+      activeVersionIndex: 0,
+      versions: [
+        {
+          id: 'p1',
+          content: 'First compared answer',
+          model: 'gpt-4o',
+          status: 'complete',
+        },
+        {
+          id: 'p2',
+          content: 'Second compared answer',
+          model: 'claude-3',
+          status: 'complete',
+        },
+      ],
+    }
+
+    render(
+      <PlaygroundChat messages={[group]} onSelectVersion={onSelectVersion} />
+    )
+
+    expect(
+      screen.getByRole('group', { name: 'Comparing 2 models' })
+    ).toBeInTheDocument()
+    expect(screen.getByText('First compared answer')).toBeInTheDocument()
+    expect(screen.getByText('Second compared answer')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Previous branch' })
+    ).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Use this reply' }))
+
+    expect(onSelectVersion).toHaveBeenCalledWith(group, 1)
   })
 
   test('switching branches reports the selected version index', async () => {

@@ -7828,6 +7828,18 @@
     "Users who purchase this plan join {{group}}. These Playground storage limits apply to that group; leave a field empty to inherit the global default.": "購買此方案的會員會加入 {{group}}。這些 Playground 儲存上限適用於該群組；留空表示沿用全域預設值。",
     "Request timing": "請求階段耗時",
     "Upstream first byte": "上游首位元組",
-    "Retries": "重試次數"
+    "Retries": "重試次數",
+    "Compare models": "對比模型",
+    "Comparing {{count}} models": "正在對比 {{count}} 個模型",
+    "Models to compare": "要對比的模型",
+    "Playground parallel comparison limit exceeded.": "Playground 並行對比超過數量上限。",
+    "Reply from {{model}}": "來自 {{model}} 的回覆",
+    "Retry this reply": "重試此回覆",
+    "Select at least two models to compare": "至少選擇兩個模型進行對比",
+    "Select at least two models to compare. Each reply is sent and billed as its own request.": "至少選擇兩個模型進行對比。每個回覆都會作為獨立請求傳送並單獨計費。",
+    "Select one reply to continue the conversation": "選擇一則回覆繼續對話",
+    "Sending the same message to each selected model. Every reply is billed separately.": "同一則訊息將傳送給每個已選模型。每個回覆單獨計費。",
+    "Use this reply": "使用此回覆",
+    "You can compare up to {{count}} models at once": "一次最多對比 {{count}} 個模型"
   }
 }

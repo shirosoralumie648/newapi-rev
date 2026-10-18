@@ -7828,6 +7828,18 @@
     "Users who purchase this plan join {{group}}. These Playground storage limits apply to that group; leave a field empty to inherit the global default.": "Пользователи, купившие этот тариф, попадают в группу {{group}}. Эти лимиты хранилища Playground применяются к этой группе; пустое поле наследует глобальное значение по умолчанию.",
     "Request timing": "Разбивка по этапам",
     "Upstream first byte": "Первый байт источника",
-    "Retries": "Повторные попытки"
+    "Retries": "Повторные попытки",
+    "Compare models": "Сравнить модели",
+    "Comparing {{count}} models": "Сравнение {{count}} моделей",
+    "Models to compare": "Модели для сравнения",
+    "Playground parallel comparison limit exceeded.": "Превышен лимит параллельного сравнения Playground.",
+    "Reply from {{model}}": "Ответ от {{model}}",
+    "Retry this reply": "Повторить этот ответ",
+    "Select at least two models to compare": "Выберите не менее двух моделей для сравнения",
+    "Select at least two models to compare. Each reply is sent and billed as its own request.": "Выберите не менее двух моделей для сравнения. Каждый ответ отправляется и оплачивается как отдельный запрос.",
+    "Select one reply to continue the conversation": "Выберите один ответ, чтобы продолжить диалог",
+    "Sending the same message to each selected model. Every reply is billed separately.": "Одно и то же сообщение отправляется каждой выбранной модели. Каждый ответ оплачивается отдельно.",
+    "Use this reply": "Использовать этот ответ",
+    "You can compare up to {{count}} models at once": "Можно сравнить до {{count}} моделей одновременно"
   }
 }
