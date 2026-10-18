@@ -169,7 +169,7 @@ describe('reasoning effort copy and payload', () => {
     })
 
     expect(input.config.reasoning_effort).toBe('minimal')
-    expect(input.parameter_enabled.reasoning_effort).toBe(true)
+    expect(input.parameter_enabled?.reasoning_effort).toBe(true)
   })
 
   test('the request carries the effort only while enabled and accepted', () => {
