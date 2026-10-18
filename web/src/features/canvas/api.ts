@@ -22,7 +22,11 @@ import { api } from '@/lib/api'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
 import { canvasDocumentSchema } from './lib/canvas-document'
-import type { CanvasProjectSummary, CanvasServerProject } from './types'
+import type {
+  CanvasProjectSummary,
+  CanvasServerProject,
+  CanvasSnapshotSummary,
+} from './types'
 
 const CANVAS_ENDPOINT = '/api/playground/canvases'
 
@@ -41,6 +45,16 @@ const canvasProjectSummarySchema = z.object({
 const canvasProjectSchema = canvasProjectSummarySchema.extend({
   document: canvasDocumentSchema,
   unavailable_node_ids: z.array(z.string()).optional(),
+})
+
+const canvasSnapshotSchema = z.object({
+  id: z.string().min(1),
+  canvas_id: z.string().min(1),
+  revision: z.number().int().nonnegative(),
+  node_count: z.number().int().nonnegative(),
+  edge_count: z.number().int().nonnegative(),
+  byte_size: z.number().int().nonnegative(),
+  created_at: z.number().int().nonnegative(),
 })
 
 function mapCanvasSummary(value: unknown): CanvasProjectSummary {
@@ -159,4 +173,55 @@ export async function deleteCanvasProject(
     { signal }
   )
   requireServerSuccess(response.data)
+}
+
+/**
+ * The canvas history, newest first. The server stores snapshot bodies in the
+ * object store and answers with metadata only, so the list never carries a
+ * document.
+ */
+export async function listCanvasSnapshots(
+  projectId: string,
+  signal?: AbortSignal
+): Promise<CanvasSnapshotSummary[]> {
+  const response = await api.get(
+    `${CANVAS_ENDPOINT}/${encodeURIComponent(projectId)}/snapshots`,
+    { params: { p: 1, page_size: 50 }, signal }
+  )
+  requireServerSuccess(response.data)
+  const data = z
+    .object({
+      items: z.array(canvasSnapshotSchema),
+      total: z.number().nonnegative(),
+    })
+    .parse(response.data.data)
+  return data.items.map((snapshot) => ({
+    id: snapshot.id,
+    canvasId: snapshot.canvas_id,
+    revision: snapshot.revision,
+    nodeCount: snapshot.node_count,
+    edgeCount: snapshot.edge_count,
+    byteSize: snapshot.byte_size,
+    createdAt: snapshot.created_at * 1000,
+  }))
+}
+
+/**
+ * Restores one stored snapshot as the canvas document. `revision` is the
+ * compare-and-swap token of the replace, and the answered project carries the
+ * restored document and the new revision.
+ */
+export async function restoreCanvasSnapshot(
+  projectId: string,
+  snapshotId: string,
+  revision: number,
+  signal?: AbortSignal
+): Promise<CanvasServerProject> {
+  const response = await api.post(
+    `${CANVAS_ENDPOINT}/${encodeURIComponent(projectId)}/snapshots/${encodeURIComponent(snapshotId)}/restore`,
+    { revision },
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  return mapCanvasProject(response.data.data)
 }

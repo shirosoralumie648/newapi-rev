@@ -115,14 +115,14 @@ func playgroundTestDB(t *testing.T, dialect string) *gorm.DB {
 	common.SetDatabaseTypes(common.DatabaseType(dialect), previousLog)
 	model.DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundUserUsage{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMessage{}, &model.PlaygroundSession{}, &model.Task{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundUserUsage{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMessage{}, &model.PlaygroundSession{}, &model.Task{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
 		model.DB = previous
 		common.SetDatabaseTypes(previousMain, previousLog)
 	})
-	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.Task{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.Task{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -173,6 +173,9 @@ func playgroundRequest(t *testing.T, user int, method, path string, body any, ha
 		c.Params = append(c.Params, gin.Param{Key: "artifactId", Value: parts[6]})
 		c.Params = append(c.Params, gin.Param{Key: "attachmentId", Value: parts[6]})
 		c.Params = append(c.Params, gin.Param{Key: "artifactKey", Value: parts[6]})
+		if parts[3] == "canvases" && parts[5] == "snapshots" {
+			c.Params = append(c.Params, gin.Param{Key: "snapshotId", Value: parts[6]})
+		}
 	}
 	if len(parts) > 8 {
 		c.Params = append(c.Params, gin.Param{Key: "versionId", Value: parts[8]})
@@ -656,6 +659,16 @@ func TestPlaygroundArtifactPersistenceMatrix(t *testing.T) {
 			assert.EqualValues(t, 2, saved.Version.Number)
 			assert.EqualValues(t, 75000, saved.Version.ByteSize)
 			assert.Equal(t, content, string(saved.Version.Content))
+			// A version larger than the externalization threshold keeps only
+			// metadata in its row; the body is a gzip object, and the reads
+			// above hydrated it from there.
+			var storedVersion model.PlaygroundArtifactVersion
+			require.NoError(t, db.Where("id = ?", saved.Version.ID).First(&storedVersion).Error)
+			assert.Equal(t, system_setting.ObjectStoreBackendLocal, storedVersion.StorageBackend)
+			assert.True(t, strings.HasPrefix(storedVersion.ObjectKey, "pg/7/artifacts/"), storedVersion.ObjectKey)
+			assert.Equal(t, "gzip", storedVersion.ContentEncoding)
+			assert.Empty(t, string(storedVersion.Content))
+			assert.EqualValues(t, 75000, storedVersion.ByteSize)
 			restoreRevision := int64(2)
 			restore := model.RestorePlaygroundArtifactInput{RequestID: "restore_1", ExpectedRevision: &restoreRevision, VersionID: created.Version.ID}
 			restored := artifactResult(t, playgroundRequest(t, 7, http.MethodPost, artifactPath+"/restore", restore, controller.RestorePlaygroundArtifactVersion))
@@ -753,6 +766,12 @@ func TestPlaygroundArtifactPersistenceMatrix(t *testing.T) {
 			deletedPath := artifactPath
 			assert.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodDelete, deletedPath+"?expected_revision=4", nil, controller.DeletePlaygroundArtifact).Code)
 			assert.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodDelete, deletedPath+"?expected_revision=4", nil, controller.DeletePlaygroundArtifact).Code)
+			// The externalized version body leaves the object store together
+			// with the row that owned it.
+			objectStore := objectstore.DefaultStore()
+			require.NotNil(t, objectStore)
+			_, objectErr := objectStore.Head(context.Background(), storedVersion.ObjectKey)
+			assert.ErrorIs(t, objectErr, objectstore.ErrObjectNotFound)
 			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 7, http.MethodPost, path, input, controller.CreatePlaygroundArtifact).Code)
 			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 7, http.MethodPost, artifactPath+"/versions", latest, controller.SavePlaygroundArtifactVersion).Code)
 			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 7, http.MethodPost, artifactPath+"/restore", restore, controller.RestorePlaygroundArtifactVersion).Code)
@@ -770,10 +789,18 @@ func TestPlaygroundArtifactPersistenceMatrix(t *testing.T) {
 			require.NoError(t, common.Unmarshal(listed.Body.Bytes(), &listing))
 			assert.Zero(t, listing.Data.Total)
 			assert.Empty(t, listing.Data.Items)
-			// Deleting a session clears tombstones; deleting another clears live bodies.
+			// Deleting a session moves it to the trash, where its tombstones
+			// and live bodies stay until the purge clears them.
 			for _, id := range []string{sessionID, foreignSession} {
 				response := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+id, nil, controller.DeletePlaygroundSession)
 				require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			}
+			require.NoError(t, db.Model(&model.PlaygroundArtifact{}).Count(&count).Error)
+			assert.EqualValues(t, 2, count)
+			require.NoError(t, db.Model(&model.PlaygroundArtifactVersion{}).Count(&count).Error)
+			assert.EqualValues(t, 1, count)
+			for _, id := range []string{sessionID, foreignSession} {
+				require.NoError(t, model.PurgePlaygroundSession(7, id))
 			}
 			require.NoError(t, db.Model(&model.PlaygroundArtifact{}).Count(&count).Error)
 			assert.Zero(t, count)
@@ -1109,10 +1136,15 @@ func TestPlaygroundAttachmentPersistenceMatrix(t *testing.T) {
 			crossSession := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+otherID+"/attachments/"+attachmentID, nil, controller.GetPlaygroundAttachment)
 			assert.Equal(t, http.StatusNotFound, crossSession.Code)
 
-			// Deleting the conversation cascades into its attachments and
-			// their stored objects.
+			// The trashed conversation keeps its attachments and their stored
+			// objects; purging it cascades into both.
 			require.NoError(t, model.DeletePlaygroundSession(7, id))
 			var count int64
+			require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("session_id = ?", id).Count(&count).Error)
+			assert.EqualValues(t, 1, count)
+			_, objectErr = objectStore.Head(context.Background(), stored.ObjectKey)
+			require.NoError(t, objectErr)
+			require.NoError(t, model.PurgePlaygroundSession(7, id))
 			require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("session_id = ?", id).Count(&count).Error)
 			assert.Zero(t, count)
 			_, objectErr = objectStore.Head(context.Background(), stored.ObjectKey)
@@ -1856,6 +1888,9 @@ func TestPlaygroundArtifactConcurrentWritesMatrix(t *testing.T) {
 			if written.err != nil {
 				assert.ErrorIs(t, written.err, model.ErrPlaygroundSessionNotFound)
 			}
+			// The trash keeps whatever the race wrote, and the purge proves the
+			// late creation left no orphan behind.
+			require.NoError(t, model.PurgePlaygroundSession(7, sessionID))
 			require.NoError(t, db.Model(&model.PlaygroundArtifact{}).Count(&count).Error)
 			assert.Zero(t, count)
 			require.NoError(t, db.Model(&model.PlaygroundArtifactVersion{}).Count(&count).Error)
@@ -2195,8 +2230,14 @@ func TestPlaygroundQuotaPolicyResolutionAndSessionLimit(t *testing.T) {
 	assert.Equal(t, http.StatusUnprocessableEntity, overflow.Code, overflow.Body.String())
 	assert.Contains(t, overflow.Body.String(), "PLAYGROUND_SESSION_LIMIT_EXCEEDED")
 
-	// Deleting a conversation frees its slot, so the next create succeeds.
+	// A trashed conversation keeps its slot; the purge that follows the
+	// retention window frees it for the next create.
 	require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+first["id"].(string), nil, controller.DeletePlaygroundSession).Code)
+	trashed := playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions", map[string]any{
+		"title": "Overflow", "config": map[string]any{}, "parameter_enabled": map[string]any{},
+	}, controller.CreatePlaygroundSession)
+	assert.Equal(t, http.StatusUnprocessableEntity, trashed.Code, trashed.Body.String())
+	require.NoError(t, model.PurgePlaygroundSession(7, first["id"].(string)))
 	assert.NotEmpty(t, createPlayground(t, 7, "quota-second")["id"])
 }
 
@@ -2411,7 +2452,13 @@ func TestPlaygroundUserUsageCounters(t *testing.T) {
 			assert.Zero(t, counters.ArtifactCount)
 			assert.Zero(t, counters.ArtifactBytes)
 
+			// A trashed canvas keeps its slot and bytes in the counters; the
+			// purge releases them.
 			require.NoError(t, model.DeletePlaygroundCanvasProject(7, storedCanvas.ID))
+			counters = playgroundUsageCounters(t, db, 7)
+			assert.EqualValues(t, 1, counters.CanvasCount)
+			assert.NotZero(t, counters.CanvasBytes)
+			require.NoError(t, model.PurgePlaygroundCanvasProject(7, storedCanvas.ID))
 			counters = playgroundUsageCounters(t, db, 7)
 			assert.Zero(t, counters.CanvasCount)
 			assert.Zero(t, counters.CanvasBytes)
@@ -2422,8 +2469,12 @@ func TestPlaygroundUserUsageCounters(t *testing.T) {
 			assert.Zero(t, counters.AttachmentBytes)
 			assert.Zero(t, counters.ObjectBytes)
 
-			// The conversation cascade releases the messages it still holds.
+			// A trashed conversation keeps counting until its purge releases
+			// everything the cascade removes.
 			require.NoError(t, model.DeletePlaygroundSession(7, sessionID))
+			counters = playgroundUsageCounters(t, db, 7)
+			assert.EqualValues(t, 1, counters.Sessions)
+			require.NoError(t, model.PurgePlaygroundSession(7, sessionID))
 			counters = playgroundUsageCounters(t, db, 7)
 			assert.EqualValues(t, 0, counters.Sessions)
 			assert.Zero(t, counters.AttachmentBytes)

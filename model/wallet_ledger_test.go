@@ -893,7 +893,10 @@ func creditGrantWalletForTest(t *testing.T, userId int, paid int, grants []struc
 	require.NoError(t, err)
 	grantIds := make([]int, 0, len(grants))
 	for index, grant := range grants {
-		refId := fmt.Sprintf("%d-grant-%d", userId, index)
+		// The ledger reference must be unique per seeded grant: a repeated
+		// seed for the same user would reuse an earlier reference and be
+		// treated as a replay, storing no bucket.
+		refId := fmt.Sprintf("%d-%s-grant-%d", userId, grant.source, index)
 		_, err := IssueCreditGrant(userId, grant.source, grant.amount, grant.expiresAt, WalletLedgerKindSystemGrant, WalletLedgerRefAdminGrant, refId, "")
 		require.NoError(t, err)
 		var stored CreditGrant
@@ -985,11 +988,11 @@ func TestCreditGrantSpendOrderAndRefundReturnsToTheBucket(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, reserved)
 		RecordWalletConsumeDelta(301, -100)
-		assert.Zero(t, grantRemaining(t, promo))
+		assert.EqualValues(t, 50, grantRemaining(t, promo), "the reservation only claims what it deducts")
 		reserved, err = TryReserveUserQuota(301, 900, "grant-order-d")
 		require.NoError(t, err)
 		assert.False(t, reserved, "the paid balance cannot cover a reservation the grants no longer cover")
-		assert.Zero(t, grantRemaining(t, promo))
+		assert.EqualValues(t, 50, grantRemaining(t, promo))
 		charged, err = SettleWalletHold(301, "grant-order-c", 50)
 		require.NoError(t, err)
 		assert.EqualValues(t, 50, charged)

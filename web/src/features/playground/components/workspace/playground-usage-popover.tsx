@@ -91,6 +91,13 @@ function PlaygroundUsageSummary(props: { userId: number | null }) {
       bytes: true,
     },
     {
+      key: 'canvas-snapshots',
+      label: t('Canvas history'),
+      metric: usage.canvasSnapshots,
+      counts: true,
+      bytes: true,
+    },
+    {
       key: 'storage',
       label: t('Object storage'),
       metric: usage.storage,

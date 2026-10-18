@@ -50,6 +50,16 @@ export const TOOL_CALL_STATUS = {
 export const TOOL_CALL_DENIED_CONTENT = 'The user denied this tool call.'
 export const TOOL_CALL_FAILED_CONTENT = 'The tool call failed.'
 
+// Model-facing stand-ins for media the next request cannot carry. They replace
+// inline base64 payloads in stored text and images from earlier turns that a
+// text-only model cannot accept. This is protocol content, not user interface
+// text, so it stays untranslated.
+export const INLINE_BASE64_OMITTED_CONTENT = '[inline base64 media omitted]'
+export const HISTORY_IMAGE_OMITTED_CONTENT =
+  '[image from an earlier message omitted for this model]'
+export const HISTORY_IMAGES_OMITTED_CONTENT =
+  '[{{count}} images from earlier messages omitted for this model]'
+
 // Local input caps for the manual result dialog. The server policy keeps the
 // authoritative argument/result byte limits.
 export const PLAYGROUND_TOOL_CALL_RESULT_MAX_CHARS = 64_000

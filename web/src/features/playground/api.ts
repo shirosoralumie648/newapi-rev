@@ -650,6 +650,7 @@ const playgroundUsageSchema = z.object({
   attachments: playgroundUsageMetricSchema,
   artifacts: playgroundUsageMetricSchema,
   canvas: playgroundUsageMetricSchema,
+  canvas_snapshots: playgroundUsageMetricSchema,
   storage: playgroundUsageMetricSchema,
   tasks: playgroundUsageMetricSchema,
 })
@@ -662,15 +663,16 @@ export interface PlaygroundUsageMetric {
 }
 
 // The unified Playground resource usage: conversations, attachments, artifacts,
-// canvases, object storage and async generation tasks the owner stores, each
-// against the account-level cap the server enforces for the owner's group.
-// `group` is the user group those limits were resolved from.
+// canvases, canvas history, object storage and async generation tasks the owner
+// stores, each against the account-level cap the server enforces for the
+// owner's group. `group` is the user group those limits were resolved from.
 export interface PlaygroundResourceUsage {
   group: string
   sessions: PlaygroundUsageMetric
   attachments: PlaygroundUsageMetric
   artifacts: PlaygroundUsageMetric
   canvas: PlaygroundUsageMetric
+  canvasSnapshots: PlaygroundUsageMetric
   storage: PlaygroundUsageMetric
   tasks: PlaygroundUsageMetric
 }
@@ -736,6 +738,7 @@ export async function getPlaygroundUsage(
     attachments: toMetric(metrics.attachments),
     artifacts: toMetric(metrics.artifacts),
     canvas: toMetric(metrics.canvas),
+    canvasSnapshots: toMetric(metrics.canvas_snapshots),
     storage: toMetric(metrics.storage),
     tasks: toMetric(metrics.tasks),
   }

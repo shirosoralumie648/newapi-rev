@@ -71,7 +71,7 @@ func playgroundMigrationDB(t *testing.T, dialect string) *gorm.DB {
 		sqlDB.SetMaxOpenConns(1)
 	}
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&PlaygroundMessage{}, &PlaygroundAttachment{}))
+		require.NoError(t, db.Migrator().DropTable(&PlaygroundMessage{}, &PlaygroundAttachment{}, &PlaygroundUserUsage{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
@@ -195,6 +195,57 @@ func TestPlaygroundAttachmentStorageSchemaMigration(t *testing.T) {
 			require.NotNil(t, stored.Data)
 			assert.Equal(t, payload, string(*stored.Data))
 			assert.Equal(t, system_setting.ObjectStoreBackendDB, stored.StorageBackend)
+		})
+	}
+}
+
+// A counter row written before the snapshot columns existed must gain them
+// with DEFAULT 0 on upgrade, keep its existing values, and the migration must
+// be repeatable. A fresh database has no counter table, so it is a no-op.
+func TestPlaygroundUserUsageCountersMigration(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundMigrationDB(t, dialect)
+			require.NoError(t, migratePlaygroundUserUsageCounters(db))
+
+			quote := "`"
+			if dialect == "postgres" {
+				quote = `"`
+			}
+			table := db.NamingStrategy.TableName("PlaygroundUserUsage")
+			q := func(name string) string { return quote + name + quote }
+			legacyColumns := []string{"user_id", "sessions", "presets", "attachment_count", "attachment_bytes", "object_bytes", "artifact_count", "artifact_bytes", "canvas_count", "canvas_bytes", "created_at", "updated_at"}
+			legacyTypes := []string{"bigint PRIMARY KEY", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL"}
+			definitions := make([]string, len(legacyColumns))
+			quoted := make([]string, len(legacyColumns))
+			for index, name := range legacyColumns {
+				definitions[index] = q(name) + " " + legacyTypes[index]
+				quoted[index] = q(name)
+			}
+			require.NoError(t, db.Exec("CREATE TABLE "+q(table)+" ("+strings.Join(definitions, ", ")+")").Error)
+			require.NoError(t, db.Exec("INSERT INTO "+q(table)+" ("+strings.Join(quoted, ", ")+") VALUES ("+strings.Repeat("?,", len(legacyColumns)-1)+"?)",
+				7, 1, 1, 0, 0, 0, 0, 0, 3, 4096, 111, 111).Error)
+
+			require.NoError(t, migratePlaygroundUserUsageCounters(db))
+			require.NoError(t, db.AutoMigrate(&PlaygroundUserUsage{}))
+			// Repeating the migration and AutoMigrate changes nothing.
+			require.NoError(t, migratePlaygroundUserUsageCounters(db))
+			require.NoError(t, db.AutoMigrate(&PlaygroundUserUsage{}))
+			require.True(t, db.Migrator().HasColumn(&PlaygroundUserUsage{}, "canvas_snapshot_count"))
+			require.True(t, db.Migrator().HasColumn(&PlaygroundUserUsage{}, "canvas_snapshot_bytes"))
+
+			var stored PlaygroundUserUsage
+			require.NoError(t, db.Where("user_id = ?", 7).First(&stored).Error)
+			assert.EqualValues(t, 3, stored.CanvasCount)
+			assert.EqualValues(t, 4096, stored.CanvasBytes)
+			assert.Zero(t, stored.CanvasSnapshotCount)
+			assert.Zero(t, stored.CanvasSnapshotBytes)
+
+			// Counter rows written afterwards carry snapshot usage.
+			require.NoError(t, db.Create(&PlaygroundUserUsage{UserID: 8, CanvasSnapshotCount: 2, CanvasSnapshotBytes: 128, CreatedAt: 1, UpdatedAt: 1}).Error)
+			require.NoError(t, db.Where("user_id = ?", 8).First(&stored).Error)
+			assert.EqualValues(t, 2, stored.CanvasSnapshotCount)
+			assert.EqualValues(t, 128, stored.CanvasSnapshotBytes)
 		})
 	}
 }

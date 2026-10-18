@@ -91,6 +91,16 @@ export function PlaygroundContextStatus(props: PlaygroundContextStatusProps) {
             )}
           </span>
         ))}
+      {props.plan.omittedImages > 0 && (
+        <span className='text-amber-600 dark:text-amber-400' role='status'>
+          {t(
+            '{{images}} images from earlier messages are left out of the next request.',
+            {
+              images: formatNumber(props.plan.omittedImages, locale),
+            }
+          )}
+        </span>
+      )}
       {props.isSummarizing && (
         <span role='status'>{t('Summarizing conversation...')}</span>
       )}
