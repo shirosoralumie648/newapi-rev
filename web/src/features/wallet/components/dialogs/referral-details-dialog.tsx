@@ -16,25 +16,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { AlertTriangle, ChevronLeft, ChevronRight, Share2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { StaticDataTable } from '@/components/data-table'
-import type { StaticDataTableColumn } from '@/components/data-table'
 import { Dialog } from '@/components/dialog'
-import { EmptyState } from '@/components/empty-state'
-import { LoadingState } from '@/components/loading-state'
 import { Button } from '@/components/ui/button'
-import { formatQuota, formatTimestampToDate } from '@/lib/format'
 
 import { useSelfReferralInvitations } from '../../hooks'
-import { getReferralSourceLabelKey } from '../../lib'
-import type { ReferralInvitation } from '../../types'
-import {
-  ReferralCommissionCell,
-  ReferralValidityCell,
-} from '../referral-invitation-cells'
+import { ReferralInvitationTable } from '../referral-invitation-table'
 
 interface ReferralDetailsDialogProps {
   open: boolean
@@ -71,56 +61,6 @@ export function ReferralDetailsDialog(props: ReferralDetailsDialogProps) {
     1,
     Math.ceil(total / REFERRAL_INVITATIONS_PAGE_SIZE)
   )
-
-  const columns: StaticDataTableColumn<ReferralInvitation>[] = [
-    {
-      id: 'invitee',
-      header: t('Invitee'),
-      cell: (invitation) => (
-        <span className='font-mono'>
-          {invitation.identifier || `#${invitation.invitee_id}`}
-        </span>
-      ),
-    },
-    {
-      id: 'source',
-      header: t('Source'),
-      cell: (invitation) => t(getReferralSourceLabelKey(invitation.source)),
-    },
-    {
-      id: 'bound',
-      header: t('Bound At'),
-      cell: (invitation) => formatTimestampToDate(invitation.bound_at),
-    },
-    {
-      id: 'paid',
-      header: t('Paid'),
-      className: 'text-right',
-      cellClassName: 'text-right',
-      cell: (invitation) => (
-        <span className='font-mono tabular-nums'>
-          {formatQuota(invitation.total_paid_quota)}
-        </span>
-      ),
-    },
-    {
-      id: 'commission',
-      header: t('Commission'),
-      className: 'text-right',
-      cellClassName: 'text-right',
-      cell: (invitation) => <ReferralCommissionCell invitation={invitation} />,
-    },
-    {
-      id: 'validity',
-      header: t('Validity'),
-      cell: (invitation) => (
-        <ReferralValidityCell
-          invitation={invitation}
-          windowMonths={windowMonths}
-        />
-      ),
-    },
-  ]
 
   return (
     <Dialog
@@ -177,31 +117,12 @@ export function ReferralDetailsDialog(props: ReferralDetailsDialogProps) {
             )}
           </p>
         ) : null}
-        {query.isLoading ? (
-          <LoadingState className='min-h-[220px]' />
-        ) : query.isError ? (
-          <EmptyState
-            icon={AlertTriangle}
-            title={t('Failed to load referral invitations')}
-            description={t('Something went wrong!')}
-            className='min-h-[220px]'
-          />
-        ) : invitations.length === 0 ? (
-          <EmptyState
-            icon={Share2}
-            title={t('No invitees yet')}
-            description={t(
-              'Accounts that join through your invitation will appear here.'
-            )}
-            className='min-h-[220px]'
-          />
-        ) : (
-          <StaticDataTable<ReferralInvitation>
-            columns={columns}
-            data={invitations}
-            getRowKey={(invitation) => invitation.invitee_id}
-          />
-        )}
+        <ReferralInvitationTable
+          invitations={invitations}
+          windowMonths={windowMonths}
+          isLoading={query.isLoading}
+          isError={query.isError}
+        />
       </div>
     </Dialog>
   )

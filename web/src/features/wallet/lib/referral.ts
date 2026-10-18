@@ -16,7 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { ReferralInvitation, ReferralStatsSummary } from '../types'
+import type {
+  ReferralAgentProfile,
+  ReferralAgentTier,
+  ReferralInvitation,
+  ReferralStatsSummary,
+} from '../types'
 
 // ============================================================================
 // Referral Statistics Helpers
@@ -35,8 +40,8 @@ export const REFERRAL_COMMISSION_STATUS_LABEL_KEYS: Record<string, string> = {
   pending: 'Pending',
   locked: 'Locked',
   settled: 'Settled',
-  review: 'Under review',
-  blocked: 'Blocked',
+  review: 'In Review',
+  blocked: 'Blocked by risk control',
   rejected: 'Rejected',
 }
 
@@ -69,6 +74,9 @@ export const REFERRAL_COMMISSION_STATUS_FILTER_VALUES = [
   'pending',
   'locked',
   'settled',
+  'review',
+  'blocked',
+  'rejected',
 ] as const
 
 /** Summary shown before the administrator page has loaded. */
@@ -80,6 +88,9 @@ export const EMPTY_REFERRAL_STATS_SUMMARY: ReferralStatsSummary = {
   pending_quota: 0,
   locked_quota: 0,
   settled_quota: 0,
+  review_quota: 0,
+  blocked_quota: 0,
+  rejected_quota: 0,
 }
 
 /**
@@ -114,20 +125,28 @@ export function getReferralCommissionReasonLabelKey(reason: string): string {
   return REFERRAL_COMMISSION_REASON_LABEL_KEYS[reason] ?? reason
 }
 
-/** Total commission of one invitation across every recorded state. */
+/**
+ * Total commission of one invitation across every recorded state. The user
+ * view only carries the payable states, the administrator view adds the
+ * refused ones.
+ */
 export function referralCommissionTotal(
   invitation: ReferralInvitation
 ): number {
   return (
     invitation.pending_quota +
     invitation.locked_quota +
-    invitation.settled_quota
+    invitation.settled_quota +
+    (invitation.review_quota ?? 0) +
+    (invitation.blocked_quota ?? 0) +
+    (invitation.rejected_quota ?? 0)
   )
 }
 
 /**
  * Translation keys of the commission states the invitation actually has, so a
- * row names pending, locked and settled amounts without inventing states.
+ * row names pending, locked, settled and — for administrators — the reviewed
+ * or refused amounts without inventing states.
  */
 export function getReferralCommissionStatusLabelKeys(
   invitation: ReferralInvitation
@@ -142,5 +161,77 @@ export function getReferralCommissionStatusLabelKeys(
   if (invitation.settled_quota > 0) {
     keys.push(REFERRAL_COMMISSION_STATUS_LABEL_KEYS.settled)
   }
+  if ((invitation.review_quota ?? 0) > 0) {
+    keys.push(REFERRAL_COMMISSION_STATUS_LABEL_KEYS.review)
+  }
+  if ((invitation.blocked_quota ?? 0) > 0) {
+    keys.push(REFERRAL_COMMISSION_STATUS_LABEL_KEYS.blocked)
+  }
+  if ((invitation.rejected_quota ?? 0) > 0) {
+    keys.push(REFERRAL_COMMISSION_STATUS_LABEL_KEYS.rejected)
+  }
   return keys
+}
+
+// ============================================================================
+// Referral Agent Helpers (RF-08)
+// ============================================================================
+
+/** Commission rate sources in resolution order, mapped to translation keys. */
+export const REFERRAL_RATE_SOURCE_LABEL_KEYS: Record<string, string> = {
+  user: 'Account override',
+  tier: 'Agent tier',
+  group: 'User group',
+  default: 'Global default',
+}
+
+/**
+ * Translation key of the winning commission rate source; an unknown source
+ * recorded by a newer backend stays readable as-is.
+ */
+export function getReferralRateSourceLabelKey(source: string): string {
+  return REFERRAL_RATE_SOURCE_LABEL_KEYS[source] ?? source
+}
+
+/** Profile shown before the caller's agent profile has loaded. */
+export const EMPTY_REFERRAL_AGENT_PROFILE: ReferralAgentProfile = {
+  marked: false,
+  tier_id: '',
+  tier_name: '',
+  rate_percent: 0,
+  rate_source: 'default',
+  enabled: false,
+  summary: EMPTY_REFERRAL_STATS_SUMMARY,
+}
+
+/**
+ * Parse the stored agent tier option (a JSON array). Malformed JSON or entries
+ * without an identifier, a name or a numeric rate are ignored, so the editor
+ * stays usable while the backend keeps the authoritative validation.
+ */
+export function parseReferralAgentTiersOption(
+  value: string
+): ReferralAgentTier[] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value)
+  } catch {
+    return []
+  }
+  if (!Array.isArray(parsed)) return []
+  const tiers: ReferralAgentTier[] = []
+  for (const entry of parsed) {
+    if (typeof entry !== 'object' || entry === null) continue
+    const record = entry as Record<string, unknown>
+    if (typeof record.id !== 'string' || typeof record.name !== 'string') {
+      continue
+    }
+    const rate =
+      typeof record.rate_percent === 'number'
+        ? record.rate_percent
+        : Number(record.rate_percent)
+    if (!Number.isFinite(rate)) continue
+    tiers.push({ id: record.id, name: record.name, rate_percent: rate })
+  }
+  return tiers
 }

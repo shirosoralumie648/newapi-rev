@@ -283,7 +283,7 @@ func TestTokenCacheSchemaAndPeriodBudgetGovernCachedReads(t *testing.T) {
 	token := createReserveTestToken(t, 100)
 	loaded, err := GetTokenByKey(token.Key, true)
 	require.NoError(t, err)
-	require.NoError(t, server.HSet(getTokenCacheKey(token.Key), "CacheSchema", "1"))
+	server.HSet(getTokenCacheKey(token.Key), "CacheSchema", "1")
 
 	_, err = cacheGetTokenByKey(token.Key)
 	require.Error(t, err, "a stale hash must not be served")
@@ -352,6 +352,9 @@ func isolatedAccountingTestDB(t *testing.T, dialect string) *gorm.DB {
 	previousMain, previousLog := common.MainDatabaseType(), common.LogDatabaseType()
 	common.SetDatabaseTypes(common.DatabaseType(dialect), previousLog)
 	DB = db
+	// The reserved-word quoting and boolean literals of the raw SQL helpers
+	// follow the active dialect, so they must be rebuilt for this database.
+	initCol()
 	t.Cleanup(func() {
 		require.NoError(t, db.Migrator().DropTable(&User{}, &Token{}, &Channel{}, &CreditGrant{}, &ReferralBinding{},
 			&ReferralRegistrationSignal{}, &ReferralIdentity{}, &ReferralFlag{}))
@@ -360,6 +363,7 @@ func isolatedAccountingTestDB(t *testing.T, dialect string) *gorm.DB {
 		require.NoError(t, sqlDB.Close())
 		DB = previous
 		common.SetDatabaseTypes(previousMain, previousLog)
+		initCol()
 	})
 	require.NoError(t, db.AutoMigrate(&User{}, &Token{}, &Channel{}, &CreditGrant{}, &ReferralBinding{},
 		&ReferralRegistrationSignal{}, &ReferralIdentity{}, &ReferralFlag{}))

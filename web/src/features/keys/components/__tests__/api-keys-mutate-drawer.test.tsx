@@ -154,6 +154,7 @@ function findButton(text: string, required = true): HTMLButtonElement | null {
 
 function getControlByLabel(labelText: 'Name' | 'Quantity'): HTMLInputElement
 function getControlByLabel(labelText: 'Group'): HTMLButtonElement
+function getControlByLabel(labelText: 'Periodic quota'): HTMLButtonElement
 function getControlByLabel(labelText: 'Auto group order'): HTMLElement
 function getControlByLabel(labelText: string): HTMLElement {
   const label = [...document.querySelectorAll<HTMLLabelElement>('label')].find(
