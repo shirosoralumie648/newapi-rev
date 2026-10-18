@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
@@ -91,6 +92,97 @@ func TestListModelsSupportsOpenAIAndGeminiAuthentication(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestClaudeTokenCountingEndpointRequiresAuthAndAvailableModel covers the
+// restored POST /v1/messages/count_tokens route: the parent middleware keeps
+// enforcing the token and model availability, while the handler answers from
+// the request body alone (no channel call, no billing).
+func TestClaudeTokenCountingEndpointRequiresAuthAndAvailableModel(t *testing.T) {
+	setupRelayRouterTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.Log{}))
+
+	user := model.User{
+		Username: "count-tokens-user",
+		AffCode:  "count-tokens-user",
+		Status:   common.UserStatusEnabled,
+		Group:    "default",
+		Quota:    100,
+	}
+	require.NoError(t, model.DB.Create(&user).Error)
+
+	const tokenKey = "claudecounttokenskey"
+	require.NoError(t, model.DB.Create(&model.Token{
+		UserId:         user.Id,
+		Key:            tokenKey,
+		Status:         common.TokenStatusEnabled,
+		ExpiredTime:    -1,
+		UnlimitedQuota: true,
+	}).Error)
+
+	channel := model.Channel{
+		Name:   "count-tokens-channel",
+		Type:   constant.ChannelTypeAnthropic,
+		Key:    "sk-count-tokens",
+		Status: common.ChannelStatusEnabled,
+		Models: "count-tokens-model",
+		Group:  "default",
+	}
+	require.NoError(t, model.DB.Create(&channel).Error)
+	require.NoError(t, model.DB.Create(&model.Ability{
+		ChannelId: channel.Id,
+		Model:     "count-tokens-model",
+		Group:     "default",
+		Enabled:   true,
+	}).Error)
+
+	engine := gin.New()
+	SetRelayRouter(engine)
+
+	post := func(t *testing.T, body string, token string) *httptest.ResponseRecorder {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		if token != "" {
+			request.Header.Set("Authorization", "Bearer "+token)
+		}
+		engine.ServeHTTP(recorder, request)
+		return recorder
+	}
+
+	t.Run("anonymous callers are rejected", func(t *testing.T) {
+		recorder := post(t, `{"model":"count-tokens-model","messages":[{"role":"user","content":"count this prompt"}]}`, "")
+		require.Equal(t, http.StatusUnauthorized, recorder.Code)
+	})
+
+	t.Run("models without a channel fail the availability check", func(t *testing.T) {
+		recorder := post(t, `{"model":"count-tokens-missing","messages":[{"role":"user","content":"count this prompt"}]}`, tokenKey)
+		require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	})
+
+	t.Run("available models are counted locally without billing", func(t *testing.T) {
+		recorder := post(t, `{
+			"model":"count-tokens-model",
+			"messages":[{"role":"user","content":"count this prompt"}],
+			"tools":[{"name":"lookup","description":"Look up a value","input_schema":{"type":"object","properties":{"query":{"type":"string"}}}}]
+		}`, tokenKey)
+		require.Equal(t, http.StatusOK, recorder.Code)
+
+		var response struct {
+			InputTokens int `json:"input_tokens"`
+		}
+		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+		assert.Positive(t, response.InputTokens)
+
+		var stored model.User
+		require.NoError(t, model.DB.First(&stored, user.Id).Error)
+		assert.Equal(t, 100, stored.Quota, "the local estimate never consumes quota")
+
+		var consumeLogs int64
+		require.NoError(t, model.LOG_DB.Model(&model.Log{}).Where("user_id = ?", user.Id).Count(&consumeLogs).Error)
+		assert.Zero(t, consumeLogs, "the local estimate writes no consume log")
+	})
 }
 
 // TestMidjourneyImageAccessControl covers the accepted proofs of

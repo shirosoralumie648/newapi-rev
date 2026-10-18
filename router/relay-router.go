@@ -130,8 +130,13 @@ func SetRelayRouter(router *gin.Engine) {
 		httpRouter.Use(middleware.Distribute())
 
 		// claude related routes
-		// TODO: /messages/count_tokens is disabled. The current controller.CountClaudeTokens
-		// httpRouter.POST("/messages/count_tokens", controller.CountClaudeTokens)
+		// Anthropic's count_tokens endpoint is answered locally with the same
+		// tokenizer the relay uses to size a Messages request: it never calls an
+		// upstream channel and never bills. The parent TokenAuth and Distribute
+		// middleware still enforce token, group, and model availability first, and
+		// a fast 200 here keeps Claude Code and other SDKs from falling back to
+		// max_tokens=1 probe requests when the route is missing.
+		httpRouter.POST("/messages/count_tokens", controller.CountClaudeTokens)
 		httpRouter.POST("/messages", func(c *gin.Context) {
 			controller.Relay(c, types.RelayFormatClaude)
 		})
