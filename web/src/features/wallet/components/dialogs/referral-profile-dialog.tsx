@@ -79,7 +79,7 @@ export function ReferralProfileDialog(props: ReferralProfileDialogProps) {
 
   const [flagLevel, setFlagLevel] = useState<ReferralFlagLevel>('watch')
   const [flagNote, setFlagNote] = useState('')
-  const [identity, setIdentity] = useState('')
+  const [identity, setIdentityInput] = useState('')
   const [identityError, setIdentityError] = useState('')
   const [clearIdentityOpen, setClearIdentityOpen] = useState(false)
 
@@ -88,7 +88,7 @@ export function ReferralProfileDialog(props: ReferralProfileDialogProps) {
 
   useEffect(() => {
     if (props.open) {
-      setIdentity('')
+      setIdentityInput('')
       setIdentityError('')
       setClearIdentityOpen(false)
     }
@@ -134,7 +134,7 @@ export function ReferralProfileDialog(props: ReferralProfileDialogProps) {
     try {
       await setIdentity.mutateAsync({ userId: props.userId, identity: value })
       toast.success(t('Referral identity updated'))
-      setIdentity('')
+      setIdentityInput('')
     } catch (error) {
       handleServerError(error, t('Failed to update the referral identity'))
     }
@@ -281,7 +281,7 @@ export function ReferralProfileDialog(props: ReferralProfileDialogProps) {
                 <Input
                   aria-invalid={identityError ? true : undefined}
                   id='referral-identity'
-                  onChange={(event) => setIdentity(event.target.value)}
+                  onChange={(event) => setIdentityInput(event.target.value)}
                   placeholder={t('Document number or ID')}
                   value={identity}
                 />

@@ -212,6 +212,24 @@ it('shows unlimited with cumulative usage and explains it on demand', async () =
   )
 })
 
+it('shows the periodic quota and its usage in the detail of a period-limited key', async () => {
+  renderQuota({
+    ...key,
+    period_quota: 5_000_000,
+    period_reset_period: 'day',
+    period_used: 1_500_000,
+  })
+  await userEvent.click(screen.getByRole('button'))
+  const detail = await screen.findByRole('dialog')
+  expect(within(detail).getByText('Periodic quota (Daily)')).toBeInTheDocument()
+  expect(within(detail).getByText('10')).toBeInTheDocument()
+  expect(within(detail).getByText('Used this period')).toBeInTheDocument()
+  expect(within(detail).getByText('3')).toBeInTheDocument()
+  expect(detail).toHaveTextContent(
+    'Requests are refused when either the remaining quota or the periodic quota is used up. The periodic quota resets automatically when the next period starts.'
+  )
+})
+
 it('keeps small custom-currency amounts exact and shows full values in the detail', async () => {
   useSystemConfigStore.getState().setConfig({
     currency: {

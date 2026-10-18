@@ -47,6 +47,10 @@ import type {
   ReferralInvitationPage,
   ReferralAdminInvitationPage,
   ReferralInvitationFilters,
+  ReferralAgent,
+  ReferralAgentPage,
+  ReferralAgentProfile,
+  ReferralAgentUpdateRequest,
   ReferralProfile,
   ReferralFlag,
   ReferralFlagLevel,
@@ -406,6 +410,51 @@ export async function exportReferralInvitationsCsv(
     { responseType: 'blob' }
   )
   return res.data as Blob
+}
+
+// ============================================================================
+// Referral Agent API Functions (RF-08)
+// ============================================================================
+
+/**
+ * Get the caller's own agent profile: the mark, the effective commission rate
+ * with its source and the invitation summary.
+ */
+export async function getSelfReferralAgent(): Promise<
+  ApiResponse<ReferralAgentProfile>
+> {
+  const res = await api.get('/api/user/self/referral-agent')
+  return res.data
+}
+
+/** List marked agent accounts with the configured tier catalogue (admin only). */
+export async function getReferralAgents(
+  page: number,
+  pageSize: number
+): Promise<ApiResponse<ReferralAgentPage>> {
+  const params = new URLSearchParams({
+    p: page.toString(),
+    page_size: pageSize.toString(),
+  })
+  const res = await api.get(`/api/user/referral/agents?${params.toString()}`)
+  return res.data
+}
+
+/** Mark one account as an agent with a tier and/or override (admin only). */
+export async function setUserReferralAgent(
+  userId: number,
+  request: ReferralAgentUpdateRequest
+): Promise<ApiResponse<{ agent: ReferralAgent }>> {
+  const res = await api.put(`/api/user/${userId}/referral-agent`, request)
+  return res.data
+}
+
+/** Remove the agent mark of one account (admin only). */
+export async function clearUserReferralAgent(
+  userId: number
+): Promise<ApiResponse> {
+  const res = await api.delete(`/api/user/${userId}/referral-agent`)
+  return res.data
 }
 
 // ============================================================================

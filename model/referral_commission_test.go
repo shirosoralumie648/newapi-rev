@@ -39,10 +39,10 @@ import (
 func setupReferralCommissionTest(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	require.NoError(t, db.AutoMigrate(&TopUp{}, &Redemption{}, &ReferralBinding{}, &ReferralCommission{},
-		&ReferralRegistrationSignal{}, &ReferralIdentity{}, &ReferralFlag{}))
+		&ReferralRegistrationSignal{}, &ReferralIdentity{}, &ReferralFlag{}, &ReferralAgent{}))
 	t.Cleanup(func() {
 		require.NoError(t, db.Migrator().DropTable(&TopUp{}, &Redemption{}, &ReferralBinding{}, &ReferralCommission{},
-			&ReferralRegistrationSignal{}, &ReferralIdentity{}, &ReferralFlag{}))
+			&ReferralRegistrationSignal{}, &ReferralIdentity{}, &ReferralFlag{}, &ReferralAgent{}))
 	})
 	confirmPaymentComplianceForTest(t)
 	previousQuotaPerUnit := common.QuotaPerUnit
@@ -726,6 +726,151 @@ func TestReferralRegistrationSignals(t *testing.T) {
 	})
 }
 
+// RF-08: the optional agent program resolves the commission rate of one
+// account from its single-account override, its configured tier, its group
+// override and the global default, in that order, and records the winning
+// source on every event.
+func TestReferralCommissionAgentTiers(t *testing.T) {
+	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
+		setupReferralCommissionTest(t, db)
+
+		t.Run("resolves the account override over tier over group over default", func(t *testing.T) {
+			restoreReferralCommissionTestSetting()
+			setting := operation_setting.GetReferralSetting()
+			setting.GroupRateOverrides = map[string]float64{"vip": 25}
+			setting.AgentTiers = []operation_setting.ReferralAgentTier{
+				{Id: "bronze", Name: "Bronze partner", RatePercent: 40},
+			}
+
+			// The tier beats the group override.
+			tierInviter := createReferralCommissionTestUser(t, db, "ag-a-tier", "vip")
+			tierInvitee := createReferralCommissionTestUser(t, db, "ag-a-tier-invitee", "default")
+			bindReferralCommissionTestInviter(t, tierInvitee, tierInviter.Id)
+			_, err := SetReferralAgent(tierInviter.Id, "bronze", nil, "tier mark", 1)
+			require.NoError(t, err)
+			completeReferralCommissionTestTopUp(t, "ag-a-tier-order", tierInvitee.Id, 10)
+			commissions := loadReferralCommissionsByRef(t, WalletLedgerRefTopUp, "ag-a-tier-order")
+			require.Len(t, commissions, 1)
+			assert.Equal(t, "40", commissions[0].RatePercent)
+			assert.Equal(t, operation_setting.ReferralRateSourceTier, commissions[0].RateSource)
+			assert.EqualValues(t, 2000000, commissions[0].CommissionQuota)
+
+			// The single-account override beats the tier.
+			overrideInviter := createReferralCommissionTestUser(t, db, "ag-a-override", "vip")
+			overrideInvitee := createReferralCommissionTestUser(t, db, "ag-a-override-invitee", "default")
+			bindReferralCommissionTestInviter(t, overrideInvitee, overrideInviter.Id)
+			override := 55.5
+			_, err = SetReferralAgent(overrideInviter.Id, "bronze", &override, "custom", 1)
+			require.NoError(t, err)
+			completeReferralCommissionTestTopUp(t, "ag-a-override-order", overrideInvitee.Id, 10)
+			commissions = loadReferralCommissionsByRef(t, WalletLedgerRefTopUp, "ag-a-override-order")
+			require.Len(t, commissions, 1)
+			assert.Equal(t, "55.5", commissions[0].RatePercent)
+			assert.Equal(t, operation_setting.ReferralRateSourceUser, commissions[0].RateSource)
+			assert.EqualValues(t, 2775000, commissions[0].CommissionQuota)
+
+			// A mark without a tier or override inherits the group override.
+			groupInviter := createReferralCommissionTestUser(t, db, "ag-a-group", "vip")
+			groupInvitee := createReferralCommissionTestUser(t, db, "ag-a-group-invitee", "default")
+			bindReferralCommissionTestInviter(t, groupInvitee, groupInviter.Id)
+			_, err = SetReferralAgent(groupInviter.Id, "", nil, "no dedicated configuration", 1)
+			require.NoError(t, err)
+			completeReferralCommissionTestTopUp(t, "ag-a-group-order", groupInvitee.Id, 10)
+			commissions = loadReferralCommissionsByRef(t, WalletLedgerRefTopUp, "ag-a-group-order")
+			require.Len(t, commissions, 1)
+			assert.Equal(t, "25", commissions[0].RatePercent)
+			assert.Equal(t, operation_setting.ReferralRateSourceGroup, commissions[0].RateSource)
+
+			// An unmarked account keeps the global default and its source.
+			defaultInviter := createReferralCommissionTestUser(t, db, "ag-a-default", "default")
+			defaultInvitee := createReferralCommissionTestUser(t, db, "ag-a-default-invitee", "default")
+			bindReferralCommissionTestInviter(t, defaultInvitee, defaultInviter.Id)
+			completeReferralCommissionTestTopUp(t, "ag-a-default-order", defaultInvitee.Id, 10)
+			commissions = loadReferralCommissionsByRef(t, WalletLedgerRefTopUp, "ag-a-default-order")
+			require.Len(t, commissions, 1)
+			assert.Equal(t, "10", commissions[0].RatePercent)
+			assert.Equal(t, operation_setting.ReferralRateSourceDefault, commissions[0].RateSource)
+		})
+
+		t.Run("falls through when the tier configuration is removed and after clearing the mark", func(t *testing.T) {
+			restoreReferralCommissionTestSetting()
+			setting := operation_setting.GetReferralSetting()
+			setting.GroupRateOverrides = map[string]float64{"vip": 25}
+			setting.AgentTiers = []operation_setting.ReferralAgentTier{{Id: "bronze", Name: "Bronze", RatePercent: 40}}
+
+			inviter := createReferralCommissionTestUser(t, db, "ag-b-inviter", "vip")
+			invitee := createReferralCommissionTestUser(t, db, "ag-b-invitee", "default")
+			bindReferralCommissionTestInviter(t, invitee, inviter.Id)
+			_, err := SetReferralAgent(inviter.Id, "bronze", nil, "", 1)
+			require.NoError(t, err)
+
+			// Deleting the tier configuration falls through to the group
+			// override instead of orphaning the marked account.
+			setting.AgentTiers = nil
+			completeReferralCommissionTestTopUp(t, "ag-b-removed-tier", invitee.Id, 10)
+			commissions := loadReferralCommissionsByRef(t, WalletLedgerRefTopUp, "ag-b-removed-tier")
+			require.Len(t, commissions, 1)
+			assert.Equal(t, "25", commissions[0].RatePercent)
+			assert.Equal(t, operation_setting.ReferralRateSourceGroup, commissions[0].RateSource)
+
+			// Clearing the mark restores the inherited configuration.
+			require.NoError(t, ClearReferralAgent(inviter.Id))
+			agent, err := GetReferralAgent(inviter.Id)
+			require.NoError(t, err)
+			assert.Nil(t, agent)
+			completeReferralCommissionTestTopUp(t, "ag-b-cleared", invitee.Id, 10)
+			commissions = loadReferralCommissionsByRef(t, WalletLedgerRefTopUp, "ag-b-cleared")
+			require.Len(t, commissions, 1)
+			assert.Equal(t, operation_setting.ReferralRateSourceGroup, commissions[0].RateSource)
+		})
+
+		t.Run("validates the mark and lists marked agents with their effective rate", func(t *testing.T) {
+			restoreReferralCommissionTestSetting()
+			setting := operation_setting.GetReferralSetting()
+			setting.AgentTiers = []operation_setting.ReferralAgentTier{{Id: "gold", Name: "Gold partner", RatePercent: 60}}
+
+			inviter := createReferralCommissionTestUser(t, db, "ag-c-inviter", "default")
+
+			_, err := SetReferralAgent(inviter.Id, "missing", nil, "", 1)
+			assert.ErrorIs(t, err, ErrReferralAgentTierUnknown)
+			badRate := 120.0
+			_, err = SetReferralAgent(inviter.Id, "gold", &badRate, "", 1)
+			assert.ErrorIs(t, err, ErrReferralAgentRateInvalid)
+
+			marked, err := SetReferralAgent(inviter.Id, "gold", nil, "top partner", 42)
+			require.NoError(t, err)
+			require.NotNil(t, marked)
+			assert.Equal(t, "gold", marked.TierId)
+			assert.Equal(t, 42, marked.MarkedBy)
+
+			// Re-marking keeps the creation time and applies the new
+			// configuration.
+			override := 12.0
+			updated, err := SetReferralAgent(inviter.Id, "gold", &override, "adjusted", 7)
+			require.NoError(t, err)
+			assert.Equal(t, marked.CreatedAt, updated.CreatedAt)
+			require.NotNil(t, updated.RatePercent)
+			assert.Equal(t, 12.0, *updated.RatePercent)
+
+			pageInfo := &common.PageInfo{Page: 1, PageSize: 100}
+			items, _, err := ListReferralAgents(pageInfo)
+			require.NoError(t, err)
+			var item *ReferralAgentItem
+			for i := range items {
+				if items[i].UserId == inviter.Id {
+					item = &items[i]
+					break
+				}
+			}
+			require.NotNil(t, item)
+			assert.Equal(t, inviter.Username, item.Username)
+			assert.Equal(t, "Gold partner", item.TierName)
+			assert.Equal(t, 12.0, item.EffectiveRate)
+			assert.Equal(t, operation_setting.ReferralRateSourceUser, item.RateSource)
+		})
+	})
+}
+
 // The window counts whole calendar months from registration, like subscription
 // durations.
 func TestReferralCommissionWindowEnd(t *testing.T) {
@@ -808,6 +953,31 @@ func TestReferralCommissionOptionValidation(t *testing.T) {
 			assert.Error(t, err, "overrides %q must be rejected", tc.value)
 		} else {
 			assert.NoError(t, err, "overrides %q must be accepted", tc.value)
+		}
+	}
+
+	agentTierCases := []struct {
+		value   string
+		wantErr bool
+	}{
+		{"", false},
+		{"[]", false},
+		{`[{"id":"bronze","name":"Bronze partner","rate_percent":40}]`, false},
+		{`[{"id":"bronze","name":"Bronze","rate_percent":0}]`, false},
+		{`[{"id":"","name":"Bronze","rate_percent":40}]`, true},
+		{`[{"id":"bronze","name":"","rate_percent":40}]`, true},
+		{`[{"id":"bronze","name":"Bronze","rate_percent":101}]`, true},
+		{`[{"id":"bronze","name":"Bronze","rate_percent":-1}]`, true},
+		{`[{"id":"bronze","name":"Bronze","rate_percent":40},{"id":"bronze","name":"Other","rate_percent":10}]`, true},
+		{`{"id":"bronze"}`, true},
+		{`not json`, true},
+	}
+	for _, tc := range agentTierCases {
+		err := operation_setting.ValidateReferralOption("referral_setting.agent_tiers", tc.value)
+		if tc.wantErr {
+			assert.Error(t, err, "agent tiers %q must be rejected", tc.value)
+		} else {
+			assert.NoError(t, err, "agent tiers %q must be accepted", tc.value)
 		}
 	}
 
@@ -1217,7 +1387,8 @@ func (referralCommissionLegacyRow) TableName() string {
 
 // The invitation statistics list every invitee of an inviter — those without
 // any commission event included, so a zero amount never hides an invited
-// account (#4197) — with the aggregates of their commission events, and honor
+// account (#4197) — with the aggregates of their commission events bucketed
+// by every known state (the blocked and rejected events included), and honor
 // the administrator filters, summary, pagination and window without ever
 // moving a balance.
 func TestReferralInvitationStats(t *testing.T) {
@@ -1246,12 +1417,20 @@ func TestReferralInvitationStats(t *testing.T) {
 		require.NoError(t, DB.Model(&ReferralBinding{}).Where("invitee_id = ?", quietInvitee.Id).Update("bound_at", 1700000200).Error)
 
 		// Three paid orders record three pending events; two of them move to
-		// their later states the way the settlement step (RF-04) will.
+		// their later states the way the settlement step (RF-04) will. Three
+		// further orders cover the recorded states that never join the payable
+		// pipeline: one waits for a manual decision, two were refused.
 		completeReferralCommissionTestTopUp(t, "s-a-order-1", paidInvitee.Id, 10)
 		completeReferralCommissionTestTopUp(t, "s-a-order-2", paidInvitee.Id, 4)
 		completeReferralCommissionTestTopUp(t, "s-a-order-3", paidInvitee.Id, 2)
 		require.NoError(t, DB.Model(&ReferralCommission{}).Where("ref_id = ?", "s-a-order-2").Update("status", ReferralCommissionStatusLocked).Error)
 		require.NoError(t, DB.Model(&ReferralCommission{}).Where("ref_id = ?", "s-a-order-3").Update("status", ReferralCommissionStatusSettled).Error)
+		completeReferralCommissionTestTopUp(t, "s-a-order-4", paidInvitee.Id, 2)
+		completeReferralCommissionTestTopUp(t, "s-a-order-5", paidInvitee.Id, 2)
+		completeReferralCommissionTestTopUp(t, "s-a-order-6", paidInvitee.Id, 2)
+		require.NoError(t, DB.Model(&ReferralCommission{}).Where("ref_id = ?", "s-a-order-4").Update("status", ReferralCommissionStatusReview).Error)
+		require.NoError(t, DB.Model(&ReferralCommission{}).Where("ref_id = ?", "s-a-order-5").Update("status", ReferralCommissionStatusBlocked).Error)
+		require.NoError(t, DB.Model(&ReferralCommission{}).Where("ref_id = ?", "s-a-order-6").Update("status", ReferralCommissionStatusRejected).Error)
 
 		t.Run("lists every invitee with commission aggregates and the window end", func(t *testing.T) {
 			query := ReferralInvitationQuery{InviterId: inviter.Id}
@@ -1273,8 +1452,11 @@ func TestReferralInvitationStats(t *testing.T) {
 			assert.EqualValues(t, 500000, paid.PendingQuota)
 			assert.EqualValues(t, 200000, paid.LockedQuota)
 			assert.EqualValues(t, 100000, paid.SettledQuota)
-			assert.EqualValues(t, 8000000, paid.TotalPaidQuota)
-			assert.EqualValues(t, 3, paid.CommissionCount)
+			assert.EqualValues(t, 100000, paid.ReviewQuota)
+			assert.EqualValues(t, 100000, paid.BlockedQuota)
+			assert.EqualValues(t, 100000, paid.RejectedQuota)
+			assert.EqualValues(t, 11000000, paid.TotalPaidQuota)
+			assert.EqualValues(t, 6, paid.CommissionCount)
 			assert.Equal(t,
 				referralCommissionWindowEnd(paidInvitee.CreatedAt, operation_setting.ReferralWindowMonthsDefault),
 				paid.CommissionEndsAt)
@@ -1304,6 +1486,13 @@ func TestReferralInvitationStats(t *testing.T) {
 			require.Len(t, filtered, 1)
 			assert.Equal(t, paidInvitee.Id, filtered[0].InviteeId)
 
+			// A refused event is selectable too: the administrator filters for
+			// the anti-abuse states the user view never exposes.
+			blocked, err := ListReferralInvitations(ReferralInvitationQuery{InviterId: inviter.Id, Status: ReferralCommissionStatusBlocked}, 0, 10)
+			require.NoError(t, err)
+			require.Len(t, blocked, 1)
+			assert.Equal(t, paidInvitee.Id, blocked[0].InviteeId)
+
 			// A keyword wildcard is a literal, not a pattern.
 			total, err = CountReferralInvitations(ReferralInvitationQuery{InviterId: inviter.Id, Keyword: "%"})
 			require.NoError(t, err)
@@ -1328,11 +1517,20 @@ func TestReferralInvitationStats(t *testing.T) {
 			require.NoError(t, err)
 			assert.EqualValues(t, 2, summary.TotalInvitees)
 			assert.EqualValues(t, 1, summary.InviteesWithCommission)
-			assert.EqualValues(t, 8000000, summary.TotalPaidQuota)
-			assert.EqualValues(t, 800000, summary.TotalCommissionQuota)
+			assert.EqualValues(t, 11000000, summary.TotalPaidQuota)
+			assert.EqualValues(t, 1100000, summary.TotalCommissionQuota)
 			assert.EqualValues(t, 500000, summary.PendingQuota)
 			assert.EqualValues(t, 200000, summary.LockedQuota)
 			assert.EqualValues(t, 100000, summary.SettledQuota)
+			assert.EqualValues(t, 100000, summary.ReviewQuota)
+			assert.EqualValues(t, 100000, summary.BlockedQuota)
+			assert.EqualValues(t, 100000, summary.RejectedQuota)
+			// Every recorded state is bucketed, so the buckets add up to the
+			// recorded total of the payable and refused events.
+			assert.Equal(t,
+				summary.TotalCommissionQuota,
+				summary.PendingQuota+summary.LockedQuota+summary.SettledQuota+
+					summary.ReviewQuota+summary.BlockedQuota+summary.RejectedQuota)
 
 			onlyQuiet, err := SummarizeReferralInvitations(ReferralInvitationQuery{InviterId: inviter.Id, Source: ReferralSourceOAuth})
 			require.NoError(t, err)
@@ -1393,7 +1591,15 @@ func TestReferralInvitationQueryValidation(t *testing.T) {
 	}
 	assert.False(t, IsReferralSource("unknown"))
 
-	for _, status := range []string{"", ReferralCommissionStatusPending, ReferralCommissionStatusLocked, ReferralCommissionStatusSettled} {
+	for _, status := range []string{
+		"",
+		ReferralCommissionStatusPending,
+		ReferralCommissionStatusReview,
+		ReferralCommissionStatusBlocked,
+		ReferralCommissionStatusRejected,
+		ReferralCommissionStatusLocked,
+		ReferralCommissionStatusSettled,
+	} {
 		assert.True(t, IsReferralCommissionStatus(status), "status %q must be accepted", status)
 	}
 	assert.False(t, IsReferralCommissionStatus("reversed"))

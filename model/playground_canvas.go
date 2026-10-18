@@ -192,6 +192,27 @@ func PlaygroundCanvasReferenceAvailability(userID int, references []PlaygroundCa
 	return available, nil
 }
 
+// PlaygroundCanvasReferenceOwnership reports, for each reference, whether the
+// account is allowed to keep it. A reference to a resource that still exists
+// under another account, or a malformed reference, is foreign; a reference
+// whose resource was deleted is kept so the node can keep its "source deleted"
+// state. Canvas import uses it to drop the references that a restored document
+// is not allowed to claim without rejecting the whole archive.
+func PlaygroundCanvasReferenceOwnership(userID int, references []PlaygroundCanvasReference) ([]bool, error) {
+	owned := make([]bool, len(references))
+	if userID <= 0 {
+		return owned, ErrPlaygroundCanvasInvalid
+	}
+	for index, reference := range references {
+		_, foreign, err := resolvePlaygroundCanvasReference(userID, reference)
+		if err != nil {
+			return nil, err
+		}
+		owned[index] = !foreign
+	}
+	return owned, nil
+}
+
 // PlaygroundCanvasProject stores one canvas document (nodes, edges, viewport)
 // as a versioned JSON snapshot. The document references conversations,
 // artifacts and attachments by ID; those references never own the rows.
@@ -654,9 +675,9 @@ func RestorePlaygroundCanvasProject(userID int, id string) (*PlaygroundCanvasPro
 
 // PurgePlaygroundCanvasProject permanently removes one trashed canvas, releases
 // the attachment and generated-result pins it held and returns its document
-// bytes to the account budget. Only the trash cleanup and tests use it; the API
-// only ever soft deletes. The stored document and history objects are deleted
-// after the database commit.
+// bytes to the account budget. The trash cleanup and the canvas-import rollback
+// use it; the user-facing API only ever soft deletes. The stored document and
+// history objects are deleted after the database commit.
 func PurgePlaygroundCanvasProject(userID int, id string) error {
 	var removedObjects []playgroundStoredObject
 	err := DB.Transaction(func(tx *gorm.DB) error {

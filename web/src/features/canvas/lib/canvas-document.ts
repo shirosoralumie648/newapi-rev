@@ -42,6 +42,7 @@ import type {
  */
 export const CANVAS_ERRORS = {
   INVALID_FILE: 'Invalid canvas file.',
+  ARCHIVE_EXPORT_FAILED: 'The canvas archive could not be downloaded.',
   TOO_MANY_NODES: 'Canvas supports at most 200 nodes.',
   TOO_MANY_EDGES: 'Canvas supports at most 400 edges.',
   TOO_LARGE: 'Canvas document is too large.',

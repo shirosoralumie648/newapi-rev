@@ -287,7 +287,7 @@ var quotaColumnGroups = []struct {
 	columns []string
 }{
 	{model: &User{}, columns: []string{"quota", "used_quota", "request_count", "aff_quota", "aff_history"}},
-	{model: &Token{}, columns: []string{"remain_quota", "used_quota"}},
+	{model: &Token{}, columns: []string{"remain_quota", "used_quota", "period_quota", "period_used"}},
 	{model: &Redemption{}, columns: []string{"quota"}},
 	{model: &QuotaData{}, columns: []string{"quota"}},
 	{model: &Task{}, columns: []string{"quota"}},
@@ -494,6 +494,7 @@ func migrateDB() error {
 		&ReferralRegistrationSignal{},
 		&ReferralIdentity{},
 		&ReferralFlag{},
+		&ReferralAgent{},
 	)
 	if err != nil {
 		return err

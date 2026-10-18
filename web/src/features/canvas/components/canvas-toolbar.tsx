@@ -53,6 +53,8 @@ interface CanvasToolbarProps {
   canSelectAll: boolean
   canGroup: boolean
   canUngroup: boolean
+  /** Whether exporting the selected nodes is possible. */
+  canExportSelection: boolean
   runPhase: CanvasWorkflowRunPhase
   /** Whether the inspector shows the assistant instead of node details. */
   assistantOpen: boolean
@@ -68,7 +70,10 @@ interface CanvasToolbarProps {
   onGroupSelection: () => void
   onUngroupSelection: () => void
   onImportFile: (file: File) => void
+  onImportArchiveFile: (file: File) => void
   onExport: () => void
+  onExportArchive: () => void
+  onExportSelectionArchive: () => void
   onToggleAssistant: () => void
   onRunWorkflow: () => void
   onCancelRun: () => void
@@ -77,6 +82,7 @@ interface CanvasToolbarProps {
 export function CanvasToolbar(props: CanvasToolbarProps) {
   const { t } = useTranslation()
   const inputRef = useRef<HTMLInputElement>(null)
+  const archiveInputRef = useRef<HTMLInputElement>(null)
   const running = props.runPhase === 'running'
 
   return (
@@ -173,6 +179,7 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
 
       <input
         accept='application/json,.json'
+        aria-label={t('Import canvas JSON file')}
         className='hidden'
         onChange={(event) => {
           const file = event.target.files?.[0]
@@ -182,26 +189,70 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
         ref={inputRef}
         type='file'
       />
-      <Button
-        disabled={props.disabled}
-        onClick={() => inputRef.current?.click()}
-        size='sm'
-        type='button'
-        variant='outline'
-      >
-        <Upload aria-hidden='true' />
-        {t('Import')}
-      </Button>
-      <Button
-        disabled={props.disabled}
-        onClick={props.onExport}
-        size='sm'
-        type='button'
-        variant='outline'
-      >
-        <Download aria-hidden='true' />
-        {t('Export')}
-      </Button>
+      <input
+        accept='.zip,application/zip'
+        aria-label={t('Import canvas archive file')}
+        className='hidden'
+        onChange={(event) => {
+          const file = event.target.files?.[0]
+          if (file) props.onImportArchiveFile(file)
+          event.target.value = ''
+        }}
+        ref={archiveInputRef}
+        type='file'
+      />
+      <DropdownMenu modal={false}>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              disabled={props.disabled}
+              size='sm'
+              type='button'
+              variant='outline'
+            />
+          }
+        >
+          <Upload aria-hidden='true' />
+          {t('Import')}
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align='start' className='w-44'>
+          <DropdownMenuItem onClick={() => inputRef.current?.click()}>
+            {t('JSON file')}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => archiveInputRef.current?.click()}>
+            {t('ZIP archive')}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <DropdownMenu modal={false}>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              disabled={props.disabled}
+              size='sm'
+              type='button'
+              variant='outline'
+            />
+          }
+        >
+          <Download aria-hidden='true' />
+          {t('Export')}
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align='start' className='w-44'>
+          <DropdownMenuItem onClick={props.onExport}>
+            {t('JSON file')}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={props.onExportArchive}>
+            {t('ZIP archive')}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={!props.canExportSelection}
+            onClick={props.onExportSelectionArchive}
+          >
+            {t('ZIP archive of selected nodes')}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
 
       {props.groups.length > 0 ? (
         <NativeSelect

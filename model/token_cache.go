@@ -32,6 +32,14 @@ func tokenCacheTTLSeconds() int {
 // While the fence exists readers simply serve the database without caching.
 const tokenCacheFenceSeconds = 10
 
+// tokenCacheSchemaVersion marks the field layout of the token hash. Bump it
+// whenever a field is added, changed, or reinterpreted: hashes below the
+// current version are never served nor refreshed, so they expire naturally and
+// the next read rebuilds them from the database. This is what makes a cached
+// token hash trustworthy for enforcement decisions such as whether a periodic
+// budget applies.
+const tokenCacheSchemaVersion = 2
+
 // invalidateTokenCacheForMutation is called before a token metadata mutation
 // writes to the database: it raises the fence and drops the cached hash so no
 // reader can act on (or re-publish) the pre-mutation state.
@@ -51,8 +59,10 @@ func invalidateTokenCacheForMutation(key string) error {
 // active and the hash is cold. An existing hash only gets its TTL refreshed:
 // its RemainQuota may already be ahead of this snapshot because atomic
 // pre-consume decrements Redis first, so a snapshot must never overwrite any
-// field of a live hash.
-// 返回值：0=被 fence 拦截，1=完成初始化，2=哈希已存在，仅刷新 TTL。
+// field of a live hash. A hash from an older schema is left untouched (no TTL
+// refresh) so it expires naturally instead of being served with incomplete
+// fields.
+// 返回值：0=被 fence 拦截，1=完成初始化，2=哈希已存在，仅刷新 TTL，3=schema 过期。
 func cacheInitToken(token Token) (int, error) {
 	if !common.RedisEnabled {
 		return 0, nil
@@ -66,6 +76,9 @@ if redis.call('EXISTS', KEYS[2]) == 1 then
   return 0
 end
 if redis.call('EXISTS', KEYS[1]) == 1 then
+  if tonumber(redis.call('HGET', KEYS[1], 'CacheSchema') or '0') ~= tonumber(ARGV[19]) then
+    return 3
+  end
   redis.call('EXPIRE', KEYS[1], ARGV[18])
   return 2
 end
@@ -75,7 +88,8 @@ redis.call('HSET', KEYS[1],
   'UnlimitedQuota', ARGV[8], 'ModelLimitsEnabled', ARGV[9], 'ModelLimits', ARGV[10],
   'AllowIps', ARGV[11], 'Group', ARGV[12], 'CrossGroupRetry', ARGV[13],
   'AutoGroups', ARGV[14], 'RemainQuota', ARGV[15], 'UsedQuota', ARGV[16],
-  'AllowUserQuotaQuery', ARGV[17])
+  'AllowUserQuotaQuery', ARGV[17], 'CacheSchema', ARGV[19], 'PeriodQuota', ARGV[20],
+  'PeriodResetPeriod', ARGV[21], 'PeriodUsed', ARGV[22], 'PeriodWindowStart', ARGV[23])
 redis.call('EXPIRE', KEYS[1], ARGV[18])
 return 1`
 
@@ -88,11 +102,14 @@ return 1`
 		token.ModelLimits, allowIps, token.Group, strconv.FormatBool(token.CrossGroupRetry),
 		token.AutoGroups, token.RemainQuota, token.UsedQuota,
 		strconv.FormatBool(token.AllowUserQuotaQuery),
-		tokenCacheTTLSeconds(),
+		tokenCacheTTLSeconds(), tokenCacheSchemaVersion, token.PeriodQuota,
+		token.PeriodResetPeriod, token.PeriodUsed, token.PeriodWindowStart,
 	).Int()
 }
 
-// cacheGetTokenByKey 从缓存读取 token；不完整的哈希（如仅有配额字段）会被拒绝。
+// cacheGetTokenByKey 从缓存读取 token；不完整的哈希（如仅有配额字段）或旧
+// schema 的哈希会被拒绝。带周期预算的令牌始终回源数据库：预算窗口由数据库
+// 权威维护，缓存的 PeriodUsed 可能落后于已提交窗口，不能用于放行判断。
 func cacheGetTokenByKey(key string) (*Token, error) {
 	if !common.RedisEnabled {
 		return nil, fmt.Errorf("redis is not enabled")
@@ -101,8 +118,11 @@ func cacheGetTokenByKey(key string) (*Token, error) {
 	if err := common.RedisHGetObj(getTokenCacheKey(key), &token); err != nil {
 		return nil, err
 	}
-	if token.Id <= 0 {
-		return nil, fmt.Errorf("token cache is incomplete")
+	if token.Id <= 0 || token.CacheSchema != tokenCacheSchemaVersion {
+		return nil, fmt.Errorf("token cache is incomplete or stale")
+	}
+	if token.HasPeriodQuota() {
+		return nil, fmt.Errorf("token with a periodic budget is served from the database")
 	}
 	token.Key = key
 	return &token, nil

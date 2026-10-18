@@ -19,11 +19,15 @@ For commercial licensing, please contact support@quantumnous.com
 package model_test
 
 import (
+	"archive/zip"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -35,6 +39,7 @@ import (
 	"github.com/QuantumNous/new-api/service/objectstore"
 	"github.com/QuantumNous/new-api/setting/playground_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1103,4 +1108,270 @@ func TestPlaygroundCanvasTrashLifecycle(t *testing.T) {
 			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 7, http.MethodPost, canvasPath+"/restore", nil, controller.RestorePlaygroundCanvasProject).Code)
 		})
 	}
+}
+
+// canvasArchiveManifestFixture mirrors the manifest an archive export writes,
+// so a test can assert the download contract without the controller types.
+type canvasArchiveManifestFixture struct {
+	Format    string          `json:"format"`
+	Version   int             `json:"version"`
+	Title     string          `json:"title"`
+	Document  json.RawMessage `json:"document"`
+	Resources []struct {
+		Entry        string `json:"entry"`
+		AttachmentID string `json:"attachment_id"`
+		SessionID    string `json:"session_id"`
+		MediaType    string `json:"media_type"`
+		ByteSize     int64  `json:"byte_size"`
+		ContentHash  string `json:"content_hash"`
+	} `json:"resources"`
+}
+
+func playgroundExportCanvasArchive(t *testing.T, user int, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	response := playgroundRequest(t, user, http.MethodGet, path, nil, controller.ExportPlaygroundCanvasArchive)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.Equal(t, "application/zip", response.Header().Get("Content-Type"))
+	return response
+}
+
+func canvasArchiveMembers(t *testing.T, archive []byte) (canvasArchiveManifestFixture, map[string][]byte) {
+	t.Helper()
+	reader, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
+	require.NoError(t, err)
+	var manifest canvasArchiveManifestFixture
+	members := make(map[string][]byte)
+	for _, member := range reader.File {
+		opened, err := member.Open()
+		require.NoError(t, err)
+		data, err := io.ReadAll(opened)
+		require.NoError(t, err)
+		require.NoError(t, opened.Close())
+		if member.Name == "canvas.json" {
+			require.NoError(t, common.Unmarshal(data, &manifest))
+			continue
+		}
+		members[member.Name] = data
+	}
+	return manifest, members
+}
+
+// canvasArchiveManifestOnly rebuilds an archive without its resource members,
+// which is the state a partially collected download leaves behind.
+func canvasArchiveManifestOnly(t *testing.T, archive []byte) []byte {
+	t.Helper()
+	reader, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
+	require.NoError(t, err)
+	var buffer bytes.Buffer
+	writer := zip.NewWriter(&buffer)
+	for _, member := range reader.File {
+		if member.Name != "canvas.json" {
+			continue
+		}
+		opened, err := member.Open()
+		require.NoError(t, err)
+		data, err := io.ReadAll(opened)
+		require.NoError(t, err)
+		require.NoError(t, opened.Close())
+		entry, err := writer.Create("canvas.json")
+		require.NoError(t, err)
+		_, err = entry.Write(data)
+		require.NoError(t, err)
+	}
+	require.NoError(t, writer.Close())
+	return buffer.Bytes()
+}
+
+func playgroundImportCanvasArchive(t *testing.T, user int, archive []byte) *httptest.ResponseRecorder {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "board.zip")
+	require.NoError(t, err)
+	_, err = part.Write(archive)
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Set("id", user)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/playground/canvases/import", &body)
+	c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+	controller.ImportPlaygroundCanvasArchive(c)
+	return recorder
+}
+
+func canvasArchiveNodes(t *testing.T, project map[string]any) []any {
+	t.Helper()
+	document, ok := project["document"].(map[string]any)
+	require.True(t, ok, "project document missing: %v", project)
+	nodes, ok := document["nodes"].([]any)
+	require.True(t, ok, "document nodes missing: %v", document)
+	return nodes
+}
+
+// A whole board, or a selected subset, downloads as an archive with the
+// controlled-read bytes of its attachments, and an archive restores as a new
+// canvas: the resources are re-uploaded into the new partition and the node
+// references are rewritten to the new rows.
+func TestPlaygroundCanvasArchiveRoundTrip(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			canvasID := createCanvasProject(t, 7, "canvas-archive")["id"].(string)
+			png := playgroundPNGFixture(96)
+			attachmentID := playgroundUploadCanvasAttachment(t, 7, canvasID, "archive-1", "image/png", png)["id"].(string)
+			update := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/canvases/"+canvasID, map[string]any{
+				"revision": 0,
+				"document": canvasDocument([]any{
+					canvasRefNode("n1", "image", map[string]any{"sessionId": canvasID, "attachmentId": attachmentID}),
+					canvasNode("n2", "text", 40, 60),
+					canvasNode("n3", "group", 0, 0),
+					map[string]any{
+						"id": "n4", "type": "text", "position": map[string]any{"x": 10, "y": 10},
+						"data": map[string]any{"kind": "text", "text": "child", "parentId": "n3"},
+					},
+				}, []any{
+					map[string]any{"id": "e1", "source": "n1", "target": "n2"},
+					map[string]any{"id": "e2", "source": "n2", "target": "n4"},
+				}),
+			}, controller.UpdatePlaygroundCanvasProject)
+			require.Equal(t, http.StatusOK, update.Code, update.Body.String())
+
+			// Only the owner can download the archive.
+			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 8, http.MethodGet, "/api/playground/canvases/"+canvasID+"/export", nil, controller.ExportPlaygroundCanvasArchive).Code)
+
+			exported := playgroundExportCanvasArchive(t, 7, "/api/playground/canvases/"+canvasID+"/export")
+			assert.Contains(t, exported.Header().Get("Content-Disposition"), "Board.zip")
+			assert.Equal(t, "private, no-store", exported.Header().Get("Cache-Control"))
+			manifest, members := canvasArchiveMembers(t, exported.Body.Bytes())
+			assert.Equal(t, "new-api-canvas", manifest.Format)
+			assert.EqualValues(t, 1, manifest.Version)
+			assert.Equal(t, "Board", manifest.Title)
+			require.Len(t, manifest.Resources, 1)
+			resource := manifest.Resources[0]
+			assert.Equal(t, attachmentID, resource.AttachmentID)
+			assert.Equal(t, canvasID, resource.SessionID)
+			assert.Equal(t, "image/png", resource.MediaType)
+			assert.EqualValues(t, len(png), resource.ByteSize)
+			require.Contains(t, members, resource.Entry)
+			assert.Equal(t, png, members[resource.Entry])
+
+			// A subset export carries the picked nodes and the edges between
+			// them, and drops the group link of a child whose group stays.
+			subset := playgroundExportCanvasArchive(t, 7, "/api/playground/canvases/"+canvasID+"/export?nodes=n4")
+			subsetManifest, subsetMembers := canvasArchiveMembers(t, subset.Body.Bytes())
+			assert.Empty(t, subsetManifest.Resources)
+			assert.Empty(t, subsetMembers)
+			var subsetDocument struct {
+				Nodes []struct {
+					ID   string          `json:"id"`
+					Data json.RawMessage `json:"data"`
+				} `json:"nodes"`
+				Edges []any `json:"edges"`
+			}
+			require.NoError(t, common.Unmarshal(subsetManifest.Document, &subsetDocument))
+			require.Len(t, subsetDocument.Nodes, 1)
+			assert.Equal(t, "n4", subsetDocument.Nodes[0].ID)
+			assert.Empty(t, subsetDocument.Edges)
+			var subsetData map[string]any
+			require.NoError(t, common.Unmarshal(subsetDocument.Nodes[0].Data, &subsetData))
+			_, hasParent := subsetData["parentId"]
+			assert.False(t, hasParent)
+			assert.Equal(t, http.StatusBadRequest, playgroundRequest(t, 7, http.MethodGet, "/api/playground/canvases/"+canvasID+"/export?nodes=missing", nil, controller.ExportPlaygroundCanvasArchive).Code)
+
+			// Another account restores the board: the bytes are re-uploaded
+			// into its own canvas partition and the references follow.
+			imported := playgroundImportCanvasArchive(t, 8, exported.Body.Bytes())
+			require.Equal(t, http.StatusOK, imported.Code, imported.Body.String())
+			data := canvasEnvelope(t, imported.Body.Bytes())
+			assert.EqualValues(t, 1, data["resources_imported"])
+			assert.EqualValues(t, 0, data["resources_missing"])
+			assert.EqualValues(t, 0, data["references_dropped"])
+			project := data["project"].(map[string]any)
+			newCanvasID := project["id"].(string)
+			require.NotEqual(t, canvasID, newCanvasID)
+			assert.Equal(t, "Board", project["title"])
+			assert.Empty(t, project["unavailable_node_ids"])
+			nodes := canvasArchiveNodes(t, project)
+			require.Len(t, nodes, 4)
+			reference := nodes[0].(map[string]any)["data"].(map[string]any)["ref"].(map[string]any)
+			newAttachmentID := reference["attachmentId"].(string)
+			require.NotEqual(t, attachmentID, newAttachmentID)
+			assert.True(t, strings.HasPrefix(newAttachmentID, "pgf_"))
+			assert.Equal(t, newCanvasID, reference["sessionId"])
+			var restored model.PlaygroundAttachment
+			require.NoError(t, db.Where("id = ?", newAttachmentID).First(&restored).Error)
+			assert.Equal(t, newCanvasID, restored.SessionID)
+			assert.Equal(t, int64(len(png)), restored.ByteSize)
+			var source model.PlaygroundAttachment
+			require.NoError(t, db.Where("id = ?", attachmentID).First(&source).Error)
+			assert.Equal(t, canvasID, source.SessionID)
+
+			// An import needs an authenticated account and a real archive.
+			assert.Equal(t, http.StatusUnauthorized, playgroundImportCanvasArchive(t, 0, exported.Body.Bytes()).Code)
+			assert.Equal(t, http.StatusBadRequest, playgroundImportCanvasArchive(t, 8, []byte("not an archive")).Code)
+		})
+	}
+}
+
+// A damaged archive still restores what it can: a resource member that is gone
+// is reported instead of failing the import, a reference another account is not
+// allowed to keep is dropped, and an archive never carries bytes that do not
+// belong to the exporting account.
+func TestPlaygroundCanvasArchiveDegradedRestore(t *testing.T) {
+	db := playgroundTestDB(t, "sqlite")
+	canvasID := createCanvasProject(t, 7, "canvas-archive-degraded")["id"].(string)
+	png := playgroundPNGFixture(48)
+	attachmentID := playgroundUploadCanvasAttachment(t, 7, canvasID, "degraded-1", "image/png", png)["id"].(string)
+	require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodPatch, "/api/playground/canvases/"+canvasID, map[string]any{
+		"revision": 0,
+		"document": canvasDocument([]any{
+			canvasRefNode("n1", "image", map[string]any{"sessionId": canvasID, "attachmentId": attachmentID}),
+		}, nil),
+	}, controller.UpdatePlaygroundCanvasProject).Code)
+	archive := playgroundExportCanvasArchive(t, 7, "/api/playground/canvases/"+canvasID+"/export").Body.Bytes()
+	damaged := canvasArchiveManifestOnly(t, archive)
+
+	// The owner still gets a complete node: the kept reference resolves to the
+	// original row, so only the archive lost the bytes.
+	sameAccount := playgroundImportCanvasArchive(t, 7, damaged)
+	require.Equal(t, http.StatusOK, sameAccount.Code, sameAccount.Body.String())
+	sameData := canvasEnvelope(t, sameAccount.Body.Bytes())
+	assert.EqualValues(t, 0, sameData["resources_imported"])
+	assert.EqualValues(t, 1, sameData["resources_missing"])
+	assert.EqualValues(t, 0, sameData["references_dropped"])
+	sameProject := sameData["project"].(map[string]any)
+	assert.Empty(t, sameProject["unavailable_node_ids"])
+	sameReference := canvasArchiveNodes(t, sameProject)[0].(map[string]any)["data"].(map[string]any)["ref"].(map[string]any)
+	assert.Equal(t, attachmentID, sameReference["attachmentId"])
+
+	// Another account cannot claim the row: the reference is dropped while the
+	// node keeps its own stored text.
+	crossAccount := playgroundImportCanvasArchive(t, 8, damaged)
+	require.Equal(t, http.StatusOK, crossAccount.Code, crossAccount.Body.String())
+	crossData := canvasEnvelope(t, crossAccount.Body.Bytes())
+	assert.EqualValues(t, 1, crossData["resources_missing"])
+	assert.EqualValues(t, 1, crossData["references_dropped"])
+	crossNode := canvasArchiveNodes(t, crossData["project"].(map[string]any))[0].(map[string]any)
+	_, hasReference := crossNode["data"].(map[string]any)["ref"]
+	assert.False(t, hasReference)
+
+	// A saved document that claims a foreign resource never leaks its bytes
+	// into an archive, and an import drops the claim again.
+	foreignSession := createPlayground(t, 8, "canvas-archive-foreign")["id"].(string)
+	foreignAttachment := playgroundUploadAttachment(t, 8, foreignSession, "foreign-1", "image/png", playgroundPNGFixture(32))["id"].(string)
+	foreignDocument, err := common.Marshal(canvasDocument([]any{
+		canvasRefNode("f1", "attachment", map[string]any{"sessionId": foreignSession, "attachmentId": foreignAttachment}),
+	}, nil))
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&model.PlaygroundCanvasProject{}).Where("id = ?", canvasID).Update("document", string(foreignDocument)).Error)
+	foreignArchive := playgroundExportCanvasArchive(t, 7, "/api/playground/canvases/"+canvasID+"/export").Body.Bytes()
+	foreignManifest, foreignMembers := canvasArchiveMembers(t, foreignArchive)
+	assert.Empty(t, foreignManifest.Resources)
+	assert.Empty(t, foreignMembers)
+	foreignImport := playgroundImportCanvasArchive(t, 7, foreignArchive)
+	require.Equal(t, http.StatusOK, foreignImport.Code, foreignImport.Body.String())
+	foreignData := canvasEnvelope(t, foreignImport.Body.Bytes())
+	assert.EqualValues(t, 0, foreignData["resources_imported"])
+	assert.EqualValues(t, 1, foreignData["references_dropped"])
 }

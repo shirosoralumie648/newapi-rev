@@ -25,7 +25,7 @@ import { formatQuotaWithCurrency, getCurrencyDisplay } from '@/lib/currency'
 import { cn } from '@/lib/utils'
 import { useSystemConfigStore } from '@/stores/system-config-store'
 
-import { API_KEY_STATUS } from '../constants'
+import { API_KEY_PERIOD_RESET_OPTIONS, API_KEY_STATUS } from '../constants'
 import type { ApiKey } from '../types'
 
 type ApiKeyQuotaCellProps = {
@@ -86,6 +86,41 @@ export function ApiKeyQuotaCell(props: ApiKeyQuotaCellProps) {
       value: `${formattedPercentage}%`,
     })
   }
+  const periodOption = API_KEY_PERIOD_RESET_OPTIONS.find(
+    (option) =>
+      option.value !== '' && option.value === props.apiKey.period_reset_period
+  )
+  const periodBudget =
+    props.apiKey.period_quota > 0 && periodOption ? periodOption : undefined
+  if (periodBudget) {
+    details.push({
+      label: `${t('Periodic quota')} (${t(periodBudget.label)})`,
+      value: formatQuotaWithCurrency(props.apiKey.period_quota, {
+        showSymbol: false,
+      }),
+    })
+    details.push({
+      label: t('Used this period'),
+      value: formatQuotaWithCurrency(props.apiKey.period_used, {
+        showSymbol: false,
+      }),
+    })
+  }
+
+  let quotaDescription: string
+  if (periodBudget) {
+    quotaDescription = t(
+      'Requests are refused when either the remaining quota or the periodic quota is used up. The periodic quota resets automatically when the next period starts.'
+    )
+  } else if (props.apiKey.unlimited_quota) {
+    quotaDescription = t(
+      'This API key has no quota limit. Requests still require available wallet or subscription quota.'
+    )
+  } else {
+    quotaDescription = t(
+      'Total = used + remaining. It is not an initial allocation or a periodic budget; changing the remaining quota changes the total and percentage.'
+    )
+  }
 
   return (
     <QuotaDetailsPopover
@@ -96,15 +131,7 @@ export function ApiKeyQuotaCell(props: ApiKeyQuotaCellProps) {
           : triggerLabel
       }
       details={details}
-      description={
-        props.apiKey.unlimited_quota
-          ? t(
-              'This API key has no quota limit. Requests still require available wallet or subscription quota.'
-            )
-          : t(
-              'Total = used + remaining. It is not an initial allocation or a periodic budget; changing the remaining quota changes the total and percentage.'
-            )
-      }
+      description={quotaDescription}
       className={
         props.variant === 'card' ? 'space-y-2.5' : 'max-w-45 space-y-1.5'
       }

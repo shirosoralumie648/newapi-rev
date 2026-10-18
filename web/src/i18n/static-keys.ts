@@ -68,6 +68,14 @@ export const STATIC_I18N_KEYS = [
   '{{count}} accounts in debt',
   'Enter a group name',
   'Save wallet overdraft',
+  // Referral statistics panel (RF-07): the binding-source and
+  // commission-state labels render from REFERRAL_SOURCE_LABEL_KEYS and
+  // REFERRAL_COMMISSION_STATUS_LABEL_KEYS in the wallet feature.
+  'Link',
+  'Settled',
+  'In Review',
+  'Blocked by risk control',
+  'Rejected',
 
   // Playground assistant preset server messages and client feedback.
   'Failed to load assistant presets',
@@ -1145,4 +1153,9 @@ export const STATIC_I18N_KEYS = [
   'Under review',
   'Watch',
   'Watched account',
+  // API key periodic quota options render through t(option.label) from
+  // API_KEY_PERIOD_RESET_OPTIONS, and the invalid-cycle message is returned
+  // from Go through message_key, so the literal scan cannot see them.
+  'No periodic limit',
+  'Invalid periodic reset cycle',
 ] as const

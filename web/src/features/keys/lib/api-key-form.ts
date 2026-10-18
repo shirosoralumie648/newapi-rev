@@ -21,7 +21,7 @@ import { z } from 'zod'
 
 import { parseQuotaFromDollars, quotaUnitsToDollars } from '@/lib/format'
 
-import { DEFAULT_GROUP } from '../constants'
+import { API_KEY_PERIOD_RESET_OPTIONS, DEFAULT_GROUP } from '../constants'
 import type { ApiKey, ApiKeyFormData } from '../types'
 
 // ============================================================================
@@ -36,6 +36,8 @@ export function getApiKeyFormSchema(t: TFunction, maxAutoGroups = 5) {
     .object({
       name: z.string().min(1, t('Please enter a name')),
       remain_quota_dollars: z.number().optional(),
+      period_quota_dollars: z.number().optional(),
+      period_reset_period: z.enum(['', 'day', 'week', 'month']),
       expired_time: z.date().optional(),
       unlimited_quota: z.boolean(),
       model_limits: z.array(z.string()),
@@ -81,6 +83,20 @@ export function getApiKeyFormSchema(t: TFunction, maxAutoGroups = 5) {
         }
       }
 
+      // 周期预算与无限额度可以同时启用：预算不是余额，必须单独校验。
+      if (data.period_reset_period !== '') {
+        if (
+          data.period_quota_dollars === undefined ||
+          data.period_quota_dollars <= 0
+        ) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['period_quota_dollars'],
+            message: t('Periodic quota must be greater than zero'),
+          })
+        }
+      }
+
       if (data.unlimited_quota) {
         return
       }
@@ -107,6 +123,8 @@ export type ApiKeyFormValues = z.infer<ReturnType<typeof getApiKeyFormSchema>>
 export const API_KEY_FORM_DEFAULT_VALUES: ApiKeyFormValues = {
   name: '',
   remain_quota_dollars: 10,
+  period_quota_dollars: undefined,
+  period_reset_period: '',
   expired_time: undefined,
   unlimited_quota: true,
   model_limits: [],
@@ -160,6 +178,11 @@ export function transformFormDataToPayload(
         ? data.auto_groups
         : [],
     cross_group_retry: data.group === 'auto' ? !!data.cross_group_retry : false,
+    period_quota:
+      data.period_reset_period === ''
+        ? 0
+        : parseQuotaFromDollars(data.period_quota_dollars || 0),
+    period_reset_period: data.period_reset_period,
   }
 }
 
@@ -177,12 +200,21 @@ export function transformApiKeyToFormDefaults(
     .filter((group) => availableSet.has(group))
     .slice(0, Math.max(0, maxAutoGroups))
   const autoGroupsMode = storedAutoGroups.length > 0 ? 'custom' : 'inherit'
+  const periodResetPeriod =
+    API_KEY_PERIOD_RESET_OPTIONS.find(
+      (option) => option.value === apiKey.period_reset_period
+    )?.value ?? ''
 
   return {
     name: apiKey.name,
     remain_quota_dollars: apiKey.unlimited_quota
       ? 0
       : quotaUnitsToDollars(apiKey.remain_quota),
+    period_quota_dollars:
+      apiKey.period_quota > 0
+        ? quotaUnitsToDollars(apiKey.period_quota)
+        : undefined,
+    period_reset_period: periodResetPeriod,
     expired_time:
       apiKey.expired_time > 0
         ? new Date(apiKey.expired_time * 1000)

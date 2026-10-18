@@ -289,9 +289,18 @@ export function ReferralAdminDialog(props: ReferralAdminDialogProps) {
           ))}
         </div>
         <p className='text-muted-foreground text-xs'>
-          {t('Pending')}: {formatQuota(summary.pending_quota)} · {t('Locked')}:{' '}
-          {formatQuota(summary.locked_quota)} · {t('Settled')}:{' '}
-          {formatQuota(summary.settled_quota)}
+          {t(REFERRAL_COMMISSION_STATUS_LABEL_KEYS.pending)}:{' '}
+          {formatQuota(summary.pending_quota)} ·{' '}
+          {t(REFERRAL_COMMISSION_STATUS_LABEL_KEYS.locked)}:{' '}
+          {formatQuota(summary.locked_quota)} ·{' '}
+          {t(REFERRAL_COMMISSION_STATUS_LABEL_KEYS.settled)}:{' '}
+          {formatQuota(summary.settled_quota)} ·{' '}
+          {t(REFERRAL_COMMISSION_STATUS_LABEL_KEYS.review)}:{' '}
+          {formatQuota(summary.review_quota)} ·{' '}
+          {t(REFERRAL_COMMISSION_STATUS_LABEL_KEYS.blocked)}:{' '}
+          {formatQuota(summary.blocked_quota)} ·{' '}
+          {t(REFERRAL_COMMISSION_STATUS_LABEL_KEYS.rejected)}:{' '}
+          {formatQuota(summary.rejected_quota)}
         </p>
         {query.data && !query.data.commission_enabled ? (
           <p className='text-muted-foreground text-xs'>
