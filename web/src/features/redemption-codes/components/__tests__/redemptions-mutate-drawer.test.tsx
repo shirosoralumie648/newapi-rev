@@ -27,6 +27,8 @@ import { afterEach, describe, expect, test } from 'vitest'
 
 import type { Redemption } from '../../types'
 
+const { QueryClient, QueryClientProvider } =
+  await import('@tanstack/react-query')
 const i18n = (await import('i18next')).default
 const { I18nextProvider, initReactI18next } = await import('react-i18next')
 const { Toaster, toast } = await import('sonner')
@@ -34,6 +36,8 @@ const { api } = await import('@/lib/api')
 const { useSystemConfigStore } = await import('@/stores/system-config-store')
 const { RedemptionsProvider } = await import('../redemptions-provider')
 const { RedemptionsMutateDrawer } = await import('../redemptions-mutate-drawer')
+
+type QueryClientInstance = InstanceType<typeof QueryClient>
 
 await i18n.use(initReactI18next).init({
   lng: 'en',
@@ -57,6 +61,7 @@ type MockableApi = {
 }
 type RenderedDrawer = {
   result: RenderResult
+  client: QueryClientInstance
 }
 type CurrencyFixture = {
   quotaDisplayType: 'USD' | 'CNY'
@@ -100,30 +105,38 @@ function deferred<T>() {
   return { promise, reject, resolve }
 }
 
-function drawerTree(currentRow: Redemption) {
+function drawerTree(currentRow: Redemption, client: QueryClientInstance) {
   return (
-    <I18nextProvider i18n={i18n}>
-      <RedemptionsProvider>
-        <RedemptionsMutateDrawer
-          open
-          currentRow={currentRow}
-          onOpenChange={() => undefined}
-        />
-      </RedemptionsProvider>
-      <Toaster duration={60_000} />
-    </I18nextProvider>
+    <QueryClientProvider client={client}>
+      <I18nextProvider i18n={i18n}>
+        <RedemptionsProvider>
+          <RedemptionsMutateDrawer
+            open
+            currentRow={currentRow}
+            onOpenChange={() => undefined}
+          />
+        </RedemptionsProvider>
+        <Toaster duration={60_000} />
+      </I18nextProvider>
+    </QueryClientProvider>
   )
 }
 
-function createDrawerTree() {
+function createDrawerTree(client: QueryClientInstance) {
   return (
-    <I18nextProvider i18n={i18n}>
-      <RedemptionsProvider>
-        <RedemptionsMutateDrawer open onOpenChange={() => undefined} />
-      </RedemptionsProvider>
-      <Toaster duration={60_000} />
-    </I18nextProvider>
+    <QueryClientProvider client={client}>
+      <I18nextProvider i18n={i18n}>
+        <RedemptionsProvider>
+          <RedemptionsMutateDrawer open onOpenChange={() => undefined} />
+        </RedemptionsProvider>
+        <Toaster duration={60_000} />
+      </I18nextProvider>
+    </QueryClientProvider>
   )
+}
+
+function createQueryClient(): QueryClientInstance {
+  return new QueryClient({ defaultOptions: { queries: { retry: false } } })
 }
 
 async function renderDrawer(
@@ -144,14 +157,15 @@ async function renderDrawer(
     },
   })
 
-  renderedDrawer = { result: render(drawerTree(currentRow)) }
+  const client = createQueryClient()
+  renderedDrawer = { result: render(drawerTree(currentRow, client)), client }
 }
 
 async function rerenderDrawer(currentRow: Redemption): Promise<void> {
   if (!renderedDrawer) {
     throw new Error('Expected a rendered redemption drawer')
   }
-  renderedDrawer.result.rerender(drawerTree(currentRow))
+  renderedDrawer.result.rerender(drawerTree(currentRow, renderedDrawer.client))
 }
 
 async function renderCreateDrawer(): Promise<void> {
@@ -166,7 +180,8 @@ async function renderCreateDrawer(): Promise<void> {
     },
   })
 
-  renderedDrawer = { result: render(createDrawerTree()) }
+  const client = createQueryClient()
+  renderedDrawer = { result: render(createDrawerTree(client)), client }
 }
 
 function getSaveButton(): HTMLButtonElement {
@@ -217,6 +232,7 @@ afterEach(() => {
   Reflect.set(console, 'log', originalConsoleLog)
   toast.dismiss()
   localStorage.clear()
+  renderedDrawer?.client.clear()
   renderedDrawer = null
 })
 

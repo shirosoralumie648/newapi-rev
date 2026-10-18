@@ -167,7 +167,10 @@ export function RedemptionsTable() {
     staleTime: 60_000,
   })
   const planTitles = useMemo(
-    () => new Map((plans || []).map((plan) => [plan.id, plan.title])),
+    () =>
+      new Map(
+        (plans || []).map((plan): [number, string] => [plan.id, plan.title])
+      ),
     [plans]
   )
   const columns = useRedemptionsColumns(planTitles)

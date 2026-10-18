@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
   fireEvent,
   render,
@@ -73,10 +74,15 @@ function readDownload(download: Download): Promise<string> {
 
 function CreateDrawer() {
   const [open, setOpen] = useState(true)
+  const [client] = useState(
+    () => new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  )
   return (
-    <RedemptionsProvider>
-      <RedemptionsMutateDrawer open={open} onOpenChange={setOpen} />
-    </RedemptionsProvider>
+    <QueryClientProvider client={client}>
+      <RedemptionsProvider>
+        <RedemptionsMutateDrawer open={open} onOpenChange={setOpen} />
+      </RedemptionsProvider>
+    </QueryClientProvider>
   )
 }
 
