@@ -16,7 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { ReferralInvitation, ReferralStatsSummary } from '../types'
+import type {
+  ReferralAgentProfile,
+  ReferralAgentTier,
+  ReferralInvitation,
+  ReferralStatsSummary,
+} from '../types'
 
 // ============================================================================
 // Referral Statistics Helpers
@@ -166,4 +171,67 @@ export function getReferralCommissionStatusLabelKeys(
     keys.push(REFERRAL_COMMISSION_STATUS_LABEL_KEYS.rejected)
   }
   return keys
+}
+
+// ============================================================================
+// Referral Agent Helpers (RF-08)
+// ============================================================================
+
+/** Commission rate sources in resolution order, mapped to translation keys. */
+export const REFERRAL_RATE_SOURCE_LABEL_KEYS: Record<string, string> = {
+  user: 'Account override',
+  tier: 'Agent tier',
+  group: 'User group',
+  default: 'Global default',
+}
+
+/**
+ * Translation key of the winning commission rate source; an unknown source
+ * recorded by a newer backend stays readable as-is.
+ */
+export function getReferralRateSourceLabelKey(source: string): string {
+  return REFERRAL_RATE_SOURCE_LABEL_KEYS[source] ?? source
+}
+
+/** Profile shown before the caller's agent profile has loaded. */
+export const EMPTY_REFERRAL_AGENT_PROFILE: ReferralAgentProfile = {
+  marked: false,
+  tier_id: '',
+  tier_name: '',
+  rate_percent: 0,
+  rate_source: 'default',
+  enabled: false,
+  summary: EMPTY_REFERRAL_STATS_SUMMARY,
+}
+
+/**
+ * Parse the stored agent tier option (a JSON array). Malformed JSON or entries
+ * without an identifier, a name or a numeric rate are ignored, so the editor
+ * stays usable while the backend keeps the authoritative validation.
+ */
+export function parseReferralAgentTiersOption(
+  value: string
+): ReferralAgentTier[] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value)
+  } catch {
+    return []
+  }
+  if (!Array.isArray(parsed)) return []
+  const tiers: ReferralAgentTier[] = []
+  for (const entry of parsed) {
+    if (typeof entry !== 'object' || entry === null) continue
+    const record = entry as Record<string, unknown>
+    if (typeof record.id !== 'string' || typeof record.name !== 'string') {
+      continue
+    }
+    const rate =
+      typeof record.rate_percent === 'number'
+        ? record.rate_percent
+        : Number(record.rate_percent)
+    if (!Number.isFinite(rate)) continue
+    tiers.push({ id: record.id, name: record.name, rate_percent: rate })
+  }
+  return tiers
 }

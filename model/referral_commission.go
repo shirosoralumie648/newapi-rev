@@ -91,7 +91,11 @@ type ReferralCommission struct {
 	BaseQuota int64 `json:"base_quota" gorm:"type:bigint;not null"`
 	// RatePercent is the effective rate for the audit trail; the amount is
 	// always derived from BaseQuota and CommissionQuota.
-	RatePercent     string `json:"rate_percent" gorm:"type:varchar(16);not null"`
+	RatePercent string `json:"rate_percent" gorm:"type:varchar(16);not null"`
+	// RateSource names where RatePercent came from: the single-account
+	// override, the agent tier, the group override or the global default
+	// (RF-08). Historic rows without a recorded source stay empty.
+	RateSource      string `json:"rate_source" gorm:"type:varchar(16);not null;default:''"`
 	CommissionQuota int64  `json:"commission_quota" gorm:"type:bigint;not null"`
 	Status          string `json:"status" gorm:"type:varchar(16);not null;index"`
 	// LockedAt and SettledAt timestamp the two settlement transitions.
@@ -165,7 +169,11 @@ func RecordReferralCommissionTx(tx *gorm.DB, inviteeId int, source string, baseQ
 		return nil, nil
 	}
 
-	ratePercent := setting.CommissionRatePercentFor(inviter.Group)
+	agent, err := referralAgentWithTx(tx, inviter.Id)
+	if err != nil {
+		return nil, err
+	}
+	ratePercent, rateSource := ReferralCommissionRateFor(agent, inviter.Group)
 	if ratePercent <= 0 {
 		return nil, nil
 	}
@@ -220,6 +228,7 @@ func RecordReferralCommissionTx(tx *gorm.DB, inviteeId int, source string, baseQ
 		RefId:           refId,
 		BaseQuota:       baseQuota,
 		RatePercent:     strconv.FormatFloat(ratePercent, 'f', -1, 64),
+		RateSource:      rateSource,
 		CommissionQuota: int64(commissionQuota),
 		Status:          initialStatus,
 		Reason:          reason,
