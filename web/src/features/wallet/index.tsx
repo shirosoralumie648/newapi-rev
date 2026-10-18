@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useNavigate } from '@tanstack/react-router'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -66,6 +67,7 @@ interface WalletProps {
 
 export function Wallet(props: WalletProps) {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const [user, setUser] = useState<UserWalletData | null>(null)
   const [userLoading, setUserLoading] = useState(true)
   const [topupAmount, setTopupAmount] = useState(0)
@@ -354,6 +356,7 @@ export function Wallet(props: WalletProps) {
               affiliateLink={affiliateLink}
               onTransfer={() => setTransferDialogOpen(true)}
               onViewReferrals={() => setReferralDialogOpen(true)}
+              onOpenProgram={() => void navigate({ to: '/referral' })}
               complianceConfirmed={
                 topupInfo?.payment_compliance_confirmed !== false
               }

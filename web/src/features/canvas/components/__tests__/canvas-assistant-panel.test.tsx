@@ -18,13 +18,23 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { expect, test, vi } from 'vitest'
+import i18next from 'i18next'
+import { beforeAll, expect, test, vi } from 'vitest'
 
 import type { ModelOption } from '@/features/playground/types'
 
 import { CANVAS_ASSISTANT_MESSAGES } from '../../constants'
 import type { CanvasAssistantMessage } from '../../hooks/use-canvas-assistant'
 import { CanvasAssistantPanel } from '../canvas-assistant-panel'
+
+beforeAll(() => {
+  i18next.addResourceBundle('en', 'translation', {
+    'Selected node: {{label}} · {{count}} nodes in context':
+      'Selected node: {{label}} · {{count}} nodes in context',
+    'Whole canvas · {{count}} nodes in context':
+      'Whole canvas · {{count}} nodes in context',
+  })
+})
 
 const MODELS: ModelOption[] = [
   { label: 'Model one', value: 'm1' },
