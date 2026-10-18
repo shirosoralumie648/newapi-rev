@@ -67,6 +67,21 @@ export const API_KEY_STATUS_OPTIONS = Object.values(API_KEY_STATUSES).map(
 )
 
 // ============================================================================
+// Periodic Quota Configuration
+// label values are i18n keys; use t(config.label) in components
+// ============================================================================
+
+export const API_KEY_PERIOD_RESET_OPTIONS = [
+  { value: '', label: 'No periodic limit' },
+  { value: 'day', label: 'Daily' },
+  { value: 'week', label: 'Weekly' },
+  { value: 'month', label: 'Monthly' },
+] as const
+
+export type ApiKeyPeriodResetValue =
+  (typeof API_KEY_PERIOD_RESET_OPTIONS)[number]['value']
+
+// ============================================================================
 // Default Values
 // ============================================================================
 

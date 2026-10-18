@@ -86,6 +86,9 @@ const (
 	// quota error
 	ErrorCodeInsufficientUserQuota      ErrorCode = "insufficient_user_quota"
 	ErrorCodePreConsumeTokenQuotaFailed ErrorCode = "pre_consume_token_quota_failed"
+	// ErrorCodeTokenPeriodQuotaExhausted marks a token whose per-period budget
+	// is used up; the request is refused until the window resets.
+	ErrorCodeTokenPeriodQuotaExhausted ErrorCode = "token_period_quota_exhausted"
 	// ErrorCodeWorkflowBudgetExceeded marks a workspace workflow step the run
 	// budget cannot admit: the step is refused before it starts, and the client
 	// stops the remaining nodes of that run (BL-03).

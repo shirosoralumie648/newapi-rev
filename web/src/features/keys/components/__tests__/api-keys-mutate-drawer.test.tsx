@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, test } from 'vitest'
 
 const { createInstance } = await import('i18next')
@@ -193,6 +194,16 @@ function selectComboboxOption(
   fireEvent.click(option)
 }
 
+function getPeriodAmountInput(): HTMLInputElement {
+  const label = [...document.querySelectorAll<HTMLLabelElement>('label')].find(
+    (candidate) => candidate.textContent?.trim().startsWith('Periodic quota (')
+  )
+  if (!label?.control || !(label.control instanceof HTMLInputElement)) {
+    throw new Error('Expected the periodic quota amount input')
+  }
+  return label.control
+}
+
 afterEach(() => {
   apiClient.get = originalGet
   apiClient.post = originalPost
@@ -297,5 +308,39 @@ describe('API keys mutate drawer user quota query switch', () => {
     fireEvent.click(findButton('Save changes', true))
     await waitFor(() => expect(createdPayloads).toHaveLength(1))
     expect(createdPayloads[0]?.allow_user_quota_query).toBe(false)
+  })
+})
+
+describe('API keys mutate drawer periodic quota', () => {
+  test('rejects a period cycle without a positive amount and does not submit', async () => {
+    const createdPayloads: Array<Record<string, unknown>> = []
+    installApiFixtures(createdPayloads)
+    await renderCreateDrawer()
+
+    changeInput(getControlByLabel('Name'), 'periodic')
+    await userEvent.click(getControlByLabel('Periodic quota'))
+    await userEvent.click(await screen.findByRole('option', { name: 'Daily' }))
+
+    fireEvent.click(findButton('Save changes', true))
+    expect(
+      await screen.findByText('Periodic quota must be greater than zero')
+    ).toBeInTheDocument()
+    expect(createdPayloads).toHaveLength(0)
+  })
+
+  test('converts the period amount and sends the reset cycle for a new key', async () => {
+    const createdPayloads: Array<Record<string, unknown>> = []
+    installApiFixtures(createdPayloads)
+    await renderCreateDrawer()
+
+    changeInput(getControlByLabel('Name'), 'periodic')
+    await userEvent.click(getControlByLabel('Periodic quota'))
+    await userEvent.click(await screen.findByRole('option', { name: 'Daily' }))
+    changeInput(getPeriodAmountInput(), '2.5')
+
+    fireEvent.click(findButton('Save changes', true))
+    await waitFor(() => expect(createdPayloads).toHaveLength(1))
+    expect(createdPayloads[0]?.period_reset_period).toBe('day')
+    expect(createdPayloads[0]?.period_quota).toBe(1_250_000)
   })
 })

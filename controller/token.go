@@ -55,6 +55,34 @@ func maxTokenQuota() int {
 	return quota
 }
 
+// validateTokenPeriodQuota 校验并归一化令牌的周期预算配置：未启用时清空重置
+// 周期；启用时必须给出 day/week/month 且预算在有效范围内。周期窗口状态由
+// 服务端维护，这里只处理客户端可写的配置列。
+func validateTokenPeriodQuota(c *gin.Context, token *model.Token) bool {
+	if token.PeriodQuota < 0 {
+		common.ApiErrorT(c, "Quota value cannot be negative")
+		return false
+	}
+	token.PeriodResetPeriod = strings.TrimSpace(token.PeriodResetPeriod)
+	if token.PeriodQuota == 0 || token.PeriodResetPeriod == "" {
+		token.PeriodQuota = 0
+		token.PeriodResetPeriod = ""
+		return true
+	}
+	switch token.PeriodResetPeriod {
+	case model.TokenPeriodDaily, model.TokenPeriodWeekly, model.TokenPeriodMonthly:
+	default:
+		common.ApiErrorT(c, "Invalid periodic reset cycle")
+		return false
+	}
+	maxQuotaValue := maxTokenQuota()
+	if token.PeriodQuota > maxQuotaValue {
+		common.ApiErrorT(c, "Quota value exceeds valid range, maximum is {{max}}", map[string]any{"max": logger.FormatQuota(maxQuotaValue)})
+		return false
+	}
+	return true
+}
+
 func buildMaskedTokenResponse(token *model.Token) *tokenResponse {
 	if token == nil {
 		return nil
@@ -276,6 +304,10 @@ func GetTokenUsage(c *gin.Context) {
 		"model_limits":         token.GetModelLimitsMap(),
 		"model_limits_enabled": token.ModelLimitsEnabled,
 		"expires_at":           expiredAt,
+		"period_quota":         token.PeriodQuota,
+		"period_reset_period":  token.PeriodResetPeriod,
+		"period_used":          token.PeriodBudgetUsed(common.GetTimestamp()),
+		"period_window_start":  token.PeriodWindowStart,
 	}
 	// 用户额度只在令牌允许时返回；IP 白名单已由 TokenAuthReadOnly 检查。
 	if token.AllowUserQuotaQuery {
@@ -328,6 +360,9 @@ func AddToken(c *gin.Context) {
 			return
 		}
 	}
+	if !validateTokenPeriodQuota(c, &token) {
+		return
+	}
 	// 检查用户令牌数量是否已达上限
 	maxTokens := operation_setting.GetMaxUserTokens()
 	count, err := model.CountUserTokens(c.GetInt("id"))
@@ -371,6 +406,8 @@ func AddToken(c *gin.Context) {
 		Group:              token.Group,
 		CrossGroupRetry:    token.CrossGroupRetry,
 		AutoGroups:         token.AutoGroups,
+		PeriodQuota:        token.PeriodQuota,
+		PeriodResetPeriod:  token.PeriodResetPeriod,
 	}
 	cleanToken.AllowUserQuotaQuery = request.AllowUserQuotaQuery == nil || *request.AllowUserQuotaQuery
 	err = cleanToken.Insert()
@@ -437,6 +474,9 @@ func UpdateToken(c *gin.Context) {
 			return
 		}
 	}
+	if !validateTokenPeriodQuota(c, &token) {
+		return
+	}
 	cleanToken, err := model.GetTokenByIds(token.Id, userId)
 	if err != nil {
 		common.ApiError(c, err)
@@ -471,6 +511,10 @@ func UpdateToken(c *gin.Context) {
 		if request.AllowUserQuotaQuery != nil {
 			cleanToken.AllowUserQuotaQuery = *request.AllowUserQuotaQuery
 		}
+		// 周期窗口状态（period_used / period_window_start）由 UpdateWithQuotaTarget
+		// 根据提交的配置推导，客户端 JSON 不能直接写入。
+		cleanToken.PeriodQuota = token.PeriodQuota
+		cleanToken.PeriodResetPeriod = token.PeriodResetPeriod
 		// Store the stable identifier: a submitted display name is translated so
 		// the token keeps working after the display name changes again.
 		cleanToken.Group = group_setting.ResolveGroupID(token.Group)
@@ -512,6 +556,8 @@ func UpdateToken(c *gin.Context) {
 			{"group", previous.Group != cleanToken.Group},
 			{"cross_group_retry", previous.CrossGroupRetry != cleanToken.CrossGroupRetry},
 			{"auto_groups", previous.AutoGroups != cleanToken.AutoGroups},
+			{"period_quota", previous.PeriodQuota != cleanToken.PeriodQuota},
+			{"period_reset_period", previous.PeriodResetPeriod != cleanToken.PeriodResetPeriod},
 		} {
 			if field.changed {
 				changedFields = append(changedFields, field.name)
