@@ -35,6 +35,9 @@ export const REFERRAL_COMMISSION_STATUS_LABEL_KEYS: Record<string, string> = {
   pending: 'Pending',
   locked: 'Locked',
   settled: 'Settled',
+  review: 'In Review',
+  blocked: 'Blocked by risk control',
+  rejected: 'Rejected',
 }
 
 /** Source filter options of the administrator invitation list. */
@@ -50,6 +53,9 @@ export const REFERRAL_COMMISSION_STATUS_FILTER_VALUES = [
   'pending',
   'locked',
   'settled',
+  'review',
+  'blocked',
+  'rejected',
 ] as const
 
 /** Summary shown before the administrator page has loaded. */
@@ -61,6 +67,9 @@ export const EMPTY_REFERRAL_STATS_SUMMARY: ReferralStatsSummary = {
   pending_quota: 0,
   locked_quota: 0,
   settled_quota: 0,
+  review_quota: 0,
+  blocked_quota: 0,
+  rejected_quota: 0,
 }
 
 /**
@@ -71,20 +80,28 @@ export function getReferralSourceLabelKey(source: string): string {
   return REFERRAL_SOURCE_LABEL_KEYS[source] ?? source
 }
 
-/** Total commission of one invitation across every recorded state. */
+/**
+ * Total commission of one invitation across every recorded state. The user
+ * view only carries the payable states, the administrator view adds the
+ * refused ones.
+ */
 export function referralCommissionTotal(
   invitation: ReferralInvitation
 ): number {
   return (
     invitation.pending_quota +
     invitation.locked_quota +
-    invitation.settled_quota
+    invitation.settled_quota +
+    (invitation.review_quota ?? 0) +
+    (invitation.blocked_quota ?? 0) +
+    (invitation.rejected_quota ?? 0)
   )
 }
 
 /**
  * Translation keys of the commission states the invitation actually has, so a
- * row names pending, locked and settled amounts without inventing states.
+ * row names pending, locked, settled and — for administrators — the reviewed
+ * or refused amounts without inventing states.
  */
 export function getReferralCommissionStatusLabelKeys(
   invitation: ReferralInvitation
@@ -98,6 +115,15 @@ export function getReferralCommissionStatusLabelKeys(
   }
   if (invitation.settled_quota > 0) {
     keys.push(REFERRAL_COMMISSION_STATUS_LABEL_KEYS.settled)
+  }
+  if ((invitation.review_quota ?? 0) > 0) {
+    keys.push(REFERRAL_COMMISSION_STATUS_LABEL_KEYS.review)
+  }
+  if ((invitation.blocked_quota ?? 0) > 0) {
+    keys.push(REFERRAL_COMMISSION_STATUS_LABEL_KEYS.blocked)
+  }
+  if ((invitation.rejected_quota ?? 0) > 0) {
+    keys.push(REFERRAL_COMMISSION_STATUS_LABEL_KEYS.rejected)
   }
   return keys
 }

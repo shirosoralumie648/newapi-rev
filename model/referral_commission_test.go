@@ -850,7 +850,8 @@ func TestReferralCommissionOptionValidation(t *testing.T) {
 
 // The invitation statistics list every invitee of an inviter — those without
 // any commission event included, so a zero amount never hides an invited
-// account (#4197) — with the aggregates of their commission events, and honor
+// account (#4197) — with the aggregates of their commission events bucketed
+// by every known state (the blocked and rejected events included), and honor
 // the administrator filters, summary, pagination and window without ever
 // moving a balance.
 func TestReferralInvitationStats(t *testing.T) {
@@ -879,12 +880,20 @@ func TestReferralInvitationStats(t *testing.T) {
 		require.NoError(t, DB.Model(&ReferralBinding{}).Where("invitee_id = ?", quietInvitee.Id).Update("bound_at", 1700000200).Error)
 
 		// Three paid orders record three pending events; two of them move to
-		// their later states the way the settlement step (RF-04) will.
+		// their later states the way the settlement step (RF-04) will. Three
+		// further orders cover the recorded states that never join the payable
+		// pipeline: one waits for a manual decision, two were refused.
 		completeReferralCommissionTestTopUp(t, "s-a-order-1", paidInvitee.Id, 10)
 		completeReferralCommissionTestTopUp(t, "s-a-order-2", paidInvitee.Id, 4)
 		completeReferralCommissionTestTopUp(t, "s-a-order-3", paidInvitee.Id, 2)
 		require.NoError(t, DB.Model(&ReferralCommission{}).Where("ref_id = ?", "s-a-order-2").Update("status", ReferralCommissionStatusLocked).Error)
 		require.NoError(t, DB.Model(&ReferralCommission{}).Where("ref_id = ?", "s-a-order-3").Update("status", ReferralCommissionStatusSettled).Error)
+		completeReferralCommissionTestTopUp(t, "s-a-order-4", paidInvitee.Id, 2)
+		completeReferralCommissionTestTopUp(t, "s-a-order-5", paidInvitee.Id, 2)
+		completeReferralCommissionTestTopUp(t, "s-a-order-6", paidInvitee.Id, 2)
+		require.NoError(t, DB.Model(&ReferralCommission{}).Where("ref_id = ?", "s-a-order-4").Update("status", ReferralCommissionStatusReview).Error)
+		require.NoError(t, DB.Model(&ReferralCommission{}).Where("ref_id = ?", "s-a-order-5").Update("status", ReferralCommissionStatusBlocked).Error)
+		require.NoError(t, DB.Model(&ReferralCommission{}).Where("ref_id = ?", "s-a-order-6").Update("status", ReferralCommissionStatusRejected).Error)
 
 		t.Run("lists every invitee with commission aggregates and the window end", func(t *testing.T) {
 			query := ReferralInvitationQuery{InviterId: inviter.Id}
@@ -906,8 +915,11 @@ func TestReferralInvitationStats(t *testing.T) {
 			assert.EqualValues(t, 500000, paid.PendingQuota)
 			assert.EqualValues(t, 200000, paid.LockedQuota)
 			assert.EqualValues(t, 100000, paid.SettledQuota)
-			assert.EqualValues(t, 8000000, paid.TotalPaidQuota)
-			assert.EqualValues(t, 3, paid.CommissionCount)
+			assert.EqualValues(t, 100000, paid.ReviewQuota)
+			assert.EqualValues(t, 100000, paid.BlockedQuota)
+			assert.EqualValues(t, 100000, paid.RejectedQuota)
+			assert.EqualValues(t, 11000000, paid.TotalPaidQuota)
+			assert.EqualValues(t, 6, paid.CommissionCount)
 			assert.Equal(t,
 				referralCommissionWindowEnd(paidInvitee.CreatedAt, operation_setting.ReferralWindowMonthsDefault),
 				paid.CommissionEndsAt)
@@ -937,6 +949,13 @@ func TestReferralInvitationStats(t *testing.T) {
 			require.Len(t, filtered, 1)
 			assert.Equal(t, paidInvitee.Id, filtered[0].InviteeId)
 
+			// A refused event is selectable too: the administrator filters for
+			// the anti-abuse states the user view never exposes.
+			blocked, err := ListReferralInvitations(ReferralInvitationQuery{InviterId: inviter.Id, Status: ReferralCommissionStatusBlocked}, 0, 10)
+			require.NoError(t, err)
+			require.Len(t, blocked, 1)
+			assert.Equal(t, paidInvitee.Id, blocked[0].InviteeId)
+
 			// A keyword wildcard is a literal, not a pattern.
 			total, err = CountReferralInvitations(ReferralInvitationQuery{InviterId: inviter.Id, Keyword: "%"})
 			require.NoError(t, err)
@@ -961,11 +980,20 @@ func TestReferralInvitationStats(t *testing.T) {
 			require.NoError(t, err)
 			assert.EqualValues(t, 2, summary.TotalInvitees)
 			assert.EqualValues(t, 1, summary.InviteesWithCommission)
-			assert.EqualValues(t, 8000000, summary.TotalPaidQuota)
-			assert.EqualValues(t, 800000, summary.TotalCommissionQuota)
+			assert.EqualValues(t, 11000000, summary.TotalPaidQuota)
+			assert.EqualValues(t, 1100000, summary.TotalCommissionQuota)
 			assert.EqualValues(t, 500000, summary.PendingQuota)
 			assert.EqualValues(t, 200000, summary.LockedQuota)
 			assert.EqualValues(t, 100000, summary.SettledQuota)
+			assert.EqualValues(t, 100000, summary.ReviewQuota)
+			assert.EqualValues(t, 100000, summary.BlockedQuota)
+			assert.EqualValues(t, 100000, summary.RejectedQuota)
+			// Every recorded state is bucketed, so the buckets add up to the
+			// recorded total of the payable and refused events.
+			assert.Equal(t,
+				summary.TotalCommissionQuota,
+				summary.PendingQuota+summary.LockedQuota+summary.SettledQuota+
+					summary.ReviewQuota+summary.BlockedQuota+summary.RejectedQuota)
 
 			onlyQuiet, err := SummarizeReferralInvitations(ReferralInvitationQuery{InviterId: inviter.Id, Source: ReferralSourceOAuth})
 			require.NoError(t, err)
@@ -1026,7 +1054,15 @@ func TestReferralInvitationQueryValidation(t *testing.T) {
 	}
 	assert.False(t, IsReferralSource("unknown"))
 
-	for _, status := range []string{"", ReferralCommissionStatusPending, ReferralCommissionStatusLocked, ReferralCommissionStatusSettled} {
+	for _, status := range []string{
+		"",
+		ReferralCommissionStatusPending,
+		ReferralCommissionStatusReview,
+		ReferralCommissionStatusBlocked,
+		ReferralCommissionStatusRejected,
+		ReferralCommissionStatusLocked,
+		ReferralCommissionStatusSettled,
+	} {
 		assert.True(t, IsReferralCommissionStatus(status), "status %q must be accepted", status)
 	}
 	assert.False(t, IsReferralCommissionStatus("reversed"))

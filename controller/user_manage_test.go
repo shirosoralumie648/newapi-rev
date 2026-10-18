@@ -948,3 +948,108 @@ func TestReferralAntiAbuseAdminEndpoints(t *testing.T) {
 	assert.Equal(t, fmt.Sprintf("Decided referral commission review #%d as approve", review.Id), reviewAudits[0].Content)
 	assert.Equal(t, fmt.Sprintf("Decided referral commission review #%d as reject", rejected.Id), reviewAudits[1].Content)
 }
+
+// The invitation statistics endpoints are read-only: the inviter sees exactly
+// their own invitees with masked identifiers and without the anti-abuse
+// commission states, the administrator list carries the refused states and
+// the filtered summary, the export writes the same rows as CSV, and no call
+// moves a balance.
+func TestReferralInvitationStatisticsEndpoints(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	now := time.Now().Unix()
+	inviter := model.User{Username: "stats-inviter", Password: "password", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Quota: 12345, AffCode: "stats-inviter-aff"}
+	require.NoError(t, db.Create(&inviter).Error)
+	invitee := model.User{Username: "stats-invitee", Email: "stats-invitee@example.com", Password: "password", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "stats-invitee-aff"}
+	require.NoError(t, db.Create(&invitee).Error)
+	otherInviter := model.User{Username: "stats-other-inviter", Password: "password", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "stats-other-inviter-aff"}
+	require.NoError(t, db.Create(&otherInviter).Error)
+	otherInvitee := model.User{Username: "stats-other-invitee", Password: "password", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "stats-other-invitee-aff"}
+	require.NoError(t, db.Create(&otherInvitee).Error)
+
+	require.NoError(t, db.Create(&model.ReferralBinding{InviteeId: invitee.Id, InviterId: inviter.Id, Source: model.ReferralSourceLink, BoundAt: now}).Error)
+	require.NoError(t, db.Create(&model.ReferralBinding{InviteeId: otherInvitee.Id, InviterId: otherInviter.Id, Source: model.ReferralSourceCode, BoundAt: now + 1}).Error)
+	require.NoError(t, db.Create(&model.ReferralCommission{
+		InviterId: inviter.Id, InviteeId: invitee.Id, Source: model.ReferralCommissionSourceTopUp,
+		RefType: model.WalletLedgerRefTopUp, RefId: "stats-order-1",
+		BaseQuota: 5000000, RatePercent: "10", CommissionQuota: 500000,
+		Status: model.ReferralCommissionStatusPending, CreatedAt: now, UpdatedAt: now,
+	}).Error)
+	require.NoError(t, db.Create(&model.ReferralCommission{
+		InviterId: inviter.Id, InviteeId: invitee.Id, Source: model.ReferralCommissionSourceTopUp,
+		RefType: model.WalletLedgerRefTopUp, RefId: "stats-order-2",
+		BaseQuota: 2000000, RatePercent: "10", CommissionQuota: 200000,
+		Status: model.ReferralCommissionStatusBlocked, Reason: model.ReferralCommissionReasonDailyCap,
+		CreatedAt: now, UpdatedAt: now,
+	}).Error)
+
+	invoke := func(userID int, method, path string, handler gin.HandlerFunc) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(method, path, nil)
+		c.Set("id", userID)
+		c.Set("role", common.RoleAdminUser)
+		c.Set("username", "stats-caller")
+		handler(c)
+		return recorder
+	}
+
+	recorder := invoke(inviter.Id, http.MethodGet, "/api/user/self/referrals?p=1&page_size=20", GetSelfReferralInvitations)
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	selfBody := recorder.Body.String()
+	assert.Contains(t, selfBody, `"success":true`)
+	assert.Contains(t, selfBody, `"total":1`)
+	assert.Contains(t, selfBody, `"identifier":"s***@example.com"`)
+	assert.Contains(t, selfBody, fmt.Sprintf(`"invitee_id":%d`, invitee.Id))
+	assert.Contains(t, selfBody, `"pending_quota":500000`)
+	assert.Contains(t, selfBody, `"commission_enabled":`)
+	assert.NotContains(t, selfBody, "stats-invitee@example.com")
+	assert.NotContains(t, selfBody, fmt.Sprintf(`"invitee_id":%d`, otherInvitee.Id))
+	assert.NotContains(t, selfBody, `"blocked_quota"`, "the user view never exposes the anti-abuse states")
+
+	recorder = invoke(9999, http.MethodGet, "/api/user/referrals?p=1&page_size=20", GetReferralInvitations)
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	adminBody := recorder.Body.String()
+	assert.Contains(t, adminBody, `"total":2`)
+	assert.Contains(t, adminBody, `"username":"stats-invitee"`, "the administrator sees the raw identifiers")
+	assert.Contains(t, adminBody, `"inviter_username":"stats-inviter"`)
+	assert.Contains(t, adminBody, `"total_invitees":2`)
+	assert.Contains(t, adminBody, `"invitees_with_commission":1`)
+	assert.Contains(t, adminBody, `"total_paid_quota":7000000`)
+	assert.Contains(t, adminBody, `"pending_quota":500000`)
+	assert.Contains(t, adminBody, `"blocked_quota":200000`)
+
+	recorder = invoke(9999, http.MethodGet, "/api/user/referrals?p=1&page_size=20&status=blocked", GetReferralInvitations)
+	assert.Contains(t, recorder.Body.String(), `"total":1`)
+	recorder = invoke(9999, http.MethodGet, "/api/user/referrals?p=1&page_size=20&status=unknown", GetReferralInvitations)
+	assert.Contains(t, recorder.Body.String(), `"success":false`)
+	recorder = invoke(9999, http.MethodGet, "/api/user/referrals?p=1&page_size=20&source=unknown", GetReferralInvitations)
+	assert.Contains(t, recorder.Body.String(), `"success":false`)
+
+	recorder = invoke(9999, http.MethodGet, "/api/user/referrals/export?status=blocked", ExportReferralInvitations)
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, "text/csv; charset=utf-8", recorder.Header().Get("Content-Type"))
+	assert.Contains(t, recorder.Header().Get("Content-Disposition"), "referral-invitations.csv")
+	csvLines := strings.Split(strings.TrimSpace(strings.TrimPrefix(recorder.Body.String(), "\xEF\xBB\xBF")), "\n")
+	require.Len(t, csvLines, 2)
+	header := strings.Split(strings.TrimSpace(csvLines[0]), ",")
+	row := strings.Split(strings.TrimSpace(csvLines[1]), ",")
+	require.Len(t, row, len(header))
+	assert.Equal(t,
+		[]string{
+			"invitee_id", "username", "email", "display_name", "inviter_id", "inviter_username",
+			"source", "bound_at", "commission_ends_at",
+			"pending_quota", "locked_quota", "settled_quota",
+			"review_quota", "blocked_quota", "rejected_quota",
+			"total_paid_quota", "commission_count",
+		},
+		header)
+	assert.Equal(t, strconv.Itoa(invitee.Id), row[0])
+	assert.Equal(t, "stats-invitee", row[1])
+	assert.Equal(t, model.ReferralSourceLink, row[6])
+	assert.Equal(t, "500000", row[9])
+	assert.Equal(t, "200000", row[13])
+
+	var stored model.User
+	require.NoError(t, db.First(&stored, inviter.Id).Error)
+	assert.EqualValues(t, 12345, stored.Quota, "the read-only statistics never move a balance")
+}

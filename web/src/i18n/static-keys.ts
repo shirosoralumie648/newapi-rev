@@ -68,6 +68,14 @@ export const STATIC_I18N_KEYS = [
   '{{count}} accounts in debt',
   'Enter a group name',
   'Save wallet overdraft',
+  // Referral statistics panel (RF-07): the binding-source and
+  // commission-state labels render from REFERRAL_SOURCE_LABEL_KEYS and
+  // REFERRAL_COMMISSION_STATUS_LABEL_KEYS in the wallet feature.
+  'Link',
+  'Settled',
+  'In Review',
+  'Blocked by risk control',
+  'Rejected',
 
   // Playground assistant preset server messages and client feedback.
   'Failed to load assistant presets',
