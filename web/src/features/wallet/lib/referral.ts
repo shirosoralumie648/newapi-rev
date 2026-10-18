@@ -63,6 +63,7 @@ export const REFERRAL_SOURCE_FILTER_VALUES = [
   'code',
   'oauth',
   'admin',
+  'legacy',
 ] as const
 
 /** Commission-status filter options of the administrator invitation list. */

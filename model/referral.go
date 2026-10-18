@@ -69,9 +69,13 @@ func (ReferralBinding) TableName() string {
 	return "referral_bindings"
 }
 
+// isReferralSource reports whether source names a recorded binding channel.
+// The legacy channel is written only by the one-time import of relations that
+// predate the binding table, but it is a recorded channel: the administrator
+// statistics accept it as a filter like every other source.
 func isReferralSource(source string) bool {
 	switch source {
-	case ReferralSourceLink, ReferralSourceCode, ReferralSourceOAuth, ReferralSourceAdmin:
+	case ReferralSourceLink, ReferralSourceCode, ReferralSourceOAuth, ReferralSourceAdmin, ReferralSourceLegacy:
 		return true
 	default:
 		return false

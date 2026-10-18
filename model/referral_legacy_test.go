@@ -152,6 +152,16 @@ func TestLegacyReferralImportMatrix(t *testing.T) {
 		require.NoError(t, db.Where("invitee_id = ?", boundInvitee.Id).First(&boundBinding).Error)
 		assert.Equal(t, ReferralSourceCode, boundBinding.Source)
 
+		// The imported channel is a recorded source: the administrator
+		// statistics filter accepts it and finds exactly the backfilled
+		// relation.
+		legacyTotal, err := CountReferralInvitations(ReferralInvitationQuery{InviterId: inviter.Id, Source: ReferralSourceLegacy})
+		require.NoError(t, err)
+		assert.EqualValues(t, 1, legacyTotal)
+		codeTotal, err := CountReferralInvitations(ReferralInvitationQuery{InviterId: inviter.Id, Source: ReferralSourceCode})
+		require.NoError(t, err)
+		assert.EqualValues(t, 1, codeTotal)
+
 		// The marker records the completed import and makes it a one-time event.
 		var option Option
 		require.NoError(t, db.Where(&Option{Key: referralLegacyMigrationOptionKey}).First(&option).Error)
