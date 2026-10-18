@@ -115,14 +115,14 @@ func playgroundTestDB(t *testing.T, dialect string) *gorm.DB {
 	common.SetDatabaseTypes(common.DatabaseType(dialect), previousLog)
 	model.DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundUserUsage{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundMessage{}, &model.PlaygroundSession{}, &model.Task{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundUserUsage{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundMessage{}, &model.PlaygroundSession{}, &model.Task{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
 		model.DB = previous
 		common.SetDatabaseTypes(previousMain, previousLog)
 	})
-	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.Task{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.Task{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -170,6 +170,9 @@ func playgroundRequest(t *testing.T, user int, method, path string, body any, ha
 		c.Params = append(c.Params, gin.Param{Key: "artifactId", Value: parts[6]})
 		c.Params = append(c.Params, gin.Param{Key: "attachmentId", Value: parts[6]})
 		c.Params = append(c.Params, gin.Param{Key: "artifactKey", Value: parts[6]})
+		if parts[3] == "canvases" && parts[5] == "snapshots" {
+			c.Params = append(c.Params, gin.Param{Key: "snapshotId", Value: parts[6]})
+		}
 	}
 	if len(parts) > 8 {
 		c.Params = append(c.Params, gin.Param{Key: "versionId", Value: parts[8]})
@@ -638,6 +641,16 @@ func TestPlaygroundArtifactPersistenceMatrix(t *testing.T) {
 			assert.EqualValues(t, 2, saved.Version.Number)
 			assert.EqualValues(t, 75000, saved.Version.ByteSize)
 			assert.Equal(t, content, string(saved.Version.Content))
+			// A version larger than the externalization threshold keeps only
+			// metadata in its row; the body is a gzip object, and the reads
+			// above hydrated it from there.
+			var storedVersion model.PlaygroundArtifactVersion
+			require.NoError(t, db.Where("id = ?", saved.Version.ID).First(&storedVersion).Error)
+			assert.Equal(t, system_setting.ObjectStoreBackendLocal, storedVersion.StorageBackend)
+			assert.True(t, strings.HasPrefix(storedVersion.ObjectKey, "pg/7/artifacts/"), storedVersion.ObjectKey)
+			assert.Equal(t, "gzip", storedVersion.ContentEncoding)
+			assert.Empty(t, string(storedVersion.Content))
+			assert.EqualValues(t, 75000, storedVersion.ByteSize)
 			restoreRevision := int64(2)
 			restore := model.RestorePlaygroundArtifactInput{RequestID: "restore_1", ExpectedRevision: &restoreRevision, VersionID: created.Version.ID}
 			restored := artifactResult(t, playgroundRequest(t, 7, http.MethodPost, artifactPath+"/restore", restore, controller.RestorePlaygroundArtifactVersion))
@@ -735,6 +748,12 @@ func TestPlaygroundArtifactPersistenceMatrix(t *testing.T) {
 			deletedPath := artifactPath
 			assert.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodDelete, deletedPath+"?expected_revision=4", nil, controller.DeletePlaygroundArtifact).Code)
 			assert.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodDelete, deletedPath+"?expected_revision=4", nil, controller.DeletePlaygroundArtifact).Code)
+			// The externalized version body leaves the object store together
+			// with the row that owned it.
+			objectStore := objectstore.DefaultStore()
+			require.NotNil(t, objectStore)
+			_, objectErr := objectStore.Head(context.Background(), storedVersion.ObjectKey)
+			assert.ErrorIs(t, objectErr, objectstore.ErrObjectNotFound)
 			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 7, http.MethodPost, path, input, controller.CreatePlaygroundArtifact).Code)
 			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 7, http.MethodPost, artifactPath+"/versions", latest, controller.SavePlaygroundArtifactVersion).Code)
 			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 7, http.MethodPost, artifactPath+"/restore", restore, controller.RestorePlaygroundArtifactVersion).Code)

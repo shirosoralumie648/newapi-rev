@@ -57,8 +57,15 @@ type PlaygroundUserUsage struct {
 	ArtifactBytes int64 `json:"artifact_bytes" gorm:"not null"`
 	CanvasCount   int64 `json:"canvas_count" gorm:"not null"`
 	CanvasBytes   int64 `json:"canvas_bytes" gorm:"not null"`
-	CreatedAt     int64 `json:"created_at" gorm:"not null"`
-	UpdatedAt     int64 `json:"updated_at" gorm:"not null"`
+	// CanvasSnapshotCount and CanvasSnapshotBytes count the gzip canvas
+	// history objects of the account. They are separate from CanvasBytes so
+	// the board budgets and the history budget never trade one for the other,
+	// and the handlers that add columns to an existing installation rely on
+	// the DEFAULT 0, which keeps the migrated columns non-null.
+	CanvasSnapshotCount int64 `json:"canvas_snapshot_count" gorm:"not null;default:0"`
+	CanvasSnapshotBytes int64 `json:"canvas_snapshot_bytes" gorm:"not null;default:0"`
+	CreatedAt           int64 `json:"created_at" gorm:"not null"`
+	UpdatedAt           int64 `json:"updated_at" gorm:"not null"`
 }
 
 // TableName pins the table name the plan defines; GORM would otherwise
@@ -70,28 +77,32 @@ func (PlaygroundUserUsage) TableName() string {
 // playgroundUserUsageCounters is the comparable snapshot of one counter row
 // without identity and timestamps.
 type playgroundUserUsageCounters struct {
-	Sessions        int64
-	Presets         int64
-	AttachmentCount int64
-	AttachmentBytes int64
-	ObjectBytes     int64
-	ArtifactCount   int64
-	ArtifactBytes   int64
-	CanvasCount     int64
-	CanvasBytes     int64
+	Sessions            int64
+	Presets             int64
+	AttachmentCount     int64
+	AttachmentBytes     int64
+	ObjectBytes         int64
+	ArtifactCount       int64
+	ArtifactBytes       int64
+	CanvasCount         int64
+	CanvasBytes         int64
+	CanvasSnapshotCount int64
+	CanvasSnapshotBytes int64
 }
 
 func (usage *PlaygroundUserUsage) counters() playgroundUserUsageCounters {
 	return playgroundUserUsageCounters{
-		Sessions:        usage.Sessions,
-		Presets:         usage.Presets,
-		AttachmentCount: usage.AttachmentCount,
-		AttachmentBytes: usage.AttachmentBytes,
-		ObjectBytes:     usage.ObjectBytes,
-		ArtifactCount:   usage.ArtifactCount,
-		ArtifactBytes:   usage.ArtifactBytes,
-		CanvasCount:     usage.CanvasCount,
-		CanvasBytes:     usage.CanvasBytes,
+		Sessions:            usage.Sessions,
+		Presets:             usage.Presets,
+		AttachmentCount:     usage.AttachmentCount,
+		AttachmentBytes:     usage.AttachmentBytes,
+		ObjectBytes:         usage.ObjectBytes,
+		ArtifactCount:       usage.ArtifactCount,
+		ArtifactBytes:       usage.ArtifactBytes,
+		CanvasCount:         usage.CanvasCount,
+		CanvasBytes:         usage.CanvasBytes,
+		CanvasSnapshotCount: usage.CanvasSnapshotCount,
+		CanvasSnapshotBytes: usage.CanvasSnapshotBytes,
 	}
 }
 
@@ -106,21 +117,25 @@ func (usage *PlaygroundUserUsage) load(counters playgroundUserUsageCounters) {
 	usage.ArtifactBytes = counters.ArtifactBytes
 	usage.CanvasCount = counters.CanvasCount
 	usage.CanvasBytes = counters.CanvasBytes
+	usage.CanvasSnapshotCount = counters.CanvasSnapshotCount
+	usage.CanvasSnapshotBytes = counters.CanvasSnapshotBytes
 }
 
 // playgroundUserUsageDelta is a signed change applied to a locked counter row.
 // A decrease is clamped at zero, so a replay or an unexpected double delete can
 // never push a counter below zero.
 type playgroundUserUsageDelta struct {
-	Sessions        int64
-	Presets         int64
-	AttachmentCount int64
-	AttachmentBytes int64
-	ObjectBytes     int64
-	ArtifactCount   int64
-	ArtifactBytes   int64
-	CanvasCount     int64
-	CanvasBytes     int64
+	Sessions            int64
+	Presets             int64
+	AttachmentCount     int64
+	AttachmentBytes     int64
+	ObjectBytes         int64
+	ArtifactCount       int64
+	ArtifactBytes       int64
+	CanvasCount         int64
+	CanvasBytes         int64
+	CanvasSnapshotCount int64
+	CanvasSnapshotBytes int64
 }
 
 func (usage *PlaygroundUserUsage) apply(delta playgroundUserUsageDelta) {
@@ -133,6 +148,8 @@ func (usage *PlaygroundUserUsage) apply(delta playgroundUserUsageDelta) {
 	usage.ArtifactBytes = max(0, usage.ArtifactBytes+delta.ArtifactBytes)
 	usage.CanvasCount = max(0, usage.CanvasCount+delta.CanvasCount)
 	usage.CanvasBytes = max(0, usage.CanvasBytes+delta.CanvasBytes)
+	usage.CanvasSnapshotCount = max(0, usage.CanvasSnapshotCount+delta.CanvasSnapshotCount)
+	usage.CanvasSnapshotBytes = max(0, usage.CanvasSnapshotBytes+delta.CanvasSnapshotBytes)
 }
 
 // lockPlaygroundUserUsage acquires the account's counter row for the rest of
@@ -175,16 +192,18 @@ func lockPlaygroundUserUsage(tx *gorm.DB, userID int) (*PlaygroundUserUsage, err
 func savePlaygroundUserUsage(tx *gorm.DB, usage *PlaygroundUserUsage) error {
 	usage.UpdatedAt = common.GetTimestamp()
 	return tx.Model(&PlaygroundUserUsage{}).Where("user_id = ?", usage.UserID).Updates(map[string]any{
-		"sessions":         usage.Sessions,
-		"presets":          usage.Presets,
-		"attachment_count": usage.AttachmentCount,
-		"attachment_bytes": usage.AttachmentBytes,
-		"object_bytes":     usage.ObjectBytes,
-		"artifact_count":   usage.ArtifactCount,
-		"artifact_bytes":   usage.ArtifactBytes,
-		"canvas_count":     usage.CanvasCount,
-		"canvas_bytes":     usage.CanvasBytes,
-		"updated_at":       usage.UpdatedAt,
+		"sessions":              usage.Sessions,
+		"presets":               usage.Presets,
+		"attachment_count":      usage.AttachmentCount,
+		"attachment_bytes":      usage.AttachmentBytes,
+		"object_bytes":          usage.ObjectBytes,
+		"artifact_count":        usage.ArtifactCount,
+		"artifact_bytes":        usage.ArtifactBytes,
+		"canvas_count":          usage.CanvasCount,
+		"canvas_bytes":          usage.CanvasBytes,
+		"canvas_snapshot_count": usage.CanvasSnapshotCount,
+		"canvas_snapshot_bytes": usage.CanvasSnapshotBytes,
+		"updated_at":            usage.UpdatedAt,
 	}).Error
 }
 
@@ -233,6 +252,17 @@ func playgroundUserUsageSnapshot(tx *gorm.DB, userID int) (PlaygroundUserUsage, 
 		return usage, err
 	}
 	usage.CanvasCount, usage.CanvasBytes = canvas.Used, canvas.UsedBytes
+	// Snapshot bytes are the logical (uncompressed) document bytes packed into
+	// the gzip history objects, which is what the snapshot budget weighs.
+	var snapshots struct {
+		Used      int64
+		UsedBytes int64
+	}
+	if err := tx.Model(&PlaygroundCanvasSnapshot{}).Where("user_id = ?", userID).
+		Select("COUNT(*) AS used, COALESCE(SUM(byte_size), 0) AS used_bytes").Scan(&snapshots).Error; err != nil {
+		return usage, err
+	}
+	usage.CanvasSnapshotCount, usage.CanvasSnapshotBytes = snapshots.Used, snapshots.UsedBytes
 	return usage, nil
 }
 
@@ -271,7 +301,7 @@ type PlaygroundUsageReconciliation struct {
 // them.
 func playgroundUsageOwnerIDs(db *gorm.DB) ([]int, error) {
 	seen := map[int]bool{}
-	for _, resource := range []any{&PlaygroundSession{}, &PlaygroundPreset{}, &PlaygroundAttachment{}, &PlaygroundArtifact{}, &PlaygroundCanvasProject{}} {
+	for _, resource := range []any{&PlaygroundSession{}, &PlaygroundPreset{}, &PlaygroundAttachment{}, &PlaygroundArtifact{}, &PlaygroundCanvasProject{}, &PlaygroundCanvasSnapshot{}} {
 		ids := make([]int, 0)
 		if err := db.Model(resource).Distinct("user_id").Pluck("user_id", &ids).Error; err != nil {
 			return nil, err

@@ -151,6 +151,41 @@ func migratePlaygroundTrashColumns(db *gorm.DB) error {
 	return nil
 }
 
+// playgroundUserUsageCounterColumns are the Playground usage counters that
+// later releases added to the account counter row. PostgreSQL refuses to add a
+// NOT NULL column to a non-empty table without a default, so they are created
+// with DEFAULT 0 before AutoMigrate sees them.
+var playgroundUserUsageCounterColumns = []string{"canvas_snapshot_count", "canvas_snapshot_bytes"}
+
+// migratePlaygroundUserUsageCounters adds the canvas snapshot counters to an
+// installation that predates them. The migration is a no-op on a fresh
+// database and once the columns exist.
+func migratePlaygroundUserUsageCounters(db *gorm.DB) error {
+	if db == nil {
+		return fmt.Errorf("migrate playground user usage counters: database is nil")
+	}
+	target := &PlaygroundUserUsage{}
+	if !db.Migrator().HasTable(target) {
+		return nil
+	}
+	statement := &gorm.Statement{DB: db}
+	if err := statement.Parse(target); err != nil {
+		return fmt.Errorf("resolve playground user usage table: %w", err)
+	}
+	if statement.Table == "" {
+		return fmt.Errorf("resolve playground user usage table: empty table name")
+	}
+	for _, column := range playgroundUserUsageCounterColumns {
+		if db.Migrator().HasColumn(target, column) {
+			continue
+		}
+		if err := db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s bigint NOT NULL DEFAULT 0", statement.Table, column)).Error; err != nil {
+			return fmt.Errorf("add %s.%s: %w", statement.Table, column, err)
+		}
+	}
+	return nil
+}
+
 // ensurePlaygroundAttachmentStorageBackend marks rows written before the
 // object store existed (and rows that an older node of a rolling upgrade kept
 // writing) as database-backed after AutoMigrate added the column. AutoMigrate
