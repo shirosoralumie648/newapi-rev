@@ -411,3 +411,61 @@ export interface CreditGrantIssueRequest {
   expires_in_days?: number
   note?: string
 }
+
+// ============================================================================
+// Referral Statistics Types
+// ============================================================================
+
+/**
+ * One invitation with the aggregates of its commission events. `identifier`
+ * is the masked invitee account shown to the inviter; the administrator view
+ * carries the raw `username`, `email` and `display_name` instead. Quota
+ * amounts are read-only and split by commission state.
+ */
+export interface ReferralInvitation {
+  invitee_id: number
+  identifier?: string
+  username?: string
+  email?: string
+  display_name?: string
+  inviter_id?: number
+  inviter_username?: string
+  source: string
+  bound_at: number
+  commission_ends_at: number
+  pending_quota: number
+  locked_quota: number
+  settled_quota: number
+  total_paid_quota: number
+  commission_count: number
+}
+
+export type ReferralInvitationPage = {
+  items: ReferralInvitation[]
+  total: number
+  /** 0 = first paid order only, -1 = no expiry, otherwise months from sign-up. */
+  window_months: number
+  commission_enabled: boolean
+}
+
+export type ReferralAdminInvitationPage = ReferralInvitationPage & {
+  summary: ReferralStatsSummary
+}
+
+/** Aggregates of the listed invitations under the active filters. */
+export interface ReferralStatsSummary {
+  total_invitees: number
+  invitees_with_commission: number
+  total_paid_quota: number
+  total_commission_quota: number
+  pending_quota: number
+  locked_quota: number
+  settled_quota: number
+}
+
+/** Administrator filters of the invitation list; empty string means "any". */
+export interface ReferralInvitationFilters {
+  keyword?: string
+  source?: string
+  status?: string
+}

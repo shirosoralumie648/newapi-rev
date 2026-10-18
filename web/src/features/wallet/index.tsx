@@ -29,6 +29,7 @@ import { CreditGrantCard } from './components/credit-grant-card'
 import { BillingHistoryDialog } from './components/dialogs/billing-history-dialog'
 import { CreemConfirmDialog } from './components/dialogs/creem-confirm-dialog'
 import { PaymentConfirmDialog } from './components/dialogs/payment-confirm-dialog'
+import { ReferralDetailsDialog } from './components/dialogs/referral-details-dialog'
 import { TransferDialog } from './components/dialogs/transfer-dialog'
 import { WalletLedgerDialog } from './components/dialogs/wallet-ledger-dialog'
 import { RechargeFormCard } from './components/recharge-form-card'
@@ -77,6 +78,7 @@ export function Wallet(props: WalletProps) {
   const [transferDialogOpen, setTransferDialogOpen] = useState(false)
   const [billingDialogOpen, setBillingDialogOpen] = useState(false)
   const [ledgerDialogOpen, setLedgerDialogOpen] = useState(false)
+  const [referralDialogOpen, setReferralDialogOpen] = useState(false)
   const [redemptionCode, setRedemptionCode] = useState('')
   const [creemDialogOpen, setCreemDialogOpen] = useState(false)
   const [selectedCreemProduct, setSelectedCreemProduct] =
@@ -349,6 +351,7 @@ export function Wallet(props: WalletProps) {
               user={user}
               affiliateLink={affiliateLink}
               onTransfer={() => setTransferDialogOpen(true)}
+              onViewReferrals={() => setReferralDialogOpen(true)}
               complianceConfirmed={
                 topupInfo?.payment_compliance_confirmed !== false
               }
@@ -387,6 +390,11 @@ export function Wallet(props: WalletProps) {
       <WalletLedgerDialog
         open={ledgerDialogOpen}
         onOpenChange={setLedgerDialogOpen}
+      />
+
+      <ReferralDetailsDialog
+        open={referralDialogOpen}
+        onOpenChange={setReferralDialogOpen}
       />
 
       <CreemConfirmDialog

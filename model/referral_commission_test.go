@@ -440,3 +440,187 @@ func TestReferralCommissionOptionValidation(t *testing.T) {
 	payment.ComplianceConfirmed = previousConfirmed
 	assert.NoError(t, operation_setting.ValidateReferralOption("referral_setting.cash_settlement_enabled", "true"))
 }
+
+// The invitation statistics list every invitee of an inviter — those without
+// any commission event included, so a zero amount never hides an invited
+// account (#4197) — with the aggregates of their commission events, and honor
+// the administrator filters, summary, pagination and window without ever
+// moving a balance.
+func TestReferralInvitationStats(t *testing.T) {
+	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
+		setupReferralCommissionTest(t, db)
+		restoreReferralCommissionTestSetting()
+
+		inviter := createReferralCommissionTestUser(t, db, "s-a-inviter", "default")
+		otherInviter := createReferralCommissionTestUser(t, db, "s-b-inviter", "default")
+		paidInvitee := createReferralCommissionTestUser(t, db, "s-a-paid", "default")
+		quietInvitee := createReferralCommissionTestUser(t, db, "s-a-quiet", "default")
+		foreignInvitee := createReferralCommissionTestUser(t, db, "s-b-foreign", "default")
+		require.NoError(t, DB.Model(&User{}).Where("id = ?", paidInvitee.Id).Update("email", "s-a-paid@example.com").Error)
+
+		bindReferralCommissionTestInviter(t, paidInvitee, inviter.Id)
+		// The quiet invitee arrived through another channel; the channel
+		// filter below must separate the two.
+		require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+			_, err := CreateReferralBindingWithTx(tx, quietInvitee, inviter.Id, ReferralSourceOAuth)
+			return err
+		}))
+		bindReferralCommissionTestInviter(t, foreignInvitee, otherInviter.Id)
+
+		// Explicit binding times make the newest-first order deterministic.
+		require.NoError(t, DB.Model(&ReferralBinding{}).Where("invitee_id = ?", paidInvitee.Id).Update("bound_at", 1700000100).Error)
+		require.NoError(t, DB.Model(&ReferralBinding{}).Where("invitee_id = ?", quietInvitee.Id).Update("bound_at", 1700000200).Error)
+
+		// Three paid orders record three pending events; two of them move to
+		// their later states the way the settlement step (RF-04) will.
+		completeReferralCommissionTestTopUp(t, "s-a-order-1", paidInvitee.Id, 10)
+		completeReferralCommissionTestTopUp(t, "s-a-order-2", paidInvitee.Id, 4)
+		completeReferralCommissionTestTopUp(t, "s-a-order-3", paidInvitee.Id, 2)
+		require.NoError(t, DB.Model(&ReferralCommission{}).Where("ref_id = ?", "s-a-order-2").Update("status", ReferralCommissionStatusLocked).Error)
+		require.NoError(t, DB.Model(&ReferralCommission{}).Where("ref_id = ?", "s-a-order-3").Update("status", ReferralCommissionStatusSettled).Error)
+
+		t.Run("lists every invitee with commission aggregates and the window end", func(t *testing.T) {
+			query := ReferralInvitationQuery{InviterId: inviter.Id}
+			total, err := CountReferralInvitations(query)
+			require.NoError(t, err)
+			assert.EqualValues(t, 2, total)
+
+			invitations, err := ListReferralInvitations(query, 0, 10)
+			require.NoError(t, err)
+			require.Len(t, invitations, 2)
+			assert.Equal(t, quietInvitee.Id, invitations[0].InviteeId)
+			assert.Zero(t, invitations[0].CommissionCount, "an invitee without events must stay listed")
+			assert.Zero(t, invitations[0].TotalPaidQuota)
+			assert.Equal(t, paidInvitee.Id, invitations[1].InviteeId)
+
+			paid := invitations[1]
+			assert.Equal(t, inviter.Id, paid.InviterId)
+			assert.Equal(t, "s-a-inviter", paid.InviterUsername)
+			assert.EqualValues(t, 500000, paid.PendingQuota)
+			assert.EqualValues(t, 200000, paid.LockedQuota)
+			assert.EqualValues(t, 100000, paid.SettledQuota)
+			assert.EqualValues(t, 8000000, paid.TotalPaidQuota)
+			assert.EqualValues(t, 3, paid.CommissionCount)
+			assert.Equal(t,
+				referralCommissionWindowEnd(paidInvitee.CreatedAt, operation_setting.ReferralWindowMonthsDefault),
+				paid.CommissionEndsAt)
+
+			// The panel exposes the masked identifier only.
+			assert.Equal(t, "s***@example.com", MaskReferralIdentifier(paid.Username, paid.Email))
+		})
+
+		t.Run("filters by keyword, source and commission status", func(t *testing.T) {
+			// The keyword matches the username or the email, ignoring case.
+			total, err := CountReferralInvitations(ReferralInvitationQuery{InviterId: inviter.Id, Keyword: "S-A-QUIET"})
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, total)
+			total, err = CountReferralInvitations(ReferralInvitationQuery{InviterId: inviter.Id, Keyword: "EXAMPLE.COM"})
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, total)
+
+			total, err = CountReferralInvitations(ReferralInvitationQuery{InviterId: inviter.Id, Source: ReferralSourceOAuth})
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, total)
+			total, err = CountReferralInvitations(ReferralInvitationQuery{InviterId: inviter.Id, Source: ReferralSourceLink})
+			require.NoError(t, err)
+			assert.Zero(t, total)
+
+			filtered, err := ListReferralInvitations(ReferralInvitationQuery{InviterId: inviter.Id, Status: ReferralCommissionStatusSettled}, 0, 10)
+			require.NoError(t, err)
+			require.Len(t, filtered, 1)
+			assert.Equal(t, paidInvitee.Id, filtered[0].InviteeId)
+
+			// A keyword wildcard is a literal, not a pattern.
+			total, err = CountReferralInvitations(ReferralInvitationQuery{InviterId: inviter.Id, Keyword: "%"})
+			require.NoError(t, err)
+			assert.Zero(t, total)
+		})
+
+		t.Run("paginates and isolates inviters", func(t *testing.T) {
+			page, err := ListReferralInvitations(ReferralInvitationQuery{InviterId: inviter.Id}, 1, 1)
+			require.NoError(t, err)
+			require.Len(t, page, 1)
+			assert.Equal(t, paidInvitee.Id, page[0].InviteeId)
+
+			foreign, err := ListReferralInvitations(ReferralInvitationQuery{InviterId: otherInviter.Id}, 0, 10)
+			require.NoError(t, err)
+			require.Len(t, foreign, 1)
+			assert.Equal(t, foreignInvitee.Id, foreign[0].InviteeId)
+			assert.Zero(t, foreign[0].CommissionCount)
+		})
+
+		t.Run("summarizes the filtered invitations", func(t *testing.T) {
+			summary, err := SummarizeReferralInvitations(ReferralInvitationQuery{InviterId: inviter.Id})
+			require.NoError(t, err)
+			assert.EqualValues(t, 2, summary.TotalInvitees)
+			assert.EqualValues(t, 1, summary.InviteesWithCommission)
+			assert.EqualValues(t, 8000000, summary.TotalPaidQuota)
+			assert.EqualValues(t, 800000, summary.TotalCommissionQuota)
+			assert.EqualValues(t, 500000, summary.PendingQuota)
+			assert.EqualValues(t, 200000, summary.LockedQuota)
+			assert.EqualValues(t, 100000, summary.SettledQuota)
+
+			onlyQuiet, err := SummarizeReferralInvitations(ReferralInvitationQuery{InviterId: inviter.Id, Source: ReferralSourceOAuth})
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, onlyQuiet.TotalInvitees)
+			assert.Zero(t, onlyQuiet.InviteesWithCommission)
+			assert.Zero(t, onlyQuiet.TotalCommissionQuota)
+		})
+
+		t.Run("derives the window end from the current configuration", func(t *testing.T) {
+			setting := operation_setting.GetReferralSetting()
+			query := ReferralInvitationQuery{InviterId: inviter.Id}
+
+			setting.WindowMonths = operation_setting.ReferralWindowMonthsFirstTopUp
+			firstTopUpOnly, err := ListReferralInvitations(query, 0, 1)
+			require.NoError(t, err)
+			require.Len(t, firstTopUpOnly, 1)
+			assert.Zero(t, firstTopUpOnly[0].CommissionEndsAt)
+
+			setting.WindowMonths = 6
+			sixMonths, err := ListReferralInvitations(query, 0, 1)
+			require.NoError(t, err)
+			require.Len(t, sixMonths, 1)
+			assert.Equal(t, referralCommissionWindowEnd(quietInvitee.CreatedAt, 6), sixMonths[0].CommissionEndsAt)
+		})
+	})
+}
+
+// The user-facing panel masks every invitee identifier: the local part of the
+// email and all but the first characters of a username stay hidden.
+func TestMaskReferralIdentifier(t *testing.T) {
+	cases := []struct {
+		name     string
+		username string
+		email    string
+		want     string
+	}{
+		{"masks the local part of an email and keeps the domain", "alice", "alice@example.com", "a***@example.com"},
+		{"keeps only the first rune of a multi-character local part", "alice", "jo.doe@example.com", "j***@example.com"},
+		{"falls back to the username without an email", "alice", "", "al***"},
+		{"keeps a one-character username recognizable", "a", "", "a***"},
+		{"returns nothing when both identifiers are empty", "", "", ""},
+		{"counts runes, not bytes", "用户名", "", "用户***"},
+		{"treats an email without a local part as missing", "alice", "@example.com", "al***"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, MaskReferralIdentifier(tc.username, tc.email))
+		})
+	}
+}
+
+// The statistics query validates the administrator filters: only recorded
+// sources and known commission states are accepted, the empty string meaning
+// "any".
+func TestReferralInvitationQueryValidation(t *testing.T) {
+	for _, source := range []string{"", ReferralSourceLink, ReferralSourceCode, ReferralSourceOAuth, ReferralSourceAdmin} {
+		assert.True(t, IsReferralSource(source), "source %q must be accepted", source)
+	}
+	assert.False(t, IsReferralSource("unknown"))
+
+	for _, status := range []string{"", ReferralCommissionStatusPending, ReferralCommissionStatusLocked, ReferralCommissionStatusSettled} {
+		assert.True(t, IsReferralCommissionStatus(status), "status %q must be accepted", status)
+	}
+	assert.False(t, IsReferralCommissionStatus("reversed"))
+}

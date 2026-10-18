@@ -203,6 +203,7 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.GET("/self/wallet/ledger", controller.GetSelfWalletLedger)
 				selfRoute.GET("/self/wallet/ledger/export", controller.ExportSelfWalletLedger)
 				selfRoute.GET("/self/wallet/grants", controller.GetSelfCreditGrantWallet)
+				selfRoute.GET("/self/referrals", controller.GetSelfReferralInvitations)
 				selfRoute.POST("/topup", middleware.CriticalRateLimit(), controller.TopUp)
 				selfRoute.POST("/pay", middleware.CriticalRateLimit(), controller.RequestEpay)
 				selfRoute.POST("/amount", controller.RequestAmount)
@@ -256,6 +257,8 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.GET("/wallet/debts", controller.GetWalletDebtors)
 				adminRoute.GET("/wallet/grants/stats", controller.GetCreditGrantStats)
 				adminRoute.POST("/wallet/grants", middleware.CriticalRateLimit(), controller.IssueCreditGrant)
+				adminRoute.GET("/referrals", controller.GetReferralInvitations)
+				adminRoute.GET("/referrals/export", controller.ExportReferralInvitations)
 
 				// Admin 2FA routes
 				adminRoute.GET("/2fa/stats", controller.Admin2FAStats)

@@ -16,11 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { AlertTriangle, Plus } from 'lucide-react'
+import { AlertTriangle, Plus, Share2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
+import { ReferralAdminDialog } from '@/features/wallet/components/dialogs/referral-admin-dialog'
 import { WalletDebtDialog } from '@/features/wallet/components/dialogs/wallet-debt-dialog'
 
 import { useUsers } from './users-provider'
@@ -29,6 +30,7 @@ export function UsersPrimaryButtons() {
   const { t } = useTranslation()
   const { setOpen, setCurrentRow } = useUsers()
   const [debtDialogOpen, setDebtDialogOpen] = useState(false)
+  const [referralDialogOpen, setReferralDialogOpen] = useState(false)
 
   const handleCreate = () => {
     setCurrentRow(null)
@@ -45,6 +47,14 @@ export function UsersPrimaryButtons() {
         <AlertTriangle className='h-4 w-4' />
         {t('Wallet debts')}
       </Button>
+      <Button
+        size='sm'
+        variant='outline'
+        onClick={() => setReferralDialogOpen(true)}
+      >
+        <Share2 className='h-4 w-4' />
+        {t('Referral Invitations')}
+      </Button>
       <Button size='sm' onClick={handleCreate}>
         <Plus className='h-4 w-4' />
         {t('Add User')}
@@ -52,6 +62,10 @@ export function UsersPrimaryButtons() {
       <WalletDebtDialog
         open={debtDialogOpen}
         onOpenChange={setDebtDialogOpen}
+      />
+      <ReferralAdminDialog
+        open={referralDialogOpen}
+        onOpenChange={setReferralDialogOpen}
       />
     </div>
   )

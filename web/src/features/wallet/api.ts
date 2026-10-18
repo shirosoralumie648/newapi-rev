@@ -44,6 +44,9 @@ import type {
   CreditGrantIssueRequest,
   CreditGrantStats,
   CreditGrantWallet,
+  ReferralInvitationPage,
+  ReferralAdminInvitationPage,
+  ReferralInvitationFilters,
 } from './types'
 
 // ============================================================================
@@ -314,6 +317,80 @@ export async function getWalletDebtors(
   })
   const res = await api.get(`/api/user/wallet/debts?${params.toString()}`)
   return res.data
+}
+
+// ============================================================================
+// Referral Statistics API Functions
+// ============================================================================
+
+/**
+ * Get the caller's own invitees with masked identifiers and the aggregates of
+ * their commission events.
+ */
+export async function getSelfReferralInvitations(
+  page: number,
+  pageSize: number
+): Promise<ApiResponse<ReferralInvitationPage>> {
+  const params = new URLSearchParams({
+    p: page.toString(),
+    page_size: pageSize.toString(),
+  })
+  const res = await api.get(`/api/user/self/referrals?${params.toString()}`)
+  return res.data
+}
+
+/** The keyword/source/status query parameters shared by list and export. */
+function referralInvitationFilterParams(
+  filters: ReferralInvitationFilters
+): URLSearchParams {
+  const params = new URLSearchParams()
+  const keyword = filters.keyword?.trim()
+  if (keyword) {
+    params.set('keyword', keyword)
+  }
+  if (filters.source) {
+    params.set('source', filters.source)
+  }
+  if (filters.status) {
+    params.set('status', filters.status)
+  }
+  return params
+}
+
+/**
+ * List every invitation platform-wide with the summary of the active filters
+ * (admin only).
+ */
+export async function getReferralInvitations(
+  page: number,
+  pageSize: number,
+  filters: ReferralInvitationFilters = {}
+): Promise<ApiResponse<ReferralAdminInvitationPage>> {
+  const params = new URLSearchParams({
+    p: page.toString(),
+    page_size: pageSize.toString(),
+  })
+  for (const [key, value] of referralInvitationFilterParams(filters)) {
+    params.set(key, value)
+  }
+  const res = await api.get(`/api/user/referrals?${params.toString()}`)
+  return res.data
+}
+
+/**
+ * Fetch the filtered invitation list as a CSV blob (admin only). The caller
+ * decides when to save the blob.
+ */
+export async function exportReferralInvitationsCsv(
+  filters: ReferralInvitationFilters = {}
+): Promise<Blob> {
+  const params = referralInvitationFilterParams(filters)
+  const query = params.toString()
+  const res = await api.get(
+    `/api/user/referrals/export${query ? `?${query}` : ''}`,
+    { responseType: 'blob' }
+  )
+  return res.data as Blob
 }
 
 // ============================================================================

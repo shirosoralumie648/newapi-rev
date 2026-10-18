@@ -38,9 +38,15 @@ const (
 	ReferralCommissionSourceRedeem = "redeem"
 )
 
-// ReferralCommissionStatusPending is the state of every event this step
-// writes: the commission is recorded but not yet locked or issued (RF-04).
-const ReferralCommissionStatusPending = "pending"
+// The commission event states. Every event starts pending: the commission is
+// recorded but not yet locked or issued. The settlement step (RF-04)
+// transitions events into locked (confirmed, not yet paid out) and settled
+// (paid out); the statistics panel already buckets by every known state.
+const (
+	ReferralCommissionStatusPending = "pending"
+	ReferralCommissionStatusLocked  = "locked"
+	ReferralCommissionStatusSettled = "settled"
+)
 
 // ReferralCommission is one single-level commission event of one paid order:
 // how much the invitee actually paid, which rate applied and how much the

@@ -163,6 +163,7 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/user/self/wallet/ledger":             accessTokenScopeRule("wallet:read"),
 	"GET /api/user/self/wallet/ledger/export":      accessTokenScopeRule("wallet:read"),
 	"GET /api/user/self/wallet/grants":             accessTokenScopeRule("wallet:read"),
+	"GET /api/user/self/referrals":                 accessTokenScopeRule("wallet:read"),
 	"GET /api/user/oauth/bindings":                 accessTokenScopeRule("account_security:read"),
 	"DELETE /api/user/oauth/bindings/:provider_id": accessTokenScopeRule("account_security:write"),
 
@@ -190,6 +191,8 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/user/wallet/debts":                       accessTokenScopeRule("user:read"),
 	"GET /api/user/wallet/grants/stats":                accessTokenScopeRule("user:read"),
 	"POST /api/user/wallet/grants":                     accessTokenScopeRule("user:write"),
+	"GET /api/user/referrals":                          accessTokenScopeRule("user:read"),
+	"GET /api/user/referrals/export":                   accessTokenScopeRule("user:read"),
 
 	// router/api-router.go: /api/subscription
 	"GET /api/subscription/plans":                                    accessTokenScopeRule("wallet:read"),

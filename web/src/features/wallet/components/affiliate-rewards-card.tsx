@@ -33,19 +33,15 @@ interface AffiliateRewardsCardProps {
   user: UserWalletData | null
   affiliateLink: string
   onTransfer: () => void
+  /** Opens the read-only list of the caller's invitees. */
+  onViewReferrals: () => void
   complianceConfirmed?: boolean
   loading?: boolean
 }
 
-export function AffiliateRewardsCard({
-  user,
-  affiliateLink,
-  onTransfer,
-  complianceConfirmed = true,
-  loading,
-}: AffiliateRewardsCardProps) {
+export function AffiliateRewardsCard(props: AffiliateRewardsCardProps) {
   const { t } = useTranslation()
-  if (loading) {
+  if (props.loading) {
     return (
       <Card data-card-hover='false' className='bg-muted/20 py-0'>
         <CardContent className='grid gap-4 p-3 sm:p-4 lg:grid-cols-[minmax(220px,1fr)_minmax(220px,0.72fr)_minmax(320px,1.15fr)] lg:items-center'>
@@ -60,7 +56,8 @@ export function AffiliateRewardsCard({
     )
   }
 
-  const hasRewards = (user?.aff_quota ?? 0) > 0
+  const complianceConfirmed = props.complianceConfirmed ?? true
+  const hasRewards = (props.user?.aff_quota ?? 0) > 0
 
   return (
     <Card data-card-hover='false' className='bg-muted/20 py-0'>
@@ -83,9 +80,12 @@ export function AffiliateRewardsCard({
 
         <div className='grid grid-cols-3 gap-1.5 text-center'>
           {[
-            [t('Pending'), formatQuota(user?.aff_quota ?? 0)],
-            [t('Total Earned'), formatQuota(user?.aff_history_quota ?? 0)],
-            [t('Invites'), String(user?.aff_count ?? 0)],
+            [t('Pending'), formatQuota(props.user?.aff_quota ?? 0)],
+            [
+              t('Total Earned'),
+              formatQuota(props.user?.aff_history_quota ?? 0),
+            ],
+            [t('Invites'), String(props.user?.aff_count ?? 0)],
           ].map(([label, value]) => (
             <div key={label}>
               <div className='text-muted-foreground truncate text-[10px] font-medium tracking-wider uppercase'>
@@ -98,23 +98,31 @@ export function AffiliateRewardsCard({
           ))}
         </div>
 
-        <div className='flex items-center gap-2'>
+        <div className='flex flex-wrap items-center gap-2'>
           <Input
-            value={affiliateLink}
+            value={props.affiliateLink}
             readOnly
-            className='border-muted bg-background/70 h-9 min-w-0 flex-1 font-mono text-xs'
+            className='border-muted bg-background/70 h-9 min-w-[140px] flex-1 font-mono text-xs'
           />
           <CopyButton
-            value={affiliateLink}
+            value={props.affiliateLink}
             variant='outline'
             className='bg-background size-9 shrink-0'
             iconClassName='size-4'
             tooltip={t('Copy referral link')}
             aria-label={t('Copy referral link')}
           />
+          <Button
+            variant='outline'
+            onClick={props.onViewReferrals}
+            className='bg-background h-9 shrink-0 px-3'
+            size='sm'
+          >
+            {t('View invitees')}
+          </Button>
           {hasRewards && (
             <Button
-              onClick={onTransfer}
+              onClick={props.onTransfer}
               disabled={!complianceConfirmed}
               className='h-9 shrink-0 px-3'
               size='sm'
