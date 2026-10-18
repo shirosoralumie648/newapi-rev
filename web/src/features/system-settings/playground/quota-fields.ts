@@ -23,6 +23,8 @@ export const PLAYGROUND_QUOTA_FIELD_KEYS = [
   'session_max_count',
   'preset_user_max_count',
   'system_prompt_max_bytes',
+  'snippet_user_max_count',
+  'snippet_content_max_bytes',
   'message_max_count',
   'message_max_versions',
   'message_max_bytes',
@@ -70,6 +72,7 @@ export const PLAYGROUND_STORAGE_QUOTA_FIELD_KEYS = [
 export const PLAYGROUND_QUOTA_GROUPS = [
   { id: 'conversations', labelKey: 'Conversations' },
   { id: 'presets', labelKey: 'Presets' },
+  { id: 'snippets', labelKey: 'Prompt snippets' },
   { id: 'messages', labelKey: 'Messages' },
   { id: 'tools', labelKey: 'Tool calls' },
   { id: 'attachments', labelKey: 'Attachments' },
@@ -104,6 +107,17 @@ export const PLAYGROUND_QUOTA_FIELDS: readonly PlaygroundQuotaField[] = [
     key: 'system_prompt_max_bytes',
     group: 'presets',
     labelKey: 'System prompt size limit',
+    bytes: true,
+  },
+  {
+    key: 'snippet_user_max_count',
+    group: 'snippets',
+    labelKey: 'Prompt snippets per user',
+  },
+  {
+    key: 'snippet_content_max_bytes',
+    group: 'snippets',
+    labelKey: 'Prompt snippet size limit',
     bytes: true,
   },
   {

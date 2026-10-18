@@ -65,6 +65,7 @@ export const API_ENDPOINTS = {
   PLAYGROUND_SESSIONS: '/api/playground/sessions',
   PLAYGROUND_CANVASES: '/api/playground/canvases',
   PLAYGROUND_PRESETS: '/api/playground/presets',
+  PLAYGROUND_SNIPPETS: '/api/playground/snippets',
   PLAYGROUND_USAGE: '/api/playground/usage',
   PLAYGROUND_MESSAGE_COSTS: '/api/playground/message-costs',
   PLAYGROUND_ASSETS: '/api/playground/assets',
@@ -143,6 +144,7 @@ export const DEFAULT_CONFIG: PlaygroundConfig = {
   frequency_penalty: 0,
   presence_penalty: 0,
   seed: null,
+  reasoning_effort: '',
   stream: true,
 }
 
@@ -153,6 +155,7 @@ export const DEFAULT_PARAMETER_ENABLED: ParameterEnabled = {
   frequency_penalty: true,
   presence_penalty: true,
   seed: false,
+  reasoning_effort: false,
 }
 
 // Storage keys
@@ -161,6 +164,8 @@ export const STORAGE_KEYS = {
   MESSAGES: 'playground_messages',
   PARAMETER_ENABLED: 'playground_parameter_enabled',
   SESSIONS: 'playground_sessions',
+  INPUT_DRAFTS: 'playground_input_drafts',
+  INPUT_HISTORY: 'playground_input_history',
 } as const
 
 export const DEFAULT_SESSION_TITLE = 'New conversation'
@@ -176,6 +181,26 @@ export const PLAYGROUND_PRESET_ERRORS = {
   SAVE_FAILED: 'Failed to save the assistant preset',
   DELETE_FAILED: 'Failed to delete the assistant preset',
 } as const
+
+// Prompt snippet display bounds and client-side failure messages. The server
+// validates the same values and owns the authoritative per-account quota.
+export const PLAYGROUND_SNIPPET_NAME_MAX_LENGTH = 100
+
+export const PLAYGROUND_SNIPPET_ERRORS = {
+  LOAD_FAILED: 'Failed to load prompt snippets',
+  SAVE_FAILED: 'Failed to save the prompt snippet',
+  DELETE_FAILED: 'Failed to delete the prompt snippet',
+} as const
+
+// Composer drafts and input history.
+// A draft is the un-submitted text of one conversation and a history entry the
+// text of one successful send. Both live in browser storage only, so they are
+// capped to keep a runaway paste from exhausting the quota.
+export const PLAYGROUND_INPUT_DRAFT_MAX_CHARS = 100_000
+export const PLAYGROUND_INPUT_DRAFT_MAX_ENTRIES = 100
+export const PLAYGROUND_INPUT_HISTORY_MAX_ENTRIES = 50
+export const PLAYGROUND_INPUT_HISTORY_ENTRY_MAX_CHARS = 8_000
+export const PLAYGROUND_INPUT_DRAFT_DEBOUNCE_MS = 400
 
 // Conversation attachment limits; the server enforces the same budgets.
 export const PLAYGROUND_ATTACHMENT_ACCEPT =
