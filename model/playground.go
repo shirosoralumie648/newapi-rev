@@ -37,6 +37,10 @@ var (
 	// capacity errors the resource quota policy produces for conversations.
 	ErrPlaygroundSessionLimit = errors.New("Playground conversation limit exceeded.")
 	ErrPlaygroundMessageLimit = errors.New("Playground message limit exceeded.")
+	// ErrPlaygroundParallelLimit is raised when a message group compares more
+	// models than the owner's policy allows. The group is rejected as a whole,
+	// so a stored snapshot never holds a comparison the policy forbids.
+	ErrPlaygroundParallelLimit = errors.New("Playground parallel comparison limit exceeded.")
 	// ErrPlaygroundContextSummaryLimit is raised when a client tries to persist
 	// a compression node bigger than the stored contract allows.
 	ErrPlaygroundContextSummaryLimit = errors.New("Playground context summary limit exceeded.")

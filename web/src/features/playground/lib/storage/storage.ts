@@ -27,6 +27,7 @@ import {
 } from '../message/message-streaming-utils'
 import { completeAssistantTiming } from '../message/message-timing-utils'
 import { hasMessageContent, hasToolCallPayload } from '../message/message-utils'
+import { interruptParallelMessage } from '../message/parallel-compare-utils'
 import {
   MAX_LOADED_MESSAGE_CHARS,
   MAX_LOADED_MESSAGES_CHARS,
@@ -264,6 +265,15 @@ function collapseRepeatedSectionSnapshots(text: string): string {
 }
 
 function normalizeStoredMessageForLoad(message: Message): Message {
+  // A comparison that was interrupted (tab closed, request lost) left one or
+  // more versions pending. They are settled as failed here so the reload shows
+  // every compared reply and no spinner that will never finish; completed
+  // replies and the selected version stay untouched.
+  const interrupted = interruptParallelMessage(message)
+  if (interrupted !== message) {
+    message = interrupted
+  }
+
   let changed = false
   const versions = message.versions.map((version) => {
     const collapsedContent = collapseRepeatedSectionSnapshots(version.content)

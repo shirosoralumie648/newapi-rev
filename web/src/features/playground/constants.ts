@@ -109,6 +109,20 @@ export const DEFAULT_CONTEXT_SETTINGS: PlaygroundContextSettings = {
   summaryModel: '',
 }
 
+// Parallel comparison bounds. The server mirrors the ceiling as the
+// `parallel_compare_max_models` quota default and enforces the owner's policy
+// when the message group is persisted, so the client never launches or stores
+// a comparison the account is not allowed to keep.
+export const PLAYGROUND_PARALLEL_MIN_MODELS = 2
+export const PLAYGROUND_PARALLEL_MAX_MODELS = 4
+
+export const PLAYGROUND_PARALLEL_MESSAGES = {
+  SELECT_MODELS: 'Select at least two models to compare',
+  LIMIT: 'You can compare up to {{count}} models at once',
+  SENDING:
+    'Sending the same message to each selected model. Every reply is billed separately.',
+} as const
+
 // A settle row is written right after the stream ends, so the first lookup can
 // miss it. The conversation cost view retries a bounded number of times while
 // an id has no row and stops immediately when consume logs are switched off.

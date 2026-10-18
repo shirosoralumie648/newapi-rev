@@ -26,6 +26,7 @@ export const PLAYGROUND_QUOTA_FIELD_KEYS = [
   'message_max_count',
   'message_max_versions',
   'message_max_bytes',
+  'parallel_compare_max_models',
   'tool_call_max_count',
   'tool_call_arguments_max_bytes',
   'tool_call_result_max_bytes',
@@ -120,6 +121,11 @@ export const PLAYGROUND_QUOTA_FIELDS: readonly PlaygroundQuotaField[] = [
     group: 'messages',
     labelKey: 'Message snapshot bytes per conversation',
     bytes: true,
+  },
+  {
+    key: 'parallel_compare_max_models',
+    group: 'messages',
+    labelKey: 'Models per parallel comparison',
   },
   {
     key: 'tool_call_max_count',

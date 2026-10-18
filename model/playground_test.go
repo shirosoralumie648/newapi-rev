@@ -396,6 +396,134 @@ func TestPlaygroundToolCallSnapshots(t *testing.T) {
 	}
 }
 
+// A parallel comparison is stored as one assistant message group whose versions
+// each name the model that produced them. The gateway validates and stores the
+// group only: every compared reply is an ordinary /pg call on its own, and the
+// owner's policy caps how many models one group may hold.
+func TestPlaygroundParallelCompareGroups(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			playgroundTestDB(t, dialect)
+			policy := playground_setting.GetPlaygroundQuotaPolicy("default")
+			require.Equal(t, 4, policy.ParallelCompareMaxModels, "the built-in comparison budget matches the client ceiling")
+			session := createPlayground(t, 7, "parallel-compare")
+			path := "/api/playground/sessions/" + session["id"].(string) + "/messages"
+
+			group := func(parallel bool, from string, versions []any) map[string]any {
+				return map[string]any{"revision": 1, "messages": []any{map[string]any{
+					"client_key": "assistant-compare",
+					"payload": map[string]any{
+						"key": "assistant-compare", "from": from, "parallel": parallel,
+						"status": "complete", "activeVersionIndex": 0, "versions": versions,
+					},
+				}}}
+			}
+			version := func(id, model, status string) map[string]any {
+				entry := map[string]any{"id": id, "content": "Reply from " + model, "model": model}
+				if status != "" {
+					entry["status"] = status
+				}
+				return entry
+			}
+
+			accepted := map[string]any{"revision": 0, "messages": []any{map[string]any{
+				"client_key": "assistant-compare",
+				"payload": map[string]any{
+					"key": "assistant-compare", "from": "assistant", "parallel": true,
+					"status": "complete", "activeVersionIndex": 1,
+					"versions": []any{
+						map[string]any{"id": "a1", "content": "Answer from model one", "model": "model-one", "status": "complete",
+							"requestId": "req-one", "usage": map[string]any{"promptTokens": 10, "completionTokens": 20, "totalTokens": 30}},
+						map[string]any{"id": "a2", "content": "Answer from model two", "model": "model-two", "status": "error",
+							"errorCode": "model_price_error", "requestId": "req-two"},
+						map[string]any{"id": "a3", "content": "", "model": "model-three", "status": "loading"},
+					},
+				},
+			}}}
+			response := playgroundRequest(t, 7, http.MethodPut, path, accepted, controller.ReplacePlaygroundMessages)
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			messages, revision, err := model.ListPlaygroundMessages(7, session["id"].(string))
+			require.NoError(t, err)
+			require.EqualValues(t, 1, revision)
+			require.Len(t, messages, 1)
+			var stored struct {
+				Parallel *bool `json:"parallel"`
+				Active   *int  `json:"activeVersionIndex"`
+				Versions []struct {
+					Model  *string `json:"model"`
+					Status string  `json:"status"`
+				} `json:"versions"`
+			}
+			require.NoError(t, common.UnmarshalJsonStr(string(messages[0].Payload), &stored))
+			require.NotNil(t, stored.Parallel)
+			assert.True(t, *stored.Parallel)
+			require.Len(t, stored.Versions, 3)
+			require.NotNil(t, stored.Versions[0].Model)
+			assert.Equal(t, "model-one", *stored.Versions[0].Model)
+			assert.Equal(t, "error", stored.Versions[1].Status)
+			assert.Equal(t, "loading", stored.Versions[2].Status)
+			require.NotNil(t, stored.Active)
+			assert.Equal(t, 1, *stored.Active)
+
+			rejects := []struct {
+				name string
+				body map[string]any
+			}{
+				{"parallel group on a user message", group(true, "user", []any{version("v1", "model-one", ""), version("v2", "model-two", "")})},
+				{"single-version comparison", group(true, "assistant", []any{version("v1", "model-one", "")})},
+				{"version without a model", group(true, "assistant", []any{version("v1", "model-one", ""), {"id": "v2", "content": "Reply"}})},
+				{"unknown version status", group(true, "assistant", []any{version("v1", "model-one", "running"), version("v2", "model-two", "")})},
+				{"oversized model name", group(true, "assistant", []any{version("v1", strings.Repeat("m", 513), ""), version("v2", "model-two", "")})},
+				{"oversized version error code", group(true, "assistant", []any{
+					version("v1", "model-one", "error"),
+					func() map[string]any {
+						entry := version("v2", "model-two", "")
+						entry["errorCode"] = strings.Repeat("e", 501)
+						return entry
+					}(),
+				})},
+			}
+			for _, test := range rejects {
+				t.Run(test.name, func(t *testing.T) {
+					rejected := playgroundRequest(t, 7, http.MethodPut, path, test.body, controller.ReplacePlaygroundMessages)
+					assert.Equal(t, http.StatusBadRequest, rejected.Code, rejected.Body.String())
+					messages, revision, err := model.ListPlaygroundMessages(7, session["id"].(string))
+					require.NoError(t, err)
+					require.EqualValues(t, 1, revision)
+					require.Len(t, messages, 1)
+					assert.Contains(t, string(messages[0].Payload), "Answer from model one")
+				})
+			}
+
+			// One model over the owner's budget is rejected with the stable
+			// capacity code, and the stored group stays untouched.
+			tooMany := make([]any, policy.ParallelCompareMaxModels+1)
+			for index := range tooMany {
+				tooMany[index] = version(fmt.Sprintf("v%d", index), fmt.Sprintf("model-%d", index), "")
+			}
+			overflow := playgroundRequest(t, 7, http.MethodPut, path, group(true, "assistant", tooMany), controller.ReplacePlaygroundMessages)
+			require.Equal(t, http.StatusUnprocessableEntity, overflow.Code, overflow.Body.String())
+			assert.Contains(t, overflow.Body.String(), "PLAYGROUND_PARALLEL_LIMIT_EXCEEDED")
+
+			// A group override lowers the comparison budget for one user group;
+			// the same group accepts at most that many models afterwards.
+			usePlaygroundGroupQuota(t, "default", playground_setting.PlaygroundQuotaPolicy{ParallelCompareMaxModels: 2})
+			threeModels := playgroundRequest(t, 7, http.MethodPut, path, group(true, "assistant", []any{
+				version("v1", "model-one", ""), version("v2", "model-two", ""), version("v3", "model-three", ""),
+			}), controller.ReplacePlaygroundMessages)
+			require.Equal(t, http.StatusUnprocessableEntity, threeModels.Code, threeModels.Body.String())
+			assert.Contains(t, threeModels.Body.String(), "PLAYGROUND_PARALLEL_LIMIT_EXCEEDED")
+			twoModels := playgroundRequest(t, 7, http.MethodPut, path, group(true, "assistant", []any{
+				version("v1", "model-one", ""), version("v2", "model-two", ""),
+			}), controller.ReplacePlaygroundMessages)
+			require.Equal(t, http.StatusOK, twoModels.Code, twoModels.Body.String())
+			_, revision, err = model.ListPlaygroundMessages(7, session["id"].(string))
+			require.NoError(t, err)
+			assert.EqualValues(t, 2, revision)
+		})
+	}
+}
+
 func TestPlaygroundMigrationCreateIsAtomicAndReplayDoesNotOverwriteMessages(t *testing.T) {
 	db := playgroundTestDB(t, "sqlite")
 	body := map[string]any{"title": "迁移会话", "client_id": "migration", "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "user", "versions": []any{map[string]any{"id": "v", "content": "Imported history"}}}}}}

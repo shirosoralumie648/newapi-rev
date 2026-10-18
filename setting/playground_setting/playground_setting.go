@@ -14,12 +14,17 @@ import (
 // A zero or negative value in an override inherits the value below it, so a
 // misconfigured option can never silently disable a server-side limit.
 type PlaygroundQuotaPolicy struct {
-	SessionMaxCount           int   `json:"session_max_count"`
-	PresetUserMaxCount        int   `json:"preset_user_max_count"`
-	SystemPromptMaxBytes      int64 `json:"system_prompt_max_bytes"`
-	MessageMaxCount           int   `json:"message_max_count"`
-	MessageMaxVersions        int   `json:"message_max_versions"`
-	MessageMaxBytes           int64 `json:"message_max_bytes"`
+	SessionMaxCount      int   `json:"session_max_count"`
+	PresetUserMaxCount   int   `json:"preset_user_max_count"`
+	SystemPromptMaxBytes int64 `json:"system_prompt_max_bytes"`
+	MessageMaxCount      int   `json:"message_max_count"`
+	MessageMaxVersions   int   `json:"message_max_versions"`
+	MessageMaxBytes      int64 `json:"message_max_bytes"`
+	// ParallelCompareMaxModels bounds one parallel-comparison message group:
+	// how many models a single send may fan out to. Each comparison request is
+	// an ordinary /pg call whose own rate limit, channel and billing apply, so
+	// this only caps the group the account may persist and launch.
+	ParallelCompareMaxModels  int   `json:"parallel_compare_max_models"`
 	ToolCallMaxCount          int   `json:"tool_call_max_count"`
 	ToolCallArgumentsMaxBytes int64 `json:"tool_call_arguments_max_bytes"`
 	ToolCallResultMaxBytes    int64 `json:"tool_call_result_max_bytes"`
@@ -81,6 +86,7 @@ func builtinPlaygroundQuotaPolicy() PlaygroundQuotaPolicy {
 		MessageMaxCount:           100,
 		MessageMaxVersions:        100,
 		MessageMaxBytes:           1 << 20,
+		ParallelCompareMaxModels:  4,
 		ToolCallMaxCount:          16,
 		ToolCallArgumentsMaxBytes: 64 << 10,
 		ToolCallResultMaxBytes:    256 << 10,
@@ -180,6 +186,9 @@ func applyPlaygroundQuotaOverrides(policy *PlaygroundQuotaPolicy, override *Play
 	}
 	if override.MessageMaxBytes > 0 {
 		policy.MessageMaxBytes = override.MessageMaxBytes
+	}
+	if override.ParallelCompareMaxModels > 0 {
+		policy.ParallelCompareMaxModels = override.ParallelCompareMaxModels
 	}
 	if override.ToolCallMaxCount > 0 {
 		policy.ToolCallMaxCount = override.ToolCallMaxCount

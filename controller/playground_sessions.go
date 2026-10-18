@@ -44,6 +44,16 @@ const (
 	// playgroundMessageTokenMax is a sanity ceiling for the display-only token
 	// counts a client may attach to one version, not a billing limit.
 	playgroundMessageTokenMax = 1 << 40
+	// playgroundMessageModelMaxLength mirrors the model name bound of the
+	// conversation config; every compared version names the model that produced
+	// it.
+	playgroundMessageModelMaxLength = 512
+	// playgroundMessageErrorCodeMaxLength bounds the stable error code a failed
+	// version of a parallel comparison may carry.
+	playgroundMessageErrorCodeMaxLength = 500
+	// playgroundParallelMinVersions is the smallest group that actually
+	// compares models: a single reply already has the ordinary message path.
+	playgroundParallelMinVersions = 2
 	// playgroundContextHistoryLimitMax and playgroundContextTokenBudgetMax bound
 	// the caller-supplied context management settings. They are request-shape
 	// limits, not resource quotas: staying inside them never changes what the
@@ -113,11 +123,24 @@ type playgroundMessageDeltaRequest struct {
 }
 
 type playgroundMessagePayload struct {
-	Key      string `json:"key"`
-	From     string `json:"from"`
+	Key  string `json:"key"`
+	From string `json:"from"`
+	// Parallel marks an assistant message group that compares models: every
+	// version holds one reply and names the model that produced it. The group
+	// is stored as one message so the conversation can keep every compared
+	// reply and continue from the one the user selects.
+	Parallel *bool `json:"parallel,omitempty"`
 	Versions []struct {
-		ID          string                        `json:"id"`
-		Content     string                        `json:"content"`
+		ID      string `json:"id"`
+		Content string `json:"content"`
+		// Model is the model that produced this version. It is required on
+		// every version of a parallel group and optional elsewhere.
+		Model *string `json:"model,omitempty"`
+		// Status and ErrorCode describe one version of a parallel group while
+		// it waits for its request or after that request failed; an absent
+		// status means the version settled normally.
+		Status      string                        `json:"status,omitempty"`
+		ErrorCode   *string                       `json:"errorCode,omitempty"`
 		Attachments []playgroundMessageAttachment `json:"attachments,omitempty"`
 		ToolCalls   []playgroundMessageToolCall   `json:"toolCalls,omitempty"`
 		// RequestId and Usage are the display-only record of the generation
@@ -265,6 +288,11 @@ func writePlaygroundError(c *gin.Context, err error) {
 	if errors.Is(err, model.ErrPlaygroundMessageLimit) {
 		status = http.StatusUnprocessableEntity
 		code = "PLAYGROUND_MESSAGE_LIMIT_EXCEEDED"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundParallelLimit) {
+		status = http.StatusUnprocessableEntity
+		code = "PLAYGROUND_PARALLEL_LIMIT_EXCEEDED"
 		err = common.NewMessage(err.Error())
 	}
 	if errors.Is(err, model.ErrPlaygroundPresetLimit) {
@@ -601,7 +629,7 @@ func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroun
 		if payload.ActiveVersionIndex != nil && (*payload.ActiveVersionIndex < 0 || *payload.ActiveVersionIndex >= len(payload.Versions)) {
 			return nil, common.NewMessage("Invalid Playground message.")
 		}
-		if payload.ErrorCode != nil && len(*payload.ErrorCode) > 500 {
+		if payload.ErrorCode != nil && len(*payload.ErrorCode) > playgroundMessageErrorCodeMaxLength {
 			return nil, common.NewMessage("Invalid Playground message.")
 		}
 		switch payload.From {
@@ -614,9 +642,38 @@ func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroun
 		default:
 			return nil, common.NewMessage("Invalid Playground message.")
 		}
+		if payload.Parallel != nil && *payload.Parallel {
+			// A comparison is a group of assistant replies: it only makes sense
+			// with several versions, and every version must name the model it
+			// came from. The owner's policy caps how many models one group may
+			// compare; the cap is enforced here, where the group is stored.
+			if payload.From != "assistant" || len(payload.Versions) < playgroundParallelMinVersions {
+				return nil, common.NewMessage("Invalid Playground message.")
+			}
+			if len(payload.Versions) > policy.ParallelCompareMaxModels {
+				return nil, model.ErrPlaygroundParallelLimit
+			}
+			for versionIndex := range payload.Versions {
+				version := &payload.Versions[versionIndex]
+				if version.Model == nil || *version.Model == "" {
+					return nil, common.NewMessage("Invalid Playground message.")
+				}
+			}
+		}
 		for versionIndex := range payload.Versions {
 			version := &payload.Versions[versionIndex]
 			if version.ID == "" || len(version.ID) > 200 {
+				return nil, common.NewMessage("Invalid Playground message.")
+			}
+			if version.Model != nil && (len(*version.Model) > playgroundMessageModelMaxLength || strings.ContainsRune(*version.Model, 0)) {
+				return nil, common.NewMessage("Invalid Playground message.")
+			}
+			switch version.Status {
+			case "", "loading", "streaming", "complete", "error":
+			default:
+				return nil, common.NewMessage("Invalid Playground message.")
+			}
+			if version.ErrorCode != nil && len(*version.ErrorCode) > playgroundMessageErrorCodeMaxLength {
 				return nil, common.NewMessage("Invalid Playground message.")
 			}
 			if err := validatePlaygroundMessageUsage(version.RequestId, version.Usage); err != nil {

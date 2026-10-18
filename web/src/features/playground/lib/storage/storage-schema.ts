@@ -95,6 +95,11 @@ const messageToolCallSchema = z.object({
 const messageVersionSchema = z.object({
   id: z.string().min(1).max(200),
   content: z.string(),
+  // Parallel comparison labels each compared reply with its model and its own
+  // lifecycle; the server bounds the model name and the status enum.
+  model: z.string().max(512).optional(),
+  status: messageStatusSchema.optional(),
+  errorCode: z.string().max(500).nullable().optional(),
   attachments: z.array(messageAttachmentSchema).optional(),
   toolCalls: z.array(messageToolCallSchema).optional(),
   // Display-only generation record. A stored version that carries it keeps the
@@ -127,6 +132,8 @@ const messageSchema = z.object({
   key: z.string().min(1).max(200),
   from: messageRoleSchema,
   versions: z.array(messageVersionSchema).min(1),
+  /** Assistant message group of one parallel comparison. */
+  parallel: z.boolean().optional(),
   activeVersionIndex: z.number().int().nonnegative().optional(),
   createdAt: z.number().finite().optional(),
   startedAt: z.number().finite().optional(),

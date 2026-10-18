@@ -56,6 +56,20 @@ export interface MessageToolCall {
 export interface MessageVersion {
   id: string
   content: string
+  /**
+   * Model that produced this version. Parallel comparison labels every
+   * compared reply with the model it came from; ordinary versions leave it
+   * absent.
+   */
+  model?: string
+  /**
+   * Lifecycle of one version of a parallel comparison: `loading` while its
+   * request runs, `error` when it failed. Absent means the version states
+   * nothing beyond the message itself.
+   */
+  status?: MessageStatus
+  /** Stable server error code of a failed parallel version, when any. */
+  errorCode?: string | null
   attachments?: MessageAttachment[]
   toolCalls?: MessageToolCall[]
   /**
@@ -99,6 +113,12 @@ export interface Message {
   key: string
   from: MessageRole
   versions: MessageVersion[]
+  /**
+   * Assistant message group produced by one parallel comparison: every
+   * version holds the reply of the model it names, and the selected version
+   * continues the conversation. Messages from ordinary sends leave it unset.
+   */
+  parallel?: boolean
   /** Index of the active version in `versions`; defaults to 0 for legacy data. */
   activeVersionIndex?: number
   createdAt?: number
