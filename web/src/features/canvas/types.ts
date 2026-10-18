@@ -183,3 +183,18 @@ export type CanvasServerProject = CanvasProjectSummary & {
   // Node ids whose referenced source no longer exists for this account.
   unavailableNodeIds?: string[]
 }
+
+/**
+ * One stored history entry of a canvas document. The server keeps the document
+ * bytes in the object store and answers with metadata only; `createdAt` is in
+ * milliseconds like the project timestamps.
+ */
+export type CanvasSnapshotSummary = {
+  id: string
+  canvasId: string
+  revision: number
+  nodeCount: number
+  edgeCount: number
+  byteSize: number
+  createdAt: number
+}

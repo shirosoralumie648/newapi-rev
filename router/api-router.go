@@ -76,6 +76,7 @@ func SetApiRouter(router *gin.Engine) {
 		playgroundRoute.Use(middleware.DisableCache(), middleware.UserAuth())
 		{
 			playgroundRoute.GET("/usage", controller.GetPlaygroundUsage)
+			playgroundRoute.GET("/settings", controller.GetPlaygroundSettings)
 			playgroundRoute.GET("/message-costs", controller.GetPlaygroundMessageCosts)
 			playgroundRoute.GET("/trash", controller.ListPlaygroundTrash)
 			playgroundRoute.GET("/assets", controller.ListPlaygroundAssets)
@@ -86,6 +87,11 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.GET("/presets/:presetId", controller.GetPlaygroundPreset)
 			playgroundRoute.PATCH("/presets/:presetId", controller.UpdatePlaygroundPreset)
 			playgroundRoute.DELETE("/presets/:presetId", controller.DeletePlaygroundPreset)
+			playgroundRoute.GET("/snippets", controller.ListPlaygroundSnippets)
+			playgroundRoute.POST("/snippets", controller.CreatePlaygroundSnippet)
+			playgroundRoute.GET("/snippets/:snippetId", controller.GetPlaygroundSnippet)
+			playgroundRoute.PATCH("/snippets/:snippetId", controller.UpdatePlaygroundSnippet)
+			playgroundRoute.DELETE("/snippets/:snippetId", controller.DeletePlaygroundSnippet)
 			playgroundRoute.GET("/sessions", controller.ListPlaygroundSessions)
 			playgroundRoute.POST("/sessions", controller.CreatePlaygroundSession)
 			playgroundRoute.GET("/sessions/:id", controller.GetPlaygroundSession)
@@ -121,6 +127,10 @@ func SetApiRouter(router *gin.Engine) {
 			// A trashed canvas waits in the shared trash window and comes back
 			// with its document, pins and counter share intact.
 			playgroundRoute.POST("/canvases/:canvasId/restore", controller.RestorePlaygroundCanvasProject)
+			// The board history: list stored snapshots and restore one as the
+			// canvas document, keeping the replaced state as a snapshot too.
+			playgroundRoute.GET("/canvases/:canvasId/snapshots", controller.ListPlaygroundCanvasSnapshots)
+			playgroundRoute.POST("/canvases/:canvasId/snapshots/:snapshotId/restore", controller.RestorePlaygroundCanvasSnapshot)
 			// A canvas owns its own attachment partition, so a file dropped on
 			// the board is uploaded without inventing a conversation for it.
 			playgroundRoute.POST("/canvases/:canvasId/attachments", controller.CreatePlaygroundCanvasAttachment)

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/middleware"
@@ -85,11 +86,12 @@ func TestDeleteRedemptionBatch(t *testing.T) {
 				common.SetDatabaseTypes(previousMain, previousLog)
 				common.RedisEnabled = previousRedis
 			})
-			for _, table := range []any{&model.User{}, &model.Redemption{}} {
+			for _, table := range []any{&model.User{}, &model.Redemption{}, &model.Option{}} {
 				require.False(t, db.Migrator().HasTable(table), "use an empty test database")
 				require.NoError(t, db.AutoMigrate(table))
 				t.Cleanup(func() { require.NoError(t, db.Migrator().DropTable(table)) })
 			}
+			require.NoError(t, model.EnsureLegacyAccessTokenRetireAt(time.Now().Unix()))
 			require.False(t, logDB.Migrator().HasTable(&model.AuditLog{}), "use an empty test log database")
 			require.NoError(t, logDB.AutoMigrate(&model.AuditLog{}))
 			t.Cleanup(func() { require.NoError(t, logDB.Migrator().DropTable(&model.AuditLog{})) })
@@ -253,16 +255,17 @@ func TestAddRedemptionSubscriptionCodes(t *testing.T) {
 				common.SetDatabaseTypes(previousMain, previousLog)
 				common.RedisEnabled = previousRedis
 			})
-			for _, table := range []any{&model.User{}, &model.Redemption{}, &model.SubscriptionPlan{}, &model.UserSubscription{}} {
+			for _, table := range []any{&model.User{}, &model.Redemption{}, &model.SubscriptionPlan{}, &model.UserSubscription{}, &model.Option{}} {
 				require.False(t, db.Migrator().HasTable(table), "use an empty test database")
 				require.NoError(t, db.AutoMigrate(table))
 				t.Cleanup(func() { require.NoError(t, db.Migrator().DropTable(table)) })
 			}
+			require.NoError(t, model.EnsureLegacyAccessTokenRetireAt(time.Now().Unix()))
 			require.False(t, logDB.Migrator().HasTable(&model.AuditLog{}), "use an empty test log database")
 			require.NoError(t, logDB.AutoMigrate(&model.AuditLog{}))
 			t.Cleanup(func() { require.NoError(t, logDB.Migrator().DropTable(&model.AuditLog{})) })
 
-			token := "redemption-subscription-test-token"
+			token := "redemption-subscription-token-01"
 			admin := model.User{Username: "redemption-subscription-admin", Password: "unused", Role: common.RoleAdminUser, Status: common.UserStatusEnabled, Group: "default", AccessToken: &token}
 			require.NoError(t, db.Create(&admin).Error)
 			plan := &model.SubscriptionPlan{Title: "controller plan", DurationUnit: model.SubscriptionDurationMonth, DurationValue: 1, TotalAmount: 100, Enabled: true}

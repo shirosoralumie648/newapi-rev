@@ -26,6 +26,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -71,6 +72,13 @@ const (
 	// matches what the model produced.
 	playgroundContextSummaryMaxBytes = 32 << 10
 )
+
+// playgroundReasoningEffortValues lists the effort strings the relay accepts
+// for `reasoning_effort` (relaykit/relayconvert/reasoning.ParseEffort), plus
+// the empty value stored while the parameter stays unset. The conversion
+// rejects any other value, so a stored configuration only ever carries one a
+// request can send.
+var playgroundReasoningEffortValues = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
 
 type playgroundSessionRequest struct {
 	Title            *string                  `json:"title"`
@@ -277,6 +285,11 @@ func writePlaygroundError(c *gin.Context, err error) {
 		code = "PLAYGROUND_NOT_FOUND"
 		err = common.NewMessage(err.Error())
 	}
+	if errors.Is(err, model.ErrPlaygroundSnippetNotFound) {
+		status = http.StatusNotFound
+		code = "PLAYGROUND_NOT_FOUND"
+		err = common.NewMessage(err.Error())
+	}
 	if errors.Is(err, model.ErrPlaygroundConflict) {
 		status = http.StatusConflict
 		code = "PLAYGROUND_CONFLICT"
@@ -302,6 +315,16 @@ func writePlaygroundError(c *gin.Context, err error) {
 	if errors.Is(err, model.ErrPlaygroundPresetLimit) {
 		status = http.StatusUnprocessableEntity
 		code = "PLAYGROUND_PRESET_LIMIT_EXCEEDED"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundSnippetLimit) {
+		status = http.StatusUnprocessableEntity
+		code = "PLAYGROUND_SNIPPET_LIMIT_EXCEEDED"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundSnippetContentLimit) {
+		status = http.StatusUnprocessableEntity
+		code = "PLAYGROUND_SNIPPET_CONTENT_LIMIT_EXCEEDED"
 		err = common.NewMessage(err.Error())
 	}
 	if errors.Is(err, model.ErrPlaygroundSystemPromptLimit) {
@@ -527,6 +550,9 @@ func encodePlaygroundSettings(request playgroundSessionRequest, systemPromptMaxB
 			case "seed":
 				_, valid = value.(float64)
 				valid = valid || value == nil
+			case "reasoning_effort":
+				text, ok := value.(string)
+				valid = ok && (text == "" || slices.Contains(playgroundReasoningEffortValues, text))
 			}
 			if !valid {
 				return nil, common.NewMessage("Invalid Playground configuration.")
@@ -541,7 +567,7 @@ func encodePlaygroundSettings(request playgroundSessionRequest, systemPromptMaxB
 	if request.ParameterEnabled != nil {
 		for key := range request.ParameterEnabled {
 			switch key {
-			case "temperature", "top_p", "max_tokens", "frequency_penalty", "presence_penalty", "seed":
+			case "temperature", "top_p", "max_tokens", "frequency_penalty", "presence_penalty", "seed", "reasoning_effort":
 			default:
 				return nil, common.NewMessage("Invalid Playground configuration.")
 			}

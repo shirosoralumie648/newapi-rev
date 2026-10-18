@@ -49,6 +49,7 @@ import type {
   PlaygroundContextSummary,
   PlaygroundMessageCost,
   PlaygroundServerSession,
+  PromptSnippet,
 } from './types'
 
 /** One non-streaming completion plus the relay request id it was recorded as. */
@@ -670,8 +671,13 @@ const playgroundUsageSchema = z.object({
   attachments: playgroundUsageMetricSchema,
   artifacts: playgroundUsageMetricSchema,
   canvas: playgroundUsageMetricSchema,
+  canvas_snapshots: playgroundUsageMetricSchema,
   storage: playgroundUsageMetricSchema,
   tasks: playgroundUsageMetricSchema,
+})
+
+const playgroundSettingsSchema = z.object({
+  sandbox_preview_enabled: z.boolean(),
 })
 
 export interface PlaygroundUsageMetric {
@@ -682,15 +688,16 @@ export interface PlaygroundUsageMetric {
 }
 
 // The unified Playground resource usage: conversations, attachments, artifacts,
-// canvases, object storage and async generation tasks the owner stores, each
-// against the account-level cap the server enforces for the owner's group.
-// `group` is the user group those limits were resolved from.
+// canvases, canvas history, object storage and async generation tasks the owner
+// stores, each against the account-level cap the server enforces for the
+// owner's group. `group` is the user group those limits were resolved from.
 export interface PlaygroundResourceUsage {
   group: string
   sessions: PlaygroundUsageMetric
   attachments: PlaygroundUsageMetric
   artifacts: PlaygroundUsageMetric
   canvas: PlaygroundUsageMetric
+  canvasSnapshots: PlaygroundUsageMetric
   storage: PlaygroundUsageMetric
   tasks: PlaygroundUsageMetric
 }
@@ -756,9 +763,29 @@ export async function getPlaygroundUsage(
     attachments: toMetric(metrics.attachments),
     artifacts: toMetric(metrics.artifacts),
     canvas: toMetric(metrics.canvas),
+    canvasSnapshots: toMetric(metrics.canvas_snapshots),
     storage: toMetric(metrics.storage),
     tasks: toMetric(metrics.tasks),
   }
+}
+
+/**
+ * Server-side Playground feature switches. `sandboxPreviewEnabled` is the
+ * administrator opt-in for rendering HTML/SVG artifact content inside the
+ * sandboxed preview; while it is false the browser must keep artifact content
+ * inert.
+ */
+export interface PlaygroundServerSettings {
+  sandboxPreviewEnabled: boolean
+}
+
+export async function getPlaygroundSettings(
+  signal?: AbortSignal
+): Promise<PlaygroundServerSettings> {
+  const response = await api.get(API_ENDPOINTS.PLAYGROUND_SETTINGS, { signal })
+  requireServerSuccess(response.data)
+  const settings = playgroundSettingsSchema.parse(response.data.data)
+  return { sandboxPreviewEnabled: settings.sandbox_preview_enabled }
 }
 
 const serverPresetSchema = z.object({
@@ -857,6 +884,94 @@ export async function deletePlaygroundPreset(
 ): Promise<void> {
   const response = await api.delete(
     `${API_ENDPOINTS.PLAYGROUND_PRESETS}/${encodeURIComponent(presetId)}`,
+    { signal }
+  )
+  requireServerSuccess(response.data)
+}
+
+const serverSnippetSchema = z.object({
+  id: z.string().min(1),
+  name: z.string(),
+  content: z.string(),
+  created_at: z.number().int().nonnegative(),
+  updated_at: z.number().int().nonnegative(),
+})
+
+export interface PlaygroundSnippetInput {
+  name: string
+  content: string
+}
+
+export type PlaygroundSnippetUpdateInput = Partial<PlaygroundSnippetInput>
+
+export interface PlaygroundSnippetListing {
+  items: PromptSnippet[]
+  total: number
+  /** Per-account snippet budget the server enforces for the owner's group. */
+  limit: number
+}
+
+function mapServerSnippet(value: unknown): PromptSnippet {
+  const snippet = serverSnippetSchema.parse(value)
+  return {
+    id: snippet.id,
+    name: snippet.name,
+    content: snippet.content,
+    createdAt: snippet.created_at * 1000,
+    updatedAt: snippet.updated_at * 1000,
+  }
+}
+
+export async function getPlaygroundSnippets(
+  signal?: AbortSignal
+): Promise<PlaygroundSnippetListing> {
+  const response = await api.get(API_ENDPOINTS.PLAYGROUND_SNIPPETS, { signal })
+  requireServerSuccess(response.data)
+  const data = z
+    .object({
+      items: z.array(z.unknown()),
+      total: z.number().nonnegative(),
+      limit: z.number().int().nonnegative(),
+    })
+    .parse(response.data.data)
+  return {
+    items: data.items.map(mapServerSnippet),
+    total: data.total,
+    limit: data.limit,
+  }
+}
+
+export async function createPlaygroundSnippet(
+  input: PlaygroundSnippetInput,
+  signal?: AbortSignal
+): Promise<PromptSnippet> {
+  const response = await api.post(API_ENDPOINTS.PLAYGROUND_SNIPPETS, input, {
+    signal,
+  })
+  requireServerSuccess(response.data)
+  return mapServerSnippet(response.data.data)
+}
+
+export async function updatePlaygroundSnippet(
+  snippetId: string,
+  input: PlaygroundSnippetUpdateInput,
+  signal?: AbortSignal
+): Promise<PromptSnippet> {
+  const response = await api.patch(
+    `${API_ENDPOINTS.PLAYGROUND_SNIPPETS}/${encodeURIComponent(snippetId)}`,
+    input,
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  return mapServerSnippet(response.data.data)
+}
+
+export async function deletePlaygroundSnippet(
+  snippetId: string,
+  signal?: AbortSignal
+): Promise<void> {
+  const response = await api.delete(
+    `${API_ENDPOINTS.PLAYGROUND_SNIPPETS}/${encodeURIComponent(snippetId)}`,
     { signal }
   )
   requireServerSuccess(response.data)

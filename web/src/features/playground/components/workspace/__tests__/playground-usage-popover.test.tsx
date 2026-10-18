@@ -44,6 +44,12 @@ const usage = {
   },
   artifacts: { used: 0, limit: 5, used_bytes: 0, limit_bytes: 1024 },
   canvas: { used: 2, limit: 20, used_bytes: 0, limit_bytes: 0 },
+  canvas_snapshots: {
+    used: 5,
+    limit: 200,
+    used_bytes: 12 * 1024,
+    limit_bytes: 64 * 1024 * 1024,
+  },
   storage: {
     used: 0,
     limit: 0,
@@ -91,6 +97,9 @@ test('opening the usage popover lists each resource against its account limit', 
   expect(screen.getByText('3 of 10')).toBeVisible()
   expect(screen.getByText('1 of 4')).toBeVisible()
   expect(screen.getByText('2 KiB of 8 MiB')).toBeVisible()
+  expect(screen.getByText('Canvas history')).toBeVisible()
+  expect(screen.getByText('5 of 200')).toBeVisible()
+  expect(screen.getByText('12 KiB of 64 MiB')).toBeVisible()
   expect(screen.getByText('Object storage')).toBeVisible()
   expect(screen.getByText('2 KiB of 128 MiB')).toBeVisible()
   expect(screen.queryByText('0 of 0')).not.toBeInTheDocument()

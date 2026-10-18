@@ -28,6 +28,13 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   Sheet,
   SheetContent,
   SheetHeader,
@@ -51,6 +58,12 @@ import {
   PLAYGROUND_PARAMETER_PANEL_SCROLL_CLASS,
   type PlaygroundParameterKey,
 } from '../../lib/parameters/playground-parameters'
+import {
+  getReasoningEffortLabelKey,
+  modelSupportsReasoningEffort,
+  normalizeReasoningEffort,
+  PLAYGROUND_REASONING_EFFORT_OPTIONS,
+} from '../../lib/parameters/playground-reasoning'
 import type { ParameterEnabled, PlaygroundConfig } from '../../types'
 
 type PlaygroundParameterPanelProps = {
@@ -97,6 +110,13 @@ export function PlaygroundParameterContent({
 
     onConfigChange(key, value ?? 0)
   }
+
+  const reasoningSupported = modelSupportsReasoningEffort(config.model)
+  const reasoningEffort = normalizeReasoningEffort(config.reasoning_effort)
+  const reasoningItems = PLAYGROUND_REASONING_EFFORT_OPTIONS.map((option) => ({
+    value: option.value,
+    label: t(option.labelKey),
+  }))
 
   return (
     <div
@@ -196,6 +216,74 @@ export function PlaygroundParameterContent({
           </div>
         )
       })}
+
+      {reasoningSupported ? (
+        <div
+          className={cn(
+            'border-border/70 bg-background/60 grid gap-2 rounded-lg border p-3 transition-opacity',
+            (!parameterEnabled.reasoning_effort || disabled) && 'opacity-55'
+          )}
+        >
+          <div className='flex items-start justify-between gap-3'>
+            <div className='min-w-0 space-y-1'>
+              <div className='flex min-w-0 items-center gap-2'>
+                <label
+                  className='truncate text-sm leading-5 font-medium'
+                  htmlFor='playground-reasoning_effort'
+                >
+                  {t('Reasoning Effort')}
+                </label>
+                <Badge
+                  className='h-5 max-w-24 shrink-0 px-1.5 font-mono text-[11px]'
+                  variant='outline'
+                >
+                  {t(getReasoningEffortLabelKey(reasoningEffort) ?? 'Not set')}
+                </Badge>
+              </div>
+              <p className='text-muted-foreground text-xs leading-4'>
+                {t('How much the model should reason before answering')}
+              </p>
+            </div>
+
+            <Switch
+              aria-label={t('Enable {{parameter}}', {
+                parameter: t('Reasoning Effort'),
+              })}
+              checked={parameterEnabled.reasoning_effort}
+              disabled={disabled}
+              onCheckedChange={(checked) =>
+                onParameterEnabledChange('reasoning_effort', checked)
+              }
+              size='sm'
+            />
+          </div>
+
+          <Select
+            disabled={disabled || !parameterEnabled.reasoning_effort}
+            items={reasoningItems}
+            onValueChange={(value: unknown) => {
+              if (typeof value !== 'string') return
+              onConfigChange('reasoning_effort', value)
+            }}
+            value={reasoningEffort || null}
+          >
+            <SelectTrigger
+              className='w-full'
+              id='playground-reasoning_effort'
+              size='sm'
+            >
+              <SelectValue placeholder={t('Select a reasoning effort')} />
+            </SelectTrigger>
+            <SelectContent>
+              {PLAYGROUND_REASONING_EFFORT_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {t(option.labelKey)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -203,9 +291,14 @@ export function PlaygroundParameterContent({
 export function PlaygroundParameterPanel(props: PlaygroundParameterPanelProps) {
   const { t } = useTranslation()
   const isMobile = useIsMobile()
-  const activeCount = PLAYGROUND_PARAMETER_CONTROLS.filter(
-    (control) => props.parameterEnabled[control.key]
-  ).length
+  const activeCount =
+    PLAYGROUND_PARAMETER_CONTROLS.filter(
+      (control) => props.parameterEnabled[control.key]
+    ).length +
+    (modelSupportsReasoningEffort(props.config.model) &&
+    props.parameterEnabled.reasoning_effort
+      ? 1
+      : 0)
 
   const trigger = (
     <PromptInputButton

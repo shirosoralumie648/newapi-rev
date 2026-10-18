@@ -81,8 +81,15 @@ export function usePlaygroundContext(options: UsePlaygroundContextOptions) {
         settings: options.settings,
         summary: options.summary,
         systemPrompt: options.systemPrompt,
+        model: options.config.model,
       }),
-    [options.messages, options.settings, options.summary, options.systemPrompt]
+    [
+      options.messages,
+      options.settings,
+      options.summary,
+      options.systemPrompt,
+      options.config.model,
+    ]
   )
 
   const runSummarization = useCallback(
@@ -181,6 +188,7 @@ export function usePlaygroundContext(options: UsePlaygroundContextOptions) {
         settings: current.settings,
         summary: current.summary,
         systemPrompt: current.systemPrompt,
+        model: current.config.model,
       })
       if (!current.settings.autoSummarize || !freshPlan.needsSummary) {
         return current.summary
@@ -201,6 +209,7 @@ export function usePlaygroundContext(options: UsePlaygroundContextOptions) {
       settings: current.settings,
       summary: current.summary,
       systemPrompt: current.systemPrompt,
+      model: current.config.model,
     })
     if (!freshPlan.needsSummary) return
     await runSummarization(freshPlan)

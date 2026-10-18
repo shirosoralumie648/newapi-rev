@@ -60,6 +60,7 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 
 	// router/api-router.go: /api/playground
 	"GET /api/playground/usage":                                                  accessTokenSessionRule,
+	"GET /api/playground/settings":                                               accessTokenSessionRule,
 	"GET /api/playground/message-costs":                                          accessTokenSessionRule,
 	"GET /api/playground/trash":                                                  accessTokenSessionRule,
 	"GET /api/playground/assets":                                                 accessTokenSessionRule,
@@ -70,6 +71,11 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/playground/presets/:presetId":                                      accessTokenSessionRule,
 	"PATCH /api/playground/presets/:presetId":                                    accessTokenSessionRule,
 	"DELETE /api/playground/presets/:presetId":                                   accessTokenSessionRule,
+	"GET /api/playground/snippets":                                               accessTokenSessionRule,
+	"POST /api/playground/snippets":                                              accessTokenSessionRule,
+	"GET /api/playground/snippets/:snippetId":                                    accessTokenSessionRule,
+	"PATCH /api/playground/snippets/:snippetId":                                  accessTokenSessionRule,
+	"DELETE /api/playground/snippets/:snippetId":                                 accessTokenSessionRule,
 	"GET /api/playground/sessions":                                               accessTokenSessionRule,
 	"POST /api/playground/sessions":                                              accessTokenSessionRule,
 	"GET /api/playground/sessions/:id":                                           accessTokenSessionRule,
@@ -99,6 +105,8 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"PATCH /api/playground/canvases/:canvasId":                                   accessTokenSessionRule,
 	"DELETE /api/playground/canvases/:canvasId":                                  accessTokenSessionRule,
 	"POST /api/playground/canvases/:canvasId/restore":                            accessTokenSessionRule,
+	"GET /api/playground/canvases/:canvasId/snapshots":                           accessTokenSessionRule,
+	"POST /api/playground/canvases/:canvasId/snapshots/:snapshotId/restore":      accessTokenSessionRule,
 	"POST /api/playground/canvases/:canvasId/attachments":                        accessTokenSessionRule,
 
 	// router/api-router.go: /api/user (self)

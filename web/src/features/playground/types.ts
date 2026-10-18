@@ -216,6 +216,19 @@ export interface AssistantPreset {
 }
 
 /**
+ * A reusable prompt fragment owned by the account: a short display name and the
+ * text the composer inserts. Snippets never carry credentials or provider
+ * addresses; inserting one only fills the composer.
+ */
+export interface PromptSnippet {
+  id: string
+  name: string
+  content: string
+  createdAt: number
+  updatedAt: number
+}
+
+/**
  * Deep-link target for the Playground route. `session` is the canonical server
  * session id a canvas node points back to; `artifact` selects a saved artifact
  * inside that session.
@@ -283,6 +296,12 @@ export interface ChatCompletionRequest {
   frequency_penalty?: number
   presence_penalty?: number
   seed?: number
+  /**
+   * Reasoning strength for the models that support it. The value is one of the
+   * effort strings the relay accepts (`none`, `minimal`, `low`, `medium`,
+   * `high`, `xhigh`, `max`) or empty while the parameter stays unset.
+   */
+  reasoning_effort?: string
 }
 
 export interface ChatCompletionChunk {
@@ -354,6 +373,12 @@ export interface PlaygroundConfig {
   frequency_penalty: number
   presence_penalty: number
   seed: number | null
+  /**
+   * Reasoning effort of the conversation; empty means unset. Only the values
+   * the relay accepts are storable, and the control is offered solely for the
+   * model families known to support it.
+   */
+  reasoning_effort: string
   stream: boolean
 }
 
@@ -364,6 +389,7 @@ export interface ParameterEnabled {
   frequency_penalty: boolean
   presence_penalty: boolean
   seed: boolean
+  reasoning_effort: boolean
 }
 
 // Model and group options

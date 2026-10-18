@@ -16,10 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test } from 'vitest'
 
 import {
   DEFAULT_CONTEXT_SETTINGS,
+  HISTORY_IMAGE_OMITTED_CONTENT,
   PLAYGROUND_CONTEXT_HISTORY_LIMIT_MAX,
   PLAYGROUND_CONTEXT_IMAGE_TOKEN_ESTIMATE,
   PLAYGROUND_CONTEXT_TOKEN_BUDGET_MAX,
@@ -30,6 +31,10 @@ import type {
   PlaygroundContextSettings,
   PlaygroundContextSummary,
 } from '../../../types'
+import {
+  clearPlaygroundAttachmentCache,
+  primePlaygroundAttachment,
+} from '../../attachment-store'
 import {
   buildContextSummaryRequest,
   estimateMessageTokens,
@@ -67,6 +72,10 @@ function summary(
     ...overrides,
   }
 }
+
+afterEach(() => {
+  clearPlaygroundAttachmentCache()
+})
 
 describe('token estimation', () => {
   test('ascii counts by characters and non-ascii per code point', () => {
@@ -273,6 +282,38 @@ describe('context planning', () => {
       settings: settings({ tokenBudget: 5 }),
     })
     expect(tiny.includedMessages.map((item) => item.key)).toEqual(['m3'])
+  })
+
+  test('a text-only model replaces earlier images and reports them', () => {
+    // A send caches the attachment bytes before the plan is built
+    // (ensurePlaygroundMessageAttachments), so the request carries the image
+    // part the policy then has to replace.
+    primePlaygroundAttachment('a1', 'data:image/png;base64,iVBORw0KGgo=')
+    const messages: Message[] = [
+      {
+        key: 'm1',
+        from: 'user',
+        versions: [
+          {
+            id: 'v1',
+            content: 'look',
+            attachments: [{ id: 'a1', url: '', mediaType: 'image/png' }],
+          },
+        ],
+      },
+      message('m2', 'next', 'user'),
+    ]
+    const plan = planPlaygroundContext({
+      messages,
+      settings: settings(),
+      model: 'deepseek-chat',
+    })
+
+    expect(plan.omittedImages).toBe(1)
+    expect(plan.requestMessages[0].content).toEqual([
+      { type: 'text', text: 'look' },
+      { type: 'text', text: HISTORY_IMAGE_OMITTED_CONTENT },
+    ])
   })
 
   test('a compression node replaces the covered prefix and its text counts toward the budget', () => {

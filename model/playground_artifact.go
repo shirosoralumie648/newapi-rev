@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -38,6 +39,9 @@ var (
 	ErrPlaygroundArtifactRequestConflict = errors.New("Playground request ID was already used for a different operation.")
 	playgroundArtifactRequestPattern     = regexp.MustCompile(`^[a-zA-Z0-9_.:-]{1,128}$`)
 	playgroundArtifactLanguagePattern    = regexp.MustCompile(`^[a-z0-9][a-z0-9+#._-]{0,31}$`)
+	// playgroundArtifactKinds are the kinds the Playground stores. html and svg
+	// are the sandbox-previewable kinds; the others stay inert text.
+	playgroundArtifactKinds = []string{"markdown", "code", "html", "svg"}
 )
 
 // DeletedAt is an explicit tombstone, not a GORM soft delete. Deleted rows retain
@@ -74,6 +78,28 @@ type PlaygroundArtifactVersion struct {
 	RequestKey            string   `json:"-" gorm:"size:64;not null;uniqueIndex:uk_pg_artifact_request,priority:2"`
 	RequestHash           string   `json:"-" gorm:"size:64;not null"`
 	RestoredFromVersionID string   `json:"restored_from_version_id,omitempty" gorm:"size:32;not null"`
+	// StorageBackend/ObjectKey/ContentEncoding mirror the payload layout of
+	// canvas documents: a body larger than the externalization threshold is
+	// gzip-compressed into the object store and Content stays empty. ObjectKey
+	// is empty for inline versions, and hydrated readers always see the real
+	// content.
+	StorageBackend  string `json:"-" gorm:"size:32"`
+	ObjectKey       string `json:"-" gorm:"size:512"`
+	ContentEncoding string `json:"-" gorm:"size:16"`
+}
+
+// hydratePlaygroundArtifactVersion loads the externalized body of one version
+// row so callers always see the real content instead of an empty column.
+func hydratePlaygroundArtifactVersion(version *PlaygroundArtifactVersion) error {
+	if version.ObjectKey == "" {
+		return nil
+	}
+	content, err := readPlaygroundStoredPayload(nil, version.ObjectKey, version.ContentEncoding, version.ByteSize)
+	if err != nil {
+		return err
+	}
+	version.Content = LongText(content)
+	return nil
 }
 
 type PlaygroundArtifactSummary struct {
@@ -157,9 +183,13 @@ func normalizePlaygroundArtifactSnapshot(kind string, title, language *string, c
 	*title = strings.TrimSpace(*title)
 	*language = strings.ToLower(strings.TrimSpace(*language))
 	if *language == "" {
-		*language = "plaintext"
-		if kind == "markdown" {
+		switch kind {
+		case "markdown":
 			*language = "markdown"
+		case "html", "svg":
+			*language = kind
+		default:
+			*language = "plaintext"
 		}
 	}
 	if *title == "" || len(*title) > 800 || !utf8.ValidString(*title) || utf8.RuneCountInString(*title) > 200 ||
@@ -311,6 +341,9 @@ func findPlaygroundArtifactCreation(tx *gorm.DB, userID int, sessionID, requestI
 	if err := tx.Where("artifact_id = ? AND number = 1", artifact.ID).First(&version).Error; err != nil {
 		return nil, err
 	}
+	if err := hydratePlaygroundArtifactVersion(&version); err != nil {
+		return nil, err
+	}
 	return playgroundArtifactResult(&artifact, &version), nil
 }
 
@@ -322,10 +355,12 @@ func CreatePlaygroundArtifact(userID int, sessionID string, input CreatePlaygrou
 	source := &input.Source
 	source.ContentHash = strings.ToLower(source.ContentHash)
 	hashBytes, hashErr := hex.DecodeString(source.ContentHash)
-	if !playgroundArtifactRequestPattern.MatchString(input.RequestID) || (input.Kind != "markdown" && input.Kind != "code") ||
+	if !playgroundArtifactRequestPattern.MatchString(input.RequestID) || !slices.Contains(playgroundArtifactKinds, input.Kind) ||
 		source.MessageKey == "" || len(source.MessageKey) > 200 || source.VersionID == "" || len(source.VersionID) > 200 ||
 		source.MessageRevision == nil || *source.MessageRevision < 0 || hashErr != nil || len(hashBytes) != sha256.Size ||
-		(source.CodeBlockIndex != nil && (*source.CodeBlockIndex < 0 || input.Kind != "code")) {
+		// A code block index identifies the code/html/svg block the artifact was
+		// derived from; an answer-wide markdown artifact never carries one.
+		(source.CodeBlockIndex != nil && (*source.CodeBlockIndex < 0 || input.Kind == "markdown")) {
 		return nil, ErrPlaygroundArtifactInvalid
 	}
 	if err := normalizePlaygroundArtifactSnapshot(input.Kind, &input.Title, &input.Language, input.Content, policy.ArtifactContentMaxBytes); err != nil {
@@ -410,19 +445,40 @@ func appendPlaygroundArtifactVersion(tx *gorm.DB, artifact *PlaygroundArtifact, 
 	if err != nil {
 		return nil, err
 	}
+	now := common.GetTimestamp()
 	version := PlaygroundArtifactVersion{ID: "pgv_" + key, ArtifactID: artifact.ID, Number: artifact.Revision + 1,
-		Title: title, Language: language, Content: LongText(content), ByteSize: int64(len(content)), CreatedAt: common.GetTimestamp(),
+		Title: title, Language: language, Content: LongText(content), ByteSize: int64(len(content)), CreatedAt: now,
 		RequestID: requestID, RequestKey: playgroundArtifactHash(requestID), RequestHash: fingerprint, RestoredFromVersionID: restoredFrom}
+	// A body larger than the externalization threshold moves into the object
+	// store before the row is written; the row then keeps only the metadata.
+	storedObject := ""
+	if backend, objectKey, encoding, externalized := externalizePlaygroundPayload(
+		playgroundArtifactVersionObjectKey(artifact.UserID, now, version.ID), []byte(content)); externalized {
+		version.Content = ""
+		version.StorageBackend, version.ObjectKey, version.ContentEncoding = backend, objectKey, encoding
+		storedObject = objectKey
+	}
 	if err := tx.Create(&version).Error; err != nil {
+		// The version row never became durable; the object it would have owned
+		// is redundant.
+		deletePlaygroundObject(nil, storedObject)
 		return nil, err
 	}
 	updated := tx.Model(&PlaygroundArtifact{}).Where("id = ? AND user_id = ? AND session_id = ? AND revision = ? AND deleted_at = 0", artifact.ID, artifact.UserID, artifact.SessionID, artifact.Revision).
 		Updates(map[string]any{"revision": version.Number, "current_version_id": version.ID, "title": title, "language": language, "updated_at": version.CreatedAt})
-	if updated.Error != nil {
-		return nil, updated.Error
-	}
-	if updated.RowsAffected != 1 {
+	if updated.Error != nil || updated.RowsAffected != 1 {
+		// The surrounding transaction rolls back, so the version row and its
+		// object are both abandoned.
+		deletePlaygroundObject(nil, storedObject)
+		if updated.Error != nil {
+			return nil, updated.Error
+		}
 		return nil, ErrPlaygroundConflict
+	}
+	if storedObject != "" {
+		// The response acknowledges the stored body even though the row keeps
+		// only the object key.
+		version.Content = LongText(content)
 	}
 	return playgroundArtifactResult(artifact, &version), nil
 }
@@ -435,6 +491,9 @@ func findPlaygroundArtifactWrite(tx *gorm.DB, artifact *PlaygroundArtifact, requ
 	}
 	if version.RequestID != requestID || version.RequestHash != fingerprint {
 		return nil, ErrPlaygroundArtifactRequestConflict
+	}
+	if err := hydratePlaygroundArtifactVersion(&version); err != nil {
+		return nil, err
 	}
 	return playgroundArtifactResult(artifact, &version), nil
 }
@@ -465,6 +524,9 @@ func writePlaygroundArtifactVersion(userID int, sessionID, artifactID, requestID
 			}
 			if version.ID != restoreID {
 				return gorm.ErrRecordNotFound
+			}
+			if err := hydratePlaygroundArtifactVersion(&version); err != nil {
+				return err
 			}
 			title, language, content = version.Title, version.Language, string(version.Content)
 		}
@@ -554,6 +616,9 @@ func GetPlaygroundArtifact(userID int, sessionID, artifactID, versionID string) 
 		if version.ID != versionID {
 			return gorm.ErrRecordNotFound
 		}
+		if err := hydratePlaygroundArtifactVersion(&version); err != nil {
+			return err
+		}
 		result = playgroundArtifactResult(artifact, &version)
 		return nil
 	})
@@ -606,7 +671,8 @@ func DeletePlaygroundArtifact(userID int, sessionID, artifactID string, revision
 	if revision < 1 {
 		return ErrPlaygroundArtifactInvalid
 	}
-	return DB.Transaction(func(tx *gorm.DB) error {
+	var removedObjects []playgroundStoredObject
+	err := DB.Transaction(func(tx *gorm.DB) error {
 		if _, err := lockPlaygroundArtifactSession(tx, userID, sessionID); err != nil {
 			return err
 		}
@@ -628,7 +694,13 @@ func DeletePlaygroundArtifact(userID int, sessionID, artifactID string, revision
 			return ErrPlaygroundConflict
 		}
 		// The versions about to be removed are the artifact's whole byte
-		// footprint, so the account counter loses exactly those bytes.
+		// footprint, so the account counter loses exactly those bytes. Their
+		// externalized bodies leave with the rows and are deleted after the
+		// transaction commits.
+		storedVersions := make([]PlaygroundArtifactVersion, 0)
+		if err := tx.Select("id, object_key").Where("artifact_id = ?", artifact.ID).Find(&storedVersions).Error; err != nil {
+			return err
+		}
 		var storedBytes struct {
 			UsedBytes int64
 		}
@@ -638,6 +710,11 @@ func DeletePlaygroundArtifact(userID int, sessionID, artifactID string, revision
 		}
 		if err := tx.Where("artifact_id = ?", artifact.ID).Delete(&PlaygroundArtifactVersion{}).Error; err != nil {
 			return err
+		}
+		for index := range storedVersions {
+			if storedVersions[index].ObjectKey != "" {
+				removedObjects = append(removedObjects, playgroundStoredObject{ObjectKey: storedVersions[index].ObjectKey})
+			}
 		}
 		now := common.GetTimestamp()
 		updated := tx.Model(&PlaygroundArtifact{}).Where("id = ? AND user_id = ? AND session_id = ? AND revision = ? AND deleted_at = 0", artifact.ID, userID, sessionID, revision).
@@ -651,4 +728,9 @@ func DeletePlaygroundArtifact(userID int, sessionID, artifactID string, revision
 		usage.apply(playgroundUserUsageDelta{ArtifactCount: -1, ArtifactBytes: -storedBytes.UsedBytes})
 		return savePlaygroundUserUsage(tx, usage)
 	})
+	if err != nil {
+		return err
+	}
+	deletePlaygroundObjects(removedObjects)
+	return nil
 }

@@ -164,6 +164,19 @@ function PlaygroundContextContent(props: PlaygroundContextContentProps) {
                 )}
           </p>
         )}
+        {props.plan.omittedImages > 0 && (
+          <p
+            role='status'
+            className='text-xs leading-4 text-amber-600 dark:text-amber-400'
+          >
+            {t(
+              '{{images}} images from earlier messages are left out of the next request.',
+              {
+                images: formatNumber(props.plan.omittedImages, locale),
+              }
+            )}
+          </p>
+        )}
       </div>
 
       <div className='grid gap-1.5'>

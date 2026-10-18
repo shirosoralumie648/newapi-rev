@@ -45,7 +45,7 @@ type ChatCompletionChoice = ChatCompletionResponse['choices'][number]
  */
 export function isParallelMessage(
   message: Message | undefined
-): message is Message {
+): message is Message & { parallel: true } {
   return message?.from === MESSAGE_ROLES.ASSISTANT && message.parallel === true
 }
 

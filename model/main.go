@@ -402,6 +402,12 @@ func migrateDB() error {
 	if err := migratePlaygroundTrashColumns(DB); err != nil {
 		return err
 	}
+	// The canvas snapshot counters are NOT NULL columns on a counter table that
+	// already holds rows on upgraded installations; add them with a default
+	// first.
+	if err := migratePlaygroundUserUsageCounters(DB); err != nil {
+		return err
+	}
 	// Migrate price_amount column from float/double to decimal for existing tables
 	migrateSubscriptionPlanPriceAmount()
 	// Migrate model_limits column from varchar to text for existing tables
@@ -457,11 +463,13 @@ func migrateDB() error {
 		&PlaygroundSession{},
 		&PlaygroundMessage{},
 		&PlaygroundPreset{},
+		&PlaygroundSnippet{},
 		&PlaygroundArtifact{},
 		&PlaygroundArtifactVersion{},
 		&PlaygroundAttachment{},
 		&PlaygroundUserUsage{},
 		&PlaygroundCanvasProject{},
+		&PlaygroundCanvasSnapshot{},
 		&PlaygroundCanvasAsset{},
 		&PlaygroundTaskArtifact{},
 		&PlaygroundTaskArtifactPin{},

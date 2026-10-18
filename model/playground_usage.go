@@ -34,13 +34,14 @@ type PlaygroundUsageMetric struct {
 // scope the read and write paths use, so one account can never observe another
 // account's totals. Group is the user group the limits were resolved from.
 type PlaygroundResourceUsage struct {
-	Group       string                `json:"group"`
-	Sessions    PlaygroundUsageMetric `json:"sessions"`
-	Attachments PlaygroundUsageMetric `json:"attachments"`
-	Artifacts   PlaygroundUsageMetric `json:"artifacts"`
-	Canvas      PlaygroundUsageMetric `json:"canvas"`
-	Storage     PlaygroundUsageMetric `json:"storage"`
-	Tasks       PlaygroundUsageMetric `json:"tasks"`
+	Group           string                `json:"group"`
+	Sessions        PlaygroundUsageMetric `json:"sessions"`
+	Attachments     PlaygroundUsageMetric `json:"attachments"`
+	Artifacts       PlaygroundUsageMetric `json:"artifacts"`
+	Canvas          PlaygroundUsageMetric `json:"canvas"`
+	CanvasSnapshots PlaygroundUsageMetric `json:"canvas_snapshots"`
+	Storage         PlaygroundUsageMetric `json:"storage"`
+	Tasks           PlaygroundUsageMetric `json:"tasks"`
 }
 
 // PlaygroundUsageForUser reports the caller's Playground storage against the
@@ -72,6 +73,10 @@ func PlaygroundUsageForUser(userID int) (*PlaygroundResourceUsage, error) {
 			Limit:      int64(policy.CanvasUserMaxProjects),
 			LimitBytes: policy.CanvasUserMaxBytes,
 		},
+		CanvasSnapshots: PlaygroundUsageMetric{
+			Limit:      int64(policy.CanvasSnapshotUserMaxCount),
+			LimitBytes: policy.CanvasSnapshotUserMaxBytes,
+		},
 		Storage: PlaygroundUsageMetric{
 			LimitBytes: policy.ObjectUserMaxBytes,
 		},
@@ -92,6 +97,8 @@ func PlaygroundUsageForUser(userID int) (*PlaygroundResourceUsage, error) {
 	usage.Artifacts.UsedBytes = counters.ArtifactBytes
 	usage.Canvas.Used = counters.CanvasCount
 	usage.Canvas.UsedBytes = counters.CanvasBytes
+	usage.CanvasSnapshots.Used = counters.CanvasSnapshotCount
+	usage.CanvasSnapshots.UsedBytes = counters.CanvasSnapshotBytes
 	// Storage counts the bytes that live in the object store, the same figure
 	// the upload path checks against ObjectUserMaxBytes.
 	usage.Storage.UsedBytes = counters.ObjectBytes

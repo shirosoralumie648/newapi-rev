@@ -339,6 +339,7 @@ func RestorePlaygroundSession(userID int, id string) (*PlaygroundSession, error)
 // deletes. The stored attachment objects are deleted after the database commit.
 func PurgePlaygroundSession(userID int, id string) error {
 	var removedAttachments []PlaygroundAttachment
+	var removedObjects []playgroundStoredObject
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var session PlaygroundSession
 		if err := lockForUpdate(tx).Where("id = ? AND user_id = ? AND deleted_at > 0", id, userID).First(&session).Error; err != nil {
@@ -347,8 +348,9 @@ func PurgePlaygroundSession(userID int, id string) error {
 			}
 			return err
 		}
-		removed, err := purgePlaygroundSessionTx(tx, userID, &session)
+		removed, objects, err := purgePlaygroundSessionTx(tx, userID, &session)
 		removedAttachments = removed
+		removedObjects = objects
 		return err
 	})
 	if err != nil {
@@ -357,6 +359,7 @@ func PurgePlaygroundSession(userID int, id string) error {
 	for index := range removedAttachments {
 		deletePlaygroundAttachmentObject(nil, &removedAttachments[index])
 	}
+	deletePlaygroundObjects(removedObjects)
 	return nil
 }
 
@@ -364,42 +367,54 @@ func PurgePlaygroundSession(userID int, id string) error {
 // inside the caller's transaction. The caller holds the row lock, so a restore
 // or a child write cannot slip in, and the account counters are remeasured from
 // the remaining rows because the cascade released conversations, attachments,
-// artifacts and messages at once.
-func purgePlaygroundSessionTx(tx *gorm.DB, userID int, session *PlaygroundSession) ([]PlaygroundAttachment, error) {
+// artifacts and messages at once. The returned objects lost their rows and must
+// be deleted after the transaction commits.
+func purgePlaygroundSessionTx(tx *gorm.DB, userID int, session *PlaygroundSession) ([]PlaygroundAttachment, []playgroundStoredObject, error) {
 	removedAttachments := make([]PlaygroundAttachment, 0)
+	removedObjects := make([]playgroundStoredObject, 0)
 	// Artifact tombstones are included explicitly; deleting a session removes
-	// its deduplication keys.
+	// its deduplication keys. Externalized version bodies leave with their rows
+	// and are collected for deletion after the commit.
 	artifactIDs := tx.Model(&PlaygroundArtifact{}).Select("id").Where("session_id = ? AND user_id = ?", session.ID, userID)
+	storedVersions := make([]PlaygroundArtifactVersion, 0)
+	if err := tx.Select("object_key").Where("artifact_id IN (?)", artifactIDs).Find(&storedVersions).Error; err != nil {
+		return nil, nil, err
+	}
+	for index := range storedVersions {
+		if storedVersions[index].ObjectKey != "" {
+			removedObjects = append(removedObjects, playgroundStoredObject{ObjectKey: storedVersions[index].ObjectKey})
+		}
+	}
 	if err := tx.Where("artifact_id IN (?)", artifactIDs).Delete(&PlaygroundArtifactVersion{}).Error; err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := tx.Where("session_id = ? AND user_id = ?", session.ID, userID).Delete(&PlaygroundArtifact{}).Error; err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// The pins of this conversation's attachments go with the attachments, so
 	// a later canvas read reports the node as "source deleted". The stored
 	// objects are deleted after the database commit.
 	if err := tx.Select("id", "storage_backend", "object_key").
 		Where("session_id = ? AND user_id = ?", session.ID, userID).Find(&removedAttachments).Error; err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	attachmentIDs := tx.Model(&PlaygroundAttachment{}).Select("id").Where("session_id = ? AND user_id = ?", session.ID, userID)
 	if err := tx.Where("attachment_id IN (?)", attachmentIDs).Delete(&PlaygroundCanvasAsset{}).Error; err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := tx.Where("session_id = ? AND user_id = ?", session.ID, userID).Delete(&PlaygroundAttachment{}).Error; err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := tx.Where("session_id = ? AND user_id = ?", session.ID, userID).Delete(&PlaygroundMessage{}).Error; err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := tx.Where("id = ? AND user_id = ?", session.ID, userID).Delete(&PlaygroundSession{}).Error; err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := refreshPlaygroundUserUsage(tx, userID); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return removedAttachments, nil
+	return removedAttachments, removedObjects, nil
 }
 
 // PlaygroundTrashItem is one conversation or canvas waiting in the trash. A
@@ -518,6 +533,7 @@ func PurgeExpiredPlaygroundTrash(batchSize int) (*PlaygroundTrashPurgeResult, er
 // early. A candidate that was restored in the meantime is skipped too.
 func purgeExpiredPlaygroundSession(candidate *PlaygroundSession, now int64) (int64, error) {
 	var removedAttachments []PlaygroundAttachment
+	var removedObjects []playgroundStoredObject
 	purged := int64(0)
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var session PlaygroundSession
@@ -534,11 +550,12 @@ func purgeExpiredPlaygroundSession(candidate *PlaygroundSession, now int64) (int
 		if now-session.DeletedAt < retention {
 			return nil
 		}
-		removed, err := purgePlaygroundSessionTx(tx, session.UserID, &session)
+		removed, objects, err := purgePlaygroundSessionTx(tx, session.UserID, &session)
 		if err != nil {
 			return err
 		}
 		removedAttachments = removed
+		removedObjects = objects
 		purged = 1
 		return nil
 	})
@@ -548,6 +565,7 @@ func purgeExpiredPlaygroundSession(candidate *PlaygroundSession, now int64) (int
 	for index := range removedAttachments {
 		deletePlaygroundAttachmentObject(nil, &removedAttachments[index])
 	}
+	deletePlaygroundObjects(removedObjects)
 	return purged, nil
 }
 

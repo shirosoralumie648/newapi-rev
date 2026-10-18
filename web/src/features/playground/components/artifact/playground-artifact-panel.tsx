@@ -52,6 +52,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { getServerMessage } from '@/lib/server-error-message'
 
 import type {
+  PlaygroundArtifactKind,
   PlaygroundArtifactResult,
   PlaygroundArtifactSummary,
 } from '../../artifact-api'
@@ -60,6 +61,7 @@ import type {
   usePlaygroundArtifacts,
 } from '../../hooks/use-playground-artifacts'
 import { downloadArtifactText } from '../../lib/artifact-utils'
+import { SandboxedArtifactPreview } from './sandboxed-artifact-preview'
 
 type ArtifactController = ReturnType<typeof usePlaygroundArtifacts>
 
@@ -387,6 +389,7 @@ export function PlaygroundArtifactPanel(props: PlaygroundArtifactPanelProps) {
                   kind={displayedDraft.kind}
                   onChange={state.updateDraft}
                   readOnlyHistory={readOnlyHistory}
+                  sandboxEnabled={controller.sandboxEnabled}
                   selectedVersion={selectedVersion}
                 />
               </ArtifactContent>
@@ -484,11 +487,72 @@ function MarkdownEditor(props: {
   )
 }
 
+function SandboxArtifactEditor(props: {
+  draft: ArtifactDraft
+  sandboxEnabled: boolean
+  onChange: (draft: ArtifactDraft) => void
+}) {
+  const { t } = useTranslation()
+  const [preview, setPreview] = useState(false)
+  const sandboxKind = props.draft.kind === 'svg' ? 'svg' : 'html'
+  if (preview && props.sandboxEnabled) {
+    return (
+      <div className='grid gap-3'>
+        <Button
+          className='w-fit'
+          onClick={() => setPreview(false)}
+          size='sm'
+          type='button'
+          variant='outline'
+        >
+          <Pencil aria-hidden='true' />
+          {t('Edit artifact')}
+        </Button>
+        <SandboxedArtifactPreview
+          content={props.draft.content}
+          kind={sandboxKind}
+          sandboxEnabled={props.sandboxEnabled}
+          title={props.draft.title}
+        />
+      </div>
+    )
+  }
+  return (
+    <div className='grid min-h-0 gap-2'>
+      {props.sandboxEnabled ? (
+        <Button
+          className='w-fit'
+          onClick={() => setPreview(true)}
+          size='sm'
+          type='button'
+          variant='outline'
+        >
+          <Eye aria-hidden='true' />
+          {t('Preview artifact')}
+        </Button>
+      ) : (
+        <p className='text-muted-foreground text-xs'>
+          {t('Sandboxed preview is disabled by the administrator.')}
+        </p>
+      )}
+      <CodeBlockEditor
+        ariaLabel={t('Artifact content')}
+        autoFocus={false}
+        language={props.draft.language || sandboxKind}
+        onChange={(content) => props.onChange({ ...props.draft, content })}
+        rows={16}
+        value={props.draft.content}
+      />
+    </div>
+  )
+}
+
 function ArtifactBody(props: {
   draft: ArtifactDraft | null
-  kind: 'markdown' | 'code'
+  kind: PlaygroundArtifactKind
   onChange: (draft: ArtifactDraft) => void
   readOnlyHistory: boolean
+  sandboxEnabled: boolean
   selectedVersion: PlaygroundArtifactResult['version'] | null
 }) {
   const { t } = useTranslation()
@@ -496,10 +560,28 @@ function ArtifactBody(props: {
     if (!props.selectedVersion) {
       return <LoadingState />
     }
-    return <VersionPreview version={props.selectedVersion} kind={props.kind} />
+    return (
+      <VersionPreview
+        kind={props.kind}
+        sandboxEnabled={props.sandboxEnabled}
+        version={props.selectedVersion}
+      />
+    )
   }
   if (props.draft?.kind === 'markdown') {
     return <MarkdownEditor draft={props.draft} onChange={props.onChange} />
+  }
+  if (
+    props.draft &&
+    (props.draft.kind === 'html' || props.draft.kind === 'svg')
+  ) {
+    return (
+      <SandboxArtifactEditor
+        draft={props.draft}
+        onChange={props.onChange}
+        sandboxEnabled={props.sandboxEnabled}
+      />
+    )
   }
   if (props.draft) {
     const draft = props.draft
@@ -519,16 +601,67 @@ function ArtifactBody(props: {
 
 function VersionPreview(props: {
   version: PlaygroundArtifactResult['version']
-  kind: 'markdown' | 'code'
+  kind: PlaygroundArtifactKind
+  sandboxEnabled: boolean
 }) {
-  return props.kind === 'markdown' ? (
-    <Markdown>{props.version.content}</Markdown>
-  ) : (
-    <CodeBlock
-      code={props.version.content}
-      language={props.version.language || 'plaintext'}
-      showToolbar
-      title={props.version.title}
-    />
+  const { t } = useTranslation()
+  const [preview, setPreview] = useState(false)
+  if (props.kind === 'markdown') {
+    return <Markdown>{props.version.content}</Markdown>
+  }
+  if (props.kind !== 'html' && props.kind !== 'svg') {
+    return (
+      <CodeBlock
+        code={props.version.content}
+        language={props.version.language || 'plaintext'}
+        showToolbar
+        title={props.version.title}
+      />
+    )
+  }
+  const sandboxKind = props.kind === 'svg' ? 'svg' : 'html'
+  if (preview && props.sandboxEnabled) {
+    return (
+      <div className='grid gap-3'>
+        <Button
+          className='w-fit'
+          onClick={() => setPreview(false)}
+          size='sm'
+          type='button'
+          variant='outline'
+        >
+          <Pencil aria-hidden='true' />
+          {t('View source')}
+        </Button>
+        <SandboxedArtifactPreview
+          content={props.version.content}
+          kind={sandboxKind}
+          sandboxEnabled={props.sandboxEnabled}
+          title={props.version.title}
+        />
+      </div>
+    )
+  }
+  return (
+    <div className='grid gap-2'>
+      {props.sandboxEnabled && (
+        <Button
+          className='w-fit'
+          onClick={() => setPreview(true)}
+          size='sm'
+          type='button'
+          variant='outline'
+        >
+          <Eye aria-hidden='true' />
+          {t('Preview artifact')}
+        </Button>
+      )}
+      <CodeBlock
+        code={props.version.content}
+        language={props.version.language || 'plaintext'}
+        showToolbar
+        title={props.version.title}
+      />
+    </div>
   )
 }

@@ -26,6 +26,7 @@ import {
   deleteCanvasProject,
   getCanvasProject,
   listCanvasProjects,
+  restoreCanvasSnapshot,
   updateCanvasProject,
 } from '../api'
 import {
@@ -384,6 +385,44 @@ export function useCanvasProject(
     }
   }, [setActiveProject])
 
+  const restoreSnapshot = useCallback(
+    async (snapshotId: string): Promise<CanvasServerProject | null> => {
+      const active = projectRef.current
+      if (!active) return null
+      // A pending autosave shares the revision counter; settle it first so the
+      // restore does not race the save into a conflict.
+      await flush()
+      const restored = await restoreCanvasSnapshot(
+        active.id,
+        snapshotId,
+        revisionRef.current
+      )
+      if (!mounted.current) return restored
+      pendingDocument.current = null
+      setDirty(false)
+      setActiveProject(applyCanvasReferenceStatus(restored))
+      setStatus('ready')
+      setError(null)
+      applyProjects(
+        projectsRef.current.map((row) =>
+          row.id === restored.id
+            ? {
+                ...row,
+                title: restored.title,
+                nodeCount: restored.nodeCount,
+                edgeCount: restored.edgeCount,
+                documentBytes: restored.documentBytes,
+                revision: restored.revision,
+                updatedAt: restored.updatedAt,
+              }
+            : row
+        )
+      )
+      return restored
+    },
+    [applyProjects, flush, setActiveProject]
+  )
+
   // A pending write means local edits would be lost on navigation.
   useEffect(() => {
     if (!dirty) return
@@ -412,5 +451,6 @@ export function useCanvasProject(
     scheduleSave,
     flushNow,
     discardLocalChanges,
+    restoreSnapshot,
   }
 }

@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useNavigate } from '@tanstack/react-router'
-import { Menu, PanelLeft } from 'lucide-react'
+import { History, Menu, PanelLeft } from 'lucide-react'
 import { useCallback, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -39,8 +39,12 @@ import { useAuthStore } from '@/stores/auth-store'
 
 import { CanvasEditor } from './components/canvas-editor'
 import { CanvasProjectList } from './components/canvas-project-list'
+import { CanvasSnapshotHistory } from './components/canvas-snapshot-history'
 import { CANVAS_DEFAULT_TITLE } from './constants'
-import { useCanvasProject, type CanvasSaveStatus } from './hooks/use-canvas-project'
+import {
+  useCanvasProject,
+  type CanvasSaveStatus,
+} from './hooks/use-canvas-project'
 import { canvasSourceSearch } from './lib/canvas-navigation'
 import type { CanvasSourceTarget } from './lib/canvas-navigation'
 import type { CanvasServerDocument } from './types'
@@ -76,6 +80,7 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
   const userId = useAuthStore((state) => state.auth.user?.id ?? null)
   const controller = useCanvasProject(userId, props.initialProjectId)
   const [listOpen, setListOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [epoch, setEpoch] = useState(0)
 
   const reportError = useCallback(
@@ -136,6 +141,16 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
       reportError(error)
     }
   }, [controller, reportError])
+
+  // Restoring replaces the project document in place; the epoch remounts the
+  // editor so its local state initializes from the restored document.
+  const handleRestoreSnapshot = useCallback(
+    async (snapshotId: string) => {
+      await controller.restoreSnapshot(snapshotId)
+      setEpoch((value) => value + 1)
+    },
+    [controller]
+  )
 
   const handleRetrySave = useCallback(async () => {
     try {
@@ -251,12 +266,22 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
             )}
             <span className='truncate text-sm font-medium'>{displayTitle}</span>
           </div>
-          <span
-            className='text-muted-foreground shrink-0 text-xs'
-            role='status'
-          >
-            {saveLabel}
-          </span>
+          <div className='flex shrink-0 items-center gap-1'>
+            {project && (
+              <Button
+                aria-label={t('Canvas history')}
+                onClick={() => setHistoryOpen(true)}
+                size='icon-sm'
+                type='button'
+                variant='ghost'
+              >
+                <History aria-hidden='true' />
+              </Button>
+            )}
+            <span className='text-muted-foreground text-xs' role='status'>
+              {saveLabel}
+            </span>
+          </div>
         </div>
 
         {conflict && (
@@ -284,6 +309,16 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
 
         {body}
       </div>
+
+      {project && (
+        <CanvasSnapshotHistory
+          key={project.id}
+          onOpenChange={setHistoryOpen}
+          onRestore={handleRestoreSnapshot}
+          open={historyOpen}
+          projectId={project.id}
+        />
+      )}
     </div>
   )
 }
