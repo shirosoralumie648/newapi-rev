@@ -62,6 +62,24 @@ type ContentTypePutter interface {
 	PutWithContentType(ctx context.Context, key string, body io.Reader, contentType string) (ObjectInfo, error)
 }
 
+// PresignPutter is an optional Store capability for backends that can sign a
+// direct upload for one declared media type: the client uploads straight to the
+// backend, and the signed request carries the type the caller declared. The
+// complete step re-verifies the stored bytes, so a forged type can never
+// smuggle a different file kind into an attachment.
+type PresignPutter interface {
+	PresignPutWithContentType(ctx context.Context, key, contentType string, ttl time.Duration) (string, error)
+}
+
+// MultipartAborter is an optional Store capability for backends that accept
+// multipart uploads. A presigned single PUT never starts one, but an
+// interrupted direct multipart upload can leave parts behind; releasing the
+// reservation aborts every in-progress upload that targets the same key so the
+// parts do not outlive their reservation.
+type MultipartAborter interface {
+	AbortMultipartUploads(ctx context.Context, key string) error
+}
+
 // ServeOptions controls the response headers used when Serve streams an
 // object. Filename is sanitized and escaped before it is written to
 // Content-Disposition.

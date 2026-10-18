@@ -1,6 +1,8 @@
 package playground_setting
 
 import (
+	"strings"
+
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/group_setting"
 )
@@ -32,20 +34,27 @@ type PlaygroundQuotaPolicy struct {
 	AttachmentMaxFileBytes    int64 `json:"attachment_max_file_bytes"`
 	AttachmentUserMaxBytes    int64 `json:"attachment_user_max_bytes"`
 	AttachmentUserMaxCount    int   `json:"attachment_user_max_count"`
-	ArtifactSessionMaxCount   int   `json:"artifact_session_max_count"`
-	ArtifactSessionMaxRecords int   `json:"artifact_session_max_records"`
-	ArtifactMaxVersions       int   `json:"artifact_max_versions"`
-	ArtifactContentMaxBytes   int64 `json:"artifact_content_max_bytes"`
-	ArtifactMaxBytes          int64 `json:"artifact_max_bytes"`
-	ArtifactSessionMaxBytes   int64 `json:"artifact_session_max_bytes"`
-	ArtifactUserMaxCount      int   `json:"artifact_user_max_count"`
-	ArtifactUserMaxBytes      int64 `json:"artifact_user_max_bytes"`
-	CanvasUserMaxProjects     int   `json:"canvas_user_max_projects"`
-	CanvasDocumentMaxBytes    int64 `json:"canvas_document_max_bytes"`
-	CanvasMaxNodes            int   `json:"canvas_max_nodes"`
-	CanvasMaxEdges            int   `json:"canvas_max_edges"`
-	CanvasNodeDataMaxBytes    int64 `json:"canvas_node_data_max_bytes"`
-	CanvasUserMaxBytes        int64 `json:"canvas_user_max_bytes"`
+	// The extended attachment kinds have their own per-file ceilings: a video is
+	// legitimately much larger than a chat image, while the account byte budgets
+	// above still bound the total an account may store. The classic limit
+	// applies to images; every kind is signature-checked server-side.
+	AttachmentVideoMaxFileBytes    int64 `json:"attachment_video_max_file_bytes"`
+	AttachmentAudioMaxFileBytes    int64 `json:"attachment_audio_max_file_bytes"`
+	AttachmentDocumentMaxFileBytes int64 `json:"attachment_document_max_file_bytes"`
+	ArtifactSessionMaxCount        int   `json:"artifact_session_max_count"`
+	ArtifactSessionMaxRecords      int   `json:"artifact_session_max_records"`
+	ArtifactMaxVersions            int   `json:"artifact_max_versions"`
+	ArtifactContentMaxBytes        int64 `json:"artifact_content_max_bytes"`
+	ArtifactMaxBytes               int64 `json:"artifact_max_bytes"`
+	ArtifactSessionMaxBytes        int64 `json:"artifact_session_max_bytes"`
+	ArtifactUserMaxCount           int   `json:"artifact_user_max_count"`
+	ArtifactUserMaxBytes           int64 `json:"artifact_user_max_bytes"`
+	CanvasUserMaxProjects          int   `json:"canvas_user_max_projects"`
+	CanvasDocumentMaxBytes         int64 `json:"canvas_document_max_bytes"`
+	CanvasMaxNodes                 int   `json:"canvas_max_nodes"`
+	CanvasMaxEdges                 int   `json:"canvas_max_edges"`
+	CanvasNodeDataMaxBytes         int64 `json:"canvas_node_data_max_bytes"`
+	CanvasUserMaxBytes             int64 `json:"canvas_user_max_bytes"`
 	// Canvas snapshot history is written while the board is saved: a snapshot
 	// is captured after every CanvasSnapshotEverySaves document saves, after
 	// CanvasSnapshotIntervalMinutes since the previous one, and once for the
@@ -111,12 +120,19 @@ func builtinPlaygroundQuotaPolicy() PlaygroundQuotaPolicy {
 		AttachmentMaxFileBytes:    8 << 20,
 		AttachmentUserMaxBytes:    64 << 20,
 		AttachmentUserMaxCount:    500,
-		ArtifactSessionMaxCount:   32,
-		ArtifactSessionMaxRecords: 256,
-		ArtifactMaxVersions:       100,
-		ArtifactContentMaxBytes:   256 << 10,
-		ArtifactMaxBytes:          8 << 20,
-		ArtifactSessionMaxBytes:   32 << 20,
+		// The extended kinds start at the ceilings the upload endpoint already
+		// enforced for generated media: video is capped at 64 MiB, audio and
+		// documents at 16 MiB, and the account byte budgets above still bound
+		// the total.
+		AttachmentVideoMaxFileBytes:    64 << 20,
+		AttachmentAudioMaxFileBytes:    16 << 20,
+		AttachmentDocumentMaxFileBytes: 16 << 20,
+		ArtifactSessionMaxCount:        32,
+		ArtifactSessionMaxRecords:      256,
+		ArtifactMaxVersions:            100,
+		ArtifactContentMaxBytes:        256 << 10,
+		ArtifactMaxBytes:               8 << 20,
+		ArtifactSessionMaxBytes:        32 << 20,
 		// The account-level artifact budget starts at the ceiling the per-session
 		// limits already imply (100 conversations x 32 active artifacts and
 		// 100 conversations x 32 MiB). It therefore never rejects a write that
@@ -241,6 +257,15 @@ func applyPlaygroundQuotaOverrides(policy *PlaygroundQuotaPolicy, override *Play
 	if override.AttachmentUserMaxCount > 0 {
 		policy.AttachmentUserMaxCount = override.AttachmentUserMaxCount
 	}
+	if override.AttachmentVideoMaxFileBytes > 0 {
+		policy.AttachmentVideoMaxFileBytes = override.AttachmentVideoMaxFileBytes
+	}
+	if override.AttachmentAudioMaxFileBytes > 0 {
+		policy.AttachmentAudioMaxFileBytes = override.AttachmentAudioMaxFileBytes
+	}
+	if override.AttachmentDocumentMaxFileBytes > 0 {
+		policy.AttachmentDocumentMaxFileBytes = override.AttachmentDocumentMaxFileBytes
+	}
 	if override.ArtifactSessionMaxCount > 0 {
 		policy.ArtifactSessionMaxCount = override.ArtifactSessionMaxCount
 	}
@@ -317,4 +342,22 @@ func applyPlaygroundQuotaOverrides(policy *PlaygroundQuotaPolicy, override *Play
 // was deleted.
 func (policy PlaygroundQuotaPolicy) TrashRetentionSeconds() int64 {
 	return int64(max(policy.TrashRetentionDays, 1)) * 24 * 60 * 60
+}
+
+// AttachmentMediaMaxFileBytes resolves the per-file ceiling of one declared
+// media type. It is the single place the per-kind rule lives, so the request
+// pre-check and the transactional validation can never disagree. A type outside
+// the upload whitelist falls through to the classic image budget; the caller
+// rejects the unknown type before any size is considered.
+func (policy PlaygroundQuotaPolicy) AttachmentMediaMaxFileBytes(mediaType string) int64 {
+	switch {
+	case strings.HasPrefix(mediaType, "video/"):
+		return policy.AttachmentVideoMaxFileBytes
+	case strings.HasPrefix(mediaType, "audio/"):
+		return policy.AttachmentAudioMaxFileBytes
+	case mediaType == "application/pdf":
+		return policy.AttachmentDocumentMaxFileBytes
+	default:
+		return policy.AttachmentMaxFileBytes
+	}
 }

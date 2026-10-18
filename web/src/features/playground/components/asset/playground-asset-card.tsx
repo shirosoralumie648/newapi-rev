@@ -23,7 +23,9 @@ import {
   Frame,
   ImageIcon,
   MessageSquare,
+  Music,
   Trash2,
+  Video,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
@@ -36,6 +38,7 @@ import { toIntlLocale } from '@/i18n/languages'
 import { formatBytes, formatTimestampRelative } from '@/lib/format'
 
 import type { PlaygroundAssetItem } from '../../asset-api'
+import { playgroundAttachmentKind } from '../../constants'
 import { useAttachmentPreviewUrl } from '../../hooks'
 
 interface PlaygroundAssetCardProps {
@@ -79,11 +82,18 @@ export function PlaygroundAssetCard(props: PlaygroundAssetCardProps) {
 
   let thumbnail = <FileText aria-hidden='true' className='size-4' />
   if (isAttachment) {
-    thumbnail = previewUrl ? (
-      <img alt='' className='size-10 object-cover' src={previewUrl} />
-    ) : (
-      <ImageIcon aria-hidden='true' className='size-4' />
-    )
+    const attachmentKind = playgroundAttachmentKind(asset.mediaType)
+    if (attachmentKind === 'video') {
+      thumbnail = <Video aria-hidden='true' className='size-4' />
+    } else if (attachmentKind === 'audio') {
+      thumbnail = <Music aria-hidden='true' className='size-4' />
+    } else if (attachmentKind === 'image') {
+      thumbnail = previewUrl ? (
+        <img alt='' className='size-10 object-cover' src={previewUrl} />
+      ) : (
+        <ImageIcon aria-hidden='true' className='size-4' />
+      )
+    }
   }
 
   return (

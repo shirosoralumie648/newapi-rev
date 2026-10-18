@@ -27,16 +27,56 @@ type fakeS3Object struct {
 	modified    time.Time
 }
 
+// fakeS3MultipartUpload is one in-progress multipart upload the listing
+// returns, so the abort path can be exercised without a real S3 endpoint.
+type fakeS3MultipartUpload struct {
+	key      string
+	uploadID string
+}
+
 // fakeS3Server is an in-memory S3 endpoint used with httptest. It implements
 // just enough of the path-style REST API for the operations the store uses.
 type fakeS3Server struct {
-	mu      sync.Mutex
-	objects map[string]fakeS3Object
-	paths   []string
+	mu               sync.Mutex
+	objects          map[string]fakeS3Object
+	paths            []string
+	multipartUploads []fakeS3MultipartUpload
+	multipartAborts  []string
 }
 
 func newFakeS3Server() *fakeS3Server {
 	return &fakeS3Server{objects: make(map[string]fakeS3Object)}
+}
+
+func (f *fakeS3Server) addMultipartUpload(key, uploadID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.multipartUploads = append(f.multipartUploads, fakeS3MultipartUpload{key: key, uploadID: uploadID})
+}
+
+// writeMultipartUploads answers the bucket-level listing the abort path reads.
+func (f *fakeS3Server) writeMultipartUploads(w http.ResponseWriter, prefix string) {
+	f.mu.Lock()
+	uploads := append([]fakeS3MultipartUpload(nil), f.multipartUploads...)
+	f.mu.Unlock()
+	var body strings.Builder
+	body.WriteString(`<?xml version="1.0" encoding="UTF-8"?><ListMultipartUploadsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Bucket>`)
+	body.WriteString(fakeS3Bucket)
+	body.WriteString(`</Bucket><IsTruncated>false</IsTruncated>`)
+	for _, upload := range uploads {
+		if prefix != "" && !strings.HasPrefix(upload.key, prefix) {
+			continue
+		}
+		body.WriteString(`<Upload><Key>`)
+		body.WriteString(upload.key)
+		body.WriteString(`</Key><UploadId>`)
+		body.WriteString(upload.uploadID)
+		body.WriteString(`</UploadId><Initiated>2026-01-01T00:00:00.000Z</Initiated></Upload>`)
+	}
+	body.WriteString(`</ListMultipartUploadsResult>`)
+	w.Header().Set("Content-Type", "application/xml")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(body.String()))
 }
 
 func (f *fakeS3Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -46,7 +86,17 @@ func (f *fakeS3Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Unlock()
 
 	bucket, key, found := strings.Cut(path, "/")
-	if !found || bucket != fakeS3Bucket {
+	if !found || key == "" {
+		// Bucket-level requests: the store lists in-progress multipart uploads
+		// before it aborts them.
+		if bucket == fakeS3Bucket && r.Method == http.MethodGet && r.URL.Query().Has("uploads") {
+			f.writeMultipartUploads(w, r.URL.Query().Get("prefix"))
+			return
+		}
+		writeFakeS3Error(w, http.StatusNotFound, "NoSuchBucket")
+		return
+	}
+	if bucket != fakeS3Bucket {
 		writeFakeS3Error(w, http.StatusNotFound, "NoSuchBucket")
 		return
 	}
@@ -86,6 +136,19 @@ func (f *fakeS3Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write(object.body)
 		}
 	case http.MethodDelete:
+		if uploadID := r.URL.Query().Get("uploadId"); uploadID != "" {
+			f.mu.Lock()
+			f.multipartAborts = append(f.multipartAborts, key+"?"+uploadID)
+			for index, upload := range f.multipartUploads {
+				if upload.key == key && upload.uploadID == uploadID {
+					f.multipartUploads = append(f.multipartUploads[:index], f.multipartUploads[index+1:]...)
+					break
+				}
+			}
+			f.mu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		f.mu.Lock()
 		delete(f.objects, key)
 		f.mu.Unlock()
@@ -301,6 +364,69 @@ func TestS3StorePresignAppliesPrefixAddressingAndTTL(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "artifact-bucket.objects.example.com", parsed.Host)
 	assert.Equal(t, "/v1/tasks/1/2026/10/task-1/image", parsed.Path)
+}
+
+func TestS3StorePresignPutWithContentType(t *testing.T) {
+	store, err := NewS3(testS3Config("https://objects.example.com"))
+	require.NoError(t, err)
+
+	presigned, err := store.PresignPutWithContentType(t.Context(), "pg/7/attachment/2026/10/presigned.mp4", "video/mp4", 90*time.Second)
+	require.NoError(t, err)
+	parsed, err := url.Parse(presigned)
+	require.NoError(t, err)
+	assert.Equal(t, "objects.example.com", parsed.Host)
+	assert.Equal(t, "/artifact-bucket/v1/pg/7/attachment/2026/10/presigned.mp4", parsed.Path)
+	assert.Equal(t, "90", parsed.Query().Get("X-Amz-Expires"))
+	assert.NotEmpty(t, parsed.Query().Get("X-Amz-Signature"))
+
+	// The signed request is usable as-is: the client PUTs the declared bytes
+	// with the declared media type and the object lands under the prefixed key.
+	server := newFakeS3Server()
+	live, _ := newTestS3Store(t, server)
+	body := []byte("signed-video-bytes")
+	location, err := live.PresignPutWithContentType(t.Context(), "pg/7/attachment/2026/10/signed.mp4", "video/mp4", 90*time.Second)
+	require.NoError(t, err)
+	request, err := http.NewRequest(http.MethodPut, location, bytes.NewReader(body))
+	require.NoError(t, err)
+	request.Header.Set("Content-Type", "video/mp4")
+	response, err := http.DefaultClient.Do(request)
+	require.NoError(t, err)
+	require.NoError(t, response.Body.Close())
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	object, ok := server.object("v1/pg/7/attachment/2026/10/signed.mp4")
+	require.True(t, ok)
+	assert.Equal(t, body, object.body)
+	assert.Equal(t, "video/mp4", object.contentType)
+
+	// The TTL rules of every other presign apply here too.
+	_, err = store.PresignPutWithContentType(t.Context(), "pg/7/attachment/2026/10/presigned.mp4", "video/mp4", maxPresignTTL+time.Second)
+	assert.ErrorContains(t, err, "TTL")
+	_, err = store.PresignPutWithContentType(t.Context(), "pg/7/../escape", "video/mp4", time.Minute)
+	assert.ErrorIs(t, err, ErrInvalidKey)
+}
+
+func TestS3StoreAbortsMultipartUploads(t *testing.T) {
+	server := newFakeS3Server()
+	store, _ := newTestS3Store(t, server)
+	const key = "pg/7/attachment/2026/10/multipart"
+	server.addMultipartUpload("v1/"+key, "upload-1")
+	server.addMultipartUpload("v1/pg/7/attachment/2026/10/other", "upload-2")
+
+	require.NoError(t, store.AbortMultipartUploads(t.Context(), key))
+	server.mu.Lock()
+	assert.Equal(t, []string{"v1/" + key + "?upload-1"}, server.multipartAborts)
+	assert.Len(t, server.multipartUploads, 1)
+	server.mu.Unlock()
+
+	// A retry finds nothing left to abort and leaves the unrelated upload alone.
+	require.NoError(t, store.AbortMultipartUploads(t.Context(), key))
+	server.mu.Lock()
+	assert.Equal(t, []string{"v1/" + key + "?upload-1"}, server.multipartAborts)
+	assert.Equal(t, "v1/pg/7/attachment/2026/10/other", server.multipartUploads[0].key)
+	server.mu.Unlock()
+
+	// Keys are validated before the endpoint is contacted.
+	assert.ErrorIs(t, store.AbortMultipartUploads(t.Context(), "pg/../escape"), ErrInvalidKey)
 }
 
 func TestNewSelectsS3Backend(t *testing.T) {

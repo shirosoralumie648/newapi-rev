@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { NodeProps } from '@xyflow/react'
-import { ImageIcon, Music, Unlink, Video } from 'lucide-react'
+import { FileText, ImageIcon, Music, Unlink, Video } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -28,6 +28,7 @@ import {
   NodeTitle,
 } from '@/components/ai-elements/node'
 import { Badge } from '@/components/ui/badge'
+import { playgroundAttachmentKind } from '@/features/playground/constants'
 import { useAttachmentPreviewUrl } from '@/features/playground/hooks/use-attachment-preview-url'
 import { TaskArtifactMedia } from '@/features/usage-logs/components/task-artifacts'
 import { translateServerText } from '@/lib/server-error-message'
@@ -47,6 +48,13 @@ function readNodePreview(data: CanvasNodeData): string {
     ''
   )
 }
+
+const CANVAS_ATTACHMENT_ICONS = {
+  image: ImageIcon,
+  video: Video,
+  audio: Music,
+  file: FileText,
+} as const
 
 /**
  * A `group` node is a plain dashed box: it carries no content and no handles,
@@ -99,6 +107,11 @@ export function CanvasFlowNodeView(props: NodeProps) {
   const mediaFailed = Boolean(mediaUrl && failedMediaUrl === mediaUrl)
   const mediaUnavailable = mediaFailed || (isMediaNode && mediaArtifact.isError)
   const MediaIcon = kind === 'audio' ? Music : Video
+  const attachmentKind = playgroundAttachmentKind(data.mediaType)
+  const AttachmentIcon = CANVAS_ATTACHMENT_ICONS[attachmentKind]
+  const attachmentFailed = Boolean(
+    attachmentUrl && failedMediaUrl === attachmentUrl
+  )
 
   return (
     <CanvasNodeCard
@@ -127,15 +140,35 @@ export function CanvasFlowNodeView(props: NodeProps) {
       <NodeContent className='grid gap-2 p-2'>
         {isAttachmentNode ? (
           <figure className='border-border/70 bg-muted/20 overflow-hidden rounded-md border'>
-            {attachmentUrl ? (
-              <img
-                alt={preview || t('Attachment')}
-                className='max-h-40 w-full object-cover'
-                src={attachmentUrl}
-              />
+            {attachmentUrl && !attachmentFailed ? (
+              attachmentKind === 'file' ? (
+                <a
+                  className='text-muted-foreground hover:text-foreground flex h-24 flex-col items-center justify-center gap-1 p-2 text-xs'
+                  href={attachmentUrl}
+                  target='_blank'
+                  rel='noreferrer'
+                >
+                  <FileText className='size-5' aria-hidden='true' />
+                  {t('Open file')}
+                </a>
+              ) : (
+                <div className='max-h-40 overflow-hidden'>
+                  <TaskArtifactMedia
+                    artifact={{
+                      key: reference?.attachmentId ?? '',
+                      type: attachmentKind,
+                    }}
+                    mediaUrl={attachmentUrl}
+                    onError={() => setFailedMediaUrl(attachmentUrl)}
+                  />
+                </div>
+              )
             ) : (
-              <div className='text-muted-foreground flex h-24 items-center justify-center'>
-                <ImageIcon className='size-5' />
+              <div className='text-muted-foreground flex h-24 flex-col items-center justify-center gap-1'>
+                <AttachmentIcon className='size-5' aria-hidden='true' />
+                {attachmentFailed ? (
+                  <span className='text-xs'>{t('Preview unavailable')}</span>
+                ) : null}
               </div>
             )}
             <figcaption className='text-muted-foreground truncate px-2 py-1 text-xs'>

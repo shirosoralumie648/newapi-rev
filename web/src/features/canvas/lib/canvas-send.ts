@@ -58,7 +58,7 @@ export interface MessageCanvasSeedInput {
   messageKey: string
   role: 'user' | 'assistant' | 'system'
   text: string
-  attachments?: { id: string; filename?: string }[]
+  attachments?: { id: string; filename?: string; mediaType?: string }[]
 }
 
 export interface ArtifactCanvasSeedInput {
@@ -101,6 +101,7 @@ export function buildMessageCanvasSeeds(
     seeds.push({
       kind: 'attachment',
       ...(attachment.filename ? { label: attachment.filename } : {}),
+      ...(attachment.mediaType ? { mediaType: attachment.mediaType } : {}),
       ref: { sessionId: input.sessionId, attachmentId: attachment.id },
     })
   }
@@ -124,6 +125,7 @@ export interface AttachmentCanvasSeedInput {
   sessionId: string
   attachmentId: string
   filename?: string
+  mediaType?: string
 }
 
 /** Maps one saved attachment to a canvas node that references it by ID. */
@@ -134,6 +136,7 @@ export function buildAttachmentCanvasSeeds(
     {
       kind: 'attachment',
       ...(input.filename ? { label: input.filename } : {}),
+      ...(input.mediaType ? { mediaType: input.mediaType } : {}),
       ref: { sessionId: input.sessionId, attachmentId: input.attachmentId },
     },
   ]
