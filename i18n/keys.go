@@ -39,6 +39,7 @@ const (
 	MsgQuotaPreConsumeInsufficient       = "quota.pre_consume_insufficient"
 	MsgQuotaWalletDebtReadOnly           = "quota.wallet_debt_read_only"
 	MsgQuotaSubscriptionInsufficient     = "quota.subscription_insufficient"
+	MsgQuotaWorkflowBudgetExceeded       = "quota.workflow_budget_exceeded"
 	MsgRelayModelPriceNotConfigured      = "relay.model_price_not_configured"
 	MsgRelayModelPriceNotConfiguredAdmin = "relay.model_price_not_configured_admin"
 	MsgRelayTaskChannelDisabled          = "relay.task_channel_disabled"

@@ -94,6 +94,10 @@ const (
 	// marker. It only scopes Playground lifecycle policies (result storage
 	// budget, expiry cleanup, cancellation) and never touches billing.
 	ContextKeyPlaygroundOrigin ContextKey = "playground_origin"
+	// ContextKeyPlaygroundWorkflowRun carries the run budget a Playground
+	// canvas step bills against (BL-03). It arrives in a workspace-only header
+	// that the transport consumes, so it never reaches an upstream provider.
+	ContextKeyPlaygroundWorkflowRun ContextKey = "playground_workflow_run"
 
 	// ContextKeyImageTaskAsync marks an image generation request that runs as
 	// a durable task instead of waiting for the images inside the request. The

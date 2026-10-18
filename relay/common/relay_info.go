@@ -95,10 +95,13 @@ type RelayInfo struct {
 	IsStream               bool
 	IsGeminiBatchEmbedding bool
 	IsPlayground           bool
-	UsePrice               bool
-	RelayMode              int
-	OriginModelName        string
-	ResponseModel          *ResponseModel
+	// PlaygroundWorkflowRunId is the run budget a workspace canvas step bills
+	// against (BL-03). Empty for every other request.
+	PlaygroundWorkflowRunId string
+	UsePrice                bool
+	RelayMode               int
+	OriginModelName         string
+	ResponseModel           *ResponseModel
 
 	// BillingModelName is the pricing identity for this request. It is kept
 	// separate from OriginModelName and UpstreamModelName so virtual pricing
@@ -662,6 +665,7 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 
 	if strings.HasPrefix(c.Request.URL.Path, "/pg") {
 		info.IsPlayground = true
+		info.PlaygroundWorkflowRunId = common.GetContextKeyString(c, constant.ContextKeyPlaygroundWorkflowRun)
 		info.RequestURLPath = strings.TrimPrefix(info.RequestURLPath, "/pg")
 		info.RequestURLPath = "/v1" + info.RequestURLPath
 	}

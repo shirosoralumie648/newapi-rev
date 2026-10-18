@@ -86,6 +86,10 @@ const (
 	// quota error
 	ErrorCodeInsufficientUserQuota      ErrorCode = "insufficient_user_quota"
 	ErrorCodePreConsumeTokenQuotaFailed ErrorCode = "pre_consume_token_quota_failed"
+	// ErrorCodeWorkflowBudgetExceeded marks a workspace workflow step the run
+	// budget cannot admit: the step is refused before it starts, and the client
+	// stops the remaining nodes of that run (BL-03).
+	ErrorCodeWorkflowBudgetExceeded ErrorCode = "workflow_budget_exceeded"
 )
 
 type NewAPIError struct {

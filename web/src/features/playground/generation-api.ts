@@ -25,6 +25,7 @@ import {
   API_ENDPOINTS,
   PLAYGROUND_IMAGE_MAX_COUNT,
   PLAYGROUND_VIDEO_MAX_DURATION_SECONDS,
+  PLAYGROUND_WORKFLOW_RUN_HEADER,
 } from './constants'
 
 /** One image the relay returned, either as a URL or as inline Base64. */
@@ -126,11 +127,13 @@ export type PlaygroundImageGenerationOutcome =
  * Starts an image generation through the Playground relay route. The body
  * carries the workspace group so the server applies the same group override
  * the chat workspace uses; channel selection, permissions and billing are the
- * ordinary relay pipeline, never a browser-held API key.
+ * ordinary relay pipeline, never a browser-held API key. `workflowRunId` marks
+ * a canvas workflow step that must bill inside its run budget.
  */
 export async function submitImageGeneration(
   input: PlaygroundImageGenerationInput,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  workflowRunId?: string
 ): Promise<PlaygroundImageGenerationOutcome> {
   const count = boundedImageCount(input.count)
   const images = (input.images ?? []).filter(Boolean)
@@ -145,7 +148,13 @@ export async function submitImageGeneration(
       ...(count ? { n: count } : {}),
       ...(images.length > 0 ? { images } : {}),
     },
-    { signal, skipErrorHandler: true }
+    {
+      signal,
+      skipErrorHandler: true,
+      ...(workflowRunId
+        ? { headers: { [PLAYGROUND_WORKFLOW_RUN_HEADER]: workflowRunId } }
+        : {}),
+    }
   )
   const task = imageTaskSchema.safeParse(response.data)
   if (task.success) {
@@ -168,10 +177,13 @@ export async function submitImageGeneration(
  * Submits a video generation task and returns its public task id when the
  * response carries one. An empty id is not a failure: the task list polls the
  * account's durable task rows, which is the authoritative status source.
+ * `workflowRunId` marks a canvas workflow step that must bill inside its run
+ * budget.
  */
 export async function submitVideoGeneration(
   input: PlaygroundVideoGenerationInput,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  workflowRunId?: string
 ): Promise<string> {
   const duration = boundedDurationSeconds(input.duration)
   const images = (input.images ?? []).filter(Boolean)
@@ -185,7 +197,13 @@ export async function submitVideoGeneration(
       ...(input.size ? { size: input.size } : {}),
       ...(images.length > 0 ? { images } : {}),
     },
-    { signal, skipErrorHandler: true }
+    {
+      signal,
+      skipErrorHandler: true,
+      ...(workflowRunId
+        ? { headers: { [PLAYGROUND_WORKFLOW_RUN_HEADER]: workflowRunId } }
+        : {}),
+    }
   )
   const parsed = videoTaskSchema.safeParse(response.data)
   if (!parsed.success) return ''

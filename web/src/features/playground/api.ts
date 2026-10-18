@@ -26,6 +26,7 @@ import {
   DEFAULT_CONFIG,
   DEFAULT_PARAMETER_ENABLED,
   PLAYGROUND_REQUEST_ID_HEADER,
+  PLAYGROUND_WORKFLOW_RUN_HEADER,
 } from './constants'
 import {
   normalizeContextSettings,
@@ -71,14 +72,22 @@ function readRequestIdHeader(headers: unknown): string | undefined {
 
 /**
  * Send chat completion request (non-streaming)
+ *
+ * `workflowRunId` is the budget of a canvas workflow run the request belongs
+ * to; it travels in a header the relay consumes, so a step bills inside the
+ * run budget instead of the wallet directly.
  */
 export async function sendChatCompletion(
   payload: ChatCompletionRequest,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  workflowRunId?: string
 ): Promise<ChatCompletionResult> {
   const res = await api.post(API_ENDPOINTS.CHAT_COMPLETIONS, payload, {
     signal,
     skipErrorHandler: true,
+    ...(workflowRunId
+      ? { headers: { [PLAYGROUND_WORKFLOW_RUN_HEADER]: workflowRunId } }
+      : {}),
   } as Record<string, unknown>)
   return {
     response: res.data as ChatCompletionResponse,

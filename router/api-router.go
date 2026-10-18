@@ -76,6 +76,11 @@ func SetApiRouter(router *gin.Engine) {
 		playgroundRoute.Use(middleware.DisableCache(), middleware.UserAuth())
 		{
 			playgroundRoute.GET("/usage", controller.GetPlaygroundUsage)
+			// One canvas workflow run may open a budget cap and settle it when
+			// the run stops (BL-03).
+			playgroundRoute.POST("/workflows/estimate", controller.PlaygroundWorkflowEstimate)
+			playgroundRoute.POST("/workflows/runs", controller.PlaygroundWorkflowRunCreate)
+			playgroundRoute.POST("/workflows/runs/:runId/settle", controller.PlaygroundWorkflowRunSettle)
 			playgroundRoute.GET("/settings", controller.GetPlaygroundSettings)
 			playgroundRoute.GET("/message-costs", controller.GetPlaygroundMessageCosts)
 			playgroundRoute.GET("/trash", controller.ListPlaygroundTrash)

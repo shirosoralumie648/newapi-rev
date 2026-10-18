@@ -568,6 +568,79 @@ func TestWalletHoldBudgetParentMountsChildren(t *testing.T) {
 		settledChild, err := GetWalletHoldByRequestId("workflow-run-3-node-1")
 		require.NoError(t, err)
 		assert.Equal(t, WalletHoldStatusSettled, settledChild.Status)
+
+		// A run budget caps the sum of its step allocations: an allocation that
+		// would cross the cap is refused before the step starts, a retried step
+		// replaces its own allocation, and a finished step settles its actual
+		// cost even beyond the remaining cap because it already ran.
+		var capped User
+		createWalletLedgerWallet(t, db, &User{Id: 103, Username: "hold-budget-cap", AffCode: "hold-budget-cap", Quota: 1000, Status: common.UserStatusEnabled})
+		_, err = CreateWalletBudgetHold(103, "workflow-run-cap", 300)
+		require.NoError(t, err)
+		first, err := ReserveWalletBudgetChild("workflow-run-cap", "workflow-run-cap-node-1", 103, 200)
+		require.NoError(t, err)
+		assert.EqualValues(t, 200, first.Amount)
+		_, err = ReserveWalletBudgetChild("workflow-run-cap", "workflow-run-cap-node-2", 103, 120)
+		assert.ErrorIs(t, err, ErrWalletBudgetExceeded, "the cap stops the next node")
+		retried, err := ReserveWalletBudgetChild("workflow-run-cap", "workflow-run-cap-node-1", 103, 180)
+		require.NoError(t, err)
+		assert.EqualValues(t, 180, retried.Amount, "a retried step replaces its own allocation")
+		_, err = ReserveWalletBudgetChild("workflow-run-cap", "workflow-run-cap-node-2", 103, 120)
+		require.NoError(t, err)
+
+		settledFirst, err := SettleWalletBudgetChild("workflow-run-cap", "workflow-run-cap-node-1", 103, 210)
+		require.NoError(t, err)
+		assert.EqualValues(t, 210, settledFirst.Amount)
+		summary, err := SettleWalletBudgetRun(103, "workflow-run-cap")
+		require.NoError(t, err)
+		assert.EqualValues(t, 300, summary.Cap)
+		assert.EqualValues(t, 330, summary.Spent)
+		assert.EqualValues(t, -30, summary.Remaining, "a finished step may exceed the cap")
+		assert.Equal(t, WalletHoldStatusSettled, summary.Status)
+		require.NoError(t, db.Select("quota").First(&capped, 103).Error)
+		assert.Equal(t, 670, capped.Quota, "the cap is settled against the actual step cost")
+
+		// Replaying the run settlement moves nothing.
+		replayed, err := SettleWalletBudgetRun(103, "workflow-run-cap")
+		require.NoError(t, err)
+		assert.Equal(t, WalletHoldStatusSettled, replayed.Status)
+		assert.EqualValues(t, 330, replayed.Spent)
+		require.NoError(t, db.Select("quota").First(&capped, 103).Error)
+		assert.Equal(t, 670, capped.Quota)
+
+		// A run whose steps never allocated anything returns its whole cap.
+		_, err = CreateWalletBudgetHold(103, "workflow-run-empty", 150)
+		require.NoError(t, err)
+		empty, err := SettleWalletBudgetRun(103, "workflow-run-empty")
+		require.NoError(t, err)
+		assert.EqualValues(t, 150, empty.Cap)
+		assert.Zero(t, empty.Spent)
+		assert.EqualValues(t, 150, empty.Remaining)
+		require.NoError(t, db.Select("quota").First(&capped, 103).Error)
+		assert.Equal(t, 670, capped.Quota)
+
+		// A step that fails before spending releases its allocation; the run
+		// then bills nothing for it, and a closed budget refuses allocations.
+		_, err = CreateWalletBudgetHold(103, "workflow-run-released", 100)
+		require.NoError(t, err)
+		_, err = ReserveWalletBudgetChild("workflow-run-released", "workflow-run-released-node-1", 103, 80)
+		require.NoError(t, err)
+		released, err := SettleWalletBudgetChild("workflow-run-released", "workflow-run-released-node-1", 103, 0)
+		require.NoError(t, err)
+		assert.Zero(t, released.Amount)
+		runReleased, err := SettleWalletBudgetRun(103, "workflow-run-released")
+		require.NoError(t, err)
+		assert.Zero(t, runReleased.Spent)
+		require.NoError(t, db.Select("quota").First(&capped, 103).Error)
+		assert.Equal(t, 670, capped.Quota)
+		_, err = ReserveWalletBudgetChild("workflow-run-released", "workflow-run-released-node-2", 103, 10)
+		assert.ErrorIs(t, err, ErrWalletHoldClosed)
+		_, err = SettleWalletBudgetRun(103, "workflow-run-missing")
+		assert.ErrorIs(t, err, ErrWalletHoldNotFound)
+
+		reconciliation, err := ReconcileWalletLedgerForUser(103)
+		require.NoError(t, err)
+		assert.True(t, reconciliation.Reconciled, "deviation=%d", reconciliation.Deviation)
 	})
 }
 
