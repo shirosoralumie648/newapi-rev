@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math/rand"
 	"strconv"
 	"strings"
 
@@ -17,7 +18,23 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-const UserNameMaxLength = 20
+const (
+	UserNameMaxLength = 20
+
+	// New affiliate codes are 8-12 alphanumeric characters. Historical shorter
+	// codes stay valid; they are simply never generated again.
+	affCodeMinLength = 8
+	affCodeMaxLength = 12
+	// affCodeMaxAttempts bounds both the unused-code lookup and the insert
+	// retry after the aff_code unique index rejects a code.
+	affCodeMaxAttempts = 10
+)
+
+// affCodeGenerator returns a candidate affiliate code. It is a variable so
+// tests can drive collision scenarios deterministically.
+var affCodeGenerator = func() string {
+	return common.GetRandomString(affCodeMinLength + rand.Intn(affCodeMaxLength-affCodeMinLength+1))
+}
 
 var userSortColumns = map[string]string{
 	"id":            "id",
@@ -549,6 +566,113 @@ func GetUserIdByAffCode(affCode string) (int, error) {
 	return user.Id, err
 }
 
+// generateAvailableAffCode returns a code that no user row holds yet. The
+// lookup is unscoped because soft-deleted rows still reserve their code: the
+// unique index covers them, so reusing a deleted account's code would fail the
+// insert.
+func generateAvailableAffCode(tx *gorm.DB) (string, error) {
+	if tx == nil {
+		tx = DB
+	}
+	for range affCodeMaxAttempts {
+		code := affCodeGenerator()
+		if code == "" {
+			continue
+		}
+		var count int64
+		if err := tx.Unscoped().Model(&User{}).Where("aff_code = ?", code).Count(&count).Error; err != nil {
+			return "", err
+		}
+		if count == 0 {
+			return code, nil
+		}
+	}
+	return "", errors.New("failed to generate an unused affiliate code")
+}
+
+// isAffCodeDuplicateError reports whether err is the database rejecting a row
+// on the aff_code unique index, the only conflict a fresh code can resolve.
+// GORM error translation is disabled in this project, so the driver error is
+// probed directly and the constraint name is matched in its message.
+func isAffCodeDuplicateError(err error) bool {
+	return err != nil && isDuplicateKeyError(err) && strings.Contains(err.Error(), "aff_code")
+}
+
+// createUserWithAffCode inserts user with a generated affiliate code and
+// retries with a new code while the aff_code unique index rejects the row,
+// which can happen when a concurrent registration claims the same code between
+// the lookup and the write. Every rejected attempt rolls back to a savepoint,
+// because a failed statement aborts the surrounding transaction on
+// PostgreSQL.
+func createUserWithAffCode(tx *gorm.DB, user *User) error {
+	var lastErr error
+	for attempt := range affCodeMaxAttempts {
+		code, err := generateAvailableAffCode(tx)
+		if err != nil {
+			return err
+		}
+		user.AffCode = code
+		savepoint := "aff_code_" + strconv.Itoa(attempt)
+		if err := tx.SavePoint(savepoint).Error; err != nil {
+			return err
+		}
+		lastErr = tx.Create(user).Error
+		if lastErr == nil {
+			return nil
+		}
+		if !isAffCodeDuplicateError(lastErr) || attempt == affCodeMaxAttempts-1 {
+			return lastErr
+		}
+		if err := tx.RollbackTo(savepoint).Error; err != nil {
+			return err
+		}
+		user.Id = 0
+	}
+	return lastErr
+}
+
+// EnsureAffCode assigns a generated code to a legacy account that does not
+// have one yet. Existing codes, including the historical 4-character ones, are
+// never replaced.
+func (user *User) EnsureAffCode() error {
+	if user.Id == 0 {
+		return common.NewMessage("ID is empty!")
+	}
+	if user.AffCode != "" {
+		return nil
+	}
+	var lastErr error
+	for range affCodeMaxAttempts {
+		code, err := generateAvailableAffCode(DB)
+		if err != nil {
+			return err
+		}
+		result := DB.Model(&User{}).
+			Where("id = ? AND (aff_code = ? OR aff_code IS NULL)", user.Id, "").
+			Update("aff_code", code)
+		if result.Error != nil {
+			if isAffCodeDuplicateError(result.Error) {
+				lastErr = result.Error
+				continue
+			}
+			return result.Error
+		}
+		if result.RowsAffected > 0 {
+			user.AffCode = code
+			return nil
+		}
+		// Another request assigned a code first; return the stored code
+		// instead of overwriting it.
+		var current User
+		if err := DB.Select("aff_code").First(&current, user.Id).Error; err != nil {
+			return err
+		}
+		user.AffCode = current.AffCode
+		return nil
+	}
+	return lastErr
+}
+
 // DeleteUserById soft-deletes a user and returns how many scoped access tokens
 // were deleted with it.
 func DeleteUserById(id int) (int64, error) {
@@ -696,7 +820,6 @@ func (user *User) Insert(inviterId int) error {
 				return err
 			}
 			user.Quota = common.QuotaForNewUser
-			user.AffCode = common.GetRandomString(4)
 
 			// 初始化用户设置，包括默认的边栏配置
 			if user.Setting == "" {
@@ -705,7 +828,7 @@ func (user *User) Insert(inviterId int) error {
 				user.SetSetting(defaultSetting)
 			}
 
-			if err := tx.Create(user).Error; err != nil {
+			if err := createUserWithAffCode(tx, user); err != nil {
 				return err
 			}
 			// The sign-up bonus is the wallet's opening balance: it is recorded
@@ -767,7 +890,6 @@ func (user *User) InsertWithTx(tx *gorm.DB, inviterId int) error {
 			return err
 		}
 		user.Quota = common.QuotaForNewUser
-		user.AffCode = common.GetRandomString(4)
 
 		// 初始化用户设置
 		if user.Setting == "" {
@@ -775,7 +897,7 @@ func (user *User) InsertWithTx(tx *gorm.DB, inviterId int) error {
 			user.SetSetting(defaultSetting)
 		}
 
-		if err := tx.Create(user).Error; err != nil {
+		if err := createUserWithAffCode(tx, user); err != nil {
 			return err
 		}
 		return insertSignupOpeningBalance(tx, user)

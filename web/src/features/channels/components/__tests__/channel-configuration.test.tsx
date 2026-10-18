@@ -2247,6 +2247,13 @@ test('closing an edited channel retains its left exit direction after the parent
     HTMLElement.prototype,
     'getAnimations'
   )
+  // The suite disables Base UI's animation waiting so popups close
+  // synchronously. This case deliberately exercises the exit animation, so it
+  // opts back in while the pending animation below is reported.
+  const originalAnimationsDisabled = Object.getOwnPropertyDescriptor(
+    globalThis,
+    'BASE_UI_ANIMATIONS_DISABLED'
+  )
   Object.defineProperty(HTMLElement.prototype, 'getAnimations', {
     configurable: true,
     value(this: HTMLElement) {
@@ -2254,6 +2261,10 @@ test('closing an edited channel retains its left exit direction after the parent
         ? [{ finished: animation.promise }]
         : []
     },
+  })
+  Object.defineProperty(globalThis, 'BASE_UI_ANIMATIONS_DISABLED', {
+    configurable: true,
+    value: false,
   })
   try {
     const user = userEvent.setup()
@@ -2287,6 +2298,15 @@ test('closing an edited channel retains its left exit direction after the parent
       )
     } else {
       Reflect.deleteProperty(HTMLElement.prototype, 'getAnimations')
+    }
+    if (originalAnimationsDisabled) {
+      Object.defineProperty(
+        globalThis,
+        'BASE_UI_ANIMATIONS_DISABLED',
+        originalAnimationsDisabled
+      )
+    } else {
+      Reflect.deleteProperty(globalThis, 'BASE_UI_ANIMATIONS_DISABLED')
     }
   }
 })

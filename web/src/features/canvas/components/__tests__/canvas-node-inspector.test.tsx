@@ -18,8 +18,10 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { type ComponentProps, useState } from 'react'
 import { expect, test, vi } from 'vitest'
 
+import type { CanvasNodeDataUpdate } from '../../hooks/use-canvas-editor'
 import type { CanvasFlowNode, CanvasNodeData } from '../../types'
 import { CanvasNodeInspector } from '../canvas-node-inspector'
 
@@ -35,6 +37,40 @@ function makeNode(data: CanvasNodeData): CanvasFlowNode {
     position: { x: 0, y: 0 },
     data,
   } as CanvasFlowNode
+}
+
+/**
+ * Renders the inspector with the canvas editor's update contract: a data update
+ * is applied to the node, so a controlled select that switches dependent fields
+ * (the generation type of a task step) re-renders. Updates are also recorded on
+ * the caller's spy.
+ */
+function CanvasNodeInspectorHarness(
+  props: Omit<
+    ComponentProps<typeof CanvasNodeInspector>,
+    'node' | 'onUpdateData'
+  > & {
+    node: CanvasFlowNode
+    onUpdateData: (id: string, update: CanvasNodeDataUpdate) => void
+  }
+) {
+  const [node, setNode] = useState<CanvasFlowNode>(props.node)
+  return (
+    <CanvasNodeInspector
+      {...props}
+      node={node}
+      onUpdateData={(id, update) => {
+        props.onUpdateData(id, update)
+        setNode((current) => ({
+          ...current,
+          data: {
+            ...current.data,
+            ...(typeof update === 'function' ? update(current.data) : update),
+          },
+        }))
+      }}
+    />
+  )
 }
 
 test('opens the source conversation from a message node', async () => {
@@ -233,7 +269,7 @@ test('configures the generation parameters and group of a task step', async () =
   const user = userEvent.setup()
   const onUpdateData = vi.fn()
   render(
-    <CanvasNodeInspector
+    <CanvasNodeInspectorHarness
       groups={[
         { label: 'default', value: 'default', ratio: 1 },
         { label: 'vip', value: 'vip', ratio: 1 },

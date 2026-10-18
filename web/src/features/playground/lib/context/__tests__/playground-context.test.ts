@@ -78,7 +78,9 @@ describe('token estimation', () => {
   })
 
   test('an image adds a fixed allowance and tool call arguments are counted', () => {
-    const plain = message('m1', 'hello')
+    // Both messages carry the same text, so their difference is exactly the
+    // image allowance.
+    const plain = message('m1', 'look')
     const withImage: Message = {
       key: 'm2',
       from: 'user',

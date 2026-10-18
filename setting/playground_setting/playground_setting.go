@@ -1,6 +1,9 @@
 package playground_setting
 
-import "github.com/QuantumNous/new-api/setting/config"
+import (
+	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/group_setting"
+)
 
 // PlaygroundQuotaPolicy is the effective per-account resource budget for the
 // Playground workspace: conversations, messages, attachments, artifacts and
@@ -123,13 +126,35 @@ func GetPlaygroundSetting() *PlaygroundSetting {
 
 // GetPlaygroundQuotaPolicy resolves the effective budget for a user group:
 // built-in defaults, then the global configuration, then the group override.
+// A group reference may still use an editable display name, so it is resolved
+// to the stable identifier first.
 func GetPlaygroundQuotaPolicy(group string) PlaygroundQuotaPolicy {
 	policy := builtinPlaygroundQuotaPolicy()
 	applyPlaygroundQuotaOverrides(&policy, playgroundSetting.Defaults)
-	if override, ok := playgroundSetting.GroupOverrides[group]; ok {
-		applyPlaygroundQuotaOverrides(&policy, &override)
+	if override, ok := playgroundGroupOverride(group); ok {
+		applyPlaygroundQuotaOverrides(&policy, override)
 	}
 	return policy
+}
+
+// playgroundGroupOverride returns the configured override for a group. The
+// policy is keyed by stable identifiers; a stored key that uses an editable
+// display name (an older configuration) still matches, so a rename never drops
+// a budget silently.
+func playgroundGroupOverride(group string) (*PlaygroundQuotaPolicy, bool) {
+	identifier := group_setting.ResolveGroupID(group)
+	if override, ok := playgroundSetting.GroupOverrides[identifier]; ok {
+		return &override, true
+	}
+	for rawGroup, override := range playgroundSetting.GroupOverrides {
+		if rawGroup == identifier {
+			continue // already checked above
+		}
+		if group_setting.ResolveGroupID(rawGroup) == identifier {
+			return &override, true
+		}
+	}
+	return nil, false
 }
 
 // applyPlaygroundQuotaOverrides copies every positive field over the policy so
