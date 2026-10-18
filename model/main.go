@@ -485,6 +485,9 @@ func migrateDB() error {
 		&CreditGrant{},
 		&ReferralBinding{},
 		&ReferralCommission{},
+		&ReferralRegistrationSignal{},
+		&ReferralIdentity{},
+		&ReferralFlag{},
 	)
 	if err != nil {
 		return err

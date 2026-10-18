@@ -27,10 +27,14 @@ type oauthStateRequest struct {
 	Aff      string          `json:"aff,omitempty"`
 	Scope    string          `json:"scope,omitempty"`
 	Context  json.RawMessage `json:"context,omitempty"`
+	// DeviceId is the client-generated device identifier the registration
+	// anti-abuse limits read; the server stores only its hash.
+	DeviceId string `json:"device_id,omitempty"`
 }
 
 type oauthFlowPayload struct {
 	AffiliateCode   string                         `json:"affiliate_code,omitempty"`
+	DeviceId        string                         `json:"device_id,omitempty"`
 	Verification    *service.OAuthVerificationFlow `json:"verification,omitempty"`
 	Telegram        *oauth.TelegramOAuthFlow       `json:"telegram,omitempty"`
 	SessionIdentity *service.AuthIdentity          `json:"session_identity,omitempty"`
@@ -52,9 +56,11 @@ func GenerateOAuthCode(c *gin.Context) {
 	request.Provider = strings.TrimSpace(request.Provider)
 	request.Intent = strings.TrimSpace(request.Intent)
 	request.Aff = strings.TrimSpace(request.Aff)
+	request.DeviceId = strings.TrimSpace(request.DeviceId)
 	if oauth.GetProvider(request.Provider) == nil ||
 		(request.Intent != model.AuthFlowIntentLogin && request.Intent != model.AuthFlowIntentBind && request.Intent != model.AuthFlowIntentVerify) ||
 		len(request.Aff) > 32 ||
+		len(request.DeviceId) > 128 ||
 		(request.Intent != model.AuthFlowIntentLogin && request.Aff != "") ||
 		(request.Intent != model.AuthFlowIntentVerify && (request.Scope != "" || len(request.Context) != 0)) {
 		common.ApiErrorT(c, "Invalid parameters")
@@ -62,7 +68,7 @@ func GenerateOAuthCode(c *gin.Context) {
 	}
 	userID := 0
 	sessionID := ""
-	flowPayload := oauthFlowPayload{AffiliateCode: request.Aff}
+	flowPayload := oauthFlowPayload{AffiliateCode: request.Aff, DeviceId: request.DeviceId}
 	bindingStarted := false
 	if request.Provider == "telegram" {
 		telegramFlow, err := oauth.NewTelegramOAuthFlow()
@@ -312,7 +318,7 @@ func handleOAuthLogin(c *gin.Context, provider oauth.Provider, oauthUser *oauth.
 		writeSecurityOperationError(c, err)
 		return
 	}
-	user, migration, err := findOrCreateOAuthUser(c, provider, oauthUser, token, payload.AffiliateCode)
+	user, migration, err := findOrCreateOAuthUser(c, provider, oauthUser, token, payload.AffiliateCode, payload.DeviceId)
 	if err != nil {
 		if errors.Is(err, model.ErrEmailAlreadyTaken) {
 			common.ApiErrorT(c, "Email address is already in use")
@@ -396,7 +402,7 @@ func handleOAuthBind(c *gin.Context, providerName string, provider oauth.Provide
 // findOrCreateOAuthUser finds the existing user or creates a new one. For a
 // legacy GitHub binding that still waits for the login verification, it also
 // returns the rewrite to carry into the challenge.
-func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *oauth.OAuthUser, token *oauth.OAuthToken, affiliateCode string) (*model.User, *service.LegacyGitHubMigration, error) {
+func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *oauth.OAuthUser, token *oauth.OAuthToken, affiliateCode string, deviceId string) (*model.User, *service.LegacyGitHubMigration, error) {
 	user := &model.User{}
 	if provider.ProviderUserIDColumn() == "telegram_id" {
 		err := provider.FillUserByProviderID(user, oauthUser.ProviderUserID)
@@ -513,14 +519,20 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 
 	// Handle affiliate code: the relation is recorded with the account in the
 	// same transaction (#5766), and an unknown or disabled inviter is dropped
-	// instead of blocking the OAuth registration.
-	attribution := model.ReferralAttribution{}
+	// instead of blocking the OAuth registration. The registration environment
+	// feeds the RF-06 anti-abuse limits.
+	attribution := model.ReferralAttribution{
+		Ip:        c.ClientIP(),
+		UserAgent: c.Request.UserAgent(),
+		DeviceId:  deviceId,
+	}
 	if inviteCode := strings.TrimSpace(affiliateCode); inviteCode != "" {
 		inviterId, lookupErr := model.LookupReferralInviter(inviteCode)
 		if lookupErr != nil {
 			common.SysLog(common.LogText("[OAuth] Ignored invitation code during registration: %s", lookupErr.Error()))
 		} else if inviterId != 0 {
-			attribution = model.ReferralAttribution{InviterId: inviterId, Source: model.ReferralSourceOAuth}
+			attribution.InviterId = inviterId
+			attribution.Source = model.ReferralSourceOAuth
 		}
 	}
 

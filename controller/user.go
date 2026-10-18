@@ -226,9 +226,17 @@ func Register(c *gin.Context) {
 	var request struct {
 		model.User
 		ReferralSource string `json:"referral_source"`
+		// DeviceId is a client-generated device identifier used only for the
+		// anti-abuse invitation limits; the server stores a hash of it.
+		DeviceId string `json:"device_id"`
 	}
 	err := common.DecodeJson(c.Request.Body, &request)
 	if err != nil {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	request.DeviceId = strings.TrimSpace(request.DeviceId)
+	if len(request.DeviceId) > 128 {
 		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
@@ -278,8 +286,13 @@ func Register(c *gin.Context) {
 	// The invitation code is the inviter's code, not the user's own. A stale or
 	// disabled inviter is dropped by the model layer (no relation, no reward)
 	// instead of blocking registration; the console hint separates the
-	// invitation link from a hand-entered code.
-	attribution := model.ReferralAttribution{}
+	// invitation link from a hand-entered code. The registration environment
+	// feeds the RF-06 anti-abuse limits and is recorded with the account.
+	attribution := model.ReferralAttribution{
+		Ip:        c.ClientIP(),
+		UserAgent: c.Request.UserAgent(),
+		DeviceId:  request.DeviceId,
+	}
 	if affCode := strings.TrimSpace(user.AffCode); affCode != "" {
 		inviterId, lookupErr := model.LookupReferralInviter(affCode)
 		if lookupErr != nil {
@@ -289,7 +302,8 @@ func Register(c *gin.Context) {
 			if strings.TrimSpace(request.ReferralSource) == model.ReferralSourceLink {
 				source = model.ReferralSourceLink
 			}
-			attribution = model.ReferralAttribution{InviterId: inviterId, Source: source}
+			attribution.InviterId = inviterId
+			attribution.Source = source
 		}
 	}
 	cleanUser := model.User{
