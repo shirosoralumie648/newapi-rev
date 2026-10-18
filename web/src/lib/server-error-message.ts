@@ -100,6 +100,13 @@ const serverErrorMessageKeys = {
     'Your wallet has unsettled debt. Top up to restore access; reading and exporting data stays available.',
   PLAYGROUND_WALLET_DEBT_UNAVAILABLE:
     'Unable to check the account wallet debt.',
+  PLAYGROUND_WORKFLOW_BUDGET_UNAVAILABLE: 'Unable to price the workflow steps.',
+  PLAYGROUND_WORKFLOW_BUDGET_INSUFFICIENT:
+    'Insufficient wallet quota to cover this run budget.',
+  PLAYGROUND_WORKFLOW_RUN_NOT_FOUND: 'Workflow run not found.',
+  PLAYGROUND_WORKFLOW_RUN_SETTLE_FAILED: 'Unable to settle the run budget.',
+  workflow_budget_exceeded:
+    'This workflow run has reached its budget cap; the remaining steps were not started.',
 } as const
 
 function isRecord(value: unknown): value is Record<string, unknown> {

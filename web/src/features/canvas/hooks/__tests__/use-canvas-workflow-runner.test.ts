@@ -1017,3 +1017,133 @@ test('stops the run when the relay refuses the task budget', async () => {
   ).toBeUndefined()
   expect(post).toHaveBeenCalledTimes(1)
 })
+
+test('bills every step inside the run budget and settles it when the run stops', async () => {
+  const post = vi.spyOn(api, 'post').mockImplementation(async (url) => {
+    if (url === '/pg/chat/completions') {
+      return {
+        data: {
+          choices: [{ message: { role: 'assistant', content: 'fox prompt' } }],
+        },
+      }
+    }
+    if (url === '/pg/images/generations') {
+      return {
+        data: {
+          created: 1,
+          data: [{ url: 'https://cdn.example.com/fox.png' }],
+        },
+      }
+    }
+    if (url === '/api/playground/workflows/runs/pgw_1/settle') {
+      return {
+        data: {
+          success: true,
+          data: {
+            run_id: 'pgw_1',
+            cap: 5000,
+            spent: 1200,
+            remaining: 3800,
+            status: 'settled',
+          },
+        },
+      }
+    }
+    throw new Error(`Unexpected POST ${url}`)
+  })
+  const chain = imageChain()
+  const hook = renderHook(() => useRunnerHarness(chain.nodes, chain.edges))
+
+  act(() => hook.result.current.runner.run(undefined, { runId: 'pgw_1' }))
+  await waitFor(() => expect(hook.result.current.runner.phase).toBe('idle'))
+
+  expect(post).toHaveBeenCalledWith(
+    '/pg/chat/completions',
+    expect.objectContaining({ model: 'gpt-4o' }),
+    expect.objectContaining({
+      headers: { 'X-Playground-Workflow-Run': 'pgw_1' },
+    })
+  )
+  expect(post).toHaveBeenCalledWith(
+    '/pg/images/generations',
+    expect.objectContaining({ model: 'gpt-image-1' }),
+    expect.objectContaining({
+      headers: { 'X-Playground-Workflow-Run': 'pgw_1' },
+    })
+  )
+  await waitFor(() =>
+    expect(post).toHaveBeenCalledWith(
+      '/api/playground/workflows/runs/pgw_1/settle',
+      {},
+      expect.anything()
+    )
+  )
+})
+
+test('stops the run at a budget cap refusal and leaves later steps untouched', async () => {
+  const post = vi.spyOn(api, 'post').mockImplementation(async (url) => {
+    if (url === '/pg/chat/completions') {
+      throw {
+        response: {
+          status: 403,
+          data: {
+            error: {
+              code: 'workflow_budget_exceeded',
+              message: 'billed elsewhere',
+            },
+          },
+        },
+      }
+    }
+    if (url === '/api/playground/workflows/runs/pgw_2/settle') {
+      return {
+        data: {
+          success: true,
+          data: {
+            run_id: 'pgw_2',
+            cap: 500,
+            spent: 125,
+            remaining: 375,
+            status: 'settled',
+          },
+        },
+      }
+    }
+    throw new Error(`Unexpected POST ${url}`)
+  })
+  const hook = renderHook(() =>
+    useRunnerHarness(
+      [
+        graphNode('p1', 'prompt', { text: 'a red fox' }),
+        graphNode('m1', 'model', { workflow: { model: 'gpt-4o' } }),
+        graphNode('m2', 'model', { workflow: { model: 'gpt-4o' } }),
+      ],
+      [
+        { id: 'e1', source: 'p1', target: 'm1' },
+        { id: 'e2', source: 'm1', target: 'm2' },
+      ]
+    )
+  )
+
+  act(() => hook.result.current.runner.run(undefined, { runId: 'pgw_2' }))
+  await waitFor(() => expect(hook.result.current.runner.phase).toBe('idle'))
+
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 'm1')?.data.workflow
+  ).toMatchObject({
+    status: 'failed',
+    error:
+      'This workflow run has reached its budget cap; the remaining steps were not started.',
+  })
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 'm2')?.data.workflow
+      ?.status
+  ).toBeUndefined()
+  await waitFor(() =>
+    expect(post).toHaveBeenCalledWith(
+      '/api/playground/workflows/runs/pgw_2/settle',
+      {},
+      expect.anything()
+    )
+  )
+})

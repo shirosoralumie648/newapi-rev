@@ -229,6 +229,12 @@ export interface AmountRequest {
 export interface AffiliateTransferRequest {
   /** Quota amount to transfer */
   quota: number
+  /**
+   * Idempotency key of one transfer attempt. The server stores it in the
+   * wallet ledger, so a repeated request reports the first outcome without
+   * moving quota twice.
+   */
+  request_id?: string
 }
 
 /**
@@ -450,6 +456,8 @@ export interface ReferralInvitation {
   pending_quota: number
   locked_quota: number
   settled_quota: number
+  /** Shared view: events whose order payment was refunded or charged back. */
+  refunded_quota: number
   /** Administrator view only: events waiting for a manual decision. */
   review_quota?: number
   /** Administrator view only: events refused by an anti-abuse rule. */
@@ -481,6 +489,7 @@ export interface ReferralStatsSummary {
   pending_quota: number
   locked_quota: number
   settled_quota: number
+  refunded_quota: number
   review_quota: number
   blocked_quota: number
   rejected_quota: number

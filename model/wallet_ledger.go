@@ -50,18 +50,22 @@ const (
 
 // Reference namespaces used by the unique idempotency index.
 const (
-	WalletLedgerRefOpening          = "opening"
-	WalletLedgerRefTopUp            = "topup"
-	WalletLedgerRefRedeem           = "redeem"
-	WalletLedgerRefAdminAdjust      = "admin_adjust"
-	WalletLedgerRefCheckin          = "checkin"
-	WalletLedgerRefAffiliate        = "affiliate_transfer"
-	WalletLedgerRefSubscription     = "subscription_order"
-	WalletLedgerRefRequestRefund    = "request_refund"
-	WalletLedgerRefTaskRefund       = "task_refund"
-	WalletLedgerRefMidjourneyRefund = "midjourney_refund"
-	WalletLedgerRefInviteeBonus     = "invitee_bonus"
-	WalletLedgerRefConsumeHourly    = "consume_hourly"
+	WalletLedgerRefOpening     = "opening"
+	WalletLedgerRefTopUp       = "topup"
+	WalletLedgerRefRedeem      = "redeem"
+	WalletLedgerRefAdminAdjust = "admin_adjust"
+	WalletLedgerRefCheckin     = "checkin"
+	WalletLedgerRefAffiliate   = "affiliate_transfer"
+	// WalletLedgerRefAffiliateMigration namespaces the one-time import of a
+	// legacy affiliate balance (RF-09): the reference id is the account id, so
+	// one account can be imported exactly once.
+	WalletLedgerRefAffiliateMigration = "affiliate_migration"
+	WalletLedgerRefSubscription       = "subscription_order"
+	WalletLedgerRefRequestRefund      = "request_refund"
+	WalletLedgerRefTaskRefund         = "task_refund"
+	WalletLedgerRefMidjourneyRefund   = "midjourney_refund"
+	WalletLedgerRefInviteeBonus       = "invitee_bonus"
+	WalletLedgerRefConsumeHourly      = "consume_hourly"
 	// Debt account references: one namespace records debt growth, the other its
 	// collection (WM-06 overdraft accounting).
 	WalletLedgerRefWalletDebt      = "wallet_debt"
@@ -80,6 +84,11 @@ const (
 	// row per reversed top-up order, so a webhook replay can never reverse the
 	// same payment twice.
 	WalletLedgerRefTopUpReversal = "topup_reversal"
+	// WalletLedgerRefReferralCommissionReversal namespaces the wallet
+	// chargebacks of already issued referral commissions: the reference id is
+	// the referral_commissions row, so a reversed order can never take a
+	// commission back twice (RF-05).
+	WalletLedgerRefReferralCommissionReversal = "referral_commission_reversal"
 )
 
 // walletLedgerConsumeHourSeconds is the aggregation window for API consumption.

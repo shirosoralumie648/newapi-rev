@@ -52,6 +52,13 @@ export const STATIC_I18N_KEYS = [
   // not start new generation or uploads.
   'Your wallet has unsettled debt. Top up to restore access; reading and exporting data stays available.',
   'Unable to check the account wallet debt.',
+  // Playground workflow run budget server messages (BL-03): the endpoints answer
+  // with these stable-code messages, so the literal scan cannot see them.
+  'Unable to price the workflow steps.',
+  'Insufficient wallet quota to cover this run budget.',
+  'Workflow run not found.',
+  'Unable to settle the run budget.',
+  'This workflow run has reached its budget cap; the remaining steps were not started.',
   // Wallet overdraft settings and administrative debt views.
   'Wallet Overdraft',
   'Wallet overdraft limit (USD)',
@@ -73,6 +80,7 @@ export const STATIC_I18N_KEYS = [
   // REFERRAL_COMMISSION_STATUS_LABEL_KEYS in the wallet feature.
   'Link',
   'Settled',
+  'Refunded',
   'In Review',
   'Blocked by risk control',
   'Rejected',
@@ -1061,6 +1069,13 @@ export const STATIC_I18N_KEYS = [
   'The step that produced this result is no longer on the canvas.',
   'A connected reference image could not be read.',
   'A connected reference image is larger than the 8 MiB limit.',
+  // Canvas workflow run budget feedback (BL-03): the estimate dialog reports
+  // these keys from constants, so the literal scan cannot see them.
+  'The run budget could not be opened.',
+  'Unable to price the run steps.',
+  'Some steps have no configured price; they still run and are charged when they finish.',
+  'Video steps are approximate: the final cost depends on the provider.',
+  'The cap is below the estimate; the run may stop before the last step.',
   // Canvas editing feedback: a drop and a paste report these keys from
   // constants, so the literal scan cannot see them.
   'Only images, videos, audio and PDF files can be added to the canvas.',
@@ -1167,4 +1182,27 @@ export const STATIC_I18N_KEYS = [
   // from Go through message_key, so the literal scan cannot see them.
   'No periodic limit',
   'Invalid periodic reset cycle',
+  // Canvas image tool titles and problem messages render through t(key) from
+  // CANVAS_IMAGE_TOOL_TITLES / CANVAS_IMAGE_TOOL_MESSAGES, so the literal scan
+  // cannot see them.
+  'Crop image',
+  'Redraw image area',
+  'Upscale image',
+  'The image could not be read from this node.',
+  'The image is larger than the 8 MiB limit.',
+  'The crop area is too small.',
+  'The image cannot be upscaled within the 4096-pixel limit.',
+  'Paint over the area you want to change.',
+  'Describe the change for the painted area.',
+  'Choose a model for the redraw.',
+  'The generated image could not be added to the canvas.',
+  'The canvas is full; the result could not be added.',
+  'The image operation failed.',
+  // Legacy referral migration (RF-09): the binding source label renders
+  // through t(label) from REFERRAL_SOURCE_LABEL_KEYS, and the migration log
+  // line and the reconciliation warning are returned from Go, so the literal
+  // scan cannot see them.
+  'Legacy',
+  'Legacy invitation reward transferred to balance {{quota}}',
+  'Legacy referral reconciliation found {{count}} deviating accounts; see the legacy_referral_reconcile system task result',
 ] as const

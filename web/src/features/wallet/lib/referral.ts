@@ -33,6 +33,7 @@ export const REFERRAL_SOURCE_LABEL_KEYS: Record<string, string> = {
   code: 'Invitation Code',
   oauth: 'OAuth',
   admin: 'Admin',
+  legacy: 'Legacy',
 }
 
 /** Commission states of one invitation or event, mapped to their translation key. */
@@ -40,6 +41,7 @@ export const REFERRAL_COMMISSION_STATUS_LABEL_KEYS: Record<string, string> = {
   pending: 'Pending',
   locked: 'Locked',
   settled: 'Settled',
+  refunded: 'Refunded',
   review: 'In Review',
   blocked: 'Blocked by risk control',
   rejected: 'Rejected',
@@ -67,6 +69,7 @@ export const REFERRAL_SOURCE_FILTER_VALUES = [
   'code',
   'oauth',
   'admin',
+  'legacy',
 ] as const
 
 /** Commission-status filter options of the administrator invitation list. */
@@ -74,6 +77,7 @@ export const REFERRAL_COMMISSION_STATUS_FILTER_VALUES = [
   'pending',
   'locked',
   'settled',
+  'refunded',
   'review',
   'blocked',
   'rejected',
@@ -88,6 +92,7 @@ export const EMPTY_REFERRAL_STATS_SUMMARY: ReferralStatsSummary = {
   pending_quota: 0,
   locked_quota: 0,
   settled_quota: 0,
+  refunded_quota: 0,
   review_quota: 0,
   blocked_quota: 0,
   rejected_quota: 0,
@@ -127,8 +132,8 @@ export function getReferralCommissionReasonLabelKey(reason: string): string {
 
 /**
  * Total commission of one invitation across every recorded state. The user
- * view only carries the payable states, the administrator view adds the
- * refused ones.
+ * view only carries the payable states and their reversed terminal state, the
+ * administrator view adds the refused ones.
  */
 export function referralCommissionTotal(
   invitation: ReferralInvitation
@@ -137,6 +142,7 @@ export function referralCommissionTotal(
     invitation.pending_quota +
     invitation.locked_quota +
     invitation.settled_quota +
+    invitation.refunded_quota +
     (invitation.review_quota ?? 0) +
     (invitation.blocked_quota ?? 0) +
     (invitation.rejected_quota ?? 0)
@@ -145,8 +151,8 @@ export function referralCommissionTotal(
 
 /**
  * Translation keys of the commission states the invitation actually has, so a
- * row names pending, locked, settled and — for administrators — the reviewed
- * or refused amounts without inventing states.
+ * row names pending, locked, settled, refunded and — for administrators — the
+ * reviewed or refused amounts without inventing states.
  */
 export function getReferralCommissionStatusLabelKeys(
   invitation: ReferralInvitation
@@ -160,6 +166,9 @@ export function getReferralCommissionStatusLabelKeys(
   }
   if (invitation.settled_quota > 0) {
     keys.push(REFERRAL_COMMISSION_STATUS_LABEL_KEYS.settled)
+  }
+  if (invitation.refunded_quota > 0) {
+    keys.push(REFERRAL_COMMISSION_STATUS_LABEL_KEYS.refunded)
   }
   if ((invitation.review_quota ?? 0) > 0) {
     keys.push(REFERRAL_COMMISSION_STATUS_LABEL_KEYS.review)

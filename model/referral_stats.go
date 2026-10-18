@@ -42,11 +42,12 @@ type ReferralInvitationQuery struct {
 // ReferralInvitation is one recorded invitation with the aggregates of its
 // commission events. The identifier fields stay raw in the model; the
 // user-facing API masks them before responding. Pending, locked and settled
-// are the states of the payable pipeline; review, blocked and rejected are
-// the states that still wait for a decision or never pay out, so only the
-// administrator API exposes them. CommissionEndsAt is the last second of the
-// commission trigger window (0 when the configured window does not expire, or
-// rewards only the first paid order).
+// are the states of the payable pipeline and refunded a revoked event whose
+// order payment was reversed; review, blocked and rejected are the states
+// that still wait for a decision or never pay out, so only the administrator
+// API exposes them. CommissionEndsAt is the last second of the commission
+// trigger window (0 when the configured window does not expire, or rewards
+// only the first paid order).
 type ReferralInvitation struct {
 	InviteeId        int
 	Username         string
@@ -64,6 +65,7 @@ type ReferralInvitation struct {
 	ReviewQuota      int64
 	BlockedQuota     int64
 	RejectedQuota    int64
+	RefundedQuota    int64
 	TotalPaidQuota   int64
 	CommissionCount  int64
 }
@@ -81,6 +83,7 @@ type ReferralStatsSummary struct {
 	PendingQuota           int64 `json:"pending_quota"`
 	LockedQuota            int64 `json:"locked_quota"`
 	SettledQuota           int64 `json:"settled_quota"`
+	RefundedQuota          int64 `json:"refunded_quota"`
 	ReviewQuota            int64 `json:"review_quota"`
 	BlockedQuota           int64 `json:"blocked_quota"`
 	RejectedQuota          int64 `json:"rejected_quota"`
@@ -102,7 +105,8 @@ func IsReferralCommissionStatus(status string) bool {
 		ReferralCommissionStatusBlocked,
 		ReferralCommissionStatusRejected,
 		ReferralCommissionStatusLocked,
-		ReferralCommissionStatusSettled:
+		ReferralCommissionStatusSettled,
+		ReferralCommissionStatusRefunded:
 		return true
 	default:
 		return false
@@ -175,12 +179,14 @@ func SummarizeReferralInvitations(query ReferralInvitationQuery) (*ReferralStats
 			COALESCE(SUM(CASE WHEN rc.status = ? THEN rc.commission_quota ELSE 0 END), 0) AS pending_quota,
 			COALESCE(SUM(CASE WHEN rc.status = ? THEN rc.commission_quota ELSE 0 END), 0) AS locked_quota,
 			COALESCE(SUM(CASE WHEN rc.status = ? THEN rc.commission_quota ELSE 0 END), 0) AS settled_quota,
+			COALESCE(SUM(CASE WHEN rc.status = ? THEN rc.commission_quota ELSE 0 END), 0) AS refunded_quota,
 			COALESCE(SUM(CASE WHEN rc.status = ? THEN rc.commission_quota ELSE 0 END), 0) AS review_quota,
 			COALESCE(SUM(CASE WHEN rc.status = ? THEN rc.commission_quota ELSE 0 END), 0) AS blocked_quota,
 			COALESCE(SUM(CASE WHEN rc.status = ? THEN rc.commission_quota ELSE 0 END), 0) AS rejected_quota`,
 			ReferralCommissionStatusPending,
 			ReferralCommissionStatusLocked,
 			ReferralCommissionStatusSettled,
+			ReferralCommissionStatusRefunded,
 			ReferralCommissionStatusReview,
 			ReferralCommissionStatusBlocked,
 			ReferralCommissionStatusRejected).
@@ -240,6 +246,7 @@ type referralInvitationAggregate struct {
 	ReviewQuota     int64
 	BlockedQuota    int64
 	RejectedQuota   int64
+	RefundedQuota   int64
 	TotalPaidQuota  int64
 	CommissionCount int64
 }
@@ -264,6 +271,7 @@ func attachReferralCommissionAggregates(inviterId int, invitations []ReferralInv
 			COALESCE(SUM(CASE WHEN rc.status = ? THEN rc.commission_quota ELSE 0 END), 0) AS review_quota,
 			COALESCE(SUM(CASE WHEN rc.status = ? THEN rc.commission_quota ELSE 0 END), 0) AS blocked_quota,
 			COALESCE(SUM(CASE WHEN rc.status = ? THEN rc.commission_quota ELSE 0 END), 0) AS rejected_quota,
+			COALESCE(SUM(CASE WHEN rc.status = ? THEN rc.commission_quota ELSE 0 END), 0) AS refunded_quota,
 			COALESCE(SUM(rc.base_quota), 0) AS total_paid_quota,
 			COUNT(*) AS commission_count`,
 			ReferralCommissionStatusPending,
@@ -271,7 +279,8 @@ func attachReferralCommissionAggregates(inviterId int, invitations []ReferralInv
 			ReferralCommissionStatusSettled,
 			ReferralCommissionStatusReview,
 			ReferralCommissionStatusBlocked,
-			ReferralCommissionStatusRejected).
+			ReferralCommissionStatusRejected,
+			ReferralCommissionStatusRefunded).
 		Where("rc.invitee_id IN ?", inviteeIds).
 		Group("rc.invitee_id")
 	if inviterId > 0 {
@@ -292,6 +301,7 @@ func attachReferralCommissionAggregates(inviterId int, invitations []ReferralInv
 		invitations[target].ReviewQuota = aggregates[i].ReviewQuota
 		invitations[target].BlockedQuota = aggregates[i].BlockedQuota
 		invitations[target].RejectedQuota = aggregates[i].RejectedQuota
+		invitations[target].RefundedQuota = aggregates[i].RefundedQuota
 		invitations[target].TotalPaidQuota = aggregates[i].TotalPaidQuota
 		invitations[target].CommissionCount = aggregates[i].CommissionCount
 	}

@@ -45,8 +45,13 @@ import {
   useCanvasEditor,
   type CanvasAddedNode,
 } from '../hooks/use-canvas-editor'
+import { useCanvasImageTools } from '../hooks/use-canvas-image-tools'
 import { useCanvasWorkflowOptions } from '../hooks/use-canvas-workflow-options'
 import { useCanvasWorkflowRunner } from '../hooks/use-canvas-workflow-runner'
+import type {
+  CanvasWorkflowRunBudgetRef,
+  CanvasWorkflowRunPlan,
+} from '../hooks/use-canvas-workflow-runner'
 import {
   CANVAS_ERRORS,
   parseCanvasImport,
@@ -67,9 +72,11 @@ import type {
 } from '../types'
 import { CanvasAssistantPanel } from './canvas-assistant-panel'
 import { CanvasDropZone } from './canvas-drop-zone'
+import { CanvasImageToolsDialog } from './canvas-image-tools-dialog'
 import { CanvasInspectorViewToggle } from './canvas-inspector-view-toggle'
 import { CanvasFlowNodeView, CanvasGroupNodeView } from './canvas-node'
 import { CanvasNodeInspector } from './canvas-node-inspector'
+import { CanvasRunBudgetDialog } from './canvas-run-budget-dialog'
 import { CanvasToolbar } from './canvas-toolbar'
 
 const canvasNodeTypes: NodeTypes = {
@@ -145,8 +152,18 @@ export function CanvasEditor(props: CanvasEditorProps) {
     addLinkedNode: editor.addLinkedNode,
   })
 
+  // The validated run the run-budget dialog is confirming; the dialog opens
+  // only when the same click would also start a run.
+  const [runPlan, setRunPlan] = useState<CanvasWorkflowRunPlan | null>(null)
+
   const [inspectorView, setInspectorView] =
     useState<CanvasInspectorView>('details')
+
+  const imageTools = useCanvasImageTools({
+    canvasId: props.project.id,
+    group: workflowOptions.group,
+    addLinkedNode: editor.addLinkedNode,
+  })
 
   const assistant = useCanvasAssistant({
     nodes: editor.nodes,
@@ -187,6 +204,15 @@ export function CanvasEditor(props: CanvasEditorProps) {
     clearAssistantMessage()
   }, [assistantMessage, clearAssistantMessage, t])
   useEffect(notifyAssistant, [notifyAssistant])
+
+  const imageToolMessage = imageTools.message
+  const clearImageToolMessage = imageTools.clearMessage
+  const notifyImageTool = useCallback(() => {
+    if (!imageToolMessage) return
+    toast.error(translateServerText(t, imageToolMessage))
+    clearImageToolMessage()
+  }, [clearImageToolMessage, imageToolMessage, t])
+  useEffect(notifyImageTool, [notifyImageTool])
 
   const handleInsertAssistantReply = useCallback(
     (message: CanvasAssistantMessage) => {
@@ -340,6 +366,7 @@ export function CanvasEditor(props: CanvasEditorProps) {
           models={workflowOptions.models}
           node={editor.selectedNode}
           onDelete={editor.deleteNode}
+          onOpenImageTools={imageTools.open}
           onOpenSource={props.onOpenSource}
           onRetry={workflow.retry}
           onUpdateData={editor.updateNodeData}
@@ -417,7 +444,7 @@ export function CanvasEditor(props: CanvasEditorProps) {
                     onImportFile={handleImportFile}
                     onPaste={handlePaste}
                     onRedo={editor.redo}
-                    onRunWorkflow={() => workflow.run()}
+                    onRunWorkflow={() => setRunPlan(workflow.estimate())}
                     onSelectAll={editor.selectAll}
                     onToggleAssistant={handleToggleAssistant}
                     onUndo={editor.undo}
@@ -435,6 +462,31 @@ export function CanvasEditor(props: CanvasEditorProps) {
       >
         {inspector}
       </WorkspaceInspector>
+      <CanvasImageToolsDialog
+        busy={imageTools.busy}
+        disabled={props.disabled}
+        models={workflowOptions.models}
+        onClose={imageTools.close}
+        onCrop={imageTools.crop}
+        onRedraw={imageTools.redraw}
+        onUpscale={imageTools.upscale}
+        source={imageTools.source}
+        sourceSize={imageTools.sourceSize}
+        tool={imageTools.tool}
+      />
+
+      <CanvasRunBudgetDialog
+        group={workflowOptions.group}
+        onOpenChange={(open) => {
+          if (!open) setRunPlan(null)
+        }}
+        onRun={(budget?: CanvasWorkflowRunBudgetRef) => {
+          setRunPlan(null)
+          workflow.run(undefined, budget)
+        }}
+        open={runPlan !== null}
+        steps={runPlan?.steps ?? []}
+      />
     </div>
   )
 }

@@ -61,6 +61,10 @@ const (
 	// commissions whose refund window elapsed and issues them to the inviter
 	// (credit grant or the configured cash payout form).
 	SystemTaskTypeReferralCommissionSettlement = "referral_commission_settlement"
+	// SystemTaskTypeLegacyReferralReconcile audits the one-time legacy import
+	// (bindings backfilled from users.inviter_id, affiliate balances imported
+	// into the wallet) and alerts on deviation without changing any balance.
+	SystemTaskTypeLegacyReferralReconcile = "legacy_referral_reconcile"
 )
 
 var ErrSystemTaskLockLost = errors.New("system task lock lost")
