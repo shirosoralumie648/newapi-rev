@@ -35,6 +35,7 @@ function makeInvitation(id: number, identifier: string, pendingQuota: number) {
     pending_quota: pendingQuota,
     locked_quota: 0,
     settled_quota: 0,
+    refunded_quota: 0,
     total_paid_quota: 0,
     commission_count: pendingQuota > 0 ? 1 : 0,
   }
@@ -109,6 +110,7 @@ it('keeps the invitee list reachable without referral rewards', () => {
       affiliateLink='https://example.com/?aff=1'
       onTransfer={vi.fn()}
       onViewReferrals={onViewReferrals}
+      onOpenProgram={vi.fn()}
     />
   )
 
@@ -117,6 +119,33 @@ it('keeps the invitee list reachable without referral rewards', () => {
   expect(
     screen.queryByRole('button', { name: 'Transfer to Balance' })
   ).not.toBeInTheDocument()
+})
+
+it('opens the dedicated referral program page from the rewards card', () => {
+  const onOpenProgram = vi.fn()
+  const user: UserWalletData = {
+    id: 1,
+    username: 'owner',
+    quota: 0,
+    used_quota: 0,
+    request_count: 0,
+    aff_quota: 0,
+    aff_history_quota: 0,
+    aff_count: 0,
+    group: 'default',
+  }
+  render(
+    <AffiliateRewardsCard
+      user={user}
+      affiliateLink='https://example.com/?aff=1'
+      onTransfer={vi.fn()}
+      onViewReferrals={vi.fn()}
+      onOpenProgram={onOpenProgram}
+    />
+  )
+
+  fireEvent.click(screen.getByRole('button', { name: 'Open referral program' }))
+  expect(onOpenProgram).toHaveBeenCalledTimes(1)
 })
 
 it('shows the configured validity window when invitations never expire', async () => {

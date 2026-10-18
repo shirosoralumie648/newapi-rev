@@ -277,14 +277,20 @@ jobs:
           mkdir -p web/dist
           touch web/dist/index.html
 
-      - name: Test batch update flush, token quota adjustments, periodic token budgets, wallet debt, and Playground message deltas, attachment storage, presigned uploads, presets, prompt snippets, system prompts, context management, parallel comparisons, stable group references, usage counters, affiliate codes, referral relations, referral commissions, referral anti-abuse limits and registration signals, referral invitation statistics, subscription redemption codes, canvas snapshots, trash and export, and task artifacts on SQLite, MySQL, and PostgreSQL
-        run: go test ./model/ -run 'TestBatchUpdateShutdownFlushMatrix|TestFlushBatchUpdateTimeoutLogsAndRetainsDeltas|TestTokenQuotaUpdatePreservesConcurrentDeductions|TestTokenPeriodQuotaBudgetMatrix|TestPlaygroundMessageDelta|TestPlaygroundMessageUniquenessMigration|TestPlaygroundMessageCostLookup|TestPlaygroundMessageVersionBranches|TestPlaygroundParallelCompareGroups|TestPlaygroundWalletDebt|TestPlaygroundAttachmentPersistenceMatrix|TestPlaygroundAttachmentStorageSchemaMigration|TestPlaygroundUploadFlow|TestPlaygroundCanvasAttachmentUpload|TestPlaygroundCanvasSnapshotHistory|TestPlaygroundCanvasLargeDocumentExternalization|TestPlaygroundPresetPersistenceAndOwnership|TestPlaygroundSnippetPersistenceAndOwnership|TestPlaygroundSessionSystemPrompt|TestPlaygroundSessionContextManagement|TestPlaygroundUserUsage|TestStableGroupReferenceMigration|TestAffCode|TestReferralBinding|TestReferralCommission|TestReferralRegistrationSignals|TestReferralInvitationStats|TestRedeemSubscriptionPlanCodeMatrix|TestPlaygroundTaskArtifactRecordsAndPins|TestPlaygroundTrashLifecycle|TestPlaygroundCanvasTrashLifecycle|TestPaymentReversal|TestRefundUnusedTopUpBalance|TestSubscriptionOrderReversal' -count=1 -v
+      - name: Test batch update flush, token quota adjustments, periodic token budgets, wallet debt, and Playground message deltas, attachment storage, presigned uploads, presets, prompt snippets, system prompts, context management, parallel comparisons, stable group references, usage counters, affiliate codes, referral relations, referral commissions, referral anti-abuse limits and registration signals, referral invitation statistics, subscription redemption codes, canvas snapshots, archive export and import, trash, and task artifacts on SQLite, MySQL, and PostgreSQL
+        run: go test ./model/ -run 'TestBatchUpdateShutdownFlushMatrix|TestFlushBatchUpdateTimeoutLogsAndRetainsDeltas|TestTokenQuotaUpdatePreservesConcurrentDeductions|TestTokenPeriodQuotaBudgetMatrix|TestPlaygroundMessageDelta|TestPlaygroundMessageUniquenessMigration|TestPlaygroundMessageCostLookup|TestPlaygroundMessageVersionBranches|TestPlaygroundParallelCompareGroups|TestPlaygroundWalletDebt|TestPlaygroundAttachmentPersistenceMatrix|TestPlaygroundAttachmentStorageSchemaMigration|TestPlaygroundUploadFlow|TestPlaygroundCanvasAttachmentUpload|TestPlaygroundCanvasSnapshotHistory|TestPlaygroundCanvasArchiveRoundTrip|TestPlaygroundCanvasLargeDocumentExternalization|TestPlaygroundPresetPersistenceAndOwnership|TestPlaygroundSnippetPersistenceAndOwnership|TestPlaygroundSessionSystemPrompt|TestPlaygroundSessionContextManagement|TestPlaygroundUserUsage|TestStableGroupReferenceMigration|TestAffCode|TestReferralBinding|TestReferralCommission|TestReferralRegistrationSignals|TestReferralInvitationStats|TestRedeemSubscriptionPlanCodeMatrix|TestPlaygroundTaskArtifactRecordsAndPins|TestPlaygroundTrashLifecycle|TestPlaygroundCanvasTrashLifecycle|TestPaymentReversal|TestRefundUnusedTopUpBalance|TestSubscriptionOrderReversal' -count=1 -v
 
       # The redemption controller stores the granted plan on every generated
       # code, so its create/validation matrix runs against the same real
       # databases.
       - name: Test subscription redemption code creation on MySQL and PostgreSQL
         run: go test ./controller/ -run 'TestAddRedemptionSubscriptionCodes' -count=1 -v
+
+      # The workspace workflow endpoints price steps, reserve a run cap as a
+      # wallet hold and settle the unspent part; the matrix runs on the same
+      # real databases.
+      - name: Test playground workflow run budgets on MySQL and PostgreSQL
+        run: go test ./controller/ -run 'TestPlaygroundWorkflowBudgetEndpoints' -count=1 -v
 
       # RF-08: the referral agent mark resolves its commission rate against the
       # real databases.

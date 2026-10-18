@@ -52,6 +52,13 @@ export const STATIC_I18N_KEYS = [
   // not start new generation or uploads.
   'Your wallet has unsettled debt. Top up to restore access; reading and exporting data stays available.',
   'Unable to check the account wallet debt.',
+  // Playground workflow run budget server messages (BL-03): the endpoints answer
+  // with these stable-code messages, so the literal scan cannot see them.
+  'Unable to price the workflow steps.',
+  'Insufficient wallet quota to cover this run budget.',
+  'Workflow run not found.',
+  'Unable to settle the run budget.',
+  'This workflow run has reached its budget cap; the remaining steps were not started.',
   // Wallet overdraft settings and administrative debt views.
   'Wallet Overdraft',
   'Wallet overdraft limit (USD)',
@@ -73,6 +80,7 @@ export const STATIC_I18N_KEYS = [
   // REFERRAL_COMMISSION_STATUS_LABEL_KEYS in the wallet feature.
   'Link',
   'Settled',
+  'Refunded',
   'In Review',
   'Blocked by risk control',
   'Rejected',
@@ -94,6 +102,7 @@ export const STATIC_I18N_KEYS = [
   'Invalid assistant preset.',
 
   'Authentication required.',
+  'Invalid Playground canvas archive.',
   'Invalid Playground configuration.',
   'Invalid Playground message.',
   'Invalid Playground pagination.',
@@ -1060,6 +1069,13 @@ export const STATIC_I18N_KEYS = [
   'The step that produced this result is no longer on the canvas.',
   'A connected reference image could not be read.',
   'A connected reference image is larger than the 8 MiB limit.',
+  // Canvas workflow run budget feedback (BL-03): the estimate dialog reports
+  // these keys from constants, so the literal scan cannot see them.
+  'The run budget could not be opened.',
+  'Unable to price the run steps.',
+  'Some steps have no configured price; they still run and are charged when they finish.',
+  'Video steps are approximate: the final cost depends on the provider.',
+  'The cap is below the estimate; the run may stop before the last step.',
   // Canvas editing feedback: a drop and a paste report these keys from
   // constants, so the literal scan cannot see them.
   'Only images, videos, audio and PDF files can be added to the canvas.',
@@ -1139,6 +1155,28 @@ export const STATIC_I18N_KEYS = [
   'Microphone access failed.',
   'Transcription failed',
   'No speech was detected.',
+  // Referral anti-abuse (RF-06) mark levels, review states, review reasons and
+  // the settings action label render through t(labelKey) from the referral
+  // label maps in features/wallet/lib/referral.ts and
+  // ReferralCommissionSection, so the literal scan cannot see them.
+  'Above the review threshold',
+  'Blocked',
+  'Clear',
+  'Frozen',
+  'Link',
+  'Rejected',
+  'Save referral commission',
+  'Under review',
+  'Watch',
+  'Watched account',
+  // Referral agent (RF-08) rate source labels render through t(labelKey) from
+  // REFERRAL_RATE_SOURCE_LABEL_KEYS in features/wallet/lib/referral.ts, and
+  // the agent mark audit actions through the AUDIT_TEMPLATES map in
+  // features/usage-logs/lib/format.ts, so the literal scan cannot see them.
+  'Account override',
+  'Agent tier',
+  'Updated the referral agent settings of user {{username}}',
+  'Cleared the referral agent mark of user {{username}}',
   // API key periodic quota options render through t(option.label) from
   // API_KEY_PERIOD_RESET_OPTIONS, and the invalid-cycle message is returned
   // from Go through message_key, so the literal scan cannot see them.

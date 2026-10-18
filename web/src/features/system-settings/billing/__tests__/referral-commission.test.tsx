@@ -169,10 +169,14 @@ test('adding a group override saves the whole override map', async () => {
 test('the engine and cash settlement require the confirmed compliance terms', () => {
   renderSection({ complianceConfirmed: false })
 
+  // Base UI renders the switch as a span with role="switch"; its disabled
+  // state is exposed through aria-disabled rather than the native attribute.
   expect(
     screen.getByRole('switch', { name: 'Enable referral commission' })
-  ).toBeDisabled()
-  expect(screen.getByRole('switch', { name: 'Cash settlement' })).toBeDisabled()
+  ).toHaveAttribute('aria-disabled', 'true')
+  expect(
+    screen.getByRole('switch', { name: 'Cash settlement' })
+  ).toHaveAttribute('aria-disabled', 'true')
 })
 
 test('the engine switch is enabled once compliance is confirmed', () => {
@@ -180,5 +184,5 @@ test('the engine switch is enabled once compliance is confirmed', () => {
 
   expect(
     screen.getByRole('switch', { name: 'Enable referral commission' })
-  ).toBeEnabled()
+  ).not.toHaveAttribute('aria-disabled', 'true')
 })

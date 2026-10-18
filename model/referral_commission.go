@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/shopspring/decimal"
@@ -44,9 +45,10 @@ const (
 // events were refused by an anti-abuse rule and rejected events were declined
 // in review. Blocked and rejected events never pay out and never count against
 // a payable cap. The settlement step (RF-04) transitions payable events into
-// locked (confirmed, not yet paid out) and settled (paid out); a refund inside
-// the window cancels a pending event before it is ever issued (RF-05). The
-// statistics panel already buckets by every known state.
+// locked (confirmed, not yet paid out) and settled (paid out); the reversal
+// step (RF-05) moves any event whose order payment was refunded or charged
+// back to refunded, which is terminal. The statistics panel buckets by every
+// known state.
 const (
 	ReferralCommissionStatusPending  = "pending"
 	ReferralCommissionStatusReview   = "review"
@@ -54,6 +56,10 @@ const (
 	ReferralCommissionStatusRejected = "rejected"
 	ReferralCommissionStatusLocked   = "locked"
 	ReferralCommissionStatusSettled  = "settled"
+	// ReferralCommissionStatusRefunded is a terminal state: the paid order of
+	// the event was refunded or charged back, so the commission is void and
+	// stops consuming a payable allowance.
+	ReferralCommissionStatusRefunded = "refunded"
 )
 
 // Referral commission settlement methods record how a settled commission
@@ -70,6 +76,7 @@ const (
 var referralCommissionUnpayableStatuses = []string{
 	ReferralCommissionStatusBlocked,
 	ReferralCommissionStatusRejected,
+	ReferralCommissionStatusRefunded,
 }
 
 // ReferralCommission is one single-level commission event of one paid order:
@@ -109,6 +116,9 @@ type ReferralCommission struct {
 	SettledAt        int64  `json:"settled_at" gorm:"bigint;not null;default:0"`
 	SettlementMethod string `json:"settlement_method" gorm:"type:varchar(16)"`
 	GrantId          int    `json:"grant_id" gorm:"not null;default:0"`
+	// ReversedAt timestamps the refund/chargeback reversal (RF-05); 0 while
+	// the event was never reversed.
+	ReversedAt int64 `json:"reversed_at" gorm:"bigint;not null;default:0"`
 	// Reason carries the anti-abuse decision behind a blocked or review event;
 	// it stays empty for events that were payable directly.
 	Reason    string `json:"reason" gorm:"type:varchar(32);not null;default:''"`
@@ -474,6 +484,165 @@ func ProcessReferralCommissionSettlement(now int64, limit int) (*ReferralCommiss
 	}
 	result.LockedCount = locked
 	return result, nil
+}
+
+// ---------------------------------------------------------------------------
+// Reversal (RF-05): refund/chargeback -> refunded
+// ---------------------------------------------------------------------------
+
+// ReferralCommissionReversal reports one revoked commission event so the
+// caller can finish the post-commit work once the enclosing transaction
+// committed: the inviter's quota cache and billing history. Quota is the
+// amount the inviter is shown — the recorded commission of a revoked event,
+// or the part taken back from the wallet of a reclaimed one — and Debt is the
+// remainder a reclaimed settled commission could not cover from the wallet
+// (WL-06). Reclaimed marks the wallet chargeback of an already issued credit
+// commission; a cash payout never entered the wallet, so it is only revoked.
+type ReferralCommissionReversal struct {
+	CommissionId int
+	InviterId    int
+	Quota        int64
+	Debt         int64
+	Reclaimed    bool
+}
+
+// reverseReferralCommissionForOrderTx revokes the commission event of one
+// refunded or charged-back order inside the same transaction that reverses the
+// order, so the order status and its commission can never diverge. An event
+// that was never issued (pending, review, locked) moves to the terminal
+// refunded state without any wallet movement; a settled credit commission is
+// taken back from the inviter's wallet down to zero, the remainder becoming
+// wallet debt under the WL-06 rules, and the chargeback is recorded under
+// (referral_commission_reversal, commission id). Cash-settled events never
+// entered the wallet, so their reversal only voids the recorded event. Events
+// that never pay out (blocked, rejected, already refunded) are a no-op, and an
+// order without a recorded commission returns (nil, nil). The state change is
+// conditional on the current status — the same idempotency anchor settlement
+// uses — so a replayed refund reverses nothing twice.
+func reverseReferralCommissionForOrderTx(tx *gorm.DB, refType string, refId string, now int64) (*ReferralCommissionReversal, error) {
+	if tx == nil || refType == "" || refId == "" {
+		return nil, nil
+	}
+	var commission ReferralCommission
+	err := lockForUpdate(tx).Where("ref_type = ? AND ref_id = ?", refType, refId).First(&commission).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var reversal *ReferralCommissionReversal
+	switch commission.Status {
+	case ReferralCommissionStatusPending, ReferralCommissionStatusReview, ReferralCommissionStatusLocked:
+		// The commission was never issued, so revoking it moves no balance;
+		// the terminal state also frees the payable allowance it held.
+		reversal = &ReferralCommissionReversal{
+			CommissionId: commission.Id,
+			InviterId:    commission.InviterId,
+			Quota:        commission.CommissionQuota,
+		}
+	case ReferralCommissionStatusSettled:
+		if commission.SettlementMethod != ReferralCommissionSettlementCredit {
+			// A cash payout never entered the wallet: the reversal voids the
+			// recorded event, and recovering an actually paid-out commission
+			// stays a manual compliance process.
+			reversal = &ReferralCommissionReversal{
+				CommissionId: commission.Id,
+				InviterId:    commission.InviterId,
+				Quota:        commission.CommissionQuota,
+			}
+			break
+		}
+		applied, debtIncrease, err := chargeWalletQuotaTx(tx, commission.InviterId, commission.CommissionQuota, 0, "")
+		if err != nil {
+			return nil, err
+		}
+		if applied > 0 {
+			balanceAfter, err := lockUserQuotaTx(tx, commission.InviterId)
+			if err != nil {
+				return nil, err
+			}
+			rowApplied, err := AppendWalletLedgerTx(tx, &WalletLedgerEntry{
+				UserId:       commission.InviterId,
+				Kind:         WalletLedgerKindChargeback,
+				Amount:       -applied,
+				BalanceAfter: balanceAfter,
+				RefType:      WalletLedgerRefReferralCommissionReversal,
+				RefId:        strconv.Itoa(commission.Id),
+				Meta:         fmt.Sprintf("reclaimed_commission=%d debt=%d", commission.CommissionQuota, debtIncrease),
+				CreatedAt:    now,
+			})
+			if err != nil {
+				return nil, err
+			}
+			if !rowApplied {
+				return nil, errors.New("wallet ledger reference conflict")
+			}
+			grants, err := lockCreditGrantsTx(tx, commission.InviterId)
+			if err != nil {
+				return nil, err
+			}
+			if _, _, err := claimCreditGrantsTx(tx, commission.InviterId, applied, grants, now); err != nil {
+				return nil, err
+			}
+		}
+		reversal = &ReferralCommissionReversal{
+			CommissionId: commission.Id,
+			InviterId:    commission.InviterId,
+			Quota:        applied,
+			Debt:         debtIncrease,
+			Reclaimed:    true,
+		}
+	default:
+		// Blocked, rejected and already refunded events never pay out; a
+		// refund of the order reverses nothing.
+		return nil, nil
+	}
+
+	updated := tx.Model(&ReferralCommission{}).
+		Where("id = ? AND status = ?", commission.Id, commission.Status).
+		Updates(map[string]any{
+			"status":      ReferralCommissionStatusRefunded,
+			"reversed_at": now,
+			"updated_at":  now,
+		})
+	if updated.Error != nil {
+		return nil, updated.Error
+	}
+	if updated.RowsAffected != 1 {
+		return nil, errors.New("referral commission state changed during reversal")
+	}
+	return reversal, nil
+}
+
+// finishReferralCommissionReversal completes one reversal after its
+// transaction committed: the inviter's quota cache absorbs the amount taken
+// back from the wallet, and the inviter's billing history records what
+// happened — a revoked event that was never issued, or a reclaimed settled
+// commission with the debt it left behind. The operator audit line is written
+// for every reversal, so an unexpected chargeback stays traceable.
+func finishReferralCommissionReversal(reversal *ReferralCommissionReversal) {
+	if reversal == nil || reversal.InviterId <= 0 {
+		return
+	}
+	if reversal.Reclaimed && reversal.Quota > 0 {
+		syncWalletQuotaCache(reversal.InviterId, -reversal.Quota, "referral commission reversal")
+	}
+	common.SysLog(common.LogText("referral commission %d (inviter %d) reversed by a payment reversal: quota=%d debt=%d reclaimed=%t",
+		reversal.CommissionId, reversal.InviterId, reversal.Quota, reversal.Debt, reversal.Reclaimed))
+	if reversal.Reclaimed {
+		RecordLog(reversal.InviterId, LogTypeTopup, common.NewMessage(
+			"Referral commission reclaimed because the order payment was reversed: {{quota}}, debt added: {{debt}}",
+			map[string]any{
+				"quota": logger.FormatQuota(int(reversal.Quota)),
+				"debt":  logger.FormatQuota(int(reversal.Debt)),
+			}))
+		return
+	}
+	RecordLog(reversal.InviterId, LogTypeTopup, common.NewMessage(
+		"Referral commission revoked because the order payment was reversed: {{quota}}",
+		map[string]any{"quota": logger.FormatQuota(int(reversal.Quota))}))
 }
 
 // ErrReferralReviewNotPending reports a review that a concurrent or earlier

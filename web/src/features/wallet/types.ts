@@ -450,6 +450,8 @@ export interface ReferralInvitation {
   pending_quota: number
   locked_quota: number
   settled_quota: number
+  /** Shared view: events whose order payment was refunded or charged back. */
+  refunded_quota: number
   /** Administrator view only: events waiting for a manual decision. */
   review_quota?: number
   /** Administrator view only: events refused by an anti-abuse rule. */
@@ -481,6 +483,7 @@ export interface ReferralStatsSummary {
   pending_quota: number
   locked_quota: number
   settled_quota: number
+  refunded_quota: number
   review_quota: number
   blocked_quota: number
   rejected_quota: number

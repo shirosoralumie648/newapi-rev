@@ -114,35 +114,57 @@ func reverseWalletQuotaTx(tx *gorm.DB, userId int, credited int64, tradeNo strin
 	return applied, debtIncrease, nil
 }
 
+// paymentReversalOutcome is what one applied payment reversal did: the quota
+// that left the wallet, the debt it added, the referral commission event it
+// revoked (nil when the order recorded none) and whether this call performed
+// the transition.
+type paymentReversalOutcome struct {
+	walletQuota  int64
+	debtIncrease int64
+	commission   *ReferralCommissionReversal
+	reversed     bool
+}
+
 // applyPaymentReversal reverses the wallet credit of one locked top-up order
-// and moves it to refunded/disputed. It returns the quota that left the wallet,
-// the debt that was added, and whether this call performed the transition;
-// replays of an already reversed order change nothing and report false.
-func applyPaymentReversal(tx *gorm.DB, topUp *TopUp, targetStatus string) (int64, int64, bool, error) {
+// and moves it to refunded/disputed, revoking the referral commission the order
+// recorded in the same transaction. It returns what the reversal did; replays
+// of an already reversed order change nothing and report false.
+func applyPaymentReversal(tx *gorm.DB, topUp *TopUp, targetStatus string) (paymentReversalOutcome, error) {
+	outcome := paymentReversalOutcome{}
 	switch topUp.Status {
 	case common.TopUpStatusRefunded, common.TopUpStatusDisputed:
-		return 0, 0, false, nil
+		return outcome, nil
 	case common.TopUpStatusSuccess:
 	default:
-		return 0, 0, false, ErrTopUpStatusInvalid
+		return outcome, ErrTopUpStatusInvalid
 	}
 	credited, err := topUpCreditedQuotaTx(tx, topUp.TradeNo)
 	if err != nil {
-		return 0, 0, false, err
+		return outcome, err
 	}
-	var applied, debtIncrease int64
 	if credited > 0 {
-		applied, debtIncrease, err = reverseWalletQuotaTx(tx, topUp.UserId, credited, topUp.TradeNo)
+		applied, debtIncrease, err := reverseWalletQuotaTx(tx, topUp.UserId, credited, topUp.TradeNo)
 		if err != nil {
-			return 0, 0, false, err
+			return outcome, err
 		}
+		outcome.walletQuota = applied
+		outcome.debtIncrease = debtIncrease
 	}
+	// The commission event of the order is revoked in the same transaction:
+	// the order must not commit as refunded while its commission keeps
+	// waiting to be issued.
+	commission, err := reverseReferralCommissionForOrderTx(tx, WalletLedgerRefTopUp, topUp.TradeNo, common.GetTimestamp())
+	if err != nil {
+		return outcome, err
+	}
+	outcome.commission = commission
 	topUp.Status = targetStatus
 	topUp.RefundTime = common.GetTimestamp()
 	if err := tx.Save(topUp).Error; err != nil {
-		return 0, 0, false, err
+		return outcome, err
 	}
-	return applied, debtIncrease, true, nil
+	outcome.reversed = true
+	return outcome, nil
 }
 
 // ReverseTopUpPayment reverses one wallet top-up identified by its local trade
@@ -153,25 +175,25 @@ func ReverseTopUpPayment(tradeNo string, disputed bool) error {
 	}
 	targetStatus := paymentReversalStatus(disputed)
 	var userId int
-	var applied, debtIncrease int64
-	var reversed bool
+	var outcome paymentReversalOutcome
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		topUp, err := lockTopUpTx(tx, tradeNo)
 		if err != nil {
 			return err
 		}
 		userId = topUp.UserId
-		applied, debtIncrease, reversed, err = applyPaymentReversal(tx, topUp, targetStatus)
+		outcome, err = applyPaymentReversal(tx, topUp, targetStatus)
 		return err
 	})
 	if err != nil {
 		return err
 	}
-	if applied > 0 {
-		syncWalletQuotaCache(userId, -applied, "top-up payment reversal")
+	if outcome.walletQuota > 0 {
+		syncWalletQuotaCache(userId, -outcome.walletQuota, "top-up payment reversal")
 	}
-	if reversed {
-		recordPaymentReversalLog(userId, applied, debtIncrease, disputed)
+	finishReferralCommissionReversal(outcome.commission)
+	if outcome.reversed {
+		recordPaymentReversalLog(userId, outcome.walletQuota, outcome.debtIncrease, disputed)
 	}
 	return nil
 }
@@ -189,6 +211,7 @@ func ReverseSubscriptionOrderPayment(tradeNo string, disputed bool) error {
 	var userId int
 	var cacheGroup string
 	var reversed bool
+	var commission *ReferralCommissionReversal
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		order, err := lockSubscriptionOrderTx(tx, tradeNo)
 		if err != nil {
@@ -205,12 +228,15 @@ func ReverseSubscriptionOrderPayment(tradeNo string, disputed bool) error {
 		userId = order.UserId
 
 		// The mirror top-up row carries no wallet credit, so reversing it only
-		// keeps the billing history consistent.
+		// keeps the billing history consistent; a commission on the trade
+		// number is revoked all the same.
 		if mirror, err := lockTopUpTx(tx, tradeNo); err == nil {
 			if mirror.Status == common.TopUpStatusSuccess {
-				if _, _, _, err := applyPaymentReversal(tx, mirror, targetStatus); err != nil {
+				outcome, err := applyPaymentReversal(tx, mirror, targetStatus)
+				if err != nil {
 					return err
 				}
+				commission = outcome.commission
 			}
 		} else if !errors.Is(err, ErrTopUpNotFound) {
 			return err
@@ -249,6 +275,7 @@ func ReverseSubscriptionOrderPayment(tradeNo string, disputed bool) error {
 	if reversed {
 		RecordLog(userId, LogTypeTopup, common.NewMessage("Subscription order payment was reversed, plan subscription cancelled"))
 	}
+	finishReferralCommissionReversal(commission)
 	return nil
 }
 
@@ -325,6 +352,7 @@ func RefundUnusedTopUpBalance(tradeNo string, callerIp string) error {
 	var userId int
 	var paymentMethod string
 	var credited int64
+	var commission *ReferralCommissionReversal
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		topUp, err := lockTopUpTx(tx, tradeNo)
 		if err != nil {
@@ -380,6 +408,13 @@ func RefundUnusedTopUpBalance(tradeNo string, callerIp string) error {
 		if _, _, err := claimCreditGrantsTx(tx, topUp.UserId, credited, grants, common.GetTimestamp()); err != nil {
 			return err
 		}
+		// The commission of the refunded order is revoked in the same
+		// transaction; the inviter's clawback may book wallet debt even
+		// though the invitee side of this refund may not.
+		commission, err = reverseReferralCommissionForOrderTx(tx, WalletLedgerRefTopUp, tradeNo, common.GetTimestamp())
+		if err != nil {
+			return err
+		}
 		topUp.Status = common.TopUpStatusRefunded
 		topUp.RefundTime = common.GetTimestamp()
 		if err := tx.Save(topUp).Error; err != nil {
@@ -396,6 +431,7 @@ func RefundUnusedTopUpBalance(tradeNo string, callerIp string) error {
 		syncWalletQuotaCache(userId, -credited, "admin top-up refund")
 		RecordTopupLog(userId, common.NewMessage("Administrator refunded the order, quota withdrawn: {{quota}}", map[string]any{"quota": logger.FormatQuota(int(credited))}), callerIp, paymentMethod, "admin")
 	}
+	finishReferralCommissionReversal(commission)
 	return nil
 }
 
