@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/setting"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -116,8 +117,9 @@ func (*CreemAdaptor) RequestPay(c *gin.Context, req *CreemPayRequest) {
 	// 先创建订单记录，使用产品配置的金额和充值额度
 	topUp := &model.TopUp{
 		UserId:          id,
-		Amount:          selectedProduct.Quota, // 充值额度
-		Money:           selectedProduct.Price, // 支付金额
+		Amount:          selectedProduct.Quota,                       // 充值额度
+		Money:           decimal.NewFromFloat(selectedProduct.Price), // 支付金额
+		Currency:        selectedProduct.Currency,
 		TradeNo:         referenceId,
 		PaymentMethod:   model.PaymentMethodCreem,
 		PaymentProvider: model.PaymentProviderCreem,
@@ -268,27 +270,116 @@ func CreemWebhook(c *gin.Context) {
 
 	logger.LogInfo(c.Request.Context(), common.LogText("Creem webhook signature verified path=%q client_ip=%s", c.Request.RequestURI, c.ClientIP()))
 
-	// 重新设置body供后续的ShouldBindJSON使用
-	c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-
-	// 解析新格式的webhook数据
-	var webhookEvent CreemWebhookEvent
-	if err := c.ShouldBindJSON(&webhookEvent); err != nil {
+	// 先宽松解析事件信封：checkout 与退款事件的对象结构不同，退款事件按需自行解析
+	var envelope struct {
+		Id        string `json:"id"`
+		EventType string `json:"eventType"`
+	}
+	if err := common.Unmarshal(bodyBytes, &envelope); err != nil {
 		logger.LogError(c.Request.Context(), common.LogText("Creem webhook failed to parse path=%q client_ip=%s error=%q body=%q", c.Request.RequestURI, c.ClientIP(), err.Error(), string(bodyBytes)))
 		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
 
-	logger.LogInfo(c.Request.Context(), common.LogText("Creem webhook parsed event_type=%s event_id=%s request_id=%s order_id=%s order_status=%s", webhookEvent.EventType, webhookEvent.Id, webhookEvent.Object.RequestId, webhookEvent.Object.Order.Id, webhookEvent.Object.Order.Status))
-
 	// 根据事件类型处理不同的webhook
-	switch webhookEvent.EventType {
+	switch envelope.EventType {
 	case "checkout.completed":
+		var webhookEvent CreemWebhookEvent
+		if err := common.Unmarshal(bodyBytes, &webhookEvent); err != nil {
+			logger.LogError(c.Request.Context(), common.LogText("Creem webhook failed to parse path=%q client_ip=%s error=%q body=%q", c.Request.RequestURI, c.ClientIP(), err.Error(), string(bodyBytes)))
+			c.AbortWithStatus(http.StatusBadRequest)
+			return
+		}
+		logger.LogInfo(c.Request.Context(), common.LogText("Creem webhook parsed event_type=%s event_id=%s request_id=%s order_id=%s order_status=%s", webhookEvent.EventType, webhookEvent.Id, webhookEvent.Object.RequestId, webhookEvent.Object.Order.Id, webhookEvent.Object.Order.Status))
 		handleCheckoutCompleted(c, &webhookEvent)
+	case "refund.created":
+		handleCreemRefundCreated(c, bodyBytes)
 	default:
-		logger.LogInfo(c.Request.Context(), common.LogText("Creem webhook ignored event event_type=%s event_id=%s", webhookEvent.EventType, webhookEvent.Id))
+		logger.LogInfo(c.Request.Context(), common.LogText("Creem webhook ignored event event_type=%s event_id=%s", envelope.EventType, envelope.Id))
 		c.Status(http.StatusOK)
 	}
+}
+
+// handleCreemRefundCreated reverses the local order behind a Creem refund.
+// Creem delivers the refund without a stable local reference, so the handler
+// accepts every reference shape the payload may carry — the checkout's
+// request_id first, then the provider-side order id — and never guesses: a
+// refund that matches no local order is logged for manual handling.
+func handleCreemRefundCreated(c *gin.Context, body []byte) {
+	var event struct {
+		Id        string         `json:"id"`
+		EventType string         `json:"eventType"`
+		Object    map[string]any `json:"object"`
+	}
+	if err := common.Unmarshal(body, &event); err != nil {
+		logger.LogError(c.Request.Context(), common.LogText("Creem refund webhook failed to parse event_id=%s error=%q", event.Id, err.Error()))
+		c.AbortWithStatus(http.StatusBadRequest)
+		return
+	}
+
+	references := []string{
+		creemNestedString(event.Object, "checkout", "request_id"),
+		creemString(event.Object, "request_id"),
+		creemNestedString(event.Object, "metadata", "reference_id"),
+	}
+	for _, reference := range references {
+		if reference == "" {
+			continue
+		}
+		handled, err := model.ReversePaymentByTradeNo(reference, false)
+		if err != nil {
+			logger.LogError(c.Request.Context(), common.LogText("Creem refund reversal failed trade_no=%s event_id=%s error=%q", reference, event.Id, err.Error()))
+			c.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		if handled {
+			logger.LogInfo(c.Request.Context(), common.LogText("Creem refund reversed trade_no=%s event_id=%s", reference, event.Id))
+			c.Status(http.StatusOK)
+			return
+		}
+	}
+
+	providerIds := []string{
+		creemNestedString(event.Object, "order", "id"),
+		creemString(event.Object, "order_id"),
+	}
+	for _, providerId := range providerIds {
+		if providerId == "" {
+			continue
+		}
+		handled, err := model.ReversePaymentByProviderPaymentId(model.PaymentProviderCreem, providerId, false)
+		if err != nil {
+			logger.LogError(c.Request.Context(), common.LogText("Creem refund reversal failed creem_order_id=%s event_id=%s error=%q", providerId, event.Id, err.Error()))
+			c.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		if handled {
+			logger.LogInfo(c.Request.Context(), common.LogText("Creem refund reversed creem_order_id=%s event_id=%s", providerId, event.Id))
+			c.Status(http.StatusOK)
+			return
+		}
+	}
+
+	logger.LogWarn(c.Request.Context(), common.LogText("Creem refund found no local order, manual handling required event_id=%s body=%q", event.Id, string(body)))
+	c.Status(http.StatusOK)
+}
+
+// creemString reads one string field of a Creem payload object.
+func creemString(object map[string]any, key string) string {
+	value, _ := object[key].(string)
+	return value
+}
+
+// creemNestedString reads one string field of a nested Creem payload object;
+// payloads may inline the nested object or only its id, neither of which is a
+// match here (the caller falls back to the provider id list).
+func creemNestedString(object map[string]any, key string, field string) string {
+	nested, _ := object[key].(map[string]any)
+	if nested == nil {
+		return ""
+	}
+	value, _ := nested[field].(string)
+	return value
 }
 
 // 处理支付完成事件
@@ -311,7 +402,13 @@ func handleCheckoutCompleted(c *gin.Context, event *CreemWebhookEvent) {
 	// Try complete subscription order first
 	LockOrder(referenceId)
 	defer UnlockOrder(referenceId)
-	if err := model.CompleteSubscriptionOrder(referenceId, common.GetJsonString(event), model.PaymentProviderCreem, ""); err == nil {
+	// Every Creem payment references the Creem order it settled; storing it
+	// lets a later refund.created match the local order.
+	payment := model.TopUpPaymentInfo{
+		ProviderPaymentID: event.Object.Order.Id,
+		Currency:          strings.ToUpper(event.Object.Order.Currency),
+	}
+	if err := model.CompleteSubscriptionOrder(referenceId, payment, common.GetJsonString(event), model.PaymentProviderCreem, ""); err == nil {
 		logger.LogInfo(c.Request.Context(), common.LogText("Creem subscription order processed trade_no=%s creem_order_id=%s", referenceId, event.Object.Order.Id))
 		c.Status(http.StatusOK)
 		return
@@ -356,14 +453,14 @@ func handleCheckoutCompleted(c *gin.Context, event *CreemWebhookEvent) {
 		logger.LogWarn(c.Request.Context(), common.LogText("Creem callback customer name is empty trade_no=%s creem_order_id=%s", referenceId, event.Object.Order.Id))
 	}
 
-	err := model.RechargeCreem(referenceId, customerEmail, customerName, c.ClientIP())
+	err := model.RechargeCreem(referenceId, payment, customerEmail, customerName, c.ClientIP())
 	if err != nil {
 		logger.LogError(c.Request.Context(), common.LogText("Creem top-up processing failed trade_no=%s creem_order_id=%s client_ip=%s error=%q", referenceId, event.Object.Order.Id, c.ClientIP(), err.Error()))
 		c.AbortWithStatus(http.StatusInternalServerError)
 		return
 	}
 
-	logger.LogInfo(c.Request.Context(), common.LogText("Creem top-up succeeded trade_no=%s creem_order_id=%s quota=%d money=%.2f client_ip=%s", referenceId, event.Object.Order.Id, topUp.Amount, topUp.Money, c.ClientIP()))
+	logger.LogInfo(c.Request.Context(), common.LogText("Creem top-up succeeded trade_no=%s creem_order_id=%s quota=%d money=%s client_ip=%s", referenceId, event.Object.Order.Id, topUp.Amount, topUp.Money.StringFixed(2), c.ClientIP()))
 	c.Status(http.StatusOK)
 }
 

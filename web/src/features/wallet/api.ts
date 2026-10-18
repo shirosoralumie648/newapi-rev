@@ -255,6 +255,16 @@ export async function completeOrder(
   return res.data
 }
 
+/**
+ * Refund the unused balance of a completed order (admin only)
+ */
+export async function refundOrder(
+  request: CompleteOrderRequest
+): Promise<ApiResponse> {
+  const res = await api.post('/api/user/topup/refund', request)
+  return res.data
+}
+
 // ============================================================================
 // Wallet Ledger API Functions
 // ============================================================================

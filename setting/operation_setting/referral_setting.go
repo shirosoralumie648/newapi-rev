@@ -25,6 +25,8 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/config"
+
+	"github.com/shopspring/decimal"
 )
 
 // Referral commission trigger windows. The window is counted from the
@@ -54,6 +56,10 @@ const (
 	ReferralLockWindowDaysMax     = 30
 	ReferralLockWindowDaysDefault = 21
 )
+
+// ReferralInviteLimitMax bounds the configurable per-signal invitation limits
+// (RF-06), so an accidental extra digit cannot silently disable the bound.
+const ReferralInviteLimitMax = 100
 
 // ReferralSetting configures the single-level referral commission engine: the
 // inviter earns a percentage of every paid order of an invitee inside the
@@ -92,6 +98,31 @@ type ReferralSetting struct {
 	// license duties of the operator. Only an explicit choice settles cash;
 	// the default path issues credit grants.
 	CashSettlementEnabled bool `json:"cash_settlement_enabled"`
+
+	// Anti-abuse limits (RF-06). Every bound is disabled by default (0): an
+	// installation keeps working without configured limits.
+	//
+	// InviteLimitPerIP, InviteLimitPerDevice and InviteLimitPerEmailDomain
+	// bound how many invitees of one inviter may earn a commission from
+	// registrations sharing the invitee's registration IP, device or email
+	// domain. A missing registration signal never triggers its bound.
+	InviteLimitPerIP          int `json:"invite_limit_per_ip"`
+	InviteLimitPerDevice      int `json:"invite_limit_per_device"`
+	InviteLimitPerEmailDomain int `json:"invite_limit_per_email_domain"`
+	// DailyCommissionCapUSD, MonthlyCommissionCapUSD and
+	// InviteeCommissionCapUSD bound the payable commission of one inviter per
+	// calendar day, per calendar month and one invitee over the whole
+	// relation. An event above a cap is recorded as blocked for the audit
+	// trail and never pays out.
+	DailyCommissionCapUSD   float64 `json:"daily_commission_cap_usd"`
+	MonthlyCommissionCapUSD float64 `json:"monthly_commission_cap_usd"`
+	InviteeCommissionCapUSD float64 `json:"invitee_commission_cap_usd"`
+	// ReviewThresholdUSD moves a single commission above this amount into
+	// manual review; an administrator must approve it before it can settle.
+	ReviewThresholdUSD float64 `json:"review_threshold_usd"`
+	// RequireRealName blocks the commissions of an inviter whose real-name
+	// identity has not been recorded by an administrator yet.
+	RequireRealName bool `json:"require_real_name"`
 }
 
 // 默认配置：引擎默认关闭，窗口默认注册后 12 个月，退款窗口默认 21 天。
@@ -144,6 +175,69 @@ func clampReferralCommissionRate(rate float64) float64 {
 	return min(rate, float64(ReferralCommissionRateMaxPercent))
 }
 
+// ReferralCommissionCapMaxUSD is the largest configurable commission cap in
+// USD: the wallet quota bound converted back, so a configured cap can never
+// saturate the wallet conversion.
+func ReferralCommissionCapMaxUSD() float64 {
+	return float64(common.MaxWalletQuota) / common.QuotaPerUnit
+}
+
+// referralCommissionCapQuota converts a USD cap to quota with the shared wallet
+// bound and audits a saturated configuration like the overdraft limit does.
+func referralCommissionCapQuota(usd float64) int64 {
+	if usd <= 0 || math.IsNaN(usd) || math.IsInf(usd, 0) {
+		return 0
+	}
+	if maxUSD := ReferralCommissionCapMaxUSD(); maxUSD > 0 && usd > maxUSD {
+		common.SysError(common.LogText("referral commission cap %v USD exceeds the wallet bound, using %v USD", usd, maxUSD))
+		usd = maxUSD
+	}
+	quota, err := common.WalletQuotaFromDecimalStrict(
+		decimal.NewFromFloat(usd).Mul(decimal.NewFromFloat(common.QuotaPerUnit)),
+	)
+	if err != nil {
+		common.SysError(common.LogText("invalid referral commission cap %v USD: %s", usd, err.Error()))
+		return 0
+	}
+	return int64(quota)
+}
+
+// DailyCommissionCapQuota resolves the per-day payable commission cap in quota;
+// 0 means the cap is disabled.
+func (s *ReferralSetting) DailyCommissionCapQuota() int64 {
+	if s == nil {
+		return 0
+	}
+	return referralCommissionCapQuota(s.DailyCommissionCapUSD)
+}
+
+// MonthlyCommissionCapQuota resolves the per-calendar-month payable commission
+// cap in quota; 0 means the cap is disabled.
+func (s *ReferralSetting) MonthlyCommissionCapQuota() int64 {
+	if s == nil {
+		return 0
+	}
+	return referralCommissionCapQuota(s.MonthlyCommissionCapUSD)
+}
+
+// InviteeCommissionCapQuota resolves the lifetime payable commission cap of one
+// invitee relation in quota; 0 means the cap is disabled.
+func (s *ReferralSetting) InviteeCommissionCapQuota() int64 {
+	if s == nil {
+		return 0
+	}
+	return referralCommissionCapQuota(s.InviteeCommissionCapUSD)
+}
+
+// ReviewThresholdQuota resolves the single-commission manual review threshold
+// in quota; 0 means every commission is recorded as payable directly.
+func (s *ReferralSetting) ReviewThresholdQuota() int64 {
+	if s == nil {
+		return 0
+	}
+	return referralCommissionCapQuota(s.ReviewThresholdUSD)
+}
+
 // ValidateReferralOption validates commission settings before they are
 // persisted. Invalid updates are rejected and the previous configuration
 // keeps working.
@@ -177,6 +271,22 @@ func ValidateReferralOption(key, value string) error {
 		if enabled && !IsPaymentComplianceConfirmed() {
 			return fmt.Errorf("referral_setting.cash_settlement_enabled requires the confirmed payment compliance terms; the administrator must assess the personal income tax and payment licensing duties of cash commissions")
 		}
+	case "referral_setting.invite_limit_per_ip",
+		"referral_setting.invite_limit_per_device",
+		"referral_setting.invite_limit_per_email_domain":
+		limit, err := strconv.Atoi(value)
+		if err != nil || limit < 0 || limit > ReferralInviteLimitMax {
+			return fmt.Errorf("%s must be an integer between 0 and %d", key, ReferralInviteLimitMax)
+		}
+	case "referral_setting.daily_commission_cap_usd",
+		"referral_setting.monthly_commission_cap_usd",
+		"referral_setting.invitee_commission_cap_usd",
+		"referral_setting.review_threshold_usd":
+		return validateReferralCommissionCap(key, value)
+	case "referral_setting.require_real_name":
+		if _, err := strconv.ParseBool(value); err != nil {
+			return fmt.Errorf("referral_setting.require_real_name must be a boolean")
+		}
 	}
 	return nil
 }
@@ -187,6 +297,16 @@ func validateReferralCommissionRate(key string, value string) error {
 	rate, err := strconv.ParseFloat(value, 64)
 	if err != nil || math.IsNaN(rate) || math.IsInf(rate, 0) || rate < 0 || rate > ReferralCommissionRateMaxPercent {
 		return fmt.Errorf("%s must be a number between 0 and %d", key, ReferralCommissionRateMaxPercent)
+	}
+	return nil
+}
+
+// validateReferralCommissionCap accepts a finite USD amount within the wallet
+// bound; 0 disables the bound.
+func validateReferralCommissionCap(key string, value string) error {
+	amount, err := strconv.ParseFloat(value, 64)
+	if err != nil || math.IsNaN(amount) || math.IsInf(amount, 0) || amount < 0 || amount > ReferralCommissionCapMaxUSD() {
+		return fmt.Errorf("%s must be a finite amount in USD between 0 and %v", key, ReferralCommissionCapMaxUSD())
 	}
 	return nil
 }

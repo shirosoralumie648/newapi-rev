@@ -38,16 +38,22 @@ const (
 	ReferralCommissionSourceRedeem = "redeem"
 )
 
-// The commission event states. Every event starts pending: the commission is
-// recorded but not yet locked or issued. The settlement task (RF-04) moves an
-// event into locked once the refund window elapsed and into settled once the
-// inviter was paid; a refund inside the window cancels a pending event before
-// it is ever issued (RF-05). The statistics panel already buckets by every
-// known state.
+// Referral commission statuses. Every event starts pending: the commission is
+// recorded but not yet locked or issued. Review events wait for an
+// administrator's decision (a large amount or a watched account); blocked
+// events were refused by an anti-abuse rule and rejected events were declined
+// in review. Blocked and rejected events never pay out and never count against
+// a payable cap. The settlement step (RF-04) transitions payable events into
+// locked (confirmed, not yet paid out) and settled (paid out); a refund inside
+// the window cancels a pending event before it is ever issued (RF-05). The
+// statistics panel already buckets by every known state.
 const (
-	ReferralCommissionStatusPending = "pending"
-	ReferralCommissionStatusLocked  = "locked"
-	ReferralCommissionStatusSettled = "settled"
+	ReferralCommissionStatusPending  = "pending"
+	ReferralCommissionStatusReview   = "review"
+	ReferralCommissionStatusBlocked  = "blocked"
+	ReferralCommissionStatusRejected = "rejected"
+	ReferralCommissionStatusLocked   = "locked"
+	ReferralCommissionStatusSettled  = "settled"
 )
 
 // Referral commission settlement methods record how a settled commission
@@ -58,6 +64,13 @@ const (
 	ReferralCommissionSettlementCredit = "credit"
 	ReferralCommissionSettlementCash   = "cash"
 )
+
+// referralCommissionUnpayableStatuses are the statuses that neither pay out
+// nor consume a payable commission allowance.
+var referralCommissionUnpayableStatuses = []string{
+	ReferralCommissionStatusBlocked,
+	ReferralCommissionStatusRejected,
+}
 
 // ReferralCommission is one single-level commission event of one paid order:
 // how much the invitee actually paid, which rate applied and how much the
@@ -92,8 +105,11 @@ type ReferralCommission struct {
 	SettledAt        int64  `json:"settled_at" gorm:"bigint;not null;default:0"`
 	SettlementMethod string `json:"settlement_method" gorm:"type:varchar(16)"`
 	GrantId          int    `json:"grant_id" gorm:"not null;default:0"`
-	CreatedAt        int64  `json:"created_at" gorm:"bigint;not null;index"`
-	UpdatedAt        int64  `json:"updated_at" gorm:"bigint;not null"`
+	// Reason carries the anti-abuse decision behind a blocked or review event;
+	// it stays empty for events that were payable directly.
+	Reason    string `json:"reason" gorm:"type:varchar(32);not null;default:''"`
+	CreatedAt int64  `json:"created_at" gorm:"bigint;not null;index"`
+	UpdatedAt int64  `json:"updated_at" gorm:"bigint;not null"`
 }
 
 func (ReferralCommission) TableName() string {
@@ -165,7 +181,10 @@ func RecordReferralCommissionTx(tx *gorm.DB, inviteeId int, source string, baseQ
 	switch {
 	case setting.WindowMonths == operation_setting.ReferralWindowMonthsFirstTopUp:
 		var recorded int64
-		if err := tx.Model(&ReferralCommission{}).Where("invitee_id = ?", inviteeId).Count(&recorded).Error; err != nil {
+		if err := tx.Model(&ReferralCommission{}).
+			Where("invitee_id = ?", inviteeId).
+			Where("status NOT IN ?", referralCommissionUnpayableStatuses).
+			Count(&recorded).Error; err != nil {
 			return nil, err
 		}
 		if recorded > 0 {
@@ -184,6 +203,15 @@ func RecordReferralCommissionTx(tx *gorm.DB, inviteeId int, source string, baseQ
 		return nil, nil
 	}
 
+	// Anti-abuse gate (RF-06): the initial status is pending when the event may
+	// settle, review when an administrator must approve it first, or blocked
+	// with the reason when a rule refuses it. A refused event is still stored
+	// with the would-be amount as audit evidence.
+	initialStatus, reason, err := referralCommissionGate(tx, &inviter, inviteeId, int64(commissionQuota), now)
+	if err != nil {
+		return nil, err
+	}
+
 	commission := &ReferralCommission{
 		InviterId:       binding.InviterId,
 		InviteeId:       inviteeId,
@@ -193,7 +221,8 @@ func RecordReferralCommissionTx(tx *gorm.DB, inviteeId int, source string, baseQ
 		BaseQuota:       baseQuota,
 		RatePercent:     strconv.FormatFloat(ratePercent, 'f', -1, 64),
 		CommissionQuota: int64(commissionQuota),
-		Status:          ReferralCommissionStatusPending,
+		Status:          initialStatus,
+		Reason:          reason,
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
@@ -436,4 +465,61 @@ func ProcessReferralCommissionSettlement(now int64, limit int) (*ReferralCommiss
 	}
 	result.LockedCount = locked
 	return result, nil
+}
+
+// ErrReferralReviewNotPending reports a review that a concurrent or earlier
+// decision already resolved.
+var ErrReferralReviewNotPending = errors.New("referral commission review is no longer pending")
+
+// ListReferralCommissionReviews lists the commission events waiting for a
+// manual decision, oldest first.
+func ListReferralCommissionReviews(pageInfo *common.PageInfo) ([]ReferralCommission, int64, error) {
+	var total int64
+	if err := DB.Model(&ReferralCommission{}).Where("status = ?", ReferralCommissionStatusReview).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	reviews := make([]ReferralCommission, 0)
+	if total == 0 {
+		return reviews, 0, nil
+	}
+	pageSize, offset := 20, 0
+	if pageInfo != nil {
+		pageSize = pageInfo.GetPageSize()
+		offset = pageInfo.GetStartIdx()
+	}
+	if err := DB.Where("status = ?", ReferralCommissionStatusReview).Order("id").Limit(pageSize).Offset(offset).Find(&reviews).Error; err != nil {
+		return nil, total, err
+	}
+	return reviews, total, nil
+}
+
+// DecideReferralCommissionReview approves (review -> pending) or rejects
+// (review -> rejected) one reviewed commission. The conditional update claims
+// the decision, so two concurrent decisions resolve exactly once; a commission
+// that is no longer under review returns ErrReferralReviewNotPending.
+func DecideReferralCommissionReview(id int, approve bool) (*ReferralCommission, error) {
+	if id <= 0 {
+		return nil, errors.New("referral commission id is invalid")
+	}
+	targetStatus := ReferralCommissionStatusRejected
+	if approve {
+		targetStatus = ReferralCommissionStatusPending
+	}
+	var commission ReferralCommission
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		update := tx.Model(&ReferralCommission{}).
+			Where("id = ? AND status = ?", id, ReferralCommissionStatusReview).
+			Updates(map[string]any{"status": targetStatus, "updated_at": common.GetTimestamp()})
+		if update.Error != nil {
+			return update.Error
+		}
+		if update.RowsAffected == 0 {
+			return ErrReferralReviewNotPending
+		}
+		return tx.First(&commission, id).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &commission, nil
 }

@@ -38,6 +38,9 @@ export const RESET_PERIODS = [
   { value: 'custom', labelKey: 'Custom (seconds)' },
 ] as const
 
+/** Currencies the backend accepts for subscription plan payment collection. */
+export const PLAN_CURRENCY_VALUES = ['USD', 'CNY', 'EUR'] as const
+
 export function getDurationUnitOptions(t: TFunction) {
   return DURATION_UNITS.map((u) => ({ value: u.value, label: t(u.labelKey) }))
 }

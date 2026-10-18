@@ -48,6 +48,7 @@ import { useTurnstile } from '@/features/auth/hooks/use-turnstile'
 import { referralAttribution } from '@/features/auth/lib/referral-attribution'
 import {
   getAffiliateCode,
+  getDeviceId,
   saveAffiliateCode,
 } from '@/features/auth/lib/storage'
 import { useStatus } from '@/hooks/use-status'
@@ -181,6 +182,7 @@ export function SignUpForm({
         verification_code: verificationCode || undefined,
         aff_code: attribution.affCode,
         referral_source: attribution.referralSource,
+        device_id: getDeviceId() || undefined,
         turnstile: turnstileToken,
       })
 
