@@ -47,12 +47,24 @@ export const PLAYGROUND_QUOTA_FIELD_KEYS = [
   'canvas_max_edges',
   'canvas_node_data_max_bytes',
   'canvas_user_max_bytes',
+  'object_user_max_bytes',
   'task_max_concurrency',
   'task_user_result_max_bytes',
 ] as const
 
 export type PlaygroundQuotaFieldKey =
   (typeof PLAYGROUND_QUOTA_FIELD_KEYS)[number]
+
+// The byte budgets that make up an account's storage entitlement. A
+// subscription plan grants them by upgrading the buyer into a group whose
+// override is larger, so the plan editor edits exactly this subset.
+export const PLAYGROUND_STORAGE_QUOTA_FIELD_KEYS = [
+  'attachment_user_max_bytes',
+  'artifact_user_max_bytes',
+  'canvas_user_max_bytes',
+  'object_user_max_bytes',
+  'task_user_result_max_bytes',
+] as const satisfies readonly PlaygroundQuotaFieldKey[]
 
 export const PLAYGROUND_QUOTA_GROUPS = [
   { id: 'conversations', labelKey: 'Conversations' },
@@ -62,13 +74,14 @@ export const PLAYGROUND_QUOTA_GROUPS = [
   { id: 'attachments', labelKey: 'Attachments' },
   { id: 'artifacts', labelKey: 'Artifacts' },
   { id: 'canvas', labelKey: 'Canvas' },
+  { id: 'storage', labelKey: 'Storage' },
   { id: 'tasks', labelKey: 'Tasks' },
 ] as const
 
 export type PlaygroundQuotaGroupId =
   (typeof PLAYGROUND_QUOTA_GROUPS)[number]['id']
 
-type PlaygroundQuotaField = {
+export type PlaygroundQuotaField = {
   key: PlaygroundQuotaFieldKey
   group: PlaygroundQuotaGroupId
   labelKey: string
@@ -217,6 +230,12 @@ export const PLAYGROUND_QUOTA_FIELDS: readonly PlaygroundQuotaField[] = [
     bytes: true,
   },
   {
+    key: 'object_user_max_bytes',
+    group: 'storage',
+    labelKey: 'Object storage per user',
+    bytes: true,
+  },
+  {
     key: 'task_max_concurrency',
     group: 'tasks',
     labelKey: 'Concurrent Playground tasks',
@@ -274,4 +293,74 @@ export function parsePlaygroundQuotaOverrides(
       values: readPlaygroundQuotaValues(value),
     }))
     .sort((a, b) => a.group.localeCompare(b.group))
+}
+
+// The quota editors work on string drafts so an empty input means "inherit"
+// instead of zero. A draft carries every field; a caller renders the subset it
+// owns, and serialization keeps the untouched fields intact.
+export type PlaygroundQuotaDraft = Record<PlaygroundQuotaFieldKey, string>
+
+export type PlaygroundQuotaDraftErrors = Partial<
+  Record<PlaygroundQuotaFieldKey, string>
+>
+
+export type PlaygroundQuotaOverrideDraft = {
+  group: string
+  values: PlaygroundQuotaDraft
+}
+
+export function buildPlaygroundQuotaDraft(
+  values: PlaygroundQuotaValues
+): PlaygroundQuotaDraft {
+  const draft = {} as PlaygroundQuotaDraft
+  for (const key of PLAYGROUND_QUOTA_FIELD_KEYS) {
+    draft[key] = values[key] === undefined ? '' : String(values[key])
+  }
+  return draft
+}
+
+export function buildPlaygroundQuotaOverrideDrafts(
+  overrides: PlaygroundQuotaOverride[]
+): PlaygroundQuotaOverrideDraft[] {
+  return overrides.map((override) => ({
+    group: override.group,
+    values: buildPlaygroundQuotaDraft(override.values),
+  }))
+}
+
+export function isPositiveQuotaValue(value: string): boolean {
+  return /^\d+$/.test(value) && Number(value) > 0
+}
+
+// serializePlaygroundQuotaValues writes the global default policy: every field
+// is sent, and an empty input becomes 0, which the backend reads as "inherit
+// the built-in limit".
+export function serializePlaygroundQuotaValues(
+  draft: PlaygroundQuotaDraft
+): string {
+  return JSON.stringify(
+    Object.fromEntries(
+      PLAYGROUND_QUOTA_FIELD_KEYS.map((key) => [key, Number(draft[key])])
+    )
+  )
+}
+
+// serializePlaygroundQuotaOverrideDrafts writes the partial override map: only
+// non-empty fields are stored, and a group left with no field is dropped so it
+// keeps inheriting the global default.
+export function serializePlaygroundQuotaOverrideDrafts(
+  overrides: PlaygroundQuotaOverrideDraft[]
+): string {
+  const entries = [...overrides]
+    .sort((a, b) => a.group.localeCompare(b.group))
+    .map((override) => {
+      const values = Object.fromEntries(
+        PLAYGROUND_QUOTA_FIELD_KEYS.filter(
+          (key) => override.values[key] !== ''
+        ).map((key) => [key, Number(override.values[key])])
+      )
+      return [override.group, values] as const
+    })
+    .filter(([, values]) => Object.keys(values).length > 0)
+  return JSON.stringify(Object.fromEntries(entries))
 }

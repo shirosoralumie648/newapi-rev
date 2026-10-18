@@ -7723,6 +7723,18 @@
     "Expected a JSON object mapping group identifiers to unique display names": "グループ識別子と一意の表示名を対応付けた JSON オブジェクトが必要です",
     "Each group has a stable identifier and an editable display name. The identifier is stored on tokens, subscription plans and quotas and cannot be changed after saving; the display name is what users see.": "各グループには不変の識別子と編集可能な表示名があります。識別子はトークン、サブスクリプションプラン、クォータに保存され、保存後は変更できません。表示名はユーザーに表示される名前です。",
     "JSON map of group identifier → display name shown in the console. A group without an entry keeps its identifier as the display name.": "グループ識別子 → 表示名の JSON マップ（コンソール表示用）。未設定のグループは識別子を表示名として使用します。",
-    "Every stored reference uses the group identifier. The identifier is fixed once the group is saved and only the display name can change, so renaming a group never invalidates existing API keys or subscriptions.": "保存される参照はすべてグループ識別子を使用します。グループの保存後は識別子が固定され、変更できるのは表示名だけなので、名前を変更しても既存の API キーやサブスクリプションが無効になることはありません。"
+    "Every stored reference uses the group identifier. The identifier is fixed once the group is saved and only the display name can change, so renaming a group never invalidates existing API keys or subscriptions.": "保存される参照はすべてグループ識別子を使用します。グループの保存後は識別子が固定され、変更できるのは表示名だけなので、名前を変更しても既存の API キーやサブスクリプションが無効になることはありません。",
+    "Current group": "現在のグループ",
+    "Object storage": "オブジェクトストレージ",
+    "Object storage per user": "ユーザーごとのオブジェクトストレージ",
+    "Open Playground resource quotas": "Playground のリソース容量を開く",
+    "Playground resource quotas could not be loaded.": "Playground のリソース容量を読み込めませんでした。",
+    "Playground storage quota": "Playground ストレージ容量",
+    "Save storage quota": "ストレージ容量を保存",
+    "Select an upgrade group to configure the Playground storage quota it grants.": "アップグレードグループを選択すると、そのグループに付与される Playground ストレージ容量を設定できます。",
+    "Subscribe to a plan to get more storage.": "プランを購読するとストレージを増やせます。",
+    "Subscription plans grant the limits of their Upgrade Group, so give a paid group a larger storage quota here.": "サブスクリプションは「アップグレードグループ」の上限を付与します。有料グループにはここでより大きなストレージ容量を設定してください。",
+    "Upgrade for more storage": "アップグレードしてストレージを増やす",
+    "Users who purchase this plan join {{group}}. These Playground storage limits apply to that group; leave a field empty to inherit the global default.": "このプランを購入したユーザーは {{group}} に所属します。これらの Playground ストレージ上限はそのグループに適用されます。空欄の項目はグローバル既定値を継承します。"
   }
 }

@@ -362,6 +362,12 @@ func createPlaygroundAttachment(ctx context.Context, userID int, partitionID str
 		if usage.AttachmentBytes+size > policy.AttachmentUserMaxBytes {
 			return ErrPlaygroundAttachmentLimit
 		}
+		// The object-store budget is the account's storage entitlement: the
+		// same counter row serializes it, so concurrent uploads cannot push
+		// the stored bytes past the limit. Existing objects stay readable.
+		if usage.ObjectBytes+size > policy.ObjectUserMaxBytes {
+			return ErrPlaygroundAttachmentLimit
+		}
 		attachment = PlaygroundAttachment{
 			ID: "pgf_" + key, UserID: userID, SessionID: partitionID,
 			MediaType: input.MediaType, Filename: input.Filename,

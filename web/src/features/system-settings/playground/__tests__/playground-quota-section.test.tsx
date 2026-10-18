@@ -100,10 +100,7 @@ test('editing a global default saves the full defaults policy with the changed v
 
 test('editing a group override saves only the group policy and keeps inherited fields out', async () => {
   const user = userEvent.setup()
-  renderSection(
-    { session_max_count: 100 },
-    { alpha: { session_max_count: 5 } }
-  )
+  renderSection({ session_max_count: 100 }, { alpha: { session_max_count: 5 } })
 
   expect(screen.getByText('alpha')).toBeVisible()
   const overrideMessages = screen.getAllByRole('spinbutton', {
@@ -151,4 +148,31 @@ test('adding and removing a group override changes the editable list without sav
   await user.click(screen.getByRole('button', { name: 'Remove' }))
   expect(screen.queryByText('beta')).not.toBeInTheDocument()
   expect(api.put).not.toHaveBeenCalled()
+})
+
+test('a group override can grant a larger object storage entitlement', async () => {
+  const user = userEvent.setup()
+  renderSection(
+    { object_user_max_bytes: 1024 },
+    { pro: { session_max_count: 5 } }
+  )
+
+  const storage = screen.getAllByRole('spinbutton', {
+    name: /Object storage per user/,
+  })[1]
+  expect(storage).toHaveValue(1024)
+  fireEvent.change(storage, { target: { value: String(16 * 1024 * 1024) } })
+  await user.click(
+    screen.getByRole('button', { name: 'Save Playground quotas' })
+  )
+
+  await waitFor(() =>
+    expect(bodyFor('playground_setting.group_overrides')).toBeDefined()
+  )
+  expect(
+    JSON.parse(bodyFor('playground_setting.group_overrides')?.value ?? '{}')
+  ).toEqual({
+    pro: { session_max_count: 5, object_user_max_bytes: 16 * 1024 * 1024 },
+  })
+  expect(bodyFor('playground_setting.defaults')).toBeUndefined()
 })

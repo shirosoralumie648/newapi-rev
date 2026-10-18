@@ -7723,6 +7723,18 @@
     "Expected a JSON object mapping group identifiers to unique display names": "Un objet JSON associant les identifiants de groupe à des noms d'affichage uniques est attendu",
     "Each group has a stable identifier and an editable display name. The identifier is stored on tokens, subscription plans and quotas and cannot be changed after saving; the display name is what users see.": "Chaque groupe possède un identifiant stable et un nom d'affichage modifiable. L'identifiant est stocké sur les jetons, les forfaits d'abonnement et les quotas et ne peut plus être modifié après l'enregistrement ; le nom d'affichage est ce que voient les utilisateurs.",
     "JSON map of group identifier → display name shown in the console. A group without an entry keeps its identifier as the display name.": "Correspondance JSON identifiant de groupe → nom d'affichage utilisé dans la console. Un groupe sans entrée conserve son identifiant comme nom d'affichage.",
-    "Every stored reference uses the group identifier. The identifier is fixed once the group is saved and only the display name can change, so renaming a group never invalidates existing API keys or subscriptions.": "Toutes les références enregistrées utilisent l'identifiant du groupe. Une fois le groupe enregistré, l'identifiant est figé et seul le nom d'affichage peut changer : renommer un groupe n'invalide donc jamais les clés API ni les abonnements existants."
+    "Every stored reference uses the group identifier. The identifier is fixed once the group is saved and only the display name can change, so renaming a group never invalidates existing API keys or subscriptions.": "Toutes les références enregistrées utilisent l'identifiant du groupe. Une fois le groupe enregistré, l'identifiant est figé et seul le nom d'affichage peut changer : renommer un groupe n'invalide donc jamais les clés API ni les abonnements existants.",
+    "Current group": "Groupe actuel",
+    "Object storage": "Stockage d'objets",
+    "Object storage per user": "Stockage d'objets par utilisateur",
+    "Open Playground resource quotas": "Ouvrir les quotas de ressources Playground",
+    "Playground resource quotas could not be loaded.": "Les quotas de ressources Playground n'ont pas pu être chargés.",
+    "Playground storage quota": "Quota de stockage Playground",
+    "Save storage quota": "Enregistrer le quota de stockage",
+    "Select an upgrade group to configure the Playground storage quota it grants.": "Sélectionnez un groupe de mise à niveau pour configurer le quota de stockage Playground qu'il accorde.",
+    "Subscribe to a plan to get more storage.": "Abonnez-vous à un forfait pour obtenir plus d'espace de stockage.",
+    "Subscription plans grant the limits of their Upgrade Group, so give a paid group a larger storage quota here.": "Les forfaits accordent les limites de leur groupe de mise à niveau ; attribuez ici un quota de stockage plus élevé à un groupe payant.",
+    "Upgrade for more storage": "Passer à une offre supérieure pour plus de stockage",
+    "Users who purchase this plan join {{group}}. These Playground storage limits apply to that group; leave a field empty to inherit the global default.": "Les utilisateurs qui achètent ce forfait rejoignent {{group}}. Ces limites de stockage Playground s'appliquent à ce groupe ; laissez un champ vide pour hériter de la valeur globale par défaut."
   }
 }

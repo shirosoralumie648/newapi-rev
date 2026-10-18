@@ -7723,6 +7723,18 @@
     "Expected a JSON object mapping group identifiers to unique display names": "Cần một đối tượng JSON ánh xạ định danh nhóm tới tên hiển thị duy nhất",
     "Each group has a stable identifier and an editable display name. The identifier is stored on tokens, subscription plans and quotas and cannot be changed after saving; the display name is what users see.": "Mỗi nhóm có một định danh cố định và một tên hiển thị có thể chỉnh sửa. Định danh được lưu trên token, gói đăng ký và hạn mức và không thể thay đổi sau khi lưu; tên hiển thị là nội dung người dùng nhìn thấy.",
     "JSON map of group identifier → display name shown in the console. A group without an entry keeps its identifier as the display name.": "Ánh xạ JSON định danh nhóm → tên hiển thị dùng trong bảng điều khiển. Nhóm không có mục nào sẽ dùng định danh làm tên hiển thị.",
-    "Every stored reference uses the group identifier. The identifier is fixed once the group is saved and only the display name can change, so renaming a group never invalidates existing API keys or subscriptions.": "Mọi tham chiếu đã lưu đều dùng định danh nhóm. Sau khi lưu, định danh được cố định và chỉ có tên hiển thị thay đổi được, vì vậy đổi tên nhóm không bao giờ làm mất hiệu lực của API key hay gói đăng ký hiện có."
+    "Every stored reference uses the group identifier. The identifier is fixed once the group is saved and only the display name can change, so renaming a group never invalidates existing API keys or subscriptions.": "Mọi tham chiếu đã lưu đều dùng định danh nhóm. Sau khi lưu, định danh được cố định và chỉ có tên hiển thị thay đổi được, vì vậy đổi tên nhóm không bao giờ làm mất hiệu lực của API key hay gói đăng ký hiện có.",
+    "Current group": "Nhóm hiện tại",
+    "Object storage": "Lưu trữ đối tượng",
+    "Object storage per user": "Lưu trữ đối tượng mỗi người dùng",
+    "Open Playground resource quotas": "Mở hạn mức tài nguyên Playground",
+    "Playground resource quotas could not be loaded.": "Không thể tải hạn mức tài nguyên Playground.",
+    "Playground storage quota": "Hạn mức lưu trữ Playground",
+    "Save storage quota": "Lưu hạn mức lưu trữ",
+    "Select an upgrade group to configure the Playground storage quota it grants.": "Chọn nhóm nâng cấp để cấu hình hạn mức lưu trữ Playground mà nhóm đó được cấp.",
+    "Subscribe to a plan to get more storage.": "Đăng ký gói để có thêm dung lượng lưu trữ.",
+    "Subscription plans grant the limits of their Upgrade Group, so give a paid group a larger storage quota here.": "Gói đăng ký cấp hạn mức của Nhóm nâng cấp tương ứng, hãy đặt hạn mức lưu trữ lớn hơn cho nhóm trả phí tại đây.",
+    "Upgrade for more storage": "Nâng cấp để có thêm dung lượng lưu trữ",
+    "Users who purchase this plan join {{group}}. These Playground storage limits apply to that group; leave a field empty to inherit the global default.": "Người dùng mua gói này sẽ tham gia {{group}}. Các hạn mức lưu trữ Playground này áp dụng cho nhóm đó; để trống để kế thừa giá trị mặc định toàn cục."
   }
 }

@@ -7723,6 +7723,18 @@
     "Expected a JSON object mapping group identifiers to unique display names": "应为「分组标识符 → 唯一显示名称」的 JSON 对象",
     "Each group has a stable identifier and an editable display name. The identifier is stored on tokens, subscription plans and quotas and cannot be changed after saving; the display name is what users see.": "每个分组都有一个稳定标识符和一个可编辑的显示名称。标识符会写入令牌、订阅套餐和配额，保存后不可更改；显示名称是用户看到的内容。",
     "JSON map of group identifier → display name shown in the console. A group without an entry keeps its identifier as the display name.": "分组标识符 → 显示名称的 JSON 映射，用于控制台展示。未配置的分组仍以标识符作为显示名称。",
-    "Every stored reference uses the group identifier. The identifier is fixed once the group is saved and only the display name can change, so renaming a group never invalidates existing API keys or subscriptions.": "所有已保存的引用都使用分组标识符。分组保存后标识符固定不变，只有显示名称可以修改，因此改名不会使已有的 API 密钥或订阅失效。"
+    "Every stored reference uses the group identifier. The identifier is fixed once the group is saved and only the display name can change, so renaming a group never invalidates existing API keys or subscriptions.": "所有已保存的引用都使用分组标识符。分组保存后标识符固定不变，只有显示名称可以修改，因此改名不会使已有的 API 密钥或订阅失效。",
+    "Current group": "当前用户组",
+    "Object storage": "对象存储",
+    "Object storage per user": "每个用户的对象存储",
+    "Open Playground resource quotas": "打开 Playground 资源配额",
+    "Playground resource quotas could not be loaded.": "无法加载 Playground 资源配额。",
+    "Playground storage quota": "Playground 存储配额",
+    "Save storage quota": "保存存储配额",
+    "Select an upgrade group to configure the Playground storage quota it grants.": "选择升级用户组后即可配置该组获得的 Playground 存储配额。",
+    "Subscribe to a plan to get more storage.": "订阅套餐即可获得更大的存储空间。",
+    "Subscription plans grant the limits of their Upgrade Group, so give a paid group a larger storage quota here.": "订阅套餐授予其「升级用户组」的配额，请在这里为付费用户组配置更大的存储配额。",
+    "Upgrade for more storage": "升级获取更大存储",
+    "Users who purchase this plan join {{group}}. These Playground storage limits apply to that group; leave a field empty to inherit the global default.": "购买此套餐的用户会加入 {{group}}。这些 Playground 存储上限适用于该用户组；留空表示继承全局默认值。"
   }
 }

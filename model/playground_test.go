@@ -2025,12 +2025,14 @@ func TestPlaygroundQuotaPolicyResolutionAndSessionLimit(t *testing.T) {
 	playgroundTestDB(t, "sqlite")
 	usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
 		policy.SessionMaxCount = 2
+		policy.ObjectUserMaxBytes = 4096
 	})
-	usePlaygroundGroupQuota(t, "default", playground_setting.PlaygroundQuotaPolicy{SessionMaxCount: 1})
+	usePlaygroundGroupQuota(t, "default", playground_setting.PlaygroundQuotaPolicy{SessionMaxCount: 1, ObjectUserMaxBytes: 8192})
 
 	policy, err := model.PlaygroundQuotaPolicyForUser(7)
 	require.NoError(t, err)
 	assert.Equal(t, 1, policy.SessionMaxCount, "the group override wins over the global default")
+	assert.EqualValues(t, 8192, policy.ObjectUserMaxBytes, "a group override can grant a larger storage entitlement")
 	assert.Equal(t, playground_setting.GetPlaygroundQuotaPolicy("").MessageMaxCount, policy.MessageMaxCount, "unset group fields inherit")
 
 	first := createPlayground(t, 7, "quota-first")
@@ -2082,7 +2084,43 @@ func TestPlaygroundAttachmentCountLimit(t *testing.T) {
 	assert.Contains(t, response.Body.String(), "PLAYGROUND_ATTACHMENT_LIMIT_EXCEEDED")
 }
 
-// The unified usage view reports the owner's stored conversations, attachments,
+// The account-level object-store budget is part of the resource quota policy,
+// so the group a subscription plan upgrades the buyer into can grant a larger
+// storage entitlement. A write over the budget is rejected with the stable
+// attachment code while the stored objects stay readable.
+func TestPlaygroundObjectStorageQuotaLimit(t *testing.T) {
+	playgroundTestDB(t, "sqlite")
+	usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+		policy.AttachmentUserMaxCount = 10
+		policy.AttachmentUserMaxBytes = 1 << 20
+		policy.ObjectUserMaxBytes = 64
+	})
+	session := createPlayground(t, 7, "object-budget")
+	id := session["id"].(string)
+	stored := playgroundUploadAttachment(t, 7, id, "object-a", "image/png", playgroundPNGFixture(64))
+
+	overflow := playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions/"+id+"/attachments", map[string]any{
+		"client_key": "object-b", "media_type": "image/png", "data": base64.StdEncoding.EncodeToString(playgroundPNGFixture(16)),
+	}, controller.CreatePlaygroundAttachment)
+	require.Equal(t, http.StatusUnprocessableEntity, overflow.Code, overflow.Body.String())
+	assert.Contains(t, overflow.Body.String(), "PLAYGROUND_ATTACHMENT_LIMIT_EXCEEDED")
+
+	// Over budget only blocks new writes: the stored attachment is still
+	// listed and its bytes are still served.
+	listed := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+id+"/attachments", nil, controller.ListPlaygroundAttachments)
+	require.Equal(t, http.StatusOK, listed.Code, listed.Body.String())
+	assert.Contains(t, listed.Body.String(), stored["id"].(string))
+	content := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+id+"/attachments/"+stored["id"].(string)+"/content", nil, controller.GetPlaygroundAttachmentContent)
+	require.Equal(t, http.StatusOK, content.Code, content.Body.String())
+	assert.Equal(t, playgroundPNGFixture(64), content.Body.Bytes())
+
+	// The upgrade target group's override grants the larger entitlement the
+	// plan sells, and the same upload then succeeds.
+	usePlaygroundGroupQuota(t, "default", playground_setting.PlaygroundQuotaPolicy{ObjectUserMaxBytes: 1 << 20})
+	playgroundUploadAttachment(t, 7, id, "object-c", "image/png", playgroundPNGFixture(16))
+}
+
+// The unified usage view reports the owner's stored conversations,
 // artifacts and canvases against the effective policy, and never mixes in
 // another account's rows. The limit column must follow the group override, so
 // it always matches what the write paths enforce.
@@ -2098,8 +2136,9 @@ func TestPlaygroundUsageForUserReportsOwnerTotals(t *testing.T) {
 		policy.CanvasUserMaxBytes = 16384
 		policy.TaskMaxConcurrency = 4
 		policy.TaskUserResultMaxBytes = 1 << 20
+		policy.ObjectUserMaxBytes = 1 << 21
 	})
-	usePlaygroundGroupQuota(t, "default", playground_setting.PlaygroundQuotaPolicy{CanvasUserMaxProjects: 9})
+	usePlaygroundGroupQuota(t, "default", playground_setting.PlaygroundQuotaPolicy{CanvasUserMaxProjects: 9, ObjectUserMaxBytes: 1 << 22})
 
 	sessionID, input := playgroundArtifactSourceFixture(t, 7, "usage-owner")
 	artifactResult(t, playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions/"+sessionID+"/artifacts", input, controller.CreatePlaygroundArtifact))
@@ -2126,6 +2165,7 @@ func TestPlaygroundUsageForUserReportsOwnerTotals(t *testing.T) {
 	usage, err := model.PlaygroundUsageForUser(7)
 	require.NoError(t, err)
 
+	assert.Equal(t, "default", usage.Group, "the view names the group its limits came from")
 	assert.EqualValues(t, 1, usage.Sessions.Used)
 	assert.EqualValues(t, 5, usage.Sessions.Limit)
 	assert.EqualValues(t, 1, usage.Attachments.Used)
@@ -2140,6 +2180,8 @@ func TestPlaygroundUsageForUserReportsOwnerTotals(t *testing.T) {
 	assert.EqualValues(t, 9, usage.Canvas.Limit)
 	assert.NotZero(t, usage.Canvas.UsedBytes)
 	assert.EqualValues(t, 16384, usage.Canvas.LimitBytes)
+	assert.EqualValues(t, 64, usage.Storage.UsedBytes, "object-store bytes are the upload budget figure")
+	assert.EqualValues(t, 1<<22, usage.Storage.LimitBytes, "the group override sets the storage entitlement")
 	assert.EqualValues(t, 1, usage.Tasks.Used)
 	assert.EqualValues(t, 4, usage.Tasks.Limit)
 	assert.EqualValues(t, len(playgroundTaskDataFixture(512)), usage.Tasks.UsedBytes)
@@ -2200,6 +2242,8 @@ func TestPlaygroundUserUsageCounters(t *testing.T) {
 			assert.EqualValues(t, counters.ArtifactBytes, usage.Artifacts.UsedBytes)
 			assert.EqualValues(t, counters.CanvasCount, usage.Canvas.Used)
 			assert.EqualValues(t, counters.CanvasBytes, usage.Canvas.UsedBytes)
+			assert.EqualValues(t, counters.ObjectBytes, usage.Storage.UsedBytes)
+			assert.Equal(t, "default", usage.Group)
 
 			// Another account never observes these counters.
 			var foreignCount int64
