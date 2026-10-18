@@ -258,7 +258,12 @@ export interface UserWalletData {
 /**
  * Topup record status
  */
-export type TopupStatus = 'success' | 'pending' | 'expired'
+export type TopupStatus =
+  | 'success'
+  | 'pending'
+  | 'expired'
+  | 'refunded'
+  | 'disputed'
 
 /**
  * Topup billing record
@@ -270,8 +275,13 @@ export interface TopupRecord {
   user_id: number
   /** Topup amount (quota) */
   amount: number
-  /** Payment amount (actual money paid) */
-  money: number
+  /**
+   * Payment amount actually charged, stored as an exact decimal and
+   * serialized by the backend as a string (legacy records may be numbers).
+   */
+  money: string | number
+  /** ISO 4217 currency the payment was collected in, when the provider reported one */
+  currency?: string
   /** Trade/order number */
   trade_no: string
   /** Payment method type */
@@ -282,6 +292,10 @@ export interface TopupRecord {
   complete_time?: number
   /** Payment status */
   status: TopupStatus
+  /** Provider-side payment reference (e.g. Stripe payment intent) */
+  provider_payment_id?: string
+  /** Timestamp of the provider refund or chargeback, when reversed */
+  refund_time?: number
 }
 
 /**
@@ -469,3 +483,79 @@ export interface ReferralInvitationFilters {
   source?: string
   status?: string
 }
+
+// ============================================================================
+// Referral Anti-Abuse Types
+// ============================================================================
+
+/**
+ * The registration environment of one account, recorded in the same
+ * transaction as the account. A missing signal means the environment was not
+ * observable (for example an administrator-created account).
+ */
+export interface ReferralRegistrationSignal {
+  id: number
+  user_id: number
+  ip: string
+  device_hash: string
+  email_domain: string
+  user_agent: string
+  created_at: number
+}
+
+/** The administrator's anti-abuse mark on one account. */
+export interface ReferralFlag {
+  id: number
+  user_id: number
+  level: string
+  note: string
+  marked_by: number
+  created_at: number
+  updated_at: number
+}
+
+/** One commission-status bucket of an account's commission history. */
+export interface ReferralCommissionStatusCount {
+  status: string
+  count: number
+  quota: number
+}
+
+/** The administrator's anti-abuse view of one account. */
+export interface ReferralProfile {
+  user_id: number
+  signal: ReferralRegistrationSignal | null
+  identity_linked: boolean
+  identity_ref: string
+  flag: ReferralFlag | null
+  invitees: number
+  commissions: ReferralCommissionStatusCount[]
+}
+
+/** The anti-abuse mark levels an administrator can set; clear removes it. */
+export type ReferralFlagLevel = 'watch' | 'frozen' | 'clear'
+
+/** One recorded commission event, as the review queue lists it. */
+export interface ReferralCommissionRecord {
+  id: number
+  inviter_id: number
+  invitee_id: number
+  source: string
+  ref_type: string
+  ref_id: string
+  base_quota: number
+  rate_percent: string
+  commission_quota: number
+  status: string
+  reason: string
+  created_at: number
+  updated_at: number
+}
+
+export interface ReferralReviewPage {
+  items: ReferralCommissionRecord[]
+  total: number
+}
+
+/** Manual decision of one reviewed commission event. */
+export type ReferralReviewDecision = 'approve' | 'reject'

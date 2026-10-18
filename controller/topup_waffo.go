@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 	"github.com/thanhpk/randstr"
 	waffo "github.com/waffo-com/waffo-go"
 	"github.com/waffo-com/waffo-go/config"
@@ -224,7 +225,8 @@ func RequestWaffoPay(c *gin.Context) {
 	topUp := &model.TopUp{
 		UserId:          id,
 		Amount:          amount,
-		Money:           payMoney,
+		Money:           decimal.NewFromFloat(payMoney),
+		Currency:        getWaffoCurrency(),
 		TradeNo:         merchantOrderId,
 		PaymentMethod:   model.PaymentMethodWaffo,
 		PaymentProvider: model.PaymentProviderWaffo,
@@ -384,6 +386,20 @@ func WaffoWebhook(c *gin.Context) {
 		}
 		logger.LogInfo(c.Request.Context(), common.LogText("Waffo webhook verified and parsed event_type=%s merchant_order_id=%s order_status=%s client_ip=%s", event.EventType, payload.Result.MerchantOrderID, payload.Result.OrderStatus, c.ClientIP()))
 		handleWaffoPayment(c, wh, &payload.Result.PaymentNotificationResult)
+	case core.EventRefund:
+		var payload core.RefundNotification
+		if err := common.Unmarshal(bodyBytes, &payload); err != nil {
+			logger.LogError(c.Request.Context(), common.LogText("Waffo failed to parse refund callback payload event_type=%s client_ip=%s error=%q body=%q", event.EventType, c.ClientIP(), err.Error(), bodyStr))
+			sendWaffoWebhookResponse(c, wh, false, "invalid refund payload")
+			return
+		}
+		if payload.Result == nil {
+			logger.LogError(c.Request.Context(), common.LogText("Waffo refund callback payload missing result event_type=%s client_ip=%s body=%q", event.EventType, c.ClientIP(), bodyStr))
+			sendWaffoWebhookResponse(c, wh, false, "invalid refund payload")
+			return
+		}
+		logger.LogInfo(c.Request.Context(), common.LogText("Waffo webhook verified and parsed event_type=%s orig_payment_request_id=%s refund_status=%s client_ip=%s", event.EventType, payload.Result.OrigPaymentRequestID, payload.Result.RefundStatus, c.ClientIP()))
+		handleWaffoRefund(c, wh, payload.Result)
 	default:
 		logger.LogInfo(c.Request.Context(), common.LogText("Waffo webhook ignored event event_type=%s client_ip=%s", event.EventType, c.ClientIP()))
 		sendWaffoWebhookResponse(c, wh, true, "")
@@ -419,6 +435,43 @@ func handleWaffoPayment(c *gin.Context, wh *core.WebhookHandler, result *core.Pa
 
 	logger.LogInfo(c.Request.Context(), common.LogText("Waffo top-up succeeded trade_no=%s client_ip=%s", merchantOrderId, c.ClientIP()))
 	sendWaffoWebhookResponse(c, wh, true, "")
+}
+
+// handleWaffoRefund reverses the credited quota when Waffo reports a fully
+// refunded order. Waffo does not distinguish a provider-initiated refund from
+// an operator refund, and both must take the quota back. In-progress, partial,
+// and failed refunds are acknowledged but skipped: reversing the full credit
+// for a partial refund would over-withdraw the user's balance, so partial
+// refunds are left for manual handling.
+func handleWaffoRefund(c *gin.Context, wh *core.WebhookHandler, result *core.RefundNotificationResult) {
+	tradeNo := result.OrigPaymentRequestID
+	switch result.RefundStatus {
+	case core.RefundStatusFullyRefunded:
+		if tradeNo == "" {
+			logger.LogWarn(c.Request.Context(), common.LogText("Waffo fully refunded notification missing orig payment request id refund_request_id=%s client_ip=%s", result.RefundRequestID, c.ClientIP()))
+			sendWaffoWebhookResponse(c, wh, true, "")
+			return
+		}
+		handled, err := model.ReversePaymentByTradeNo(tradeNo, false)
+		if err != nil {
+			logger.LogError(c.Request.Context(), common.LogText("Waffo refund reversal failed trade_no=%s refund_request_id=%s client_ip=%s error=%q", tradeNo, result.RefundRequestID, c.ClientIP(), err.Error()))
+			sendWaffoWebhookResponse(c, wh, false, err.Error())
+			return
+		}
+		if !handled {
+			logger.LogWarn(c.Request.Context(), common.LogText("Waffo refund found no local order trade_no=%s refund_request_id=%s client_ip=%s", tradeNo, result.RefundRequestID, c.ClientIP()))
+			sendWaffoWebhookResponse(c, wh, true, "")
+			return
+		}
+		logger.LogInfo(c.Request.Context(), common.LogText("Waffo refund reversed trade_no=%s refund_request_id=%s client_ip=%s", tradeNo, result.RefundRequestID, c.ClientIP()))
+		sendWaffoWebhookResponse(c, wh, true, "")
+	case core.RefundStatusPartiallyRefunded:
+		logger.LogWarn(c.Request.Context(), common.LogText("Waffo partial refund needs manual handling trade_no=%s refund_request_id=%s refund_amount=%s client_ip=%s", tradeNo, result.RefundRequestID, result.RefundAmount, c.ClientIP()))
+		sendWaffoWebhookResponse(c, wh, true, "")
+	default:
+		logger.LogInfo(c.Request.Context(), common.LogText("Waffo refund notification ignored trade_no=%s refund_request_id=%s refund_status=%s client_ip=%s", tradeNo, result.RefundRequestID, result.RefundStatus, c.ClientIP()))
+		sendWaffoWebhookResponse(c, wh, true, "")
+	}
 }
 
 // sendWaffoWebhookResponse 发送签名响应

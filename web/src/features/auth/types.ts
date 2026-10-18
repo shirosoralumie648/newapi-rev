@@ -44,6 +44,7 @@ export interface RegisterPayload {
   verification_code?: string
   aff_code?: string
   referral_source?: ReferralSource
+  device_id?: string
   turnstile?: string
 }
 

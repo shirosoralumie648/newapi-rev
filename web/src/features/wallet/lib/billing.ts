@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { StatusBadgeProps } from '@/components/status-badge'
-import { formatTimestampToDate } from '@/lib/format'
+import { formatNumber, formatTimestampToDate } from '@/lib/format'
 
 import type { TopupStatus } from '../types'
 
@@ -45,6 +45,14 @@ export const STATUS_CONFIG: Record<TopupStatus, StatusConfig> = {
   expired: {
     variant: 'danger',
     label: 'Expired',
+  },
+  refunded: {
+    variant: 'danger',
+    label: 'Refunded',
+  },
+  disputed: {
+    variant: 'danger',
+    label: 'Disputed',
   },
 }
 
@@ -81,4 +89,32 @@ export function getPaymentMethodName(
  */
 export function formatTimestamp(timestamp: number): string {
   return formatTimestampToDate(timestamp)
+}
+
+/**
+ * Format the paid amount of a topup record.
+ *
+ * The backend stores the exact decimal and serializes it as a string, and the
+ * amount is denominated in the provider currency instead of the configured
+ * quota display currency, so the shared currency helpers do not apply here.
+ */
+export function formatPaymentAmount(
+  money: string | number,
+  currency?: string
+): string {
+  const amount = typeof money === 'string' ? Number(money) : money
+  if (amount == null || Number.isNaN(amount)) return '-'
+
+  if (currency && /^[A-Za-z]{3}$/.test(currency)) {
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: 'currency',
+        currency: currency.toUpperCase(),
+      }).format(amount)
+    } catch {
+      // Fall back to a plain number when the currency code is unknown.
+    }
+  }
+
+  return formatNumber(amount)
 }

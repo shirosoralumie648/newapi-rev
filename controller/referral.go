@@ -20,9 +20,11 @@ package controller
 
 import (
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -283,4 +285,173 @@ func referralCommissionWindowMonths() int {
 // events; a disabled engine leaves every aggregate at its recorded value.
 func referralCommissionEnabled() bool {
 	return operation_setting.GetReferralSetting().Enabled
+}
+
+// GetUserReferralProfile returns the anti-abuse view of one managed account:
+// the registration signal, the identity correlation prefix, the flag and the
+// commission summary.
+func GetUserReferralProfile(c *gin.Context) {
+	user, ok := requireManagedUser(c)
+	if !ok {
+		return
+	}
+	profile, err := model.GetReferralProfile(user.Id)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    profile,
+	})
+}
+
+type referralFlagRequest struct {
+	Level string `json:"level"`
+	Note  string `json:"note"`
+}
+
+// SetUserReferralFlag sets or clears the anti-abuse mark (watch or frozen) of a
+// managed account.
+func SetUserReferralFlag(c *gin.Context) {
+	user, ok := requireManagedUser(c)
+	if !ok {
+		return
+	}
+	var request referralFlagRequest
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	request.Level = strings.TrimSpace(request.Level)
+	flag, err := model.SetReferralFlag(user.Id, request.Level, request.Note, c.GetInt("id"))
+	if err != nil {
+		if errors.Is(err, model.ErrReferralFlagLevelInvalid) {
+			common.ApiErrorT(c, "Invalid parameters")
+			return
+		}
+		common.ApiError(c, err)
+		return
+	}
+	recordManageAuditFor(c, user.Id, "user.referral_flag", map[string]any{
+		"username": user.Username,
+		"id":       user.Id,
+		"level":    request.Level,
+		"note":     strings.TrimSpace(request.Note),
+	})
+	common.ApiSuccessT(c, "Referral flag updated", gin.H{"flag": flag})
+}
+
+type referralIdentityRequest struct {
+	Identity string `json:"identity"`
+}
+
+// SetUserReferralIdentity records the administrator-verified real-name identity
+// of a managed account. Only a hash is stored; the response exposes an
+// 8-character correlation prefix.
+func SetUserReferralIdentity(c *gin.Context) {
+	user, ok := requireManagedUser(c)
+	if !ok {
+		return
+	}
+	var request referralIdentityRequest
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	record, err := model.SetReferralIdentity(user.Id, request.Identity)
+	if err != nil {
+		if errors.Is(err, model.ErrReferralIdentityInvalid) {
+			common.ApiErrorT(c, "Invalid parameters")
+			return
+		}
+		common.ApiError(c, err)
+		return
+	}
+	identityRef := record.IdentityHash
+	if len(identityRef) > 8 {
+		identityRef = identityRef[:8]
+	}
+	recordManageAuditFor(c, user.Id, "user.referral_identity", map[string]any{
+		"username":     user.Username,
+		"id":           user.Id,
+		"identity_ref": identityRef,
+	})
+	common.ApiSuccessT(c, "Referral identity updated", gin.H{"identity_ref": identityRef})
+}
+
+// ClearUserReferralIdentity removes the recorded real-name identity of a
+// managed account.
+func ClearUserReferralIdentity(c *gin.Context) {
+	user, ok := requireManagedUser(c)
+	if !ok {
+		return
+	}
+	if err := model.ClearReferralIdentity(user.Id); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	recordManageAuditFor(c, user.Id, "user.referral_identity_clear", map[string]any{
+		"username": user.Username,
+		"id":       user.Id,
+	})
+	common.ApiSuccessT(c, "Referral identity cleared", nil)
+}
+
+// ListReferralCommissionReviews lists the commission events waiting for a
+// manual decision.
+func ListReferralCommissionReviews(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	reviews, total, err := model.ListReferralCommissionReviews(pageInfo)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(reviews)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    pageInfo,
+	})
+}
+
+type referralReviewDecisionRequest struct {
+	Decision string `json:"decision"`
+}
+
+// ReviewReferralCommission approves or rejects one reviewed commission event.
+func ReviewReferralCommission(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	var request referralReviewDecisionRequest
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	decision := strings.TrimSpace(request.Decision)
+	if decision != "approve" && decision != "reject" {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	commission, err := model.DecideReferralCommissionReview(id, decision == "approve")
+	if err != nil {
+		if errors.Is(err, model.ErrReferralReviewNotPending) {
+			common.ApiErrorT(c, "The referral review is no longer pending")
+			return
+		}
+		common.ApiError(c, err)
+		return
+	}
+	recordManageAuditFor(c, commission.InviterId, "user.referral_review", map[string]any{
+		"id":               commission.Id,
+		"decision":         decision,
+		"invitee_id":       commission.InviteeId,
+		"commission_quota": commission.CommissionQuota,
+	})
+	common.ApiSuccessT(c, "Referral review updated", gin.H{"commission": commission})
 }

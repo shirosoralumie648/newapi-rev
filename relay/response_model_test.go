@@ -200,6 +200,7 @@ func TestResponseModelHandlersCaptureBeforeConversion(t *testing.T) {
 		{"responses buffered to chat", responsesStream, types.RelayFormatOpenAI, false, openai.OaiResponsesToChatBufferedStreamHandler},
 		{"chat to responses", chat, types.RelayFormatOpenAIResponses, false, openai.OaiChatToResponsesHandler},
 		{"chat to responses stream", chatStream, types.RelayFormatOpenAIResponses, true, openai.OaiChatToResponsesStreamHandler},
+		{"chat buffered to responses", chatStream, types.RelayFormatOpenAIResponses, false, openai.OaiChatToResponsesBufferedStreamHandler},
 		{"claude", claudeBody, types.RelayFormatClaude, false, func(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 			return claude.ClaudeHandler(c, resp, info)
 		}},

@@ -212,6 +212,21 @@ type AdminUpsertSubscriptionPlanRequest struct {
 	Plan model.SubscriptionPlan `json:"plan"`
 }
 
+// normalizeSubscriptionCurrency normalizes and validates the currency a plan
+// is collected in. Plans are charged in their own currency without conversion
+// (no FX), so the value must be one the configured payment channels support.
+func normalizeSubscriptionCurrency(raw string) (string, bool) {
+	currency := strings.ToUpper(strings.TrimSpace(raw))
+	if currency == "" {
+		currency = "USD"
+	}
+	switch currency {
+	case "USD", "CNY", "EUR":
+		return currency, true
+	}
+	return "", false
+}
+
 func AdminCreateSubscriptionPlan(c *gin.Context) {
 	if !requirePaymentCompliance(c) {
 		return
@@ -235,10 +250,12 @@ func AdminCreateSubscriptionPlan(c *gin.Context) {
 		common.ApiErrorT(c, "Price cannot exceed 9999")
 		return
 	}
-	if req.Plan.Currency == "" {
-		req.Plan.Currency = "USD"
+	currency, ok := normalizeSubscriptionCurrency(req.Plan.Currency)
+	if !ok {
+		common.ApiErrorT(c, "Unsupported currency")
+		return
 	}
-	req.Plan.Currency = "USD"
+	req.Plan.Currency = currency
 	if req.Plan.AllowBalancePay == nil {
 		req.Plan.AllowBalancePay = common.GetPointer(true)
 	}
@@ -329,10 +346,12 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 		return
 	}
 	req.Plan.Id = id
-	if req.Plan.Currency == "" {
-		req.Plan.Currency = "USD"
+	currency, ok := normalizeSubscriptionCurrency(req.Plan.Currency)
+	if !ok {
+		common.ApiErrorT(c, "Unsupported currency")
+		return
 	}
-	req.Plan.Currency = "USD"
+	req.Plan.Currency = currency
 	if req.Plan.DurationUnit == "" {
 		req.Plan.DurationUnit = model.SubscriptionDurationMonth
 	}

@@ -1045,6 +1045,7 @@ export const STATIC_I18N_KEYS = [
   'Gift',
   'Invite',
   'Promo',
+  'Referral',
   // Canvas workflow run messages: the run reports these keys from constants,
   // so the literal scan cannot see them.
   'The canvas is full; the run could not add a result node.',

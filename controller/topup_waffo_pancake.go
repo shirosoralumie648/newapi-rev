@@ -381,7 +381,7 @@ func RequestWaffoPancakePay(c *gin.Context) {
 	topUp := &model.TopUp{
 		UserId:          id,
 		Amount:          normalizeWaffoPancakeTopUpAmount(req.Amount),
-		Money:           payMoney,
+		Money:           decimal.NewFromFloat(payMoney),
 		TradeNo:         tradeNo,
 		PaymentMethod:   model.PaymentMethodWaffoPancake,
 		PaymentProvider: model.PaymentProviderWaffoPancake,
@@ -474,8 +474,13 @@ func WaffoPancakeWebhook(c *gin.Context) {
 		return
 	}
 
-	logger.LogInfo(c.Request.Context(), common.LogText("Waffo Pancake webhook signature verified event_type=%s event_id=%s order_id=%s client_ip=%s", event.NormalizedEventType(), event.ID, event.Data.OrderID, c.ClientIP()))
-	if event.NormalizedEventType() != "order.completed" {
+	eventType := event.NormalizedEventType()
+	logger.LogInfo(c.Request.Context(), common.LogText("Waffo Pancake webhook signature verified event_type=%s event_id=%s order_id=%s client_ip=%s", eventType, event.ID, event.Data.OrderID, c.ClientIP()))
+	if eventType == "refund.succeeded" {
+		handleWaffoPancakeRefund(c, event)
+		return
+	}
+	if eventType != "order.completed" {
 		c.String(http.StatusOK, "OK")
 		return
 	}
@@ -497,7 +502,10 @@ func WaffoPancakeWebhook(c *gin.Context) {
 		}
 		LockOrder(tradeNo)
 		defer UnlockOrder(tradeNo)
-		if err := model.CompleteSubscriptionOrder(tradeNo, string(bodyBytes), model.PaymentProviderWaffoPancake, ""); err != nil {
+		if err := model.CompleteSubscriptionOrder(tradeNo, model.TopUpPaymentInfo{
+			ProviderPaymentID: event.Data.OrderID,
+			Currency:          strings.ToUpper(strings.TrimSpace(event.Data.Currency)),
+		}, string(bodyBytes), model.PaymentProviderWaffoPancake, ""); err != nil {
 			logger.LogError(c.Request.Context(), common.LogText("Waffo Pancake subscription completion failed trade_no=%s event_id=%s order_id=%s client_ip=%s error=%q", tradeNo, event.ID, event.Data.OrderID, c.ClientIP(), err.Error()))
 			c.String(http.StatusInternalServerError, "retry")
 			return
@@ -523,12 +531,52 @@ func WaffoPancakeWebhook(c *gin.Context) {
 	LockOrder(tradeNo)
 	defer UnlockOrder(tradeNo)
 
-	if err := model.RechargeWaffoPancake(tradeNo); err != nil {
+	if err := model.RechargeWaffoPancake(tradeNo, model.TopUpPaymentInfo{
+		ProviderPaymentID: event.Data.OrderID,
+		Currency:          strings.ToUpper(strings.TrimSpace(event.Data.Currency)),
+	}); err != nil {
 		logger.LogError(c.Request.Context(), common.LogText("Waffo Pancake top-up processing failed trade_no=%s event_id=%s order_id=%s client_ip=%s error=%q", tradeNo, event.ID, event.Data.OrderID, c.ClientIP(), err.Error()))
 		c.String(http.StatusInternalServerError, "retry")
 		return
 	}
 
 	logger.LogInfo(c.Request.Context(), common.LogText("Waffo Pancake top-up succeeded trade_no=%s event_id=%s order_id=%s client_ip=%s", tradeNo, event.ID, event.Data.OrderID, c.ClientIP()))
+	c.String(http.StatusOK, "OK")
+}
+
+// handleWaffoPancakeRefund reverses the local order behind a refund.succeeded
+// event. The refund payload inherits the order's merchant external id, so the
+// order is resolved like a payment event, with the buyer-identity guard.
+// Subscription orders are resolved first because a subscription order also
+// mirrors a top-up row under the same trade number. A refund that matches no
+// local order is acknowledged; retrying would not find it either.
+func handleWaffoPancakeRefund(c *gin.Context, event *service.WaffoPancakeWebhookEvent) {
+	tradeNo, err := service.ResolveWaffoPancakeSubscriptionTradeNo(event)
+	if err != nil {
+		tradeNo, err = service.ResolveWaffoPancakeTradeNo(event)
+	}
+	if err != nil {
+		logger.LogWarn(c.Request.Context(), common.LogText(
+			"Waffo Pancake refund found no local order event_id=%s order_id=%s buyer_identity=%q client_ip=%s error=%q",
+			event.ID, event.Data.OrderID, event.Data.MerchantProvidedBuyerIdentity, c.ClientIP(), err.Error(),
+		))
+		c.String(http.StatusOK, "OK")
+		return
+	}
+
+	LockOrder(tradeNo)
+	defer UnlockOrder(tradeNo)
+	handled, err := model.ReversePaymentByTradeNo(tradeNo, false)
+	if err != nil {
+		logger.LogError(c.Request.Context(), common.LogText("Waffo Pancake refund reversal failed trade_no=%s event_id=%s order_id=%s client_ip=%s error=%q", tradeNo, event.ID, event.Data.OrderID, c.ClientIP(), err.Error()))
+		c.String(http.StatusInternalServerError, "retry")
+		return
+	}
+	if !handled {
+		logger.LogWarn(c.Request.Context(), common.LogText("Waffo Pancake refund found no local order trade_no=%s event_id=%s order_id=%s client_ip=%s", tradeNo, event.ID, event.Data.OrderID, c.ClientIP()))
+		c.String(http.StatusOK, "OK")
+		return
+	}
+	logger.LogInfo(c.Request.Context(), common.LogText("Waffo Pancake refund reversed trade_no=%s event_id=%s order_id=%s client_ip=%s", tradeNo, event.ID, event.Data.OrderID, c.ClientIP()))
 	c.String(http.StatusOK, "OK")
 }

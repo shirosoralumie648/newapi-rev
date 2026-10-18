@@ -27,6 +27,7 @@ For commercial licensing, please contact support@quantumnous.com
 const STORAGE_KEYS = {
   AFFILIATE: 'aff',
   STATUS: 'status',
+  DEVICE: 'device_id',
 } as const
 
 // ============================================================================
@@ -57,5 +58,52 @@ export function saveAffiliateCode(code: string): void {
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to save affiliate code:', error)
+  }
+}
+
+// ============================================================================
+// Device Identifier
+// ============================================================================
+
+function createDeviceId(): string {
+  if (
+    typeof crypto !== 'undefined' &&
+    typeof crypto.randomUUID === 'function'
+  ) {
+    return crypto.randomUUID()
+  }
+  const bytes = new Uint8Array(16)
+  if (
+    typeof crypto !== 'undefined' &&
+    typeof crypto.getRandomValues === 'function'
+  ) {
+    crypto.getRandomValues(bytes)
+  } else {
+    for (let i = 0; i < bytes.length; i += 1) {
+      bytes[i] = Math.floor(Math.random() * 256)
+    }
+  }
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join(
+    ''
+  )
+}
+
+/**
+ * Get the stable client device identifier used by the registration anti-abuse
+ * limits. It is generated once per browser profile and persisted; the server
+ * stores only a hash of the value.
+ */
+export function getDeviceId(): string {
+  if (typeof window === 'undefined') return ''
+  try {
+    const stored = window.localStorage.getItem(STORAGE_KEYS.DEVICE)
+    if (stored) return stored
+    const deviceId = createDeviceId()
+    window.localStorage.setItem(STORAGE_KEYS.DEVICE, deviceId)
+    return deviceId
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('Failed to get device id:', error)
+    return ''
   }
 }

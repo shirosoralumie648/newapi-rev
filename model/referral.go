@@ -35,11 +35,19 @@ var (
 	ErrReferralAlreadyBound = errors.New("invitee already has an inviter")
 )
 
-// ReferralAttribution is the invitation carried by a registration request. The
-// zero value means the account was created without an invitation.
+// ReferralAttribution is the invitation carried by a registration request plus
+// the registration environment RF-06 records for the anti-abuse limits. The
+// zero value means the account was created without an invitation and without
+// an observable environment.
 type ReferralAttribution struct {
 	InviterId int
 	Source    string
+	// Ip, UserAgent and DeviceId describe the registration request. DeviceId
+	// is a client-generated identifier stored only as a hash; the raw value
+	// never reaches the database.
+	Ip        string
+	UserAgent string
+	DeviceId  string
 }
 
 // ReferralBinding is the single invitation attribution of an account: one
@@ -166,12 +174,22 @@ func CreateReferralBindingWithTx(tx *gorm.DB, invitee *User, inviterId int, sour
 	return binding, nil
 }
 
-// bindReferralAttribution records the invitation of a freshly created account.
-// An attribution that cannot form a valid relation — the inviter disappeared,
-// is disabled (banned), or the invitee would invite themselves — is dropped
-// with a log line instead of failing the registration: a stale invitation link
-// must not block sign-up, and no relation means no referral reward (#4360).
-func bindReferralAttribution(tx *gorm.DB, user *User, attribution ReferralAttribution) error {
+// recordReferralRegistrationWithTx persists the registration environment of a
+// freshly created account and, when an invitation was resolved, its binding in
+// the same transaction. The signal row is skipped entirely when no environment
+// value is observable, so accounts created outside a registration request (for
+// example by an administrator) keep working without the anti-abuse limits. An
+// attribution that cannot form a valid relation — the inviter disappeared, is
+// disabled (banned), or the invitee would invite themselves — is dropped with a
+// log line instead of failing the registration: a stale invitation link must
+// not block sign-up, and no relation means no referral reward (#4360).
+func recordReferralRegistrationWithTx(tx *gorm.DB, user *User, attribution ReferralAttribution) error {
+	if tx == nil || user == nil || user.Id == 0 {
+		return errors.New("referral registration is invalid")
+	}
+	if err := recordReferralRegistrationSignalWithTx(tx, user, attribution); err != nil {
+		return err
+	}
 	if attribution.InviterId == 0 {
 		return nil
 	}
@@ -188,6 +206,34 @@ func bindReferralAttribution(tx *gorm.DB, user *User, attribution ReferralAttrib
 	default:
 		return err
 	}
+}
+
+// recordReferralRegistrationSignalWithTx writes the registration signal of one
+// account. Values that are not observable stay empty and their bound does not
+// apply; a fully empty environment writes no row at all.
+func recordReferralRegistrationSignalWithTx(tx *gorm.DB, user *User, attribution ReferralAttribution) error {
+	ip := strings.TrimSpace(attribution.Ip)
+	deviceHash := hashReferralDeviceId(attribution.DeviceId)
+	domain := referralEmailDomain(user.Email)
+	if ip == "" && deviceHash == "" && domain == "" {
+		return nil
+	}
+	userAgent := attribution.UserAgent
+	if runes := []rune(userAgent); len(runes) > 512 {
+		userAgent = string(runes[:512])
+	}
+	signal := &ReferralRegistrationSignal{
+		UserId:      user.Id,
+		Ip:          ip,
+		DeviceHash:  deviceHash,
+		EmailDomain: domain,
+		UserAgent:   userAgent,
+		CreatedAt:   common.GetTimestamp(),
+	}
+	if err := tx.Create(signal).Error; err != nil {
+		return fmt.Errorf("record referral registration signal: %w", err)
+	}
+	return nil
 }
 
 // GetReferralBindingForInvitee returns the recorded binding of an invitee, or

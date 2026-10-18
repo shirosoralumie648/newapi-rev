@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/model_setting"
 
 	"github.com/gin-gonic/gin"
 )
@@ -44,6 +45,19 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 			http.StatusBadRequest,
 			types.ErrOptionWithSkipRetry(),
 		)
+	}
+
+	info.InitChannelMeta(c)
+	if info.RelayMode == relayconstant.RelayModeResponses &&
+		!model_setting.GetGlobalSettings().PassThroughRequestEnabled &&
+		!info.ChannelSetting.PassThroughBodyEnabled &&
+		service.ShouldResponsesUseChatCompletionsGlobal(info.ChannelId, info.ChannelType, info.OriginModelName) {
+		usage, apiErr := responsesViaChatCompletions(c, info, responsesReq)
+		if apiErr != nil {
+			return apiErr
+		}
+		ConsumeResponsesQuota(c, info, usage)
+		return nil
 	}
 
 	adaptor, requestBody, closer, apiErr := PrepareResponsesRequest(c, info, responsesReq)

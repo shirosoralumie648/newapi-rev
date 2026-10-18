@@ -51,6 +51,10 @@ const (
 	// grants whose validity elapsed, reducing the wallet balance with a ledger
 	// entry in the same transaction.
 	SystemTaskTypeCreditGrantExpiry = "credit_grant_expiry"
+	// SystemTaskTypeReferralCommissionSettlement locks recorded referral
+	// commissions whose refund window elapsed and issues them to the inviter
+	// (credit grant or the configured cash payout form).
+	SystemTaskTypeReferralCommissionSettlement = "referral_commission_settlement"
 )
 
 var ErrSystemTaskLockLost = errors.New("system task lock lost")

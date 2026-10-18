@@ -67,6 +67,9 @@ func TestMain(m *testing.M) {
 		&WalletDebt{},
 		&CreditGrant{},
 		&ReferralBinding{},
+		&ReferralRegistrationSignal{},
+		&ReferralIdentity{},
+		&ReferralFlag{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -105,6 +108,9 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM wallet_holds")
 		DB.Exec("DELETE FROM wallet_debts")
 		DB.Exec("DELETE FROM referral_bindings")
+		DB.Exec("DELETE FROM referral_registration_signals")
+		DB.Exec("DELETE FROM referral_identities")
+		DB.Exec("DELETE FROM referral_flags")
 	})
 }
 

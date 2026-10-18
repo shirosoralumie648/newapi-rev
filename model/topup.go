@@ -2,7 +2,6 @@ package model
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -12,16 +11,25 @@ import (
 )
 
 type TopUp struct {
-	Id              int     `json:"id"`
-	UserId          int     `json:"user_id" gorm:"index"`
-	Amount          int64   `json:"amount"`
-	Money           float64 `json:"money"`
-	TradeNo         string  `json:"trade_no" gorm:"unique;type:varchar(255);index"`
-	PaymentMethod   string  `json:"payment_method" gorm:"type:varchar(50)"`
-	PaymentProvider string  `json:"payment_provider" gorm:"type:varchar(50);default:''"`
-	CreateTime      int64   `json:"create_time"`
-	CompleteTime    int64   `json:"complete_time"`
-	Status          string  `json:"status"`
+	Id     int   `json:"id"`
+	UserId int   `json:"user_id" gorm:"index"`
+	Amount int64 `json:"amount"`
+	// Money is the exact payment amount in Currency (not converted).
+	Money   decimal.Decimal `json:"money" gorm:"type:decimal(20,6);not null;default:0"`
+	TradeNo string          `json:"trade_no" gorm:"unique;type:varchar(255);index"`
+	// Currency is the ISO 4217 code the provider collected in; an empty value
+	// marks orders created before the currency was recorded.
+	Currency        string `json:"currency" gorm:"type:varchar(8);not null;default:''"`
+	PaymentMethod   string `json:"payment_method" gorm:"type:varchar(50)"`
+	PaymentProvider string `json:"payment_provider" gorm:"type:varchar(50);default:''"`
+	// ProviderPaymentId is the provider-side payment reference (Stripe
+	// PaymentIntent, Creem order, ...) used to match refund/dispute webhooks.
+	ProviderPaymentId string `json:"provider_payment_id" gorm:"type:varchar(255);not null;default:'';index"`
+	CreateTime        int64  `json:"create_time"`
+	CompleteTime      int64  `json:"complete_time"`
+	// RefundTime is when a provider refund or chargeback reversal was applied.
+	RefundTime int64  `json:"refund_time" gorm:"bigint;not null;default:0"`
+	Status     string `json:"status"`
 }
 
 const (
@@ -49,7 +57,25 @@ var (
 	ErrInvalidTopUpQuota        error = common.NewMessage("Invalid top-up quota")
 	ErrTopUpQuotaLimitExceeded  error = common.NewMessage("Top-up quota limit exceeded")
 	ErrWalletQuotaLimitExceeded error = common.NewMessage("Wallet quota limit exceeded")
+	// Refund errors also reach the web console.
+	ErrTopUpRefundNotAllowed    error = common.NewMessage("This order does not support a refund")
+	ErrTopUpBalanceInsufficient error = common.NewMessage("The available balance is not enough to cover this refund")
 )
+
+// TopUpPaymentInfo carries the provider-side identifiers and the collected
+// currency of one completed payment. It is stored on the order so refund and
+// dispute webhooks can match the order and audits can tell which currency was
+// collected.
+type TopUpPaymentInfo struct {
+	CustomerID        string
+	ProviderPaymentID string
+	Currency          string
+}
+
+// formatTopUpMoney renders a payment amount for user-visible log text.
+func formatTopUpMoney(money decimal.Decimal) string {
+	return money.StringFixed(2)
+}
 
 func (topUp *TopUp) Insert() error {
 	var err error
@@ -229,17 +255,18 @@ func RechargeEpay(tradeNo string, actualPaymentMethod string, callerIp string) (
 	}
 	syncCreditUserQuotaCache(topUp.UserId, quotaToAdd, common.LogText("epay topup"))
 
-	common.SysLog(common.LogText("Epay top-up succeeded trade_no=%s user_id=%d quota_to_add=%d money=%.2f", topUp.TradeNo, topUp.UserId, quotaToAdd, topUp.Money))
-	RecordTopupLog(topUp.UserId, common.NewMessage("Online top-up succeeded, amount added: {{quota}}, payment amount: {{amount}}", map[string]any{"quota": logger.FormatQuota(quotaToAdd), "amount": fmt.Sprintf("%f", topUp.Money)}), callerIp, topUp.PaymentMethod, PaymentProviderEpay)
+	common.SysLog(common.LogText("Epay top-up succeeded trade_no=%s user_id=%d quota_to_add=%d money=%s", topUp.TradeNo, topUp.UserId, quotaToAdd, formatTopUpMoney(topUp.Money)))
+	RecordTopupLog(topUp.UserId, common.NewMessage("Online top-up succeeded, amount added: {{quota}}, payment amount: {{amount}}", map[string]any{"quota": logger.FormatQuota(quotaToAdd), "amount": formatTopUpMoney(topUp.Money)}), callerIp, topUp.PaymentMethod, PaymentProviderEpay)
 	return false, nil
 }
 
-func Recharge(referenceId string, customerId string, callerIp string) (err error) {
+func Recharge(referenceId string, payment TopUpPaymentInfo, callerIp string) (err error) {
 	if referenceId == "" {
 		return errors.New("payment order number not provided")
 	}
 
 	var quota int
+	var alreadyDone bool
 	topUp := &TopUp{}
 
 	refCol := "`trade_no`"
@@ -257,10 +284,21 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 			return ErrPaymentMethodMismatch
 		}
 
+		if topUp.Status == common.TopUpStatusSuccess {
+			// A webhook replay may still fill in payment data an earlier
+			// delivery left out, but never credits the order twice.
+			alreadyDone = true
+			if applyTopUpPaymentInfo(topUp, payment) {
+				return tx.Save(topUp).Error
+			}
+			return nil
+		}
+
 		if topUp.Status != common.TopUpStatusPending {
 			return errors.New("invalid top-up order status")
 		}
 
+		applyTopUpPaymentInfo(topUp, payment)
 		topUp.CompleteTime = common.GetTimestamp()
 		topUp.Status = common.TopUpStatusSuccess
 		err = tx.Save(topUp).Error
@@ -269,13 +307,13 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 		}
 
 		quota, err = common.WalletQuotaFromDecimalStrict(
-			decimal.NewFromFloat(topUp.Money).Mul(decimal.NewFromFloat(common.QuotaPerUnit)),
+			topUp.Money.Mul(decimal.NewFromFloat(common.QuotaPerUnit)),
 		)
 		if err != nil || quota <= 0 {
 			return ErrInvalidTopUpQuota
 		}
 		return creditTopUpQuota(tx, topUp.UserId, quota, WalletLedgerKindTopUp, WalletLedgerRefTopUp, topUp.TradeNo, map[string]any{
-			"stripe_customer": customerId,
+			"stripe_customer": payment.CustomerID,
 		})
 	})
 
@@ -283,11 +321,31 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 		common.SysError(common.LogText("topup failed: %s", err.Error()))
 		return errors.New("top-up failed")
 	}
+	if alreadyDone {
+		return nil
+	}
 	syncCreditUserQuotaCache(topUp.UserId, quota, common.LogText("stripe topup"))
 
 	RecordTopupLog(topUp.UserId, common.NewMessage("Online top-up succeeded, amount added: {{quota}}, payment amount: {{amount}}", map[string]any{"quota": logger.FormatQuota(quota), "amount": topUp.Amount}), callerIp, topUp.PaymentMethod, PaymentMethodStripe)
 
 	return nil
+}
+
+// applyTopUpPaymentInfo stores the provider-side payment reference and the
+// collected currency on the order. Both are what later refund and dispute
+// webhooks match on, so callers set them in the same transaction that credits
+// the order. It reports whether anything changed.
+func applyTopUpPaymentInfo(topUp *TopUp, payment TopUpPaymentInfo) bool {
+	changed := false
+	if payment.ProviderPaymentID != "" && topUp.ProviderPaymentId != payment.ProviderPaymentID {
+		topUp.ProviderPaymentId = payment.ProviderPaymentID
+		changed = true
+	}
+	if payment.Currency != "" && topUp.Currency != payment.Currency {
+		topUp.Currency = payment.Currency
+		changed = true
+	}
+	return changed
 }
 
 // topUpQueryWindowSeconds 限制充值记录查询的时间窗口（秒）。
@@ -460,7 +518,7 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 
 	var userId int
 	var quotaToAdd int
-	var payMoney float64
+	var payMoney decimal.Decimal
 	var paymentMethod string
 
 	err := DB.Transaction(func(tx *gorm.DB) error {
@@ -485,7 +543,7 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 		var quotaErr error
 		if topUp.PaymentProvider == PaymentProviderStripe {
 			quotaToAdd, quotaErr = common.WalletQuotaFromDecimalStrict(
-				decimal.NewFromFloat(topUp.Money).Mul(decimal.NewFromFloat(common.QuotaPerUnit)),
+				topUp.Money.Mul(decimal.NewFromFloat(common.QuotaPerUnit)),
 			)
 		} else {
 			quotaToAdd, quotaErr = common.WalletQuotaFromDecimalStrict(
@@ -520,10 +578,10 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 
 	// 事务外记录日志，避免阻塞
 	syncCreditUserQuotaCache(userId, quotaToAdd, common.LogText("manual topup"))
-	RecordTopupLog(userId, common.NewMessage("Administrator completed the order, amount added: {{quota}}, payment amount: {{amount}}", map[string]any{"quota": logger.FormatQuota(quotaToAdd), "amount": fmt.Sprintf("%f", payMoney)}), callerIp, paymentMethod, "admin")
+	RecordTopupLog(userId, common.NewMessage("Administrator completed the order, amount added: {{quota}}, payment amount: {{amount}}", map[string]any{"quota": logger.FormatQuota(quotaToAdd), "amount": formatTopUpMoney(payMoney)}), callerIp, paymentMethod, "admin")
 	return nil
 }
-func RechargeCreem(referenceId string, customerEmail string, customerName string, callerIp string) (err error) {
+func RechargeCreem(referenceId string, payment TopUpPaymentInfo, customerEmail string, customerName string, callerIp string) (err error) {
 	if referenceId == "" {
 		return errors.New("payment order number not provided")
 	}
@@ -550,6 +608,7 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 			return errors.New("invalid top-up order status")
 		}
 
+		applyTopUpPaymentInfo(topUp, payment)
 		topUp.CompleteTime = common.GetTimestamp()
 		topUp.Status = common.TopUpStatusSuccess
 		err = tx.Save(topUp).Error
@@ -590,7 +649,7 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 	}
 	syncCreditUserQuotaCache(topUp.UserId, quota, common.LogText("creem topup"))
 
-	RecordTopupLog(topUp.UserId, common.NewMessage("{{provider}} top-up succeeded, amount added: {{quota}}, payment amount: {{amount}}", map[string]any{"provider": "Creem", "quota": quota, "amount": fmt.Sprintf("%.2f", topUp.Money)}), callerIp, topUp.PaymentMethod, PaymentMethodCreem)
+	RecordTopupLog(topUp.UserId, common.NewMessage("{{provider}} top-up succeeded, amount added: {{quota}}, payment amount: {{amount}}", map[string]any{"provider": "Creem", "quota": quota, "amount": formatTopUpMoney(topUp.Money)}), callerIp, topUp.PaymentMethod, PaymentMethodCreem)
 
 	return nil
 }
@@ -649,13 +708,13 @@ func RechargeWaffo(tradeNo string, callerIp string) (err error) {
 	syncCreditUserQuotaCache(topUp.UserId, quotaToAdd, common.LogText("waffo topup"))
 
 	if quotaToAdd > 0 {
-		RecordTopupLog(topUp.UserId, common.NewMessage("{{provider}} top-up succeeded, amount added: {{quota}}, payment amount: {{amount}}", map[string]any{"provider": "Waffo", "quota": logger.FormatQuota(quotaToAdd), "amount": fmt.Sprintf("%.2f", topUp.Money)}), callerIp, topUp.PaymentMethod, PaymentMethodWaffo)
+		RecordTopupLog(topUp.UserId, common.NewMessage("{{provider}} top-up succeeded, amount added: {{quota}}, payment amount: {{amount}}", map[string]any{"provider": "Waffo", "quota": logger.FormatQuota(quotaToAdd), "amount": formatTopUpMoney(topUp.Money)}), callerIp, topUp.PaymentMethod, PaymentMethodWaffo)
 	}
 
 	return nil
 }
 
-func RechargeWaffoPancake(tradeNo string) (err error) {
+func RechargeWaffoPancake(tradeNo string, payment TopUpPaymentInfo) (err error) {
 	if tradeNo == "" {
 		return errors.New("payment order number not provided")
 	}
@@ -679,6 +738,11 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 		}
 
 		if topUp.Status == common.TopUpStatusSuccess {
+			// A webhook replay may still fill in payment data an earlier
+			// delivery left out, but never credits the order twice.
+			if applyTopUpPaymentInfo(topUp, payment) {
+				return tx.Save(topUp).Error
+			}
 			return nil
 		}
 
@@ -686,6 +750,7 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 			return errors.New("invalid top-up order status")
 		}
 
+		applyTopUpPaymentInfo(topUp, payment)
 		quotaToAdd, err = common.WalletQuotaFromDecimalStrict(
 			decimal.NewFromInt(topUp.Amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit)),
 		)
@@ -709,7 +774,7 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 	syncCreditUserQuotaCache(topUp.UserId, quotaToAdd, common.LogText("waffo pancake topup"))
 
 	if quotaToAdd > 0 {
-		RecordLog(topUp.UserId, LogTypeTopup, common.NewMessage("{{provider}} top-up succeeded, amount added: {{quota}}, payment amount: {{amount}}", map[string]any{"provider": "Waffo Pancake", "quota": logger.FormatQuota(quotaToAdd), "amount": fmt.Sprintf("%.2f", topUp.Money)}))
+		RecordLog(topUp.UserId, LogTypeTopup, common.NewMessage("{{provider}} top-up succeeded, amount added: {{quota}}, payment amount: {{amount}}", map[string]any{"provider": "Waffo Pancake", "quota": logger.FormatQuota(quotaToAdd), "amount": formatTopUpMoney(topUp.Money)}))
 	}
 
 	return nil
