@@ -245,7 +245,7 @@ func builtinPlaygroundStorageBillingSetting() *PlaygroundStorageBillingSetting {
 		PriceUSDPerGBMonth: 0.015,
 		FreeGB:             1,
 		GroupFreeGB:        map[string]float64{},
-		ApplyGroupRatio:    true,
+		ApplyGroupRatio:    false,
 		GraceDays:          7,
 		Egress: PlaygroundStorageEgressSetting{
 			Mode:          PlaygroundStorageEgressModeUnmetered,

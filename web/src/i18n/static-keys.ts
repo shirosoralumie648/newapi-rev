@@ -1216,4 +1216,9 @@ export const STATIC_I18N_KEYS = [
   'Legacy',
   'Legacy invitation reward transferred to balance {{quota}}',
   'Legacy referral reconciliation found {{count}} deviating accounts; see the legacy_referral_reconcile system task result',
+  // Playground storage billing (BL-02): the ledger day statuses render through
+  // t(label) from STORAGE_LEDGER_STATUS_LABELS, so the literal scan cannot see
+  // them.
+  'Pending',
+  'Grace',
 ] as const

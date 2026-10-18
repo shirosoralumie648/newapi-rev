@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/playground_setting"
 )
@@ -103,7 +104,7 @@ func (playgroundStorageSettleHandler) Run(ctx context.Context, task *model.Syste
 	}
 	if report.GraceCount > 0 {
 		common.SysError(common.LogText("playground storage settlement left %d accounts read-only with %d quota uncovered", report.GraceCount, report.GraceQuota))
-		model.RecordLog(0, model.LogTypeSystem, common.NewMessage("Playground storage settlement left {{count}} accounts read-only with {{quota}} quota uncovered; see the playground_storage_settle system task result", map[string]any{"count": report.GraceCount, "quota": report.GraceQuota}))
+		model.RecordLog(0, model.LogTypeSystem, common.NewMessage("Playground storage settlement left {{count}} accounts read-only with {{quota}} quota uncovered; see the playground_storage_settle system task result", map[string]any{"count": report.GraceCount, "quota": logger.FormatQuota(int(report.GraceQuota))}))
 	}
 	if err := model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusSucceeded, report, ""); err != nil {
 		logSystemTaskLockError(ctx, task, err)

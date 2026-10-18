@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/setting/playground_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
@@ -533,7 +534,7 @@ func recordPlaygroundStorageSettlementLog(row *PlaygroundStorageLedger, settleme
 	RecordTaskBillingLog(RecordTaskBillingLogParams{
 		UserId:    row.UserId,
 		LogType:   LogTypeConsume,
-		Content:   []*common.Message{common.NewMessage("Playground storage billing for {{date}}: {{quota}} quota charged, {{bytes}} bytes billed", map[string]any{"date": row.Date, "quota": settlement.ChargedQuota, "bytes": settlement.BillableBytes + row.EgressBytes})},
+		Content:   []*common.Message{common.NewMessage("Playground storage billing for {{date}}: {{quota}} quota charged, {{bytes}} bytes billed", map[string]any{"date": row.Date, "quota": logger.FormatQuota(int(settlement.ChargedQuota)), "bytes": settlement.BillableBytes + row.EgressBytes})},
 		ModelName: PlaygroundStorageBillingModelName,
 		Quota:     int(settlement.ChargedQuota),
 		Group:     settlement.Group,
