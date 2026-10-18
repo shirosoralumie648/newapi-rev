@@ -28,7 +28,7 @@ import {
   PLAYGROUND_ATTACHMENT_MAX_COUNT,
 } from '../constants'
 import type { MessageAttachment } from '../types'
-import { primePlaygroundAttachment } from './attachment-store'
+import { blobToDataUrl, primePlaygroundAttachment } from './attachment-store'
 
 /**
  * Stable translation keys for upload failures the input shows directly. The
@@ -83,4 +83,52 @@ export async function uploadPlaygroundAttachments(
     })
   }
   return attachments
+}
+
+// Filenames of cached speech by media type; the stored name is display-only,
+// but the extension keeps the attachment identifiable in the asset library.
+const SPEECH_FILENAMES: Record<string, string> = {
+  'audio/mpeg': 'speech.mp3',
+  'audio/wav': 'speech.wav',
+  'audio/ogg': 'speech.ogg',
+  'audio/webm': 'speech.webm',
+}
+
+/**
+ * Caches generated speech bytes as a conversation attachment and returns the
+ * reference a message stores. Uploading follows the attachment path, so the
+ * audio is owned by the account and survives browsing; the bytes are primed
+ * into the local cache so the player renders without downloading them again.
+ */
+export async function uploadPlaygroundSpeechAttachment(
+  sessionId: string,
+  blob: Blob
+): Promise<MessageAttachment> {
+  if (blob.size === 0) {
+    throw new Error(PLAYGROUND_ATTACHMENT_ERRORS.UNREADABLE)
+  }
+  if (blob.size > PLAYGROUND_ATTACHMENT_MAX_BYTES) {
+    throw new Error(PLAYGROUND_ATTACHMENT_ERRORS.TOO_LARGE)
+  }
+  const mediaType = blob.type || 'audio/mpeg'
+  const filename = SPEECH_FILENAMES[mediaType] ?? 'speech.mp3'
+  const dataUrl = await blobToDataUrl(blob)
+  const separator = dataUrl.indexOf(',')
+  if (separator === -1) {
+    throw new Error(PLAYGROUND_ATTACHMENT_ERRORS.UNREADABLE)
+  }
+  const { attachment } = await uploadPlaygroundAttachment(sessionId, {
+    clientKey: nanoid(),
+    mediaType,
+    filename,
+    data: dataUrl.slice(separator + 1),
+  })
+  primePlaygroundAttachment(attachment.id, dataUrl)
+  return {
+    id: attachment.id,
+    url: playgroundAttachmentContentUrl(attachment.sessionId, attachment.id),
+    mediaType: attachment.mediaType,
+    filename: attachment.filename,
+    byteSize: attachment.byteSize,
+  }
 }

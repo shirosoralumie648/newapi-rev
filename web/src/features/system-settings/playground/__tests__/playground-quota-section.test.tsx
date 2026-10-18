@@ -36,7 +36,11 @@ function bodyFor(key: string): OptionBody | undefined {
     .find((body) => body.key === key)
 }
 
-type SectionProps = { defaultsJson: string; groupOverridesJson: string }
+type SectionProps = {
+  defaultsJson: string
+  groupOverridesJson: string
+  sandboxPreviewEnabled: boolean
+}
 
 function Fixture(props: SectionProps) {
   const [container, setContainer] = useState<HTMLDivElement | null>(null)
@@ -47,6 +51,7 @@ function Fixture(props: SectionProps) {
         <PlaygroundQuotaSection
           defaultsJson={props.defaultsJson}
           groupOverridesJson={props.groupOverridesJson}
+          sandboxPreviewEnabled={props.sandboxPreviewEnabled}
         />
       </SettingsPageProvider>
     </>
@@ -55,7 +60,8 @@ function Fixture(props: SectionProps) {
 
 function renderSection(
   defaults: Record<string, number>,
-  overrides: Record<string, Record<string, number>> = {}
+  overrides: Record<string, Record<string, number>> = {},
+  sandboxPreviewEnabled = false
 ) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -65,6 +71,7 @@ function renderSection(
       <Fixture
         defaultsJson={JSON.stringify(defaults)}
         groupOverridesJson={JSON.stringify(overrides)}
+        sandboxPreviewEnabled={sandboxPreviewEnabled}
       />
     </QueryClientProvider>
   )
@@ -175,4 +182,30 @@ test('a group override can grant a larger object storage entitlement', async () 
     pro: { session_max_count: 5, object_user_max_bytes: 16 * 1024 * 1024 },
   })
   expect(bodyFor('playground_setting.defaults')).toBeUndefined()
+})
+
+test('toggling the sandbox preview switch saves only that option', async () => {
+  const user = userEvent.setup()
+  renderSection({ session_max_count: 100 })
+
+  const toggle = screen.getByRole('switch', {
+    name: 'Enable sandboxed artifact preview',
+  })
+  expect(toggle).not.toBeChecked()
+  await user.click(toggle)
+  expect(toggle).toBeChecked()
+
+  await user.click(
+    screen.getByRole('button', { name: 'Save Playground quotas' })
+  )
+
+  await waitFor(() =>
+    expect(bodyFor('playground_setting.sandbox_preview_enabled')).toBeDefined()
+  )
+  expect(bodyFor('playground_setting.sandbox_preview_enabled')).toEqual({
+    key: 'playground_setting.sandbox_preview_enabled',
+    value: 'true',
+  })
+  expect(bodyFor('playground_setting.defaults')).toBeUndefined()
+  expect(bodyFor('playground_setting.group_overrides')).toBeUndefined()
 })

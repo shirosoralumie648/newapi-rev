@@ -23,6 +23,8 @@ import {
   type ParsedNode,
 } from 'stream-markdown-parser'
 
+import type { PlaygroundArtifactKind } from '../artifact-api'
+
 const parser = getMarkdown('playground-artifact-source', {
   enableMath: true,
   enableContainers: true,
@@ -81,7 +83,7 @@ export function getPlaygroundCodeSelections(
 export function getArtifactFilename(
   title: string,
   language: string,
-  kind: 'markdown' | 'code'
+  kind: PlaygroundArtifactKind
 ): string {
   const safe =
     title
@@ -92,10 +94,13 @@ export function getArtifactFilename(
       .replaceAll(/[. ]+$/g, '')
       .slice(0, 120) || 'artifact'
   let suffix = 'md'
-  if (kind === 'code') {
+  if (kind === 'html' || kind === 'svg') {
+    suffix = kind
+  } else if (kind === 'code') {
     const normalized = language.toLowerCase().replaceAll(/[^a-z0-9+#._-]/g, '')
     // Mirror CodeBlock: an unlabeled fence has no real extension.
-    suffix = normalized === '' || normalized === 'plaintext' ? 'txt' : normalized
+    suffix =
+      normalized === '' || normalized === 'plaintext' ? 'txt' : normalized
   }
   return `${safe}.${suffix}`
 }
@@ -103,7 +108,7 @@ export function getArtifactFilename(
 export function downloadArtifactText(
   title: string,
   language: string,
-  kind: 'markdown' | 'code',
+  kind: PlaygroundArtifactKind,
   content: string
 ): void {
   const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })

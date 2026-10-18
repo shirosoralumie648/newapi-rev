@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import {
+  AudioLines,
   ExternalLink,
   Eye,
   FileText,
@@ -76,14 +77,19 @@ export function PlaygroundAssetCard(props: PlaygroundAssetCardProps) {
       ]
     : [asset.language, updated]
   const title = asset.title || (isAttachment ? t('Attachment') : t('Artifacts'))
+  const isAudio = isAttachment && (asset.mediaType ?? '').startsWith('audio/')
 
   let thumbnail = <FileText aria-hidden='true' className='size-4' />
   if (isAttachment) {
-    thumbnail = previewUrl ? (
-      <img alt='' className='size-10 object-cover' src={previewUrl} />
-    ) : (
-      <ImageIcon aria-hidden='true' className='size-4' />
-    )
+    if (isAudio) {
+      thumbnail = <AudioLines aria-hidden='true' className='size-4' />
+    } else {
+      thumbnail = previewUrl ? (
+        <img alt='' className='size-10 object-cover' src={previewUrl} />
+      ) : (
+        <ImageIcon aria-hidden='true' className='size-4' />
+      )
+    }
   }
 
   return (

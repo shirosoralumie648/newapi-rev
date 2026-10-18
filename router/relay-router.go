@@ -104,6 +104,14 @@ func SetRelayRouter(router *gin.Engine) {
 			middleware.Distribute(),
 			controller.PlaygroundAudioSpeech,
 		)
+		// Dictation is multipart, so its group override arrives in the
+		// X-Playground-Group header; the bridge consumes it before the relay
+		// pipeline sees the canonical request.
+		playgroundMediaRouter.POST("/audio/transcriptions",
+			middleware.PlaygroundRelayBridge("/v1/audio/transcriptions"),
+			middleware.Distribute(),
+			controller.PlaygroundAudioTranscription,
+		)
 	}
 	relayV1Router := router.Group("/v1")
 	relayV1Router.Use(middleware.RouteTag("relay"))

@@ -115,14 +115,14 @@ func playgroundTestDB(t *testing.T, dialect string) *gorm.DB {
 	common.SetDatabaseTypes(common.DatabaseType(dialect), previousLog)
 	model.DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundUserUsage{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundMessage{}, &model.PlaygroundSession{}, &model.Task{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundUserUsage{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMessage{}, &model.PlaygroundSession{}, &model.Task{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
 		model.DB = previous
 		common.SetDatabaseTypes(previousMain, previousLog)
 	})
-	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.Task{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.Task{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -161,6 +161,9 @@ func playgroundRequest(t *testing.T, user int, method, path string, body any, ha
 		}
 		if parts[3] == "presets" {
 			c.Params = append(c.Params, gin.Param{Key: "presetId", Value: parts[4]})
+		}
+		if parts[3] == "snippets" {
+			c.Params = append(c.Params, gin.Param{Key: "snippetId", Value: parts[4]})
 		}
 		if parts[3] == "tasks" {
 			c.Params = append(c.Params, gin.Param{Key: "taskId", Value: parts[4]})
@@ -261,6 +264,21 @@ func TestPlaygroundPersistenceMatrix(t *testing.T) {
 			reloaded, err = model.GetPlaygroundSession(7, id)
 			require.NoError(t, err)
 			assert.Contains(t, reloaded.Config, "test-model")
+			// Reasoning effort is part of the stored configuration; only the
+			// effort strings the relay accepts are storable.
+			response = playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+id, map[string]any{
+				"revision": 1, "config": map[string]any{"reasoning_effort": "high"},
+				"parameter_enabled": map[string]bool{"reasoning_effort": true},
+			}, controller.UpdatePlaygroundSession)
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			reloaded, err = model.GetPlaygroundSession(7, id)
+			require.NoError(t, err)
+			assert.Contains(t, reloaded.Config, `"reasoning_effort":"high"`)
+			assert.Contains(t, reloaded.ParameterEnabled, `"reasoning_effort":true`)
+			invalidEffort := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+id, map[string]any{
+				"revision": 2, "config": map[string]any{"reasoning_effort": "turbo"},
+			}, controller.UpdatePlaygroundSession)
+			assert.Equal(t, http.StatusBadRequest, invalidEffort.Code, invalidEffort.Body.String())
 			response = playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+id, nil, controller.DeletePlaygroundSession)
 			require.Equal(t, http.StatusOK, response.Code)
 			_, err = model.GetPlaygroundSession(7, id)
@@ -820,7 +838,8 @@ func TestPlaygroundArtifactValidationAndUTF8Boundaries(t *testing.T) {
 		{"request id invalid", func(v *model.CreatePlaygroundArtifactInput) { v.RequestID = "bad/id" }, 400},
 		{"request id unicode", func(v *model.CreatePlaygroundArtifactInput) { v.RequestID = "请求" }, 400},
 		{"request id missing", func(v *model.CreatePlaygroundArtifactInput) { v.RequestID = "" }, 400},
-		{"kind invalid", func(v *model.CreatePlaygroundArtifactInput) { v.Kind = "html" }, 400},
+		{"kind invalid", func(v *model.CreatePlaygroundArtifactInput) { v.Kind = "pdf" }, 400},
+		{"kind case sensitive", func(v *model.CreatePlaygroundArtifactInput) { v.Kind = "HTML" }, 400},
 		{"revision missing", func(v *model.CreatePlaygroundArtifactInput) { v.Source.MessageRevision = nil }, 400},
 		{"hash invalid", func(v *model.CreatePlaygroundArtifactInput) { v.Source.ContentHash = "hash" }, 400},
 		{"hash changed", func(v *model.CreatePlaygroundArtifactInput) { v.Source.ContentHash = strings.Repeat("0", 64) }, 409},
@@ -867,6 +886,19 @@ func TestPlaygroundArtifactValidationAndUTF8Boundaries(t *testing.T) {
 	candidate.RequestID = "NANOID_A-z:._-09"
 	different := artifactResult(t, playgroundRequest(t, 7, http.MethodPost, path, candidate, controller.CreatePlaygroundArtifact))
 	assert.NotEqual(t, code.Artifact.ID, different.Artifact.ID)
+	// html and svg are accepted so the sandbox can preview them, and an empty
+	// language records the format for the renderer. All three code-block kinds
+	// may carry the index of the block they were derived from.
+	for _, kind := range []string{"html", "svg"} {
+		previewable := input
+		previewable.RequestID = "kind-" + kind
+		previewable.Kind = kind
+		previewable.Language = ""
+		previewable.Source.CodeBlockIndex = &index
+		preview := artifactResult(t, playgroundRequest(t, 7, http.MethodPost, path, previewable, controller.CreatePlaygroundArtifact))
+		assert.Equal(t, kind, preview.Artifact.Kind)
+		assert.Equal(t, kind, preview.Version.Language)
+	}
 }
 
 func TestPlaygroundArtifactRejectsUnfinishedOrNonAssistantSources(t *testing.T) {
@@ -998,6 +1030,16 @@ func TestPlaygroundArtifactCapacity(t *testing.T) {
 
 func playgroundPNGFixture(size int) []byte {
 	data := []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a}
+	for len(data) < size {
+		data = append(data, byte(len(data)%251))
+	}
+	return data
+}
+
+// playgroundMP3Fixture builds an ID3-tagged payload the audio validator
+// accepts as audio/mpeg.
+func playgroundMP3Fixture(size int) []byte {
+	data := []byte("ID3")
 	for len(data) < size {
 		data = append(data, byte(len(data)%251))
 	}
@@ -1157,6 +1199,8 @@ func TestPlaygroundAttachmentValidationLimits(t *testing.T) {
 	reject("invalid base64", map[string]any{"client_key": "c", "media_type": "image/png", "data": "not-base64!!"}, http.StatusBadRequest)
 	reject("empty client key", map[string]any{"client_key": " ", "media_type": "image/png", "data": encoded}, http.StatusBadRequest)
 	reject("oversized attachment", map[string]any{"client_key": "d", "media_type": "image/png", "data": base64.StdEncoding.EncodeToString(playgroundPNGFixture(4097))}, http.StatusUnprocessableEntity)
+	reject("audio bytes under an image type", map[string]any{"client_key": "e", "media_type": "image/png", "data": base64.StdEncoding.EncodeToString(playgroundMP3Fixture(64))}, http.StatusBadRequest)
+	reject("unsupported audio type", map[string]any{"client_key": "f", "media_type": "audio/flac", "data": base64.StdEncoding.EncodeToString(playgroundMP3Fixture(64))}, http.StatusBadRequest)
 
 	// The per-account budget counts every stored byte, including replays of one file.
 	playgroundUploadAttachment(t, 7, id, "budget-a", "image/png", playgroundPNGFixture(4096))
@@ -1244,6 +1288,67 @@ func TestPlaygroundAttachmentMessageReferences(t *testing.T) {
 	var stored int64
 	require.NoError(t, db.Model(&model.PlaygroundMessage{}).Where("session_id = ?", id).Count(&stored).Error)
 	assert.Zero(t, stored)
+}
+
+// Playground message speech references are the cached read-aloud audio of a
+// user or assistant reply. They follow the attachment reference contract: only
+// an owned id is accepted, the stored metadata always comes from the row, and
+// a lingering reference keeps the audio bytes alive.
+func TestPlaygroundMessageSpeechReferences(t *testing.T) {
+	db := playgroundTestDB(t, "sqlite")
+	session := createPlayground(t, 7, "speech-references")
+	id := session["id"].(string)
+	path := "/api/playground/sessions/" + id + "/messages"
+	speech := playgroundUploadAttachment(t, 7, id, "speech-a", "audio/mpeg", playgroundMP3Fixture(64))
+	speechID := speech["id"].(string)
+
+	message := func(key, from string, version map[string]any) map[string]any {
+		return map[string]any{"client_key": key, "payload": map[string]any{"key": key, "from": from, "versions": []any{version}}}
+	}
+
+	// An assistant reply keeps its cached read-aloud audio; the stored
+	// reference carries the owned metadata, not the client's claims.
+	response := playgroundRequest(t, 7, http.MethodPut, path, map[string]any{
+		"revision": 0,
+		"messages": []any{message("a1", "assistant", map[string]any{
+			"id": "a1-v1", "content": "Read this aloud",
+			"speech": map[string]any{"id": speechID, "media_type": "text/plain", "filename": "spoofed.mp3"},
+		})},
+	}, controller.ReplacePlaygroundMessages)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), speechID)
+	assert.Contains(t, response.Body.String(), `"media_type":"audio/mpeg"`)
+	assert.NotContains(t, response.Body.String(), "spoofed.mp3")
+
+	// The cached audio is a real reference: the attachment cannot be deleted.
+	inUse := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+id+"/attachments/"+speechID, nil, controller.DeletePlaygroundAttachment)
+	assert.Equal(t, http.StatusConflict, inUse.Code, inUse.Body.String())
+
+	// A system message can never carry speech, and an unowned id is rejected
+	// without replacing the stored history.
+	systemRejected := playgroundRequest(t, 7, http.MethodPut, path, map[string]any{
+		"revision": 1,
+		"messages": []any{message("s1", "system", map[string]any{"id": "s1-v1", "content": "Read this aloud", "speech": map[string]any{"id": speechID}})},
+	}, controller.ReplacePlaygroundMessages)
+	assert.Equal(t, http.StatusBadRequest, systemRejected.Code)
+	unknownRejected := playgroundRequest(t, 7, http.MethodPut, path, map[string]any{
+		"revision": 1,
+		"messages": []any{message("a2", "assistant", map[string]any{"id": "a2-v1", "content": "Read this aloud", "speech": map[string]any{"id": "pgf_missing"}})},
+	}, controller.ReplacePlaygroundMessages)
+	assert.Equal(t, http.StatusBadRequest, unknownRejected.Code)
+
+	// Dropping the reference releases the audio for deletion.
+	released := playgroundRequest(t, 7, http.MethodPut, path, map[string]any{
+		"revision": 1,
+		"messages": []any{message("a1", "assistant", map[string]any{"id": "a1-v1", "content": "Read this aloud"})},
+	}, controller.ReplacePlaygroundMessages)
+	require.Equal(t, http.StatusOK, released.Code, released.Body.String())
+	deleted := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+id+"/attachments/"+speechID, nil, controller.DeletePlaygroundAttachment)
+	assert.Equal(t, http.StatusOK, deleted.Code, deleted.Body.String())
+
+	var stored int64
+	require.NoError(t, db.Model(&model.PlaygroundMessage{}).Where("session_id = ?", id).Count(&stored).Error)
+	assert.EqualValues(t, 1, stored)
 }
 
 func TestPlaygroundAttachmentOrphanCleanup(t *testing.T) {
@@ -1626,6 +1731,7 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	attachmentBase := "/api/playground/sessions/" + sessionID + "/attachments"
 	for _, route := range []struct{ method, path string }{
 		{http.MethodGet, "/api/playground/usage"},
+		{http.MethodGet, "/api/playground/settings"},
 		{http.MethodGet, "/api/playground/message-costs?request_ids=route-cost"},
 		{http.MethodGet, "/api/playground/assets?kind=attachment"},
 		{http.MethodPost, "/api/playground/tasks/missing/cancel"},
@@ -1634,6 +1740,11 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodGet, "/api/playground/presets/missing"},
 		{http.MethodPatch, "/api/playground/presets/missing"},
 		{http.MethodDelete, "/api/playground/presets/missing"},
+		{http.MethodGet, "/api/playground/snippets"},
+		{http.MethodPost, "/api/playground/snippets"},
+		{http.MethodGet, "/api/playground/snippets/missing"},
+		{http.MethodPatch, "/api/playground/snippets/missing"},
+		{http.MethodDelete, "/api/playground/snippets/missing"},
 		{http.MethodGet, attachmentBase}, {http.MethodPost, attachmentBase},
 		{http.MethodGet, attachmentBase + "/missing"}, {http.MethodGet, attachmentBase + "/missing/content"},
 		{http.MethodDelete, attachmentBase + "/missing"},
@@ -1699,6 +1810,12 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	require.Equal(t, 200, usageResponse.Code, usageResponse.Body.String())
 	assert.Contains(t, usageResponse.Body.String(), `"sessions"`)
 	assert.Contains(t, usageResponse.Body.String(), `"tasks"`)
+
+	// The settings endpoint reports the server-side sandbox preview switch and
+	// defaults to disabled until an administrator opts in.
+	settingsResponse := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, "/api/playground/settings", nil)
+	require.Equal(t, 200, settingsResponse.Code, settingsResponse.Body.String())
+	assert.Contains(t, settingsResponse.Body.String(), `"sandbox_preview_enabled":false`)
 
 	// Canvas routes share the same session-only authentication contract.
 	canvasBase := "/api/playground/canvases"
@@ -2987,6 +3104,120 @@ func TestPlaygroundPresetPersistenceAndOwnership(t *testing.T) {
 			var stored int64
 			require.NoError(t, db.Model(&model.PlaygroundPreset{}).Where("user_id = ?", 7).Count(&stored).Error)
 			assert.Zero(t, stored)
+		})
+	}
+}
+
+// Prompt snippets are owner-scoped server resources: another account can
+// neither list nor mutate them, every field is validated on write, and the
+// per-account budget and per-snippet text bound come from the shared resource
+// quota policy.
+func TestPlaygroundSnippetPersistenceAndOwnership(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			// The new table is part of the migration contract and must stay
+			// idempotent on every dialect.
+			require.NoError(t, db.AutoMigrate(&model.PlaygroundSnippet{}))
+
+			created := playgroundRequest(t, 7, http.MethodPost, "/api/playground/snippets", map[string]any{
+				"name": "  Review checklist  ", "content": "Check every endpoint for owner scoping.",
+			}, controller.CreatePlaygroundSnippet)
+			require.Equal(t, http.StatusOK, created.Code, created.Body.String())
+			var envelope struct {
+				Success bool
+				Data    struct {
+					ID        string `json:"id"`
+					Name      string `json:"name"`
+					Content   string `json:"content"`
+					CreatedAt int64  `json:"created_at"`
+					UpdatedAt int64  `json:"updated_at"`
+				}
+			}
+			require.NoError(t, common.Unmarshal(created.Body.Bytes(), &envelope))
+			require.True(t, envelope.Success, created.Body.String())
+			id := envelope.Data.ID
+			require.True(t, strings.HasPrefix(id, "pgs_"), id)
+			assert.Equal(t, "Review checklist", envelope.Data.Name)
+			assert.Equal(t, "Check every endpoint for owner scoping.", envelope.Data.Content)
+			assert.NotZero(t, envelope.Data.CreatedAt)
+
+			// The write keeps the account counter row exact.
+			var usage model.PlaygroundUserUsage
+			require.NoError(t, db.Where("user_id = ?", 7).First(&usage).Error)
+			assert.EqualValues(t, 1, usage.Snippets)
+
+			// The listing is owner-scoped and reports the effective budget.
+			listed := playgroundRequest(t, 7, http.MethodGet, "/api/playground/snippets", nil, controller.ListPlaygroundSnippets)
+			var listing struct {
+				Success bool
+				Data    struct {
+					Items []struct{ ID string }
+					Total int
+					Limit int
+				}
+			}
+			require.NoError(t, common.Unmarshal(listed.Body.Bytes(), &listing))
+			require.True(t, listing.Success, listed.Body.String())
+			require.Len(t, listing.Data.Items, 1)
+			assert.Equal(t, id, listing.Data.Items[0].ID)
+			assert.Equal(t, 1, listing.Data.Total)
+			assert.Equal(t, playground_setting.GetPlaygroundQuotaPolicy("default").SnippetUserMaxCount, listing.Data.Limit)
+			foreignList := playgroundRequest(t, 8, http.MethodGet, "/api/playground/snippets", nil, controller.ListPlaygroundSnippets)
+			assert.Contains(t, foreignList.Body.String(), `"total":0`)
+
+			// Mutation is owner-scoped; another account gets the same 404.
+			foreignRead := playgroundRequest(t, 8, http.MethodGet, "/api/playground/snippets/"+id, nil, controller.GetPlaygroundSnippet)
+			assert.Equal(t, http.StatusNotFound, foreignRead.Code, foreignRead.Body.String())
+			foreignUpdate := playgroundRequest(t, 8, http.MethodPatch, "/api/playground/snippets/"+id, map[string]any{"name": "Hijacked"}, controller.UpdatePlaygroundSnippet)
+			assert.Equal(t, http.StatusNotFound, foreignUpdate.Code, foreignUpdate.Body.String())
+			foreignDelete := playgroundRequest(t, 8, http.MethodDelete, "/api/playground/snippets/"+id, nil, controller.DeletePlaygroundSnippet)
+			assert.Equal(t, http.StatusNotFound, foreignDelete.Code, foreignDelete.Body.String())
+
+			updated := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/snippets/"+id, map[string]any{"name": "Checklist"}, controller.UpdatePlaygroundSnippet)
+			require.Equal(t, http.StatusOK, updated.Code, updated.Body.String())
+			assert.Contains(t, updated.Body.String(), `"name":"Checklist"`)
+			assert.Contains(t, updated.Body.String(), "Check every endpoint for owner scoping.", "unsent content keeps its stored value")
+
+			for name, body := range map[string]map[string]any{
+				"empty name":      {"name": "   ", "content": "x"},
+				"overlong name":   {"name": strings.Repeat("n", 101), "content": "x"},
+				"missing content": {"name": "A"},
+				"blank content":   {"name": "A", "content": "  \n"},
+			} {
+				response := playgroundRequest(t, 7, http.MethodPost, "/api/playground/snippets", body, controller.CreatePlaygroundSnippet)
+				assert.Equal(t, http.StatusBadRequest, response.Code, name+": "+response.Body.String())
+			}
+			emptyPatch := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/snippets/"+id, map[string]any{}, controller.UpdatePlaygroundSnippet)
+			assert.Equal(t, http.StatusBadRequest, emptyPatch.Code, emptyPatch.Body.String())
+			assert.Contains(t, emptyPatch.Body.String(), "Invalid prompt snippet.")
+
+			// The resource policy bounds the text of one snippet and the
+			// account count with stable capacity errors.
+			usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+				policy.SnippetContentMaxBytes = 16
+			})
+			tooLong := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/snippets/"+id, map[string]any{
+				"content": strings.Repeat("x", 17),
+			}, controller.UpdatePlaygroundSnippet)
+			assert.Equal(t, http.StatusUnprocessableEntity, tooLong.Code, tooLong.Body.String())
+			assert.Contains(t, tooLong.Body.String(), "PLAYGROUND_SNIPPET_CONTENT_LIMIT_EXCEEDED")
+			usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+				policy.SnippetUserMaxCount = 1
+			})
+			overflow := playgroundRequest(t, 7, http.MethodPost, "/api/playground/snippets", map[string]any{"name": "One too many", "content": "x"}, controller.CreatePlaygroundSnippet)
+			assert.Equal(t, http.StatusUnprocessableEntity, overflow.Code, overflow.Body.String())
+			assert.Contains(t, overflow.Body.String(), "PLAYGROUND_SNIPPET_LIMIT_EXCEEDED")
+
+			deleted := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/snippets/"+id, nil, controller.DeletePlaygroundSnippet)
+			require.Equal(t, http.StatusOK, deleted.Code, deleted.Body.String())
+			repeat := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/snippets/"+id, nil, controller.DeletePlaygroundSnippet)
+			assert.Equal(t, http.StatusNotFound, repeat.Code, repeat.Body.String())
+			var stored int64
+			require.NoError(t, db.Model(&model.PlaygroundSnippet{}).Where("user_id = ?", 7).Count(&stored).Error)
+			assert.Zero(t, stored)
+			require.NoError(t, db.Where("user_id = ?", 7).First(&usage).Error)
+			assert.Zero(t, usage.Snippets)
 		})
 	}
 }

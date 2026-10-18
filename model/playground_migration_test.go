@@ -212,7 +212,11 @@ func TestPlaygroundUserUsageCountersMigration(t *testing.T) {
 			if dialect == "postgres" {
 				quote = `"`
 			}
-			table := db.NamingStrategy.TableName("PlaygroundUserUsage")
+			// The model pins its table name, so the naming strategy cannot
+			// prefix this table; resolve it the way the migration does.
+			statement := &gorm.Statement{DB: db}
+			require.NoError(t, statement.Parse(&PlaygroundUserUsage{}))
+			table := statement.Table
 			q := func(name string) string { return quote + name + quote }
 			legacyColumns := []string{"user_id", "sessions", "presets", "attachment_count", "attachment_bytes", "object_bytes", "artifact_count", "artifact_bytes", "canvas_count", "canvas_bytes", "created_at", "updated_at"}
 			legacyTypes := []string{"bigint PRIMARY KEY", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL"}

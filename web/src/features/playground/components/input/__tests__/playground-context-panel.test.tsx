@@ -20,12 +20,16 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import i18next from 'i18next'
 import type { ComponentProps } from 'react'
-import { beforeAll, expect, test, vi } from 'vitest'
+import { afterEach, beforeAll, expect, test, vi } from 'vitest'
 
 import { PromptInputProvider } from '@/components/ai-elements/prompt-input'
 
 import { DEFAULT_CONTEXT_SETTINGS } from '../../../constants'
 import { planPlaygroundContext } from '../../../lib'
+import {
+  clearPlaygroundAttachmentCache,
+  primePlaygroundAttachment,
+} from '../../../lib/attachment-store'
 import type { Message, PlaygroundContextSummary } from '../../../types'
 import { PlaygroundContextPanel } from '../playground-context-panel'
 
@@ -78,6 +82,10 @@ function mount(
 async function openPanel(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('button', { name: 'Context management' }))
 }
+
+afterEach(() => {
+  clearPlaygroundAttachmentCache()
+})
 
 beforeAll(() => {
   i18next.addResourceBundle('en', 'translation', {
@@ -142,6 +150,10 @@ test('an automatic summary marks the dropped messages as summarized', async () =
 
 test('a text-only model reports history images left out of the next request', async () => {
   const user = userEvent.setup()
+  // A send caches the attachment bytes before the plan is built
+  // (ensurePlaygroundMessageAttachments), so the request carries the image
+  // part the policy then has to replace.
+  primePlaygroundAttachment('a1', 'data:image/png;base64,iVBORw0KGgo=')
   const messages: Message[] = [
     {
       key: 'm1',

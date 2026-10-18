@@ -31,6 +31,10 @@ import {
 } from '../context/playground-context'
 import { applyModelMediaPolicy } from '../message/message-media-utils'
 import { isValidMessage } from '../message/message-utils'
+import {
+  modelSupportsReasoningEffort,
+  normalizeReasoningEffort,
+} from '../parameters/playground-reasoning'
 
 /**
  * Context management input for one payload: the conversation's settings and
@@ -112,6 +116,18 @@ export function buildChatCompletionPayload(
 
   if (parameterEnabled.seed && config.seed !== null) {
     payload.seed = config.seed
+  }
+
+  if (
+    parameterEnabled.reasoning_effort &&
+    modelSupportsReasoningEffort(config.model)
+  ) {
+    // Only a value the relay accepts is forwarded; a stale or edited stored
+    // value silently leaves the parameter unset instead of failing the request.
+    const effort = normalizeReasoningEffort(config.reasoning_effort)
+    if (effort) {
+      payload.reasoning_effort = effort
+    }
   }
 
   return payload

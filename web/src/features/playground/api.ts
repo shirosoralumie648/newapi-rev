@@ -49,6 +49,7 @@ import type {
   PlaygroundContextSummary,
   PlaygroundMessageCost,
   PlaygroundServerSession,
+  PromptSnippet,
 } from './types'
 
 /** One non-streaming completion plus the relay request id it was recorded as. */
@@ -291,8 +292,27 @@ function mapServerAttachment(value: unknown): PlaygroundServerAttachment {
   }
 }
 
+// One stored attachment/reference keeps the owned metadata; the client adds the
+// content URL of the owning conversation, which is the only field the server
+// derives on read.
+function normalizeServerMessageAttachment(
+  attachment: unknown,
+  sessionId: string
+): unknown {
+  const stored = serverMessageAttachmentSchema.safeParse(attachment)
+  if (!stored.success) return attachment
+  return {
+    id: stored.data.id,
+    url: playgroundAttachmentContentUrl(sessionId, stored.data.id),
+    mediaType: stored.data.media_type,
+    filename: stored.data.filename,
+    byteSize: stored.data.byte_size,
+  }
+}
+
 // The stored message snapshot keeps attachment references only; display and
-// request fields are derived from the owned attachment rows on read.
+// request fields are derived from the owned attachment rows on read. A cached
+// read-aloud reference (`speech`) is resolved the same way.
 function normalizeServerMessagePayload(
   payload: unknown,
   sessionId: string
@@ -304,22 +324,24 @@ function normalizeServerMessagePayload(
     ...(payload as Record<string, unknown>),
     versions: versions.map((version) => {
       if (!version || typeof version !== 'object') return version
-      const attachments = (version as { attachments?: unknown }).attachments
-      if (!Array.isArray(attachments) || attachments.length === 0)
-        return version
+      const record = version as Record<string, unknown>
+      const attachments = Array.isArray(record.attachments)
+        ? record.attachments
+        : null
+      const speech = record.speech ?? null
+      if (!attachments?.length && !speech) return version
       return {
-        ...(version as Record<string, unknown>),
-        attachments: attachments.map((attachment) => {
-          const stored = serverMessageAttachmentSchema.safeParse(attachment)
-          if (!stored.success) return attachment
-          return {
-            id: stored.data.id,
-            url: playgroundAttachmentContentUrl(sessionId, stored.data.id),
-            mediaType: stored.data.media_type,
-            filename: stored.data.filename,
-            byteSize: stored.data.byte_size,
-          }
-        }),
+        ...record,
+        ...(attachments?.length
+          ? {
+              attachments: attachments.map((attachment) =>
+                normalizeServerMessageAttachment(attachment, sessionId)
+              ),
+            }
+          : {}),
+        ...(speech
+          ? { speech: normalizeServerMessageAttachment(speech, sessionId) }
+          : {}),
       }
     }),
   }
@@ -654,6 +676,10 @@ const playgroundUsageSchema = z.object({
   tasks: playgroundUsageMetricSchema,
 })
 
+const playgroundSettingsSchema = z.object({
+  sandbox_preview_enabled: z.boolean(),
+})
+
 export interface PlaygroundUsageMetric {
   used: number
   limit: number
@@ -741,6 +767,25 @@ export async function getPlaygroundUsage(
     storage: toMetric(metrics.storage),
     tasks: toMetric(metrics.tasks),
   }
+}
+
+/**
+ * Server-side Playground feature switches. `sandboxPreviewEnabled` is the
+ * administrator opt-in for rendering HTML/SVG artifact content inside the
+ * sandboxed preview; while it is false the browser must keep artifact content
+ * inert.
+ */
+export interface PlaygroundServerSettings {
+  sandboxPreviewEnabled: boolean
+}
+
+export async function getPlaygroundSettings(
+  signal?: AbortSignal
+): Promise<PlaygroundServerSettings> {
+  const response = await api.get(API_ENDPOINTS.PLAYGROUND_SETTINGS, { signal })
+  requireServerSuccess(response.data)
+  const settings = playgroundSettingsSchema.parse(response.data.data)
+  return { sandboxPreviewEnabled: settings.sandbox_preview_enabled }
 }
 
 const serverPresetSchema = z.object({
@@ -839,6 +884,94 @@ export async function deletePlaygroundPreset(
 ): Promise<void> {
   const response = await api.delete(
     `${API_ENDPOINTS.PLAYGROUND_PRESETS}/${encodeURIComponent(presetId)}`,
+    { signal }
+  )
+  requireServerSuccess(response.data)
+}
+
+const serverSnippetSchema = z.object({
+  id: z.string().min(1),
+  name: z.string(),
+  content: z.string(),
+  created_at: z.number().int().nonnegative(),
+  updated_at: z.number().int().nonnegative(),
+})
+
+export interface PlaygroundSnippetInput {
+  name: string
+  content: string
+}
+
+export type PlaygroundSnippetUpdateInput = Partial<PlaygroundSnippetInput>
+
+export interface PlaygroundSnippetListing {
+  items: PromptSnippet[]
+  total: number
+  /** Per-account snippet budget the server enforces for the owner's group. */
+  limit: number
+}
+
+function mapServerSnippet(value: unknown): PromptSnippet {
+  const snippet = serverSnippetSchema.parse(value)
+  return {
+    id: snippet.id,
+    name: snippet.name,
+    content: snippet.content,
+    createdAt: snippet.created_at * 1000,
+    updatedAt: snippet.updated_at * 1000,
+  }
+}
+
+export async function getPlaygroundSnippets(
+  signal?: AbortSignal
+): Promise<PlaygroundSnippetListing> {
+  const response = await api.get(API_ENDPOINTS.PLAYGROUND_SNIPPETS, { signal })
+  requireServerSuccess(response.data)
+  const data = z
+    .object({
+      items: z.array(z.unknown()),
+      total: z.number().nonnegative(),
+      limit: z.number().int().nonnegative(),
+    })
+    .parse(response.data.data)
+  return {
+    items: data.items.map(mapServerSnippet),
+    total: data.total,
+    limit: data.limit,
+  }
+}
+
+export async function createPlaygroundSnippet(
+  input: PlaygroundSnippetInput,
+  signal?: AbortSignal
+): Promise<PromptSnippet> {
+  const response = await api.post(API_ENDPOINTS.PLAYGROUND_SNIPPETS, input, {
+    signal,
+  })
+  requireServerSuccess(response.data)
+  return mapServerSnippet(response.data.data)
+}
+
+export async function updatePlaygroundSnippet(
+  snippetId: string,
+  input: PlaygroundSnippetUpdateInput,
+  signal?: AbortSignal
+): Promise<PromptSnippet> {
+  const response = await api.patch(
+    `${API_ENDPOINTS.PLAYGROUND_SNIPPETS}/${encodeURIComponent(snippetId)}`,
+    input,
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  return mapServerSnippet(response.data.data)
+}
+
+export async function deletePlaygroundSnippet(
+  snippetId: string,
+  signal?: AbortSignal
+): Promise<void> {
+  const response = await api.delete(
+    `${API_ENDPOINTS.PLAYGROUND_SNIPPETS}/${encodeURIComponent(snippetId)}`,
     { signal }
   )
   requireServerSuccess(response.data)

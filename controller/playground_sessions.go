@@ -26,6 +26,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -71,6 +72,13 @@ const (
 	// matches what the model produced.
 	playgroundContextSummaryMaxBytes = 32 << 10
 )
+
+// playgroundReasoningEffortValues lists the effort strings the relay accepts
+// for `reasoning_effort` (relaykit/relayconvert/reasoning.ParseEffort), plus
+// the empty value stored while the parameter stays unset. The conversion
+// rejects any other value, so a stored configuration only ever carries one a
+// request can send.
+var playgroundReasoningEffortValues = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
 
 type playgroundSessionRequest struct {
 	Title            *string                  `json:"title"`
@@ -142,7 +150,11 @@ type playgroundMessagePayload struct {
 		Status      string                        `json:"status,omitempty"`
 		ErrorCode   *string                       `json:"errorCode,omitempty"`
 		Attachments []playgroundMessageAttachment `json:"attachments,omitempty"`
-		ToolCalls   []playgroundMessageToolCall   `json:"toolCalls,omitempty"`
+		// Speech references the cached read-aloud audio of this version. The
+		// bytes are an owned conversation attachment; only the reference is
+		// stored on the message, exactly like an attachment reference.
+		Speech    *playgroundMessageAttachment `json:"speech,omitempty"`
+		ToolCalls []playgroundMessageToolCall  `json:"toolCalls,omitempty"`
 		// RequestId and Usage are the display-only record of the generation
 		// that produced this version: the relay request id plus the token
 		// usage it reported. Neither feeds billing; the settled consume log
@@ -273,6 +285,11 @@ func writePlaygroundError(c *gin.Context, err error) {
 		code = "PLAYGROUND_NOT_FOUND"
 		err = common.NewMessage(err.Error())
 	}
+	if errors.Is(err, model.ErrPlaygroundSnippetNotFound) {
+		status = http.StatusNotFound
+		code = "PLAYGROUND_NOT_FOUND"
+		err = common.NewMessage(err.Error())
+	}
 	if errors.Is(err, model.ErrPlaygroundConflict) {
 		status = http.StatusConflict
 		code = "PLAYGROUND_CONFLICT"
@@ -298,6 +315,16 @@ func writePlaygroundError(c *gin.Context, err error) {
 	if errors.Is(err, model.ErrPlaygroundPresetLimit) {
 		status = http.StatusUnprocessableEntity
 		code = "PLAYGROUND_PRESET_LIMIT_EXCEEDED"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundSnippetLimit) {
+		status = http.StatusUnprocessableEntity
+		code = "PLAYGROUND_SNIPPET_LIMIT_EXCEEDED"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundSnippetContentLimit) {
+		status = http.StatusUnprocessableEntity
+		code = "PLAYGROUND_SNIPPET_CONTENT_LIMIT_EXCEEDED"
 		err = common.NewMessage(err.Error())
 	}
 	if errors.Is(err, model.ErrPlaygroundSystemPromptLimit) {
@@ -523,6 +550,9 @@ func encodePlaygroundSettings(request playgroundSessionRequest, systemPromptMaxB
 			case "seed":
 				_, valid = value.(float64)
 				valid = valid || value == nil
+			case "reasoning_effort":
+				text, ok := value.(string)
+				valid = ok && (text == "" || slices.Contains(playgroundReasoningEffortValues, text))
 			}
 			if !valid {
 				return nil, common.NewMessage("Invalid Playground configuration.")
@@ -537,7 +567,7 @@ func encodePlaygroundSettings(request playgroundSessionRequest, systemPromptMaxB
 	if request.ParameterEnabled != nil {
 		for key := range request.ParameterEnabled {
 			switch key {
-			case "temperature", "top_p", "max_tokens", "frequency_penalty", "presence_penalty", "seed":
+			case "temperature", "top_p", "max_tokens", "frequency_penalty", "presence_penalty", "seed", "reasoning_effort":
 			default:
 				return nil, common.NewMessage("Invalid Playground configuration.")
 			}
@@ -684,19 +714,27 @@ func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroun
 					return nil, err
 				}
 			}
-			if len(version.Attachments) == 0 {
-				continue
-			}
-			if !allowAttachments || payload.From != "user" || len(version.Attachments) > policy.AttachmentMaxCount {
-				return nil, common.NewMessage("Invalid Playground message.")
-			}
-			seen := make(map[string]bool, len(version.Attachments))
-			for _, attachment := range version.Attachments {
-				if attachment.ID == "" || len(attachment.ID) > 200 || seen[attachment.ID] {
+			if len(version.Attachments) > 0 {
+				if !allowAttachments || payload.From != "user" || len(version.Attachments) > policy.AttachmentMaxCount {
 					return nil, common.NewMessage("Invalid Playground message.")
 				}
-				seen[attachment.ID] = true
-				attachmentIDs[attachment.ID] = true
+				seen := make(map[string]bool, len(version.Attachments))
+				for _, attachment := range version.Attachments {
+					if attachment.ID == "" || len(attachment.ID) > 200 || seen[attachment.ID] {
+						return nil, common.NewMessage("Invalid Playground message.")
+					}
+					seen[attachment.ID] = true
+					attachmentIDs[attachment.ID] = true
+				}
+			}
+			// Cached read-aloud audio is a reference like an attachment, but
+			// it belongs to a user or assistant reply, never to a system
+			// message.
+			if version.Speech != nil {
+				if !allowAttachments || (payload.From != "user" && payload.From != "assistant") || version.Speech.ID == "" || len(version.Speech.ID) > 200 {
+					return nil, common.NewMessage("Invalid Playground message.")
+				}
+				attachmentIDs[version.Speech.ID] = true
 			}
 		}
 		if len(payload.Sources) > 100 {
@@ -740,6 +778,12 @@ func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroun
 				attachment.MediaType = stored.MediaType
 				attachment.Filename = stored.Filename
 				attachment.ByteSize = stored.ByteSize
+			}
+			if version.Speech != nil {
+				stored := resolved[version.Speech.ID]
+				version.Speech.MediaType = stored.MediaType
+				version.Speech.Filename = stored.Filename
+				version.Speech.ByteSize = stored.ByteSize
 			}
 		}
 		// Only the message contract is persisted; unknown credential/provider fields are discarded.

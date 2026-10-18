@@ -54,7 +54,12 @@ test('inline base64 media is replaced in every shape and counted', () => {
   const result = omitInlineBase64Media(input)
 
   expect(result.omitted).toBe(4)
-  expect(result.text).not.toContain('base64')
+  // The placeholder itself names base64, so what must be gone is the payload:
+  // neither a data URL nor the encoded bytes survive the replacement.
+  expect(result.text).not.toContain('data:')
+  expect(result.text).not.toContain(PNG_BASE64)
+  expect(result.text).not.toContain('BBBB')
+  expect(result.text).not.toContain('CCCC')
   expect(result.text.match(/\[inline base64 media omitted\]/g)).toHaveLength(4)
 })
 
