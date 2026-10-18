@@ -109,6 +109,7 @@ it('keeps the invitee list reachable without referral rewards', () => {
       affiliateLink='https://example.com/?aff=1'
       onTransfer={vi.fn()}
       onViewReferrals={onViewReferrals}
+      onOpenProgram={vi.fn()}
     />
   )
 

@@ -352,6 +352,9 @@ func isolatedAccountingTestDB(t *testing.T, dialect string) *gorm.DB {
 	previousMain, previousLog := common.MainDatabaseType(), common.LogDatabaseType()
 	common.SetDatabaseTypes(common.DatabaseType(dialect), previousLog)
 	DB = db
+	// The reserved-word quoting and boolean literals of the raw SQL helpers
+	// follow the active dialect, so they must be rebuilt for this database.
+	initCol()
 	t.Cleanup(func() {
 		require.NoError(t, db.Migrator().DropTable(&User{}, &Token{}, &Channel{}, &CreditGrant{}, &ReferralBinding{},
 			&ReferralRegistrationSignal{}, &ReferralIdentity{}, &ReferralFlag{}))
@@ -360,6 +363,7 @@ func isolatedAccountingTestDB(t *testing.T, dialect string) *gorm.DB {
 		require.NoError(t, sqlDB.Close())
 		DB = previous
 		common.SetDatabaseTypes(previousMain, previousLog)
+		initCol()
 	})
 	require.NoError(t, db.AutoMigrate(&User{}, &Token{}, &Channel{}, &CreditGrant{}, &ReferralBinding{},
 		&ReferralRegistrationSignal{}, &ReferralIdentity{}, &ReferralFlag{}))
