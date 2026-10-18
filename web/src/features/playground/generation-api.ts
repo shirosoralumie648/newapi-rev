@@ -91,6 +91,32 @@ const videoTaskSchema = z.object({
 })
 
 /**
+ * Parses the outcome of an image generation or edit: a durable task id when a
+ * task-plugin model submitted the job, otherwise the returned images. An answer
+ * that is neither is a failed operation and throws with the caller's label.
+ */
+function parseImageOutcome(
+  data: unknown,
+  failureMessage: string
+): PlaygroundImageGenerationOutcome {
+  const task = imageTaskSchema.safeParse(data)
+  if (task.success) {
+    return { kind: 'task', taskId: task.data.data.task_id }
+  }
+  const parsed = imageGenerationSchema.safeParse(data)
+  if (!parsed.success) {
+    throw new Error(failureMessage)
+  }
+  return {
+    kind: 'images',
+    images: parsed.data.data.map((item) => ({
+      ...(item.url ? { url: item.url } : {}),
+      ...(item.b64_json ? { b64Json: item.b64_json } : {}),
+    })),
+  }
+}
+
+/**
  * Keeps a user-supplied billing multiplier inside the bound the server
  * enforces (`dto.MaxImageN`); anything malformed is dropped instead of sent.
  */
@@ -156,21 +182,47 @@ export async function submitImageGeneration(
         : {}),
     }
   )
-  const task = imageTaskSchema.safeParse(response.data)
-  if (task.success) {
-    return { kind: 'task', taskId: task.data.data.task_id }
-  }
-  const parsed = imageGenerationSchema.safeParse(response.data)
-  if (!parsed.success) {
-    throw new Error('Image generation failed')
-  }
-  return {
-    kind: 'images',
-    images: parsed.data.data.map((item) => ({
-      ...(item.url ? { url: item.url } : {}),
-      ...(item.b64_json ? { b64Json: item.b64_json } : {}),
-    })),
-  }
+  return parseImageOutcome(response.data, 'Image generation failed')
+}
+
+export interface PlaygroundImageEditInput {
+  model: string
+  prompt: string
+  /** Source image; the bytes travel in the multipart body, never as a URL. */
+  image: Blob
+  imageFilename: string
+  /** Mask over the source image, transparent where the edit applies. */
+  mask: Blob
+  maskFilename: string
+  /** Workspace group the edit runs in; empty uses the account group. */
+  group?: string
+  size?: string
+}
+
+/**
+ * Submits an image edit (a prompt with the source image and its mask) through
+ * the Playground relay route. The body is multipart, so the workspace group
+ * travels in the X-Playground-Group header: the server consumes and validates
+ * it before the canonical relay request, and it never reaches the upstream
+ * provider. Billing, permissions and channel selection stay the ordinary relay
+ * pipeline.
+ */
+export async function submitImageEdit(
+  input: PlaygroundImageEditInput,
+  signal?: AbortSignal
+): Promise<PlaygroundImageGenerationOutcome> {
+  const form = new FormData()
+  form.append('model', input.model)
+  form.append('prompt', input.prompt)
+  form.append('image', input.image, input.imageFilename)
+  form.append('mask', input.mask, input.maskFilename)
+  if (input.size) form.append('size', input.size)
+  const response = await api.post(API_ENDPOINTS.IMAGE_EDITS, form, {
+    signal,
+    skipErrorHandler: true,
+    ...(input.group ? { headers: { 'X-Playground-Group': input.group } } : {}),
+  })
+  return parseImageOutcome(response.data, 'Image edit failed')
 }
 
 /**

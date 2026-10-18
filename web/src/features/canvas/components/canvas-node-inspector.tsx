@@ -16,7 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { FileText, MessageSquare, Trash2 } from 'lucide-react'
+import {
+  Crop,
+  FileText,
+  Maximize2,
+  MessageSquare,
+  Paintbrush,
+  Trash2,
+} from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -25,12 +32,16 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import type { GroupOption, ModelOption } from '@/features/playground/types'
 
-import { CANVAS_NODE_KIND_LABELS } from '../constants'
+import { CANVAS_IMAGE_TOOL_TITLES, CANVAS_NODE_KIND_LABELS } from '../constants'
 import type {
   CanvasNodeDataUpdate,
   CanvasNodeDataUpdateOptions,
 } from '../hooks/use-canvas-editor'
 import type { CanvasWorkflowRunPhase } from '../hooks/use-canvas-workflow-runner'
+import {
+  canvasImageToolSource,
+  type CanvasImageToolKind,
+} from '../lib/canvas-image-tools'
 import {
   canvasNodeSourceTarget,
   type CanvasSourceTarget,
@@ -43,6 +54,14 @@ import {
 import type { CanvasFlowNode } from '../types'
 import { CanvasNodeResultFields } from './canvas-node-result-fields'
 import { CanvasNodeWorkflowFields } from './canvas-node-workflow-fields'
+
+// One icon per image tool; the buttons map over the title record so a new tool
+// needs its entry here and in the titles.
+const CANVAS_IMAGE_TOOL_ICONS: Record<CanvasImageToolKind, typeof Crop> = {
+  crop: Crop,
+  redraw: Paintbrush,
+  upscale: Maximize2,
+}
 
 interface CanvasNodeInspectorProps {
   node: CanvasFlowNode | null
@@ -62,6 +81,8 @@ interface CanvasNodeInspectorProps {
   onDelete: (id: string) => void
   onRetry?: (nodeId: string) => void
   onOpenSource?: (target: CanvasSourceTarget) => void
+  /** Opens one browser-side image tool on an image-carrying node. */
+  onOpenImageTools?: (node: CanvasFlowNode, tool: CanvasImageToolKind) => void
 }
 
 export function CanvasNodeInspector(props: CanvasNodeInspectorProps) {
@@ -240,6 +261,34 @@ export function CanvasNodeInspector(props: CanvasNodeInspectorProps) {
                 {t('Open artifact')}
               </Button>
             ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {props.onOpenImageTools && canvasImageToolSource(node.data) ? (
+        <div className='grid gap-2'>
+          <span className='text-muted-foreground text-xs'>
+            {t('Image tools')}
+          </span>
+          <div className='flex flex-wrap gap-2'>
+            {(
+              Object.keys(CANVAS_IMAGE_TOOL_TITLES) as CanvasImageToolKind[]
+            ).map((tool) => {
+              const Icon = CANVAS_IMAGE_TOOL_ICONS[tool]
+              return (
+                <Button
+                  disabled={props.disabled}
+                  key={tool}
+                  onClick={() => props.onOpenImageTools?.(node, tool)}
+                  size='sm'
+                  type='button'
+                  variant='outline'
+                >
+                  <Icon aria-hidden='true' />
+                  {t(CANVAS_IMAGE_TOOL_TITLES[tool])}
+                </Button>
+              )
+            })}
           </div>
         </div>
       ) : null}
