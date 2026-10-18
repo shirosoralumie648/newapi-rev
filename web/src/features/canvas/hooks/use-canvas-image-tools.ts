@@ -157,7 +157,7 @@ function sniffImageMediaType(bytes: Uint8Array): string | null {
   return null
 }
 
-function decodeBase64ImageBytes(source: string): Uint8Array {
+function decodeBase64ImageBytes(source: string): Uint8Array<ArrayBuffer> {
   const separator = source.startsWith('data:') ? source.indexOf(',') : -1
   const payload = separator >= 0 ? source.slice(separator + 1) : source
   const binary = atob(payload)
@@ -168,7 +168,9 @@ function decodeBase64ImageBytes(source: string): Uint8Array {
   return bytes
 }
 
-async function fetchImageBytes(url: string | undefined): Promise<Uint8Array> {
+async function fetchImageBytes(
+  url: string | undefined
+): Promise<Uint8Array<ArrayBuffer>> {
   const target = url?.trim()
   if (!target) {
     throw new CanvasImageToolError(CANVAS_IMAGE_TOOL_MESSAGES.RESULT_UNREADABLE)

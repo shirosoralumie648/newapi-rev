@@ -36,7 +36,10 @@ import {
   scaleCanvasImage,
 } from '../../lib/canvas-image-render'
 import type { CanvasFlowNode } from '../../types'
-import { useCanvasImageTools } from '../use-canvas-image-tools'
+import {
+  useCanvasImageTools,
+  type UseCanvasImageToolsOptions,
+} from '../use-canvas-image-tools'
 
 vi.mock('@/features/playground/lib/attachment-upload', () => ({
   uploadPlaygroundAttachmentDirect: vi.fn(),
@@ -121,7 +124,9 @@ function redrawInput() {
 }
 
 function useHarness(addLinkedNode?: () => string | null) {
-  const link = vi.fn(addLinkedNode ?? (() => 'node-new'))
+  const link = vi.fn<UseCanvasImageToolsOptions['addLinkedNode']>(
+    addLinkedNode ?? (() => 'node-new')
+  )
   const hook = renderHook(() =>
     useCanvasImageTools({
       canvasId: 'pgc_1',
