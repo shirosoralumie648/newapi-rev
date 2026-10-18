@@ -40,7 +40,10 @@ type Redemption struct {
 	Key    string `json:"key" gorm:"type:char(32);uniqueIndex"`
 	Status int    `json:"status" gorm:"default:1"`
 	Name   string `json:"name" gorm:"index"`
-	Quota  int    `json:"quota" gorm:"type:bigint;default:100"`
+	// Quota carries the wallet credit of a quota code. Subscription codes
+	// store 0, so the column has no database default: GORM would rewrite a
+	// zero value with it on insert and subscription codes would carry credit.
+	Quota int `json:"quota" gorm:"type:bigint"`
 	// Type is "quota" (credit Quota) or "subscription" (grant PlanId). Rows
 	// created before this column existed read back as empty and are treated
 	// as quota codes.

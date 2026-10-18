@@ -474,7 +474,7 @@ func TestPlaygroundParallelCompareGroups(t *testing.T) {
 			}{
 				{"parallel group on a user message", group(true, "user", []any{version("v1", "model-one", ""), version("v2", "model-two", "")})},
 				{"single-version comparison", group(true, "assistant", []any{version("v1", "model-one", "")})},
-				{"version without a model", group(true, "assistant", []any{version("v1", "model-one", ""), {"id": "v2", "content": "Reply"}})},
+				{"version without a model", group(true, "assistant", []any{version("v1", "model-one", ""), map[string]any{"id": "v2", "content": "Reply"}})},
 				{"unknown version status", group(true, "assistant", []any{version("v1", "model-one", "running"), version("v2", "model-two", "")})},
 				{"oversized model name", group(true, "assistant", []any{version("v1", strings.Repeat("m", 513), ""), version("v2", "model-two", "")})},
 				{"oversized version error code", group(true, "assistant", []any{
@@ -771,10 +771,18 @@ func TestPlaygroundArtifactPersistenceMatrix(t *testing.T) {
 			require.NoError(t, common.Unmarshal(listed.Body.Bytes(), &listing))
 			assert.Zero(t, listing.Data.Total)
 			assert.Empty(t, listing.Data.Items)
-			// Deleting a session clears tombstones; deleting another clears live bodies.
+			// Deleting a session moves it to the trash, where its tombstones
+			// and live bodies stay until the purge clears them.
 			for _, id := range []string{sessionID, foreignSession} {
 				response := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+id, nil, controller.DeletePlaygroundSession)
 				require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			}
+			require.NoError(t, db.Model(&model.PlaygroundArtifact{}).Count(&count).Error)
+			assert.EqualValues(t, 2, count)
+			require.NoError(t, db.Model(&model.PlaygroundArtifactVersion{}).Count(&count).Error)
+			assert.EqualValues(t, 1, count)
+			for _, id := range []string{sessionID, foreignSession} {
+				require.NoError(t, model.PurgePlaygroundSession(7, id))
 			}
 			require.NoError(t, db.Model(&model.PlaygroundArtifact{}).Count(&count).Error)
 			assert.Zero(t, count)
@@ -1110,10 +1118,15 @@ func TestPlaygroundAttachmentPersistenceMatrix(t *testing.T) {
 			crossSession := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+otherID+"/attachments/"+attachmentID, nil, controller.GetPlaygroundAttachment)
 			assert.Equal(t, http.StatusNotFound, crossSession.Code)
 
-			// Deleting the conversation cascades into its attachments and
-			// their stored objects.
+			// The trashed conversation keeps its attachments and their stored
+			// objects; purging it cascades into both.
 			require.NoError(t, model.DeletePlaygroundSession(7, id))
 			var count int64
+			require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("session_id = ?", id).Count(&count).Error)
+			assert.EqualValues(t, 1, count)
+			_, objectErr = objectStore.Head(context.Background(), stored.ObjectKey)
+			require.NoError(t, objectErr)
+			require.NoError(t, model.PurgePlaygroundSession(7, id))
 			require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("session_id = ?", id).Count(&count).Error)
 			assert.Zero(t, count)
 			_, objectErr = objectStore.Head(context.Background(), stored.ObjectKey)
@@ -1852,6 +1865,9 @@ func TestPlaygroundArtifactConcurrentWritesMatrix(t *testing.T) {
 			if written.err != nil {
 				assert.ErrorIs(t, written.err, model.ErrPlaygroundSessionNotFound)
 			}
+			// The trash keeps whatever the race wrote, and the purge proves the
+			// late creation left no orphan behind.
+			require.NoError(t, model.PurgePlaygroundSession(7, sessionID))
 			require.NoError(t, db.Model(&model.PlaygroundArtifact{}).Count(&count).Error)
 			assert.Zero(t, count)
 			require.NoError(t, db.Model(&model.PlaygroundArtifactVersion{}).Count(&count).Error)
@@ -2191,8 +2207,14 @@ func TestPlaygroundQuotaPolicyResolutionAndSessionLimit(t *testing.T) {
 	assert.Equal(t, http.StatusUnprocessableEntity, overflow.Code, overflow.Body.String())
 	assert.Contains(t, overflow.Body.String(), "PLAYGROUND_SESSION_LIMIT_EXCEEDED")
 
-	// Deleting a conversation frees its slot, so the next create succeeds.
+	// A trashed conversation keeps its slot; the purge that follows the
+	// retention window frees it for the next create.
 	require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+first["id"].(string), nil, controller.DeletePlaygroundSession).Code)
+	trashed := playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions", map[string]any{
+		"title": "Overflow", "config": map[string]any{}, "parameter_enabled": map[string]any{},
+	}, controller.CreatePlaygroundSession)
+	assert.Equal(t, http.StatusUnprocessableEntity, trashed.Code, trashed.Body.String())
+	require.NoError(t, model.PurgePlaygroundSession(7, first["id"].(string)))
 	assert.NotEmpty(t, createPlayground(t, 7, "quota-second")["id"])
 }
 
@@ -2407,7 +2429,13 @@ func TestPlaygroundUserUsageCounters(t *testing.T) {
 			assert.Zero(t, counters.ArtifactCount)
 			assert.Zero(t, counters.ArtifactBytes)
 
+			// A trashed canvas keeps its slot and bytes in the counters; the
+			// purge releases them.
 			require.NoError(t, model.DeletePlaygroundCanvasProject(7, storedCanvas.ID))
+			counters = playgroundUsageCounters(t, db, 7)
+			assert.EqualValues(t, 1, counters.CanvasCount)
+			assert.NotZero(t, counters.CanvasBytes)
+			require.NoError(t, model.PurgePlaygroundCanvasProject(7, storedCanvas.ID))
 			counters = playgroundUsageCounters(t, db, 7)
 			assert.Zero(t, counters.CanvasCount)
 			assert.Zero(t, counters.CanvasBytes)
@@ -2418,8 +2446,12 @@ func TestPlaygroundUserUsageCounters(t *testing.T) {
 			assert.Zero(t, counters.AttachmentBytes)
 			assert.Zero(t, counters.ObjectBytes)
 
-			// The conversation cascade releases the messages it still holds.
+			// A trashed conversation keeps counting until its purge releases
+			// everything the cascade removes.
 			require.NoError(t, model.DeletePlaygroundSession(7, sessionID))
+			counters = playgroundUsageCounters(t, db, 7)
+			assert.EqualValues(t, 1, counters.Sessions)
+			require.NoError(t, model.PurgePlaygroundSession(7, sessionID))
 			counters = playgroundUsageCounters(t, db, 7)
 			assert.EqualValues(t, 0, counters.Sessions)
 			assert.Zero(t, counters.AttachmentBytes)

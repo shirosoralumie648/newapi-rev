@@ -77,6 +77,7 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			playgroundRoute.GET("/usage", controller.GetPlaygroundUsage)
 			playgroundRoute.GET("/message-costs", controller.GetPlaygroundMessageCosts)
+			playgroundRoute.GET("/trash", controller.ListPlaygroundTrash)
 			playgroundRoute.GET("/assets", controller.ListPlaygroundAssets)
 			playgroundRoute.POST("/tasks/:taskId/cancel", controller.PlaygroundTaskCancel)
 			playgroundRoute.PUT("/tasks/:taskId/artifacts/:artifactKey/pin", controller.PlaygroundTaskArtifactPin)
@@ -90,6 +91,10 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.GET("/sessions/:id", controller.GetPlaygroundSession)
 			playgroundRoute.PATCH("/sessions/:id", controller.UpdatePlaygroundSession)
 			playgroundRoute.DELETE("/sessions/:id", controller.DeletePlaygroundSession)
+			// The trash keeps a deleted conversation recoverable for the
+			// configured window; export also works while it waits there.
+			playgroundRoute.POST("/sessions/:id/restore", controller.RestorePlaygroundSession)
+			playgroundRoute.GET("/sessions/:id/export", controller.ExportPlaygroundSession)
 			playgroundRoute.GET("/sessions/:id/messages", controller.ListPlaygroundMessages)
 			playgroundRoute.PATCH("/sessions/:id/messages", controller.ApplyPlaygroundMessagesDelta)
 			// Deprecated compatibility shim: the full snapshot endpoint is kept for
@@ -113,6 +118,9 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.GET("/canvases/:canvasId", controller.GetPlaygroundCanvasProject)
 			playgroundRoute.PATCH("/canvases/:canvasId", controller.UpdatePlaygroundCanvasProject)
 			playgroundRoute.DELETE("/canvases/:canvasId", controller.DeletePlaygroundCanvasProject)
+			// A trashed canvas waits in the shared trash window and comes back
+			// with its document, pins and counter share intact.
+			playgroundRoute.POST("/canvases/:canvasId/restore", controller.RestorePlaygroundCanvasProject)
 			// The board history: list stored snapshots and restore one as the
 			// canvas document, keeping the replaced state as a snapshot too.
 			playgroundRoute.GET("/canvases/:canvasId/snapshots", controller.ListPlaygroundCanvasSnapshots)

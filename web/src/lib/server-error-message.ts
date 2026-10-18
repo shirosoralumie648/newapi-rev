@@ -94,6 +94,8 @@ const serverErrorMessageKeys = {
   PLAYGROUND_TASK_CANCEL_FAILED: 'Unable to cancel the task.',
   PLAYGROUND_CONTEXT_SUMMARY_LIMIT_EXCEEDED:
     'Playground context summary limit exceeded.',
+  PLAYGROUND_PARALLEL_LIMIT_EXCEEDED:
+    'Playground parallel comparison limit exceeded.',
   PLAYGROUND_WALLET_DEBT_READ_ONLY:
     'Your wallet has unsettled debt. Top up to restore access; reading and exporting data stays available.',
   PLAYGROUND_WALLET_DEBT_UNAVAILABLE:

@@ -64,6 +64,9 @@ interface PlaygroundInputProps {
   groups: GroupOption[]
   groupValue: string
   onGroupChange: (value: string) => void
+  /** Models of the next comparison; fewer than two means an ordinary send. */
+  compareModels: string[]
+  onCompareModelsChange: (models: string[]) => void
   hasMessages?: boolean
   onConfigChange: <K extends keyof PlaygroundConfig>(
     key: K,
@@ -109,6 +112,8 @@ export function PlaygroundInput({
   groups,
   groupValue,
   onGroupChange,
+  compareModels,
+  onCompareModelsChange,
   hasMessages = false,
   onConfigChange,
   onClearMessages,
@@ -215,6 +220,8 @@ export function PlaygroundInput({
                 hasMessages={hasMessages}
                 isSummarizing={isSummarizing}
                 models={models}
+                compareModels={compareModels}
+                onCompareModelsChange={onCompareModelsChange}
                 onClearMessages={onClearMessages}
                 onConfigChange={onConfigChange}
                 onContextSettingsChange={onContextSettingsChange}

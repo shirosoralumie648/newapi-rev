@@ -29,12 +29,13 @@ import type {
   ChatCompletionResponse,
   Message,
   MessageAttachment,
+  MessageStatus,
   MessageUsage,
   MessageVersion,
 } from '../../types'
 import { applyChatCompletionChoice } from './message-streaming-utils'
 import { completeAssistantTiming } from './message-timing-utils'
-import { createUserMessage } from './message-utils'
+import { createUserMessage, getActiveVersionIndex } from './message-utils'
 
 type ChatCompletionChoice = ChatCompletionResponse['choices'][number]
 
@@ -42,7 +43,9 @@ type ChatCompletionChoice = ChatCompletionResponse['choices'][number]
  * Whether the message is the group one parallel comparison produced. Only the
  * assistant path stores it; user and system messages never compare models.
  */
-export function isParallelMessage(message: Message | undefined): boolean {
+export function isParallelMessage(
+  message: Message | undefined
+): message is Message {
   return message?.from === MESSAGE_ROLES.ASSISTANT && message.parallel === true
 }
 
@@ -123,7 +126,11 @@ function getVersionStatus(version: MessageVersion): MessageStatus {
   return version.status ?? MESSAGE_STATUS.COMPLETE
 }
 
-function isPendingVersion(version: MessageVersion): boolean {
+/**
+ * Whether one compared reply still waits for its request. Pending versions
+ * show a loader and keep the group loading until every reply lands.
+ */
+export function isPendingParallelVersion(version: MessageVersion): boolean {
   const status = getVersionStatus(version)
   return (
     status === MESSAGE_STATUS.LOADING || status === MESSAGE_STATUS.STREAMING
@@ -131,7 +138,7 @@ function isPendingVersion(version: MessageVersion): boolean {
 }
 
 export function hasPendingParallelVersions(message: Message): boolean {
-  return message.versions.some(isPendingVersion)
+  return message.versions.some(isPendingParallelVersion)
 }
 
 function updateParallelVersion(
@@ -176,7 +183,7 @@ export function settleParallelMessage(
       (version) => getVersionStatus(version) === MESSAGE_STATUS.ERROR
     )
 
-  return completeAssistantTiming(
+  const settled = completeAssistantTiming(
     {
       ...message,
       status: allFailed ? MESSAGE_STATUS.ERROR : MESSAGE_STATUS.COMPLETE,
@@ -186,6 +193,21 @@ export function settleParallelMessage(
     },
     completedAt
   )
+
+  // The conversation continues from the active reply, so a group whose active
+  // reply failed falls back to the first reply that actually arrived. Without
+  // the fallback the next request would carry error text as the answer.
+  const activeIndex = getActiveVersionIndex(settled)
+  if (
+    getVersionStatus(settled.versions[activeIndex]) !== MESSAGE_STATUS.ERROR
+  ) {
+    return settled
+  }
+  const fallbackIndex = settled.versions.findIndex(
+    (version) => getVersionStatus(version) === MESSAGE_STATUS.COMPLETE
+  )
+  if (fallbackIndex === -1) return settled
+  return { ...settled, activeVersionIndex: fallbackIndex }
 }
 
 /**
@@ -286,7 +308,7 @@ export function interruptParallelMessage(
   }
 
   const versions = message.versions.map((version) =>
-    isPendingVersion(version)
+    isPendingParallelVersion(version)
       ? {
           ...version,
           content: `${t(ERROR_MESSAGES.API_REQUEST_ERROR)}: ${t(

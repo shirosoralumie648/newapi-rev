@@ -893,7 +893,10 @@ func creditGrantWalletForTest(t *testing.T, userId int, paid int, grants []struc
 	require.NoError(t, err)
 	grantIds := make([]int, 0, len(grants))
 	for index, grant := range grants {
-		refId := fmt.Sprintf("%d-grant-%d", userId, index)
+		// The ledger reference must be unique per seeded grant: a repeated
+		// seed for the same user would reuse an earlier reference and be
+		// treated as a replay, storing no bucket.
+		refId := fmt.Sprintf("%d-%s-grant-%d", userId, grant.source, index)
 		_, err := IssueCreditGrant(userId, grant.source, grant.amount, grant.expiresAt, WalletLedgerKindSystemGrant, WalletLedgerRefAdminGrant, refId, "")
 		require.NoError(t, err)
 		var stored CreditGrant

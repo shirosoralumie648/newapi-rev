@@ -42,6 +42,7 @@ import {
   getMessageAlignment,
   getPreviousUserMessage,
   isErrorMessage,
+  isParallelMessage,
 } from '../../lib'
 import type {
   Message as MessageType,
@@ -55,6 +56,7 @@ import { PlaygroundMessageContent } from '../message/playground-message-content'
 import { PlaygroundMessageEditor } from '../message/playground-message-editor'
 import { PlaygroundContextNode } from './playground-context-node'
 import { PlaygroundEmptyState } from './playground-empty-state'
+import { PlaygroundParallelCompare } from './playground-parallel-compare'
 
 const MAX_RENDERED_HISTORY_MESSAGES = 24
 
@@ -77,6 +79,8 @@ interface PlaygroundChatProps {
   ) => void
   onDenyToolCall?: (message: MessageType, toolCallId: string) => void
   onContinueToolCalls?: (message: MessageType) => void
+  /** Retry one failed model of a parallel comparison message. */
+  onRetryParallelVersion?: (message: MessageType, versionIndex: number) => void
   isGenerating?: boolean
   isLoadingMessages?: boolean
   editingKey?: string | null
@@ -104,6 +108,7 @@ export function PlaygroundChat({
   onProvideToolResult,
   onDenyToolCall,
   onContinueToolCalls,
+  onRetryParallelVersion,
   isGenerating = false,
   isLoadingMessages = false,
   editingKey,
@@ -195,6 +200,57 @@ export function PlaygroundChat({
       />
     ) : undefined
 
+    // A comparison group answers with its own side-by-side view; every other
+    // reply keeps the ordinary branch renderer.
+    const answerView = isParallelMessage(message) ? (
+      <PlaygroundParallelCompare
+        costs={costs}
+        isGenerating={isGenerating}
+        isLastMessage={isLastMessage}
+        message={message}
+        onContinueToolCalls={onContinueToolCalls}
+        onDenyToolCall={onDenyToolCall}
+        onProvideToolResult={onProvideToolResult}
+        onRetryVersion={onRetryParallelVersion}
+        onSelectVersion={onSelectVersion}
+      />
+    ) : (
+      <Branch
+        defaultBranch={getActiveVersionIndex(message)}
+        key={`${message.key}:${message.versions.length}`}
+        onBranchChange={(versionIndex) =>
+          onSelectVersion?.(message, versionIndex)
+        }
+      >
+        <BranchMessages>
+          {message.versions.map((version, versionIndex) => (
+            <PlaygroundMessageContent
+              actions={messageActions}
+              alignment={alignment}
+              cost={
+                version.requestId ? costs?.get(version.requestId) : undefined
+              }
+              errorActions={errorActions}
+              isGenerating={isGenerating}
+              isLastMessage={isLastMessage}
+              isSourceVisible={isSourceVisible}
+              key={`${version.id}-${versionIndex}`}
+              message={message}
+              onContinueToolCalls={onContinueToolCalls}
+              onDenyToolCall={onDenyToolCall}
+              onProvideToolResult={onProvideToolResult}
+              version={version}
+            />
+          ))}
+        </BranchMessages>
+        <BranchSelector from={message.from}>
+          <BranchPrevious disabled={isGenerating} />
+          <BranchPage />
+          <BranchNext disabled={isGenerating} />
+        </BranchSelector>
+      </Branch>
+    )
+
     return (
       <Message
         className='group flex-row-reverse py-2.5'
@@ -213,42 +269,7 @@ export function PlaygroundChat({
               originalText={originalText}
             />
           ) : (
-            <Branch
-              defaultBranch={getActiveVersionIndex(message)}
-              key={`${message.key}:${message.versions.length}`}
-              onBranchChange={(versionIndex) =>
-                onSelectVersion?.(message, versionIndex)
-              }
-            >
-              <BranchMessages>
-                {message.versions.map((version, versionIndex) => (
-                  <PlaygroundMessageContent
-                    actions={messageActions}
-                    alignment={alignment}
-                    cost={
-                      version.requestId
-                        ? costs?.get(version.requestId)
-                        : undefined
-                    }
-                    errorActions={errorActions}
-                    isGenerating={isGenerating}
-                    isLastMessage={isLastMessage}
-                    isSourceVisible={isSourceVisible}
-                    key={`${version.id}-${versionIndex}`}
-                    message={message}
-                    onContinueToolCalls={onContinueToolCalls}
-                    onDenyToolCall={onDenyToolCall}
-                    onProvideToolResult={onProvideToolResult}
-                    version={version}
-                  />
-                ))}
-              </BranchMessages>
-              <BranchSelector from={message.from}>
-                <BranchPrevious disabled={isGenerating} />
-                <BranchPage />
-                <BranchNext disabled={isGenerating} />
-              </BranchSelector>
-            </Branch>
+            answerView
           )}
         </div>
       </Message>

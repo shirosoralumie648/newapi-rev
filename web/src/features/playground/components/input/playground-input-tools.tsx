@@ -42,6 +42,7 @@ import type {
   PlaygroundContextSettings,
   PlaygroundContextSummary,
 } from '../../types'
+import { PlaygroundComparePanel } from './playground-compare-panel'
 import { PlaygroundContextPanel } from './playground-context-panel'
 import { PlaygroundParameterPanel } from './playground-parameter-panel'
 import { PlaygroundSystemPromptPanel } from './playground-system-prompt-panel'
@@ -51,6 +52,9 @@ type PlaygroundInputToolsProps = {
   disabled?: boolean
   hasMessages?: boolean
   models: ModelOption[]
+  /** Models of the next comparison; empty or single means an ordinary send. */
+  compareModels: string[]
+  onCompareModelsChange: (models: string[]) => void
   onClearMessages?: () => void
   onConfigChange: <K extends keyof PlaygroundConfig>(
     key: K,
@@ -77,6 +81,8 @@ export function PlaygroundInputTools({
   disabled,
   hasMessages = false,
   models,
+  compareModels,
+  onCompareModelsChange,
   onClearMessages,
   onConfigChange,
   onParameterEnabledChange,
@@ -146,6 +152,13 @@ export function PlaygroundInputTools({
             <p>{t('Search')}</p>
           </TooltipContent>
         </Tooltip>
+
+        <PlaygroundComparePanel
+          compareModels={compareModels}
+          disabled={disabled}
+          models={models}
+          onCompareModelsChange={onCompareModelsChange}
+        />
 
         <PlaygroundParameterPanel
           config={config}

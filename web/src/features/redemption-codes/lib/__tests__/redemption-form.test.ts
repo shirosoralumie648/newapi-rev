@@ -177,6 +177,7 @@ describe('redemption form mapping', () => {
     const schema = getRedemptionFormSchema(t)
     const result = schema.safeParse({
       ...REDEMPTION_FORM_DEFAULT_VALUES,
+      name: 'sub-code',
       type: 'subscription',
       plan_id: 0,
     })
@@ -189,6 +190,7 @@ describe('redemption form mapping', () => {
     const schema = getRedemptionFormSchema(t)
     const result = schema.safeParse({
       ...REDEMPTION_FORM_DEFAULT_VALUES,
+      name: 'sub-code',
       type: 'subscription',
       plan_id: 7,
       duration_unit: 'year',
@@ -205,6 +207,7 @@ describe('redemption form mapping', () => {
     const schema = getRedemptionFormSchema(t)
     const result = schema.safeParse({
       ...REDEMPTION_FORM_DEFAULT_VALUES,
+      name: 'sub-code',
       type: 'subscription',
       plan_id: 7,
       duration_unit: 'day',

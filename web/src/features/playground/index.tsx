@@ -55,8 +55,10 @@ import {
   PlaygroundWorkspace,
   type PlaygroundInspectorView,
 } from './components/workspace/playground-workspace'
+import { PLAYGROUND_PARALLEL_MIN_MODELS } from './constants'
 import {
   useChatHandler,
+  useParallelChat,
   usePlaygroundContext,
   usePlaygroundConversation,
   usePlaygroundMessageCosts,
@@ -67,6 +69,7 @@ import {
 } from './hooks'
 import type { CapturedArtifactSource } from './hooks/use-playground-artifacts'
 import {
+  appendParallelMessagePair,
   collectMessageRequestIds,
   getCurrentVersion,
   getMessageContent,
@@ -125,6 +128,7 @@ function PlaygroundContent(props: {
   )
   const appliedSessionRef = useRef<string | null>(null)
   const appliedArtifactRef = useRef<string | null>(null)
+  const [compareModels, setCompareModels] = useState<string[]>([])
   const local = usePlaygroundState()
   const {
     config,
@@ -153,6 +157,13 @@ function PlaygroundContent(props: {
     switchSession,
   } = local
 
+  // A composer submit can await an attachment upload before it appends, and a
+  // comparison sends the snapshot it appended itself. The ref keeps both built
+  // on the newest conversation even when the callback started a few awaits
+  // earlier.
+  const messagesRef = useRef(messages)
+  messagesRef.current = messages
+
   const contextController = usePlaygroundContext({
     sessionId: activeSessionId,
     messages,
@@ -173,6 +184,22 @@ function PlaygroundContent(props: {
     sessionId: activeSessionId,
   })
 
+  const {
+    sendParallelChat,
+    retryParallelVersion,
+    stopComparison,
+    isComparing,
+  } = useParallelChat({
+    config,
+    parameterEnabled,
+    systemPrompt,
+    contextSettings: context,
+    messages,
+    prepareContextSummary: contextController.prepareForSend,
+    onMessageUpdate: updateMessages,
+    sessionId: activeSessionId,
+  })
+
   // Every generated version keeps the relay request id of its request, so the
   // conversation can read the settled cost rows back in one bounded lookup.
   const messageRequestIds = useMemo(
@@ -182,7 +209,9 @@ function PlaygroundContent(props: {
   const messageCostQuery = usePlaygroundMessageCosts(userId, messageRequestIds)
   const messageCosts = messageCostQuery.data?.costs
 
-  const sync = usePlaygroundServer(local, isGenerating)
+  // A running comparison writes the same snapshot through several requests, so
+  // the autosave waits for it exactly like it waits for a streamed reply.
+  const sync = usePlaygroundServer(local, isGenerating || isComparing)
   const deleteSession = sync.deleteSession
   const activeSession = sessions.find(
     (session) => session.id === activeSessionId
@@ -196,7 +225,8 @@ function PlaygroundContent(props: {
     !sync.isLoading &&
     !sync.isSaving &&
     !sync.error &&
-    !isGenerating
+    !isGenerating &&
+    !isComparing
   )
   // Sending a message snapshot to a canvas only needs the conversation to be
   // persisted; it does not mutate or require an idle generation.
@@ -224,10 +254,31 @@ function PlaygroundContent(props: {
 
   const pendingToolCalls = hasPendingToolCalls(messages)
 
+  // The composer sends an ordinary reply unless the compare selection holds a
+  // comparison; with one, the same turn goes to every selected model as its
+  // own request and lands as a comparison group.
+  const submitTurn = useCallback(
+    (text: string, attachments?: MessageAttachment[]) => {
+      if (compareModels.length < PLAYGROUND_PARALLEL_MIN_MODELS) {
+        handleSendMessage(text, attachments)
+        return
+      }
+      const nextMessages = appendParallelMessagePair(
+        messagesRef.current,
+        text,
+        attachments,
+        compareModels
+      )
+      updateMessages(nextMessages)
+      sendParallelChat(nextMessages)
+    },
+    [compareModels, handleSendMessage, sendParallelChat, updateMessages]
+  )
+
   const handleInputSubmit = useCallback(
     async (text: string, files: (FileUIPart & { id?: string })[] = []) => {
       if (files.length === 0) {
-        handleSendMessage(text)
+        submitTurn(text)
         return
       }
       const session = activeSession
@@ -252,14 +303,20 @@ function PlaygroundContent(props: {
         }
         throw error
       }
-      handleSendMessage(text, attachments)
+      submitTurn(text, attachments)
     },
-    [activeSession, handleSendMessage, sync, t]
+    [activeSession, submitTurn, sync, t]
   )
 
-  const stopBeforeSessionChange = useCallback(() => {
+  const handleStop = useCallback(() => {
+    if (isComparing) stopComparison()
     if (isGenerating) stopGeneration()
-  }, [isGenerating, stopGeneration])
+  }, [isComparing, isGenerating, stopComparison, stopGeneration])
+
+  const stopBeforeSessionChange = useCallback(() => {
+    if (isComparing) stopComparison()
+    if (isGenerating) stopGeneration()
+  }, [isComparing, isGenerating, stopComparison, stopGeneration])
 
   const handleWorkspaceTransition = useCallback(
     (action: () => void) => {
@@ -903,17 +960,18 @@ function PlaygroundContent(props: {
               onEditMessage={handleEditMessage}
               onDeleteMessage={handleDeleteMessage}
               onSelectVersion={handleSelectMessageVersion}
-              onSelectPrompt={handleSendMessage}
+              onSelectPrompt={submitTurn}
               onProvideToolResult={handleProvideToolResult}
               onDenyToolCall={handleDenyToolCall}
               onContinueToolCalls={handleContinueToolCalls}
+              onRetryParallelVersion={retryParallelVersion}
               onCreateArtifact={
                 artifactCreationEnabled ? openArtifactSource : undefined
               }
               onSendToCanvas={
                 canvasSendEnabled ? handleSendMessageToCanvas : undefined
               }
-              isGenerating={isGenerating}
+              isGenerating={isGenerating || isComparing}
               editingKey={editingMessageKey}
               onCancelEdit={handleEditOpenChange}
               onSaveEdit={(newContent) => applyEdit(newContent, false)}
@@ -945,17 +1003,20 @@ function PlaygroundContent(props: {
               contextSummary={contextSummary}
               disabled={
                 isGenerating ||
+                isComparing ||
                 sync.isLoading ||
                 pendingToolCalls ||
                 contextController.isSummarizing
               }
               groups={groups}
               groupValue={config.group}
-              isGenerating={isGenerating}
+              isGenerating={isGenerating || isComparing}
               isModelLoading={isLoadingModels}
               isSummarizing={contextController.isSummarizing}
               modelValue={config.model}
               models={models}
+              compareModels={compareModels}
+              onCompareModelsChange={setCompareModels}
               onContextSettingsChange={updateContextSettings}
               onGroupChange={(value) => updateConfig('group', value)}
               onConfigChange={updateConfig}
@@ -963,7 +1024,7 @@ function PlaygroundContent(props: {
               onModelChange={(value) => updateConfig('model', value)}
               onParameterEnabledChange={updateParameterEnabled}
               onRemoveContextSummary={handleRemoveContextSummary}
-              onStop={stopGeneration}
+              onStop={handleStop}
               onSubmit={handleInputSubmit}
               onSummarizeContext={handleSummarizeContext}
               onSystemPromptChange={updateSystemPrompt}

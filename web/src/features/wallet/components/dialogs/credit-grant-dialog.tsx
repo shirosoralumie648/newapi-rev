@@ -40,12 +40,12 @@ import {
 import { formatQuota, formatTimestampToDate } from '@/lib/format'
 import { handleServerError } from '@/lib/handle-server-error'
 
-import { useIssueCreditGrant, useUserCreditGrants } from '../hooks'
+import { useIssueCreditGrant, useUserCreditGrants } from '../../hooks'
 import {
   CREDIT_GRANT_SOURCES,
   getCreditGrantSourceLabel,
-} from '../lib/credit-grant'
-import type { CreditGrantBucket } from '../types'
+} from '../../lib/credit-grant'
+import type { CreditGrantBucket } from '../../types'
 
 interface CreditGrantDialogProps {
   open: boolean

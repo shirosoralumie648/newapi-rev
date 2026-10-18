@@ -11,6 +11,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
@@ -418,6 +419,9 @@ func TestMjImageAccessModeOptionRoundTrip(t *testing.T) {
 func setupRelayRouterTestDB(t *testing.T) {
 	t.Helper()
 
+	// Distributor errors localize their messages with i18n; an uninitialized
+	// bundle panics inside the localizer.
+	require.NoError(t, i18n.Init())
 	gin.SetMode(gin.TestMode)
 	originalIsMasterNode := common.IsMasterNode
 	originalRedisEnabled := common.RedisEnabled
