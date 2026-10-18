@@ -17,10 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
-import { describe, expect, test } from 'vitest'
+import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 
-import type { TaskLog } from '../../types'
+import { api } from '@/lib/api'
+
+import type { TaskArtifact, TaskLog } from '../../types'
 import { TaskArtifactsCell } from '../task-artifacts'
 
 function taskLog(overrides: Partial<TaskLog> = {}): TaskLog {
@@ -46,16 +49,23 @@ function taskLog(overrides: Partial<TaskLog> = {}): TaskLog {
   }
 }
 
-function renderCell(log: TaskLog) {
+function renderCell(
+  log: TaskLog,
+  onTogglePin?: (artifact: TaskArtifact) => void
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
     <QueryClientProvider client={queryClient}>
-      <TaskArtifactsCell log={log} />
+      <TaskArtifactsCell log={log} onTogglePin={onTogglePin} />
     </QueryClientProvider>
   )
 }
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
 describe('task artifacts cell', () => {
   test('given a synchronous result the gateway did not retain, a hint replaces the artifacts button', () => {
@@ -81,6 +91,80 @@ describe('task artifacts cell', () => {
     expect(screen.queryByText('Result not retained')).not.toBeInTheDocument()
     expect(
       screen.queryByRole('button', { name: /Artifacts/ })
+    ).not.toBeInTheDocument()
+  })
+
+  test('given a stored result, the artifacts dialog offers the keep toggle to its owner', async () => {
+    const artifact: TaskArtifact = {
+      key: 'output-1',
+      type: 'image',
+      content_url: `https://gateway.example.com/v1/tasks/task-public/artifacts/output-1/content?access=${'A'.repeat(43)}`,
+      stored: true,
+    }
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: { success: true, data: { artifacts: [artifact] } },
+    })
+    const onTogglePin = vi.fn()
+    const user = userEvent.setup()
+    renderCell(taskLog(), onTogglePin)
+
+    await user.click(screen.getByRole('button', { name: /Artifacts/ }))
+    const keep = await screen.findByRole('button', { name: 'Keep results' })
+    await user.click(keep)
+
+    expect(onTogglePin).toHaveBeenCalledWith(artifact)
+  })
+
+  test('given a pinned result, the keep toggle reports the active state', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          artifacts: [
+            {
+              key: 'output-1',
+              type: 'image',
+              content_url: `https://gateway.example.com/v1/tasks/task-public/artifacts/output-1/content?access=${'A'.repeat(43)}`,
+              stored: true,
+              pinned: true,
+            },
+          ],
+        },
+      },
+    })
+    const user = userEvent.setup()
+    renderCell(taskLog(), vi.fn())
+
+    await user.click(screen.getByRole('button', { name: /Artifacts/ }))
+    const release = await screen.findByRole('button', {
+      name: 'Stop keeping results',
+    })
+    expect(release).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  test('given a result the gateway could not store, the dialog marks it as not stored', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          artifacts: [
+            {
+              key: 'output-1',
+              type: 'image',
+              content_url: `https://gateway.example.com/v1/tasks/task-public/artifacts/output-1/content?access=${'A'.repeat(43)}`,
+              expired: true,
+            },
+          ],
+        },
+      },
+    })
+    const user = userEvent.setup()
+    renderCell(taskLog(), vi.fn())
+
+    await user.click(screen.getByRole('button', { name: /Artifacts/ }))
+    await waitFor(() => expect(screen.getByText('Not stored')).toBeVisible())
+    expect(
+      screen.queryByRole('button', { name: 'Keep results' })
     ).not.toBeInTheDocument()
   })
 })

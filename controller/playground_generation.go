@@ -21,6 +21,7 @@ package controller
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -217,4 +218,76 @@ func PlaygroundTaskCancel(c *gin.Context) {
 		service.RefundTaskQuota(c.Request.Context(), task, model.PlaygroundTaskCanceledReason)
 	}
 	common.ApiSuccess(c, gin.H{"task_id": task.TaskID, "status": task.Status})
+}
+
+// PlaygroundTaskArtifactPin keeps or releases the stored bytes of one
+// generated result. Pinning is what exempts the artifact from the result
+// retention window; it is owner-scoped to workspace tasks, and the result
+// budget still applies while bytes are stored. Releasing a pin only removes
+// the asset-library pin, so a canvas that still references the result keeps it.
+func PlaygroundTaskArtifactPin(c *gin.Context) {
+	userID := c.GetInt("id")
+	taskID := strings.TrimSpace(c.Param("taskId"))
+	artifactKey := strings.TrimSpace(c.Param("artifactKey"))
+	var request struct {
+		Pinned *bool `json:"pinned"`
+	}
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil || request.Pinned == nil {
+		common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage("Invalid request."), gin.H{"code": "PLAYGROUND_INVALID_REQUEST"})
+		return
+	}
+
+	task, exists, err := model.GetByTaskId(userID, taskID)
+	if err != nil {
+		common.ApiErrorStatus(c, http.StatusInternalServerError, common.NewMessage("Unable to query the task."), gin.H{"code": "PLAYGROUND_STORAGE_ERROR"})
+		return
+	}
+	if !exists || task == nil || !task.PrivateData.PlaygroundOrigin {
+		common.ApiErrorStatus(c, http.StatusNotFound, common.NewMessage("Task not found."), gin.H{"code": "PLAYGROUND_TASK_NOT_FOUND"})
+		return
+	}
+	if task.Status != model.TaskStatusSuccess {
+		common.ApiErrorStatus(c, http.StatusConflict, common.NewMessage("Only a finished task keeps its results."), gin.H{"code": "PLAYGROUND_TASK_NOT_READY"})
+		return
+	}
+	if !playgroundTaskArtifactKeyExists(task, artifactKey) {
+		common.ApiErrorStatus(c, http.StatusNotFound, common.NewMessage("Task or artifact not found."), gin.H{"code": "PLAYGROUND_TASK_ARTIFACT_NOT_FOUND"})
+		return
+	}
+	if err := model.SetPlaygroundTaskArtifactPin(userID, taskID, artifactKey, *request.Pinned); err != nil {
+		common.ApiErrorStatus(c, http.StatusInternalServerError, common.NewMessage("Unable to update the result retention."), gin.H{"code": "PLAYGROUND_STORAGE_ERROR"})
+		return
+	}
+	common.ApiSuccess(c, gin.H{"task_id": taskID, "artifact_key": artifactKey, "pinned": *request.Pinned})
+}
+
+// playgroundTaskArtifactKeyExists reports whether the artifact key belongs to
+// the task's results. An already projected artifact is accepted (stored,
+// pending, or expired); otherwise the key must be part of the current
+// projection (the plugin listing or the legacy video result), so a caller
+// cannot pin an arbitrary key.
+func playgroundTaskArtifactKeyExists(task *model.Task, artifactKey string) bool {
+	if task == nil || !taskArtifactKeyPattern.MatchString(artifactKey) {
+		return false
+	}
+	record, err := model.GetPlaygroundTaskArtifact(task.UserId, task.TaskID, artifactKey)
+	if err != nil {
+		return false
+	}
+	if record != nil {
+		return true
+	}
+	if !taskHasPluginExecution(task) {
+		return artifactKey == "video" && legacyVideoAvailable(task)
+	}
+	artifacts, err := projectTaskArtifacts(task)
+	if err != nil {
+		return false
+	}
+	for _, artifact := range artifacts {
+		if artifact.Key == artifactKey {
+			return true
+		}
+	}
+	return false
 }

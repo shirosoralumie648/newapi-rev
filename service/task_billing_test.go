@@ -60,6 +60,9 @@ func TestMain(m *testing.M) {
 		&model.UserSubscription{},
 		&model.SystemTask{},
 		&model.SystemTaskLock{},
+		&model.PlaygroundTaskArtifact{},
+		&model.PlaygroundTaskArtifactPin{},
+		&model.PlaygroundTaskArtifactSync{},
 		&model.WalletLedgerEntry{},
 		&model.WalletHold{},
 		&model.WalletDebt{},
@@ -90,6 +93,9 @@ func truncate(t *testing.T) {
 		model.DB.Exec("DELETE FROM wallet_ledger")
 		model.DB.Exec("DELETE FROM wallet_holds")
 		model.DB.Exec("DELETE FROM wallet_debts")
+		model.DB.Exec("DELETE FROM playground_task_artifacts")
+		model.DB.Exec("DELETE FROM playground_task_artifact_pins")
+		model.DB.Exec("DELETE FROM playground_task_artifact_syncs")
 	})
 }
 

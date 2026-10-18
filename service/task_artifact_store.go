@@ -59,99 +59,161 @@ func (disabledArtifactStore) Serve(*gin.Context, *model.Task, *StoredArtifactRef
 	return ErrTaskArtifactStoreDisabled
 }
 
-// s3TaskArtifactStore keeps generated artifact bytes in an S3-compatible
-// bucket. Ownership is enforced by the controller before Resolve, Persist, or
-// Serve is called; the object key itself is derived from the task owner.
-type s3TaskArtifactStore struct {
+// objectTaskArtifactStore keeps generated artifact bytes in an object store and
+// the ownership, key, hash, and retention metadata in the database. It writes
+// into the explicitly configured S3 bucket when TASK_ARTIFACT_STORE_MODE is
+// s3, and into the process-wide object store (local disk by default)
+// otherwise. Ownership is enforced before Resolve, Persist, or Serve is
+// called, and every read re-checks the record so a collected artifact is never
+// served from a stale key.
+type objectTaskArtifactStore struct {
+	// objects is the explicitly configured bucket. It is nil when the shared
+	// process-wide store is used, which is resolved lazily because the store is
+	// installed after this value is built.
 	objects    objectstore.Store
 	bucket     string
 	presignTTL time.Duration
 }
 
-func (s *s3TaskArtifactStore) Enabled() bool {
-	return true
+func (s *objectTaskArtifactStore) objectStore() objectstore.Store {
+	if s != nil && s.objects != nil {
+		return s.objects
+	}
+	return objectstore.DefaultStore()
 }
 
-func (s *s3TaskArtifactStore) Resolve(ctx context.Context, task *model.Task, artifact types.TaskArtifact) (*StoredArtifactRef, error) {
-	objectKey, err := taskArtifactObjectKey(task, artifact.Key)
+func (s *objectTaskArtifactStore) Enabled() bool {
+	return s.objectStore() != nil
+}
+
+func (s *objectTaskArtifactStore) Resolve(ctx context.Context, task *model.Task, artifact types.TaskArtifact) (*StoredArtifactRef, error) {
+	store := s.objectStore()
+	if store == nil || task == nil || model.DB == nil {
+		return nil, nil
+	}
+	record, err := model.GetPlaygroundTaskArtifact(task.UserId, task.TaskID, artifact.Key)
 	if err != nil {
 		return nil, err
 	}
-	info, err := s.objects.Head(ctx, objectKey)
+	if record == nil || record.State != model.TaskArtifactStateStored || record.ObjectKey == "" {
+		// The artifact was never persisted (or was collected): the caller keeps
+		// proxying the provider reference.
+		return nil, nil
+	}
+	pinned, err := model.IsPlaygroundTaskArtifactPinned(record.UserID, record.TaskID, record.ArtifactKey)
+	if err != nil {
+		return nil, err
+	}
+	if !pinned && record.ExpiresAt > 0 && record.ExpiresAt < common.GetTimestamp() {
+		// The retention window ended but the scheduled cleanup has not run yet.
+		return nil, nil
+	}
+	info, err := store.Head(ctx, record.ObjectKey)
 	if errors.Is(err, objectstore.ErrObjectNotFound) {
-		// The artifact was never persisted; the caller keeps proxying the
-		// provider URL.
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return s.artifactRef(artifact, objectKey, info.Size), nil
+	mimeType := record.MimeType
+	if mimeType == "" {
+		mimeType = artifact.MimeType
+	}
+	return &StoredArtifactRef{
+		Backend:     store.Backend(),
+		Bucket:      s.bucket,
+		ArtifactKey: record.ArtifactKey,
+		ObjectKey:   record.ObjectKey,
+		MimeType:    mimeType,
+		Size:        info.Size,
+	}, nil
 }
 
-func (s *s3TaskArtifactStore) Persist(ctx context.Context, task *model.Task, artifact types.TaskArtifact, content io.Reader) (*StoredArtifactRef, error) {
+func (s *objectTaskArtifactStore) Persist(ctx context.Context, task *model.Task, artifact types.TaskArtifact, content io.Reader) (*StoredArtifactRef, error) {
 	if content == nil {
 		return nil, errors.New("task artifact store: artifact content is required")
+	}
+	store := s.objectStore()
+	if store == nil {
+		return nil, ErrTaskArtifactStoreDisabled
 	}
 	objectKey, err := taskArtifactObjectKey(task, artifact.Key)
 	if err != nil {
 		return nil, err
 	}
 	var info objectstore.ObjectInfo
-	if putter, ok := s.objects.(objectstore.ContentTypePutter); ok {
+	if putter, ok := store.(objectstore.ContentTypePutter); ok {
 		info, err = putter.PutWithContentType(ctx, objectKey, content, artifact.MimeType)
 	} else {
-		info, err = s.objects.Put(ctx, objectKey, content)
+		info, err = store.Put(ctx, objectKey, content)
 	}
 	if err != nil {
 		return nil, err
 	}
-	return s.artifactRef(artifact, objectKey, info.Size), nil
-}
-
-func (s *s3TaskArtifactStore) Serve(c *gin.Context, task *model.Task, ref *StoredArtifactRef) error {
-	if c == nil || c.Request == nil {
-		return errors.New("task artifact store: request context is required")
-	}
-	if ref == nil {
-		return errors.New("task artifact store: artifact reference is required")
-	}
-	objectKey, err := taskArtifactObjectKey(task, ref.ArtifactKey)
-	if err != nil {
-		return err
-	}
-	if objectKey != ref.ObjectKey || ref.Backend != s.objects.Backend() {
-		return errors.New("task artifact store: artifact reference does not belong to this task")
-	}
-
-	ctx := c.Request.Context()
-	if url, presignErr := s.objects.PresignGet(ctx, ref.ObjectKey, s.presignTTL); presignErr == nil {
-		// Ownership was verified before Serve. The redirect carries a
-		// short-lived credential in its query string, so no shared cache may
-		// store the response.
-		c.Header("Cache-Control", "private, no-store")
-		c.Redirect(http.StatusFound, url)
-		return nil
-	}
-	return objectstore.Serve(ctx, s.objects, c.Writer, ref.ObjectKey, objectstore.ServeOptions{
-		ContentType: ref.MimeType,
-	})
-}
-
-func (s *s3TaskArtifactStore) artifactRef(artifact types.TaskArtifact, objectKey string, size int64) *StoredArtifactRef {
 	return &StoredArtifactRef{
-		Backend:     s.objects.Backend(),
+		Backend:     store.Backend(),
 		Bucket:      s.bucket,
 		ArtifactKey: artifact.Key,
 		ObjectKey:   objectKey,
 		MimeType:    artifact.MimeType,
-		Size:        size,
+		Size:        info.Size,
+	}, nil
+}
+
+func (s *objectTaskArtifactStore) Serve(c *gin.Context, task *model.Task, ref *StoredArtifactRef) error {
+	if c == nil || c.Request == nil {
+		return errors.New("task artifact store: request context is required")
 	}
+	if ref == nil || ref.ObjectKey == "" {
+		return errors.New("task artifact store: artifact reference is required")
+	}
+	store := s.objectStore()
+	if store == nil {
+		return ErrTaskArtifactStoreDisabled
+	}
+	if ref.Backend != "" && ref.Backend != store.Backend() {
+		return errors.New("task artifact store: artifact reference does not belong to this store")
+	}
+
+	ctx := c.Request.Context()
+	// The bytes belong to one account, so no shared cache may hold them.
+	c.Header("Cache-Control", "private, no-store")
+	ttl := s.presignTTL
+	if ttl <= 0 {
+		ttl = objectstore.DefaultPresignTTL()
+	}
+	if url, presignErr := store.PresignGet(ctx, ref.ObjectKey, ttl); presignErr == nil {
+		// Ownership was verified before Serve. The redirect carries a
+		// short-lived credential in its query string.
+		c.Redirect(http.StatusFound, url)
+		return nil
+	}
+	return objectstore.Serve(ctx, store, c.Writer, ref.ObjectKey, objectstore.ServeOptions{
+		ContentType: ref.MimeType,
+	})
+}
+
+// taskArtifactObjectStore returns the byte backend generated results are
+// persisted into: the explicitly configured S3 bucket, or the process-wide
+// object store. It is nil while no store is configured.
+func taskArtifactObjectStore() objectstore.Store {
+	if store, ok := taskArtifactStore.(*objectTaskArtifactStore); ok {
+		return store.objectStore()
+	}
+	return nil
+}
+
+// TaskArtifactStoreConfigured reports whether generated results can be
+// persisted. The scheduled store pass is only scheduled while a backend is
+// available, and release deployments without an object store keep the
+// provider-proxy behavior.
+func TaskArtifactStoreConfigured() bool {
+	return taskArtifactObjectStore() != nil
 }
 
 // taskArtifactObjectKey derives the deterministic object key of one artifact
-// from its task, so Resolve never needs a database lookup:
-// tasks/{user_id}/{yyyy}/{mm}/{task_id}/{artifact_key}
+// from its task:
+// pg/{user_id}/task/{yyyy}/{mm}/{task_id}/{artifact_key}
 func taskArtifactObjectKey(task *model.Task, artifactKey string) (string, error) {
 	if task == nil {
 		return "", errors.New("task artifact store: task is required")
@@ -168,7 +230,7 @@ func taskArtifactObjectKey(task *model.Task, artifactKey string) (string, error)
 	if createdAt == 0 {
 		createdAt = time.Now().Unix()
 	}
-	return fmt.Sprintf("tasks/%d/%s/%s/%s",
+	return fmt.Sprintf("pg/%d/task/%s/%s/%s",
 		task.UserId,
 		time.Unix(createdAt, 0).UTC().Format("2006/01"),
 		taskID,
@@ -191,8 +253,10 @@ func isSafeObjectKeySegment(segment string) bool {
 }
 
 // GetTaskArtifactStore returns the process-wide artifact storage backend.
-// Artifacts are stored in the configured bucket when TASK_ARTIFACT_STORE_MODE
-// is s3; otherwise the gateway keeps proxying provider URLs.
+// Generated results are persisted through the configured S3 bucket when
+// TASK_ARTIFACT_STORE_MODE is s3, and through the shared object store
+// otherwise; the gateway keeps proxying provider URLs only while no store is
+// configured.
 func GetTaskArtifactStore() TaskArtifactStore {
 	return taskArtifactStore
 }
@@ -202,18 +266,21 @@ func GetTaskArtifactStore() TaskArtifactStore {
 var taskArtifactStore = newTaskArtifactStore(system_setting.LoadTaskArtifactStoreConfig())
 
 func newTaskArtifactStore(config system_setting.TaskArtifactStoreConfig) TaskArtifactStore {
-	if config.Mode != system_setting.TaskArtifactStoreModeS3 {
-		return &disabledArtifactStore{}
+	if config.Mode == system_setting.TaskArtifactStoreModeS3 {
+		objects, err := objectstore.NewS3(config.ObjectStoreConfig())
+		if err != nil {
+			// Configuration errors never repeat credential values. An explicit
+			// S3 configuration is never silently redirected to local disk.
+			common.SysError(common.LogText("failed to initialize the task artifact S3 store: %s; generated artifacts fall back to the upstream provider", err.Error()))
+			return &disabledArtifactStore{}
+		}
+		return &objectTaskArtifactStore{
+			objects:    objects,
+			bucket:     config.S3.Bucket,
+			presignTTL: time.Duration(config.S3PresignTTLSeconds) * time.Second,
+		}
 	}
-	objects, err := objectstore.NewS3(config.ObjectStoreConfig())
-	if err != nil {
-		// Configuration errors never repeat credential values.
-		common.SysError(common.LogText("failed to initialize the task artifact S3 store: %s; generated artifacts fall back to the upstream provider", err.Error()))
-		return &disabledArtifactStore{}
-	}
-	return &s3TaskArtifactStore{
-		objects:    objects,
-		bucket:     config.S3.Bucket,
+	return &objectTaskArtifactStore{
 		presignTTL: time.Duration(config.S3PresignTTLSeconds) * time.Second,
 	}
 }

@@ -389,6 +389,17 @@ export interface TaskArtifact {
   type: TaskArtifactType
   mime_type?: string
   content_url: string
+  /** Whether the gateway persisted a copy of the bytes in its object store. */
+  stored?: boolean
+  /**
+   * Whether the result could not be stored (for example because the account
+   * storage budget was exhausted); only the provider link remains.
+   */
+  expired?: boolean
+  /** Whether the owner keeps the stored copy past its retention window. */
+  pinned?: boolean
+  /** Unix seconds when the stored copy is collected unless it is pinned. */
+  expires_at?: number
 }
 
 export interface AudioClip {

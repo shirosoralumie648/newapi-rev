@@ -63,6 +63,7 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/playground/message-costs":                                          accessTokenSessionRule,
 	"GET /api/playground/assets":                                                 accessTokenSessionRule,
 	"POST /api/playground/tasks/:taskId/cancel":                                  accessTokenSessionRule,
+	"PUT /api/playground/tasks/:taskId/artifacts/:artifactKey/pin":               accessTokenSessionRule,
 	"GET /api/playground/presets":                                                accessTokenSessionRule,
 	"POST /api/playground/presets":                                               accessTokenSessionRule,
 	"GET /api/playground/presets/:presetId":                                      accessTokenSessionRule,

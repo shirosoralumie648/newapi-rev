@@ -79,6 +79,7 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.GET("/message-costs", controller.GetPlaygroundMessageCosts)
 			playgroundRoute.GET("/assets", controller.ListPlaygroundAssets)
 			playgroundRoute.POST("/tasks/:taskId/cancel", controller.PlaygroundTaskCancel)
+			playgroundRoute.PUT("/tasks/:taskId/artifacts/:artifactKey/pin", controller.PlaygroundTaskArtifactPin)
 			playgroundRoute.GET("/presets", controller.ListPlaygroundPresets)
 			playgroundRoute.POST("/presets", controller.CreatePlaygroundPreset)
 			playgroundRoute.GET("/presets/:presetId", controller.GetPlaygroundPreset)

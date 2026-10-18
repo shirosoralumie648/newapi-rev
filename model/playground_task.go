@@ -91,8 +91,9 @@ func playgroundTaskResultBytesQuery() string {
 	}
 }
 
-// PlaygroundTaskResultStorageBytes reports how many retained result snapshot
-// bytes the account's Playground-origin async tasks hold. The value backs the
+// PlaygroundTaskResultStorageBytes reports how many retained result bytes the
+// account's Playground-origin async tasks hold: the durable task snapshots plus
+// the generated artifacts persisted in the object store. The value backs the
 // `TaskUserResultMaxBytes` budget, an independent resource limit that never
 // reads or writes User.Quota.
 func PlaygroundTaskResultStorageBytes(userID int) (int64, error) {
@@ -110,32 +111,71 @@ func PlaygroundTaskResultStorageBytes(userID int) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return stored.UsedBytes, nil
+	artifacts, err := PlaygroundTaskArtifactStoredBytes(userID)
+	if err != nil {
+		return 0, err
+	}
+	return stored.UsedBytes + artifacts, nil
 }
 
 // DeleteExpiredPlaygroundTasks hard-deletes terminal Playground-origin tasks
 // whose finish time predates the cutoff, freeing the result snapshots they
 // retain. Only rows that reached a terminal state before the cutoff are
 // eligible, so rows still being polled are never removed; polling updates use
-// a status CAS and cannot resurrect a deleted row.
+// a status CAS and cannot resurrect a deleted row. A task whose generated
+// results are still pinned by the asset library or a canvas is kept: its
+// stored artifacts must stay readable for as long as the owner references
+// them.
 func DeleteExpiredPlaygroundTasks(finishedBefore int64, batchSize int) (int64, error) {
 	if batchSize <= 0 {
 		batchSize = 200
 	}
 	var total int64
+	cursor := int64(0)
 	for {
-		var ids []int64
-		if err := DB.Model(&Task{}).
+		rows := make([]Task, 0, batchSize)
+		if err := DB.Select("id", "user_id", "task_id").
 			Where("status IN ?", []TaskStatus{TaskStatusFailure, TaskStatusSuccess}).
 			Where("finish_time > 0 AND finish_time < ?", finishedBefore).
 			Where(playgroundTaskOriginCondition()).
-			Order("finish_time ASC, id ASC").Limit(batchSize).Pluck("id", &ids).Error; err != nil {
+			Where("id > ?", cursor).
+			Order("id ASC").Limit(batchSize).Find(&rows).Error; err != nil {
 			return total, err
 		}
-		if len(ids) == 0 {
+		if len(rows) == 0 {
 			return total, nil
 		}
-		result := DB.Where("id IN ?", ids).
+		cursor = rows[len(rows)-1].ID
+
+		taskIDsByUser := make(map[int][]string, len(rows))
+		for index := range rows {
+			taskIDsByUser[rows[index].UserId] = append(taskIDsByUser[rows[index].UserId], rows[index].TaskID)
+		}
+		pinned := make(map[string]bool)
+		for userID, taskIDs := range taskIDsByUser {
+			set, err := PlaygroundTaskArtifactPinnedForTasks(userID, taskIDs)
+			if err != nil {
+				return total, err
+			}
+			for taskID, isPinned := range set {
+				if isPinned {
+					pinned[taskID] = true
+				}
+			}
+		}
+		deletableIDs := make([]int64, 0, len(rows))
+		deletableTaskIDs := make([]string, 0, len(rows))
+		for index := range rows {
+			if pinned[rows[index].TaskID] {
+				continue
+			}
+			deletableIDs = append(deletableIDs, rows[index].ID)
+			deletableTaskIDs = append(deletableTaskIDs, rows[index].TaskID)
+		}
+		if len(deletableIDs) == 0 {
+			continue
+		}
+		result := DB.Where("id IN ?", deletableIDs).
 			Where("status IN ?", []TaskStatus{TaskStatusFailure, TaskStatusSuccess}).
 			Where("finish_time > 0 AND finish_time < ?", finishedBefore).
 			Where(playgroundTaskOriginCondition()).
@@ -144,8 +184,8 @@ func DeleteExpiredPlaygroundTasks(finishedBefore int64, batchSize int) (int64, e
 			return total, result.Error
 		}
 		total += result.RowsAffected
-		if len(ids) < batchSize {
-			return total, nil
+		if err := DeletePlaygroundTaskArtifactSyncMarkers(deletableTaskIDs); err != nil {
+			return total, err
 		}
 	}
 }

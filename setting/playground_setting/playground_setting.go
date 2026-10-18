@@ -41,8 +41,14 @@ type PlaygroundQuotaPolicy struct {
 	CanvasMaxEdges            int   `json:"canvas_max_edges"`
 	CanvasNodeDataMaxBytes    int64 `json:"canvas_node_data_max_bytes"`
 	CanvasUserMaxBytes        int64 `json:"canvas_user_max_bytes"`
-	TaskMaxConcurrency        int   `json:"task_max_concurrency"`
-	TaskUserResultMaxBytes    int64 `json:"task_user_result_max_bytes"`
+	// ObjectUserMaxBytes caps the bytes the account keeps in the object store
+	// (conversation and canvas attachments today, generated results once they
+	// are persisted there). It is the account-level storage entitlement a
+	// subscription plan grants by upgrading the buyer into a group whose
+	// override is larger.
+	ObjectUserMaxBytes     int64 `json:"object_user_max_bytes"`
+	TaskMaxConcurrency     int   `json:"task_max_concurrency"`
+	TaskUserResultMaxBytes int64 `json:"task_user_result_max_bytes"`
 }
 
 // PlaygroundSetting is the persisted configuration. Defaults is the global
@@ -101,7 +107,12 @@ func builtinPlaygroundQuotaPolicy() PlaygroundQuotaPolicy {
 		CanvasMaxEdges:         400,
 		CanvasNodeDataMaxBytes: 64 << 10,
 		CanvasUserMaxBytes:     16 << 20,
-		TaskMaxConcurrency:     3,
+		// The account-level object-store budget starts at the ceiling the
+		// existing attachment and generated-result budgets already imply
+		// (64 MiB each), so enabling it never rejects a write the previous
+		// limits accepted while still capping the durable object footprint.
+		ObjectUserMaxBytes: 128 << 20,
+		TaskMaxConcurrency: 3,
 		// The account-level result storage budget for Playground-origin async
 		// tasks. Scheduled expiry frees finished task rows after the retention
 		// window, so a healthy workspace stays far below this ceiling.
@@ -232,6 +243,9 @@ func applyPlaygroundQuotaOverrides(policy *PlaygroundQuotaPolicy, override *Play
 	}
 	if override.CanvasUserMaxBytes > 0 {
 		policy.CanvasUserMaxBytes = override.CanvasUserMaxBytes
+	}
+	if override.ObjectUserMaxBytes > 0 {
+		policy.ObjectUserMaxBytes = override.ObjectUserMaxBytes
 	}
 	if override.TaskMaxConcurrency > 0 {
 		policy.TaskMaxConcurrency = override.TaskMaxConcurrency

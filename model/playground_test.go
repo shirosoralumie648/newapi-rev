@@ -115,14 +115,14 @@ func playgroundTestDB(t *testing.T, dialect string) *gorm.DB {
 	common.SetDatabaseTypes(common.DatabaseType(dialect), previousLog)
 	model.DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundUserUsage{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundMessage{}, &model.PlaygroundSession{}, &model.Task{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundUserUsage{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundMessage{}, &model.PlaygroundSession{}, &model.Task{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
 		model.DB = previous
 		common.SetDatabaseTypes(previousMain, previousLog)
 	})
-	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasAsset{}, &model.Task{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.Task{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -169,6 +169,7 @@ func playgroundRequest(t *testing.T, user int, method, path string, body any, ha
 	if len(parts) > 6 {
 		c.Params = append(c.Params, gin.Param{Key: "artifactId", Value: parts[6]})
 		c.Params = append(c.Params, gin.Param{Key: "attachmentId", Value: parts[6]})
+		c.Params = append(c.Params, gin.Param{Key: "artifactKey", Value: parts[6]})
 	}
 	if len(parts) > 8 {
 		c.Params = append(c.Params, gin.Param{Key: "versionId", Value: parts[8]})
@@ -2024,12 +2025,14 @@ func TestPlaygroundQuotaPolicyResolutionAndSessionLimit(t *testing.T) {
 	playgroundTestDB(t, "sqlite")
 	usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
 		policy.SessionMaxCount = 2
+		policy.ObjectUserMaxBytes = 4096
 	})
-	usePlaygroundGroupQuota(t, "default", playground_setting.PlaygroundQuotaPolicy{SessionMaxCount: 1})
+	usePlaygroundGroupQuota(t, "default", playground_setting.PlaygroundQuotaPolicy{SessionMaxCount: 1, ObjectUserMaxBytes: 8192})
 
 	policy, err := model.PlaygroundQuotaPolicyForUser(7)
 	require.NoError(t, err)
 	assert.Equal(t, 1, policy.SessionMaxCount, "the group override wins over the global default")
+	assert.EqualValues(t, 8192, policy.ObjectUserMaxBytes, "a group override can grant a larger storage entitlement")
 	assert.Equal(t, playground_setting.GetPlaygroundQuotaPolicy("").MessageMaxCount, policy.MessageMaxCount, "unset group fields inherit")
 
 	first := createPlayground(t, 7, "quota-first")
@@ -2081,7 +2084,43 @@ func TestPlaygroundAttachmentCountLimit(t *testing.T) {
 	assert.Contains(t, response.Body.String(), "PLAYGROUND_ATTACHMENT_LIMIT_EXCEEDED")
 }
 
-// The unified usage view reports the owner's stored conversations, attachments,
+// The account-level object-store budget is part of the resource quota policy,
+// so the group a subscription plan upgrades the buyer into can grant a larger
+// storage entitlement. A write over the budget is rejected with the stable
+// attachment code while the stored objects stay readable.
+func TestPlaygroundObjectStorageQuotaLimit(t *testing.T) {
+	playgroundTestDB(t, "sqlite")
+	usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+		policy.AttachmentUserMaxCount = 10
+		policy.AttachmentUserMaxBytes = 1 << 20
+		policy.ObjectUserMaxBytes = 64
+	})
+	session := createPlayground(t, 7, "object-budget")
+	id := session["id"].(string)
+	stored := playgroundUploadAttachment(t, 7, id, "object-a", "image/png", playgroundPNGFixture(64))
+
+	overflow := playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions/"+id+"/attachments", map[string]any{
+		"client_key": "object-b", "media_type": "image/png", "data": base64.StdEncoding.EncodeToString(playgroundPNGFixture(16)),
+	}, controller.CreatePlaygroundAttachment)
+	require.Equal(t, http.StatusUnprocessableEntity, overflow.Code, overflow.Body.String())
+	assert.Contains(t, overflow.Body.String(), "PLAYGROUND_ATTACHMENT_LIMIT_EXCEEDED")
+
+	// Over budget only blocks new writes: the stored attachment is still
+	// listed and its bytes are still served.
+	listed := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+id+"/attachments", nil, controller.ListPlaygroundAttachments)
+	require.Equal(t, http.StatusOK, listed.Code, listed.Body.String())
+	assert.Contains(t, listed.Body.String(), stored["id"].(string))
+	content := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+id+"/attachments/"+stored["id"].(string)+"/content", nil, controller.GetPlaygroundAttachmentContent)
+	require.Equal(t, http.StatusOK, content.Code, content.Body.String())
+	assert.Equal(t, playgroundPNGFixture(64), content.Body.Bytes())
+
+	// The upgrade target group's override grants the larger entitlement the
+	// plan sells, and the same upload then succeeds.
+	usePlaygroundGroupQuota(t, "default", playground_setting.PlaygroundQuotaPolicy{ObjectUserMaxBytes: 1 << 20})
+	playgroundUploadAttachment(t, 7, id, "object-c", "image/png", playgroundPNGFixture(16))
+}
+
+// The unified usage view reports the owner's stored conversations,
 // artifacts and canvases against the effective policy, and never mixes in
 // another account's rows. The limit column must follow the group override, so
 // it always matches what the write paths enforce.
@@ -2097,8 +2136,9 @@ func TestPlaygroundUsageForUserReportsOwnerTotals(t *testing.T) {
 		policy.CanvasUserMaxBytes = 16384
 		policy.TaskMaxConcurrency = 4
 		policy.TaskUserResultMaxBytes = 1 << 20
+		policy.ObjectUserMaxBytes = 1 << 21
 	})
-	usePlaygroundGroupQuota(t, "default", playground_setting.PlaygroundQuotaPolicy{CanvasUserMaxProjects: 9})
+	usePlaygroundGroupQuota(t, "default", playground_setting.PlaygroundQuotaPolicy{CanvasUserMaxProjects: 9, ObjectUserMaxBytes: 1 << 22})
 
 	sessionID, input := playgroundArtifactSourceFixture(t, 7, "usage-owner")
 	artifactResult(t, playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions/"+sessionID+"/artifacts", input, controller.CreatePlaygroundArtifact))
@@ -2125,6 +2165,7 @@ func TestPlaygroundUsageForUserReportsOwnerTotals(t *testing.T) {
 	usage, err := model.PlaygroundUsageForUser(7)
 	require.NoError(t, err)
 
+	assert.Equal(t, "default", usage.Group, "the view names the group its limits came from")
 	assert.EqualValues(t, 1, usage.Sessions.Used)
 	assert.EqualValues(t, 5, usage.Sessions.Limit)
 	assert.EqualValues(t, 1, usage.Attachments.Used)
@@ -2139,6 +2180,8 @@ func TestPlaygroundUsageForUserReportsOwnerTotals(t *testing.T) {
 	assert.EqualValues(t, 9, usage.Canvas.Limit)
 	assert.NotZero(t, usage.Canvas.UsedBytes)
 	assert.EqualValues(t, 16384, usage.Canvas.LimitBytes)
+	assert.EqualValues(t, 64, usage.Storage.UsedBytes, "object-store bytes are the upload budget figure")
+	assert.EqualValues(t, 1<<22, usage.Storage.LimitBytes, "the group override sets the storage entitlement")
 	assert.EqualValues(t, 1, usage.Tasks.Used)
 	assert.EqualValues(t, 4, usage.Tasks.Limit)
 	assert.EqualValues(t, len(playgroundTaskDataFixture(512)), usage.Tasks.UsedBytes)
@@ -2199,6 +2242,8 @@ func TestPlaygroundUserUsageCounters(t *testing.T) {
 			assert.EqualValues(t, counters.ArtifactBytes, usage.Artifacts.UsedBytes)
 			assert.EqualValues(t, counters.CanvasCount, usage.Canvas.Used)
 			assert.EqualValues(t, counters.CanvasBytes, usage.Canvas.UsedBytes)
+			assert.EqualValues(t, counters.ObjectBytes, usage.Storage.UsedBytes)
+			assert.Equal(t, "default", usage.Group)
 
 			// Another account never observes these counters.
 			var foreignCount int64
@@ -3076,6 +3121,185 @@ func TestPlaygroundMessageCostLookup(t *testing.T) {
 				assert.Equal(t, http.StatusBadRequest, rejected.Code, path)
 				assert.Contains(t, rejected.Body.String(), "PLAYGROUND_INVALID_REQUEST", path)
 			}
+		})
+	}
+}
+
+// Persisted generation results are owner-scoped records with a retention
+// window. Their bytes count against the account result budget, the pin
+// endpoints and canvas documents keep a result past the window, and the
+// scheduled cleanup never removes a task whose result is still pinned.
+func TestPlaygroundTaskArtifactRecordsAndPins(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			now := common.GetTimestamp()
+			usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+				policy.TaskUserResultMaxBytes = 1 << 20
+			})
+			task := model.Task{TaskID: "pg-artifact-task", Platform: "kling", UserId: 7, Status: model.TaskStatusSuccess,
+				Action: "text_to_video", SubmitTime: now, FinishTime: now,
+				PrivateData: model.TaskPrivateData{PlaygroundOrigin: true}}
+			require.NoError(t, db.Create(&task).Error)
+
+			seeds := []model.PlaygroundTaskArtifactSeed{
+				{Key: "video", Type: "video", MimeType: "video/mp4"},
+				{Key: "thumb", Type: "image", MimeType: "image/png"},
+			}
+			records, err := model.EnsurePlaygroundTaskArtifacts(7, task.TaskID, seeds)
+			require.NoError(t, err)
+			require.Len(t, records, 2)
+			// Re-registering the same projection keeps the existing rows, so a
+			// retry can never reset a stored record.
+			again, err := model.EnsurePlaygroundTaskArtifacts(7, task.TaskID, seeds)
+			require.NoError(t, err)
+			require.Len(t, again, 2)
+			assert.Equal(t, records[0].ID, again[0].ID)
+			otherUserRecords, err := model.PlaygroundTaskArtifactsForTask(8, task.TaskID)
+			require.NoError(t, err)
+			assert.Empty(t, otherUserRecords)
+
+			expiresAt := now - 60
+			recordsByKey := make(map[string]model.PlaygroundTaskArtifact, len(records))
+			for index := range records {
+				recordsByKey[records[index].ArtifactKey] = records[index]
+			}
+			videoRecord, videoOK := recordsByKey["video"]
+			thumbRecord, thumbOK := recordsByKey["thumb"]
+			require.True(t, videoOK && thumbOK)
+			require.NoError(t, model.MarkPlaygroundTaskArtifactStored(videoRecord.ID, "local", "pg/7/task/x/video", "video/mp4", 2048, "hash-video", expiresAt))
+			require.NoError(t, model.MarkPlaygroundTaskArtifactStored(thumbRecord.ID, "local", "pg/7/task/x/thumb", "image/png", 1024, "hash-thumb", expiresAt))
+			storedBytes, err := model.PlaygroundTaskArtifactStoredBytes(7)
+			require.NoError(t, err)
+			assert.EqualValues(t, 3072, storedBytes)
+			totalBytes, err := model.PlaygroundTaskResultStorageBytes(7)
+			require.NoError(t, err)
+			assert.GreaterOrEqual(t, totalBytes, storedBytes)
+
+			// Stored results count against the account budget, so the next
+			// workspace submission is refused with the stable storage code.
+			usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+				policy.TaskUserResultMaxBytes = 1024
+			})
+			overBudget := playgroundRequest(t, 7, http.MethodPost, "/v1/videos", map[string]any{"model": "kling-v1", "prompt": "fox"}, controller.PlaygroundVideoTask)
+			assert.Equal(t, http.StatusTooManyRequests, overBudget.Code, overBudget.Body.String())
+			assert.Contains(t, overBudget.Body.String(), controller.PlaygroundTaskStorageLimitErrorCode)
+
+			// A pinned artifact is excluded from the expiry pass and cannot be
+			// collected; an unpinned expired artifact is.
+			require.NoError(t, model.SetPlaygroundTaskArtifactPin(7, task.TaskID, "thumb", true))
+			expired, err := model.ListExpiredPlaygroundTaskArtifacts(now, 10)
+			require.NoError(t, err)
+			expiredKeys := make([]string, 0, len(expired))
+			for index := range expired {
+				expiredKeys = append(expiredKeys, expired[index].ArtifactKey)
+			}
+			assert.Equal(t, []string{"video"}, expiredKeys)
+			deleted, err := model.DeletePlaygroundTaskArtifact(videoRecord.ID)
+			require.NoError(t, err)
+			assert.True(t, deleted)
+			deleted, err = model.DeletePlaygroundTaskArtifact(thumbRecord.ID)
+			require.NoError(t, err)
+			assert.False(t, deleted, "a pinned result is never collected")
+			pinned, err := model.IsPlaygroundTaskArtifactPinned(7, task.TaskID, "thumb")
+			require.NoError(t, err)
+			assert.True(t, pinned)
+			otherPinned, err := model.IsPlaygroundTaskArtifactPinned(8, task.TaskID, "thumb")
+			require.NoError(t, err)
+			assert.False(t, otherPinned)
+
+			// The owner-scoped pin endpoint rejects another account, an unknown
+			// key, and an unfinished task; the owner can pin and release.
+			foreignPin := playgroundRequest(t, 8, http.MethodPut, "/api/playground/tasks/"+task.TaskID+"/artifacts/thumb/pin", map[string]any{"pinned": true}, controller.PlaygroundTaskArtifactPin)
+			assert.Equal(t, http.StatusNotFound, foreignPin.Code, foreignPin.Body.String())
+			unknownPin := playgroundRequest(t, 7, http.MethodPut, "/api/playground/tasks/"+task.TaskID+"/artifacts/missing/pin", map[string]any{"pinned": true}, controller.PlaygroundTaskArtifactPin)
+			assert.Equal(t, http.StatusNotFound, unknownPin.Code, unknownPin.Body.String())
+			require.NoError(t, db.Model(&model.Task{}).Where("task_id = ?", task.TaskID).Update("status", model.TaskStatusInProgress).Error)
+			notReady := playgroundRequest(t, 7, http.MethodPut, "/api/playground/tasks/"+task.TaskID+"/artifacts/thumb/pin", map[string]any{"pinned": true}, controller.PlaygroundTaskArtifactPin)
+			assert.Equal(t, http.StatusConflict, notReady.Code, notReady.Body.String())
+			require.NoError(t, db.Model(&model.Task{}).Where("task_id = ?", task.TaskID).Update("status", model.TaskStatusSuccess).Error)
+			release := playgroundRequest(t, 7, http.MethodPut, "/api/playground/tasks/"+task.TaskID+"/artifacts/thumb/pin", map[string]any{"pinned": false}, controller.PlaygroundTaskArtifactPin)
+			require.Equal(t, http.StatusOK, release.Code, release.Body.String())
+			pinned, err = model.IsPlaygroundTaskArtifactPinned(7, task.TaskID, "thumb")
+			require.NoError(t, err)
+			assert.False(t, pinned)
+
+			// A canvas node referencing a result pins it until the document no
+			// longer does (or the canvas is deleted).
+			createCanvasPin := func(documentNodes []any) *httptest.ResponseRecorder {
+				return playgroundRequest(t, 7, http.MethodPost, "/api/playground/canvases", map[string]any{
+					"client_id": "artifact-pin-canvas",
+					"title":     "Board",
+					"document":  canvasDocument(documentNodes, nil),
+				}, controller.CreatePlaygroundCanvasProject)
+			}
+			canvas := createCanvasPin([]any{canvasRefNode("n1", "task-result", map[string]any{"taskId": task.TaskID, "taskArtifactKey": "thumb"})})
+			require.Equal(t, http.StatusOK, canvas.Code, canvas.Body.String())
+			canvasID, _ := canvasEnvelope(t, canvas.Body.Bytes())["id"].(string)
+			require.NotEmpty(t, canvasID)
+			require.NoError(t, model.SetPlaygroundTaskArtifactPin(7, task.TaskID, "thumb", true))
+			pinned, err = model.IsPlaygroundTaskArtifactPinned(7, task.TaskID, "thumb")
+			require.NoError(t, err)
+			assert.True(t, pinned)
+			detached := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/canvases/"+canvasID, map[string]any{
+				"revision": 0,
+				"document": canvasDocument([]any{canvasNode("n1", "text", 0, 0)}, nil),
+				"title":    "Board",
+			}, controller.UpdatePlaygroundCanvasProject)
+			require.Equal(t, http.StatusOK, detached.Code, detached.Body.String())
+			// The user pin survives the canvas release; deleting the canvas
+			// releases its own pins only.
+			pinned, err = model.IsPlaygroundTaskArtifactPinned(7, task.TaskID, "thumb")
+			require.NoError(t, err)
+			assert.True(t, pinned)
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodDelete, "/api/playground/canvases/"+canvasID, nil, controller.DeletePlaygroundCanvasProject).Code)
+			pinned, err = model.IsPlaygroundTaskArtifactPinned(7, task.TaskID, "thumb")
+			require.NoError(t, err)
+			assert.True(t, pinned)
+
+			// The scheduled cleanup deletes only expired, unpinned tasks and
+			// forgets their projection markers.
+			oldFinish := now - int64((40 * 24 * time.Hour).Seconds())
+			expiredTask := model.Task{TaskID: "pg-artifact-expired", Platform: "kling", UserId: 7, Status: model.TaskStatusSuccess,
+				SubmitTime: oldFinish, FinishTime: oldFinish, PrivateData: model.TaskPrivateData{PlaygroundOrigin: true}}
+			pinnedTask := model.Task{TaskID: "pg-artifact-pinned", Platform: "kling", UserId: 7, Status: model.TaskStatusSuccess,
+				SubmitTime: oldFinish, FinishTime: oldFinish, PrivateData: model.TaskPrivateData{PlaygroundOrigin: true}}
+			require.NoError(t, db.Create(&expiredTask).Error)
+			require.NoError(t, db.Create(&pinnedTask).Error)
+			require.NoError(t, model.MarkPlaygroundTaskArtifactsSynced(7, "pg-artifact-expired"))
+			require.NoError(t, model.MarkPlaygroundTaskArtifactsSynced(7, "pg-artifact-pinned"))
+			require.NoError(t, model.SetPlaygroundTaskArtifactPin(7, "pg-artifact-pinned", "video", true))
+
+			deletedTasks, err := model.DeleteExpiredPlaygroundTasks(now-int64((30*24*time.Hour).Seconds()), 50)
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, deletedTasks)
+			var remaining []string
+			require.NoError(t, db.Model(&model.Task{}).Where("user_id = ?", 7).Order("task_id ASC").Pluck("task_id", &remaining).Error)
+			assert.Contains(t, remaining, "pg-artifact-pinned")
+			assert.NotContains(t, remaining, "pg-artifact-expired")
+			var markers []string
+			require.NoError(t, db.Model(&model.PlaygroundTaskArtifactSync{}).Order("task_id ASC").Pluck("task_id", &markers).Error)
+			assert.Equal(t, []string{"pg-artifact-pinned"}, markers)
+
+			// The projection pass lists only successful, recent, unprojected
+			// workspace tasks.
+			missing, err := model.ListPlaygroundTasksMissingArtifactSync(now-int64((30*24*time.Hour).Seconds()), 10)
+			require.NoError(t, err)
+			missingIDs := make([]string, 0, len(missing))
+			for index := range missing {
+				missingIDs = append(missingIDs, missing[index].TaskID)
+			}
+			assert.Equal(t, []string{"pg-artifact-task"}, missingIDs)
+
+			// The scheduled store pass is only scheduled while it has work.
+			cutoff := now - int64((30 * 24 * time.Hour).Seconds())
+			hasWork, err := model.HasPlaygroundTasksAwaitingArtifacts(cutoff)
+			require.NoError(t, err)
+			assert.True(t, hasWork)
+			require.NoError(t, model.MarkPlaygroundTaskArtifactsSynced(7, "pg-artifact-task"))
+			hasWork, err = model.HasPlaygroundTasksAwaitingArtifacts(cutoff)
+			require.NoError(t, err)
+			assert.False(t, hasWork)
 		})
 	}
 }

@@ -52,6 +52,7 @@ function PlaygroundPage() {
             search: { project: projectId },
           })
         }}
+        onOpenUpgrade={() => void navigate({ to: '/wallet' })}
       />
     </Main>
   )

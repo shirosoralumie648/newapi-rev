@@ -82,6 +82,12 @@ func VideoProxy(c *gin.Context) {
 			fmt.Sprintf("Task is not completed yet, current status: %s", task.Status))
 		return
 	}
+	// A persisted result is served from the object store before any provider
+	// request is built, so viewing a result never depends on the provider link
+	// staying alive.
+	if serveStoredTaskVideo(c, task) {
+		return
+	}
 
 	var descriptor *relaychannel.TaskContentRequest
 	if taskHasPluginExecution(task) {

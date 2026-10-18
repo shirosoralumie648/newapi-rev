@@ -6521,6 +6521,13 @@
     "The requested chat preset does not exist or has been removed.": "請求的聊天預設不存在或已被刪除。",
     "The reset request stays disabled until a credit is available.": "沒有可用次數時，重置請求會保持停用。",
     "The result was returned in the API response and was not saved as an artifact": "結果已在介面回應中返回，未保存為製品",
+    "Keep results": "保留結果",
+    "Stop keeping results": "取消保留結果",
+    "Results will be kept": "結果將被保留",
+    "Results will expire again": "結果將重新依保留期清理",
+    "Not stored": "未儲存",
+    "The result is not stored on this server, so it stops working when the provider link expires.": "結果未儲存在本伺服器上，上游連結過期後將無法存取。",
+    "Unable to update result retention.": "無法更新結果保留狀態。",
     "The search pattern can contain at most 2 % wildcards": "搜尋模式中最多允許包含 2 個 % 萬用字元",
     "The search pattern cannot contain consecutive % wildcards": "搜尋模式中不允許包含連續的 % 萬用字元",
     "The selected subscription plan does not exist": "所選訂閱方案不存在",
@@ -7737,6 +7744,18 @@
     "Expected a JSON object mapping group identifiers to unique display names": "應為「分組識別碼 → 唯一顯示名稱」的 JSON 物件",
     "Each group has a stable identifier and an editable display name. The identifier is stored on tokens, subscription plans and quotas and cannot be changed after saving; the display name is what users see.": "每個分組都有一個穩定識別碼和一個可編輯的顯示名稱。識別碼會寫入權杖、訂閱方案和配額，儲存後不可更改；顯示名稱是使用者看到的內容。",
     "JSON map of group identifier → display name shown in the console. A group without an entry keeps its identifier as the display name.": "分組識別碼 → 顯示名稱的 JSON 對應，用於主控台顯示。未設定的分組仍以識別碼作為顯示名稱。",
-    "Every stored reference uses the group identifier. The identifier is fixed once the group is saved and only the display name can change, so renaming a group never invalidates existing API keys or subscriptions.": "所有已儲存的引用都使用分組識別碼。分組儲存後識別碼固定不變，只有顯示名稱可以修改，因此改名不會使既有的 API 金鑰或訂閱失效。"
+    "Every stored reference uses the group identifier. The identifier is fixed once the group is saved and only the display name can change, so renaming a group never invalidates existing API keys or subscriptions.": "所有已儲存的引用都使用分組識別碼。分組儲存後識別碼固定不變，只有顯示名稱可以修改，因此改名不會使既有的 API 金鑰或訂閱失效。",
+    "Current group": "目前使用者群組",
+    "Object storage": "物件儲存",
+    "Object storage per user": "每位使用者的物件儲存",
+    "Open Playground resource quotas": "開啟 Playground 資源配額",
+    "Playground resource quotas could not be loaded.": "無法載入 Playground 資源配額。",
+    "Playground storage quota": "Playground 儲存配額",
+    "Save storage quota": "儲存配額設定",
+    "Select an upgrade group to configure the Playground storage quota it grants.": "選擇升級使用者群組後即可設定該群組取得的 Playground 儲存配額。",
+    "Subscribe to a plan to get more storage.": "訂閱方案即可獲得更大的儲存空間。",
+    "Subscription plans grant the limits of their Upgrade Group, so give a paid group a larger storage quota here.": "訂閱方案授予其「升級使用者群組」的配額，請在這裡為付費群組設定更大的儲存配額。",
+    "Upgrade for more storage": "升級取得更大儲存空間",
+    "Users who purchase this plan join {{group}}. These Playground storage limits apply to that group; leave a field empty to inherit the global default.": "購買此方案的會員會加入 {{group}}。這些 Playground 儲存上限適用於該群組；留空表示沿用全域預設值。"
   }
 }

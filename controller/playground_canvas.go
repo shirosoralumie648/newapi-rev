@@ -297,23 +297,29 @@ func playgroundCanvasNodeReferences(document *playgroundCanvasDocument) []playgr
 }
 
 // validatePlaygroundCanvasReferences checks ownership of every claimed resource
-// and returns the attachment IDs the canvas pins. A reference whose resource was
-// deleted is accepted so the board stays editable; it is reported as
-// unavailable on read.
-func validatePlaygroundCanvasReferences(userID int, document *playgroundCanvasDocument) ([]string, error) {
+// and returns the attachments and generated results the canvas pins. A
+// reference whose resource was deleted is accepted so the board stays
+// editable; it is reported as unavailable on read.
+func validatePlaygroundCanvasReferences(userID int, document *playgroundCanvasDocument) (model.PlaygroundCanvasPins, error) {
 	nodeReferences := playgroundCanvasNodeReferences(document)
 	references := make([]model.PlaygroundCanvasReference, 0, len(nodeReferences))
-	attachmentIDs := make([]string, 0)
+	pins := model.PlaygroundCanvasPins{}
 	for _, nodeReference := range nodeReferences {
 		references = append(references, nodeReference.Reference)
 		if nodeReference.Reference.AttachmentID != "" {
-			attachmentIDs = append(attachmentIDs, nodeReference.Reference.AttachmentID)
+			pins.AttachmentIDs = append(pins.AttachmentIDs, nodeReference.Reference.AttachmentID)
+		}
+		if nodeReference.Reference.TaskID != "" && nodeReference.Reference.TaskArtifactKey != "" {
+			pins.TaskArtifacts = append(pins.TaskArtifacts, model.PlaygroundCanvasTaskArtifactRef{
+				TaskID:      nodeReference.Reference.TaskID,
+				ArtifactKey: nodeReference.Reference.TaskArtifactKey,
+			})
 		}
 	}
 	if err := model.ValidatePlaygroundCanvasReferences(userID, references); err != nil {
-		return nil, err
+		return model.PlaygroundCanvasPins{}, err
 	}
-	return attachmentIDs, nil
+	return pins, nil
 }
 
 // playgroundCanvasUnavailableNodeIDs resolves the stored document's references
@@ -416,7 +422,7 @@ func CreatePlaygroundCanvasProject(c *gin.Context) {
 		writePlaygroundCanvasError(c, err)
 		return
 	}
-	attachmentIDs, err := validatePlaygroundCanvasReferences(c.GetInt("id"), request.Document)
+	pins, err := validatePlaygroundCanvasReferences(c.GetInt("id"), request.Document)
 	if err != nil {
 		writePlaygroundCanvasError(c, err)
 		return
@@ -428,7 +434,7 @@ func CreatePlaygroundCanvasProject(c *gin.Context) {
 	if request.ClientID != "" {
 		project.ClientID = &request.ClientID
 	}
-	stored, created, err := model.CreatePlaygroundCanvasProject(c.GetInt("id"), project, attachmentIDs)
+	stored, created, err := model.CreatePlaygroundCanvasProject(c.GetInt("id"), project, pins)
 	if err != nil {
 		writePlaygroundCanvasError(c, err)
 		return
@@ -475,7 +481,7 @@ func UpdatePlaygroundCanvasProject(c *gin.Context) {
 			writePlaygroundCanvasError(c, err)
 			return
 		}
-		attachmentIDs, err := validatePlaygroundCanvasReferences(c.GetInt("id"), request.Document)
+		pins, err := validatePlaygroundCanvasReferences(c.GetInt("id"), request.Document)
 		if err != nil {
 			writePlaygroundCanvasError(c, err)
 			return
@@ -483,7 +489,7 @@ func UpdatePlaygroundCanvasProject(c *gin.Context) {
 		input.Document = &document
 		input.NodeCount = nodeCount
 		input.EdgeCount = edgeCount
-		input.AttachmentIDs = attachmentIDs
+		input.Pins = pins
 	}
 	if input.Document == nil && input.Title == nil {
 		writePlaygroundCanvasError(c, model.ErrPlaygroundCanvasInvalid)

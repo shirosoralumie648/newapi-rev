@@ -28,12 +28,24 @@ type taskArtifactResponse struct {
 	Type       string `json:"type"`
 	MimeType   string `json:"mime_type,omitempty"`
 	ContentURL string `json:"content_url"`
+	// Persistence metadata of the object store copy. Stored is false while the
+	// bytes still come from the provider: the artifact was not projected yet,
+	// the deployment has no object store, or the result was left with its
+	// upstream reference. Expired marks a result whose bytes could not be kept
+	// (for example because the account budget was exhausted) so the UI can say
+	// the provider link will stop working instead of hiding the artifact.
+	Stored    bool  `json:"stored"`
+	Expired   bool  `json:"expired,omitempty"`
+	Pinned    bool  `json:"pinned,omitempty"`
+	ExpiresAt int64 `json:"expires_at,omitempty"`
 }
 
 var (
 	taskArtifactKeyPattern           = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$`)
 	errTaskArtifactPluginUnavailable = errors.New("task artifact plugin unavailable")
 	errTaskArtifactPlugin            = errors.New("task artifact plugin error")
+	errTaskArtifactPersistence       = errors.New("failed to query stored artifacts")
+	errTaskArtifactContentURL        = errors.New("failed to build artifact content URL")
 )
 
 func GetTask(c *gin.Context) {
@@ -98,19 +110,14 @@ func writeTaskArtifacts(c *gin.Context, task *model.Task, dashboard bool) {
 		writeTaskArtifactProjectionError(c, err)
 		return
 	}
-	items := make([]taskArtifactResponse, 0, len(artifacts))
-	for _, artifact := range artifacts {
-		contentURL, buildErr := service.BuildTaskArtifactContentURL(task.TaskID, artifact.Key)
-		if buildErr != nil {
-			writeTaskArtifactError(c, http.StatusInternalServerError, "artifact_url_error", "Failed to build artifact content URL")
+	items, err := buildTaskArtifactResponses(task, artifacts)
+	if err != nil {
+		if errors.Is(err, errTaskArtifactPersistence) {
+			writeTaskArtifactError(c, http.StatusInternalServerError, "artifact_internal_error", "Failed to query stored artifacts")
 			return
 		}
-		items = append(items, taskArtifactResponse{
-			Key:        artifact.Key,
-			Type:       artifact.Type,
-			MimeType:   artifact.MimeType,
-			ContentURL: contentURL,
-		})
+		writeTaskArtifactError(c, http.StatusInternalServerError, "artifact_url_error", "Failed to build artifact content URL")
+		return
 	}
 	response := gin.H{"task_id": task.TaskID, "artifacts": items}
 	if dashboard && task.Status == model.TaskStatusSuccess && task.Platform == constant.TaskPlatformSuno {
@@ -129,6 +136,70 @@ func writeTaskArtifacts(c *gin.Context, task *model.Task, dashboard bool) {
 		return
 	}
 	c.JSON(http.StatusOK, response)
+}
+
+// taskArtifactPersistenceState is the object store view of one task's
+// artifacts: the durable record of each key and the keys the asset library or
+// a canvas keeps past their retention window.
+type taskArtifactPersistenceState struct {
+	records map[string]model.PlaygroundTaskArtifact
+	pinned  map[string]bool
+}
+
+// buildTaskArtifactResponses builds the artifact list of one task, including
+// the persistence state of every key. A provider URL error and a persistence
+// read error stay distinguishable so the endpoint keeps its stable codes.
+func buildTaskArtifactResponses(task *model.Task, artifacts []relaychannel.TaskArtifact) ([]taskArtifactResponse, error) {
+	persistence, err := buildTaskArtifactPersistenceState(task)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", errTaskArtifactPersistence, err)
+	}
+	items := make([]taskArtifactResponse, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		contentURL, buildErr := service.BuildTaskArtifactContentURL(task.TaskID, artifact.Key)
+		if buildErr != nil {
+			return nil, fmt.Errorf("%w: %v", errTaskArtifactContentURL, buildErr)
+		}
+		item := taskArtifactResponse{
+			Key:        artifact.Key,
+			Type:       artifact.Type,
+			MimeType:   artifact.MimeType,
+			ContentURL: contentURL,
+		}
+		if record, ok := persistence.records[artifact.Key]; ok {
+			item.Stored = record.State == model.TaskArtifactStateStored && record.ObjectKey != ""
+			item.Expired = record.State == model.TaskArtifactStateExpired
+			item.ExpiresAt = record.ExpiresAt
+		}
+		item.Pinned = persistence.pinned[artifact.Key]
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+func buildTaskArtifactPersistenceState(task *model.Task) (taskArtifactPersistenceState, error) {
+	if task == nil {
+		return taskArtifactPersistenceState{records: map[string]model.PlaygroundTaskArtifact{}, pinned: map[string]bool{}}, nil
+	}
+	state := taskArtifactPersistenceState{
+		records: map[string]model.PlaygroundTaskArtifact{},
+		pinned:  map[string]bool{},
+	}
+	records, err := model.PlaygroundTaskArtifactsForTask(task.UserId, task.TaskID)
+	if err != nil {
+		return state, err
+	}
+	for index := range records {
+		state.records[records[index].ArtifactKey] = records[index]
+	}
+	pinnedKeys, err := model.PlaygroundTaskArtifactPinKeys(task.UserId, task.TaskID)
+	if err != nil {
+		return state, err
+	}
+	for _, key := range pinnedKeys {
+		state.pinned[key] = true
+	}
+	return state, nil
 }
 
 // legacySunoAudioClips projects a pre-plugin Suno task's persisted snapshot
@@ -338,6 +409,9 @@ func TaskArtifactContent(c *gin.Context) {
 			writeTaskArtifactError(c, http.StatusNotFound, "artifact_not_found", "Task or artifact not found")
 			return
 		}
+		if serveStoredTaskArtifact(c, task, types.TaskArtifact{Key: "video", Type: "video"}) {
+			return
+		}
 		descriptor := &relaychannel.TaskContentRequest{
 			URL:            task.GetResultURL(),
 			Method:         c.Request.Method,
@@ -371,7 +445,13 @@ func TaskArtifactContent(c *gin.Context) {
 		}
 		return
 	}
+	serveTaskArtifactFromProvider(c, task, artifactKey)
+}
 
+// serveTaskArtifactFromProvider builds the provider request of one artifact
+// through the plugin adaptor and proxies its content. It runs only when the
+// object store has no persisted copy of the artifact.
+func serveTaskArtifactFromProvider(c *gin.Context, task *model.Task, artifactKey string) {
 	adaptor, err := initTaskArtifactAdaptor(task)
 	if err != nil {
 		writeTaskArtifactProjectionError(c, err)
@@ -397,6 +477,38 @@ func TaskArtifactContent(c *gin.Context) {
 	if err := proxyTaskMedia(c, task, descriptor); err != nil {
 		writeTaskMediaProxyError(c, err)
 	}
+}
+
+// serveStoredTaskVideo serves the task's stored video artifact when its bytes
+// were persisted. The artifact key comes from the durable record, so no
+// provider call is made just to read a stored result.
+func serveStoredTaskVideo(c *gin.Context, task *model.Task) bool {
+	records, err := model.PlaygroundTaskArtifactsForTask(task.UserId, task.TaskID)
+	if err != nil {
+		return false
+	}
+	for index := range records {
+		if records[index].ArtifactType != "video" {
+			continue
+		}
+		return serveStoredTaskArtifact(c, task, types.TaskArtifact{Key: records[index].ArtifactKey, Type: "video"})
+	}
+	return false
+}
+
+// serveStoredTaskArtifact serves one artifact from the object store and
+// reports whether the response was handled. A missing or collected object
+// reports false so the caller keeps proxying the provider reference.
+func serveStoredTaskArtifact(c *gin.Context, task *model.Task, artifact types.TaskArtifact) bool {
+	artifactStore := service.GetTaskArtifactStore()
+	ref, err := artifactStore.Resolve(c.Request.Context(), task, artifact)
+	if err != nil || ref == nil {
+		return false
+	}
+	if serveErr := artifactStore.Serve(c, task, ref); serveErr != nil {
+		logger.LogWarn(c.Request.Context(), fmt.Sprintf("Failed to serve stored artifact %s for task %s: %v", artifact.Key, task.TaskID, serveErr))
+	}
+	return true
 }
 
 func taskArtifactClientHeaders(headers http.Header) map[string]string {
