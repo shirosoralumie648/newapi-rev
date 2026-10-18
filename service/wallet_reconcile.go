@@ -39,11 +39,12 @@ func (walletReconcileHandler) Run(ctx context.Context, task *model.SystemTask, r
 	if report.DeviationCount > 0 {
 		common.SysError(common.LogText("wallet ledger reconciliation found %d deviating users", report.DeviationCount))
 		model.RecordLog(0, model.LogTypeSystem, common.NewMessage("Wallet ledger reconciliation found {{count}} deviating users; see the wallet_reconcile system task result", map[string]any{"count": report.DeviationCount}))
-		NotifyRootUser(
-			dto.NotifyTypeChannelUpdate,
-			"Wallet ledger reconciliation found deviations",
-			fmt.Sprintf("%d user wallets differ from their ledger sum. Review the wallet_reconcile system task result; balances were not modified.", report.DeviationCount),
-		)
+		notifyAdmins(dto.NotifyTypeChannelUpdate, func(role int, _ dto.UserSetting) bool {
+			return role == common.RoleRootUser
+		}, func(string) (string, string) {
+			return "Wallet ledger reconciliation found deviations",
+				fmt.Sprintf("%d user wallets differ from their ledger sum. Review the wallet_reconcile system task result; balances were not modified.", report.DeviationCount)
+		})
 	}
 	if err := model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusSucceeded, report, ""); err != nil {
 		logSystemTaskLockError(ctx, task, err)
