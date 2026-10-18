@@ -72,6 +72,10 @@ const (
 	WalletLedgerRefGrantExpire = "grant_expire"
 	// WalletLedgerRefAdminGrant namespaces administrator-issued credit grants.
 	WalletLedgerRefAdminGrant = "admin_grant"
+	// WalletLedgerRefReferralCommission namespaces issued referral commissions;
+	// the reference id is the referral_commissions row the commission was
+	// settled from, so a settled commission can never be issued twice (RF-04).
+	WalletLedgerRefReferralCommission = "referral_commission"
 )
 
 // walletLedgerConsumeHourSeconds is the aggregation window for API consumption.

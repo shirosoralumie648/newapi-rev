@@ -1,30 +1,37 @@
 package operation_setting
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/config"
 )
 
 // Credit grant sources. Grant-typed credits (sign-in bonus, invitation reward,
-// redemption code, promotion, administrator gift) are recorded as credit_grants
-// rows with their own validity, while a top-up only credits the paid balance
-// that never expires.
+// redemption code, promotion, administrator gift, referral commission) are
+// recorded as credit_grants rows with their own validity, while a top-up only
+// credits the paid balance that never expires.
 const (
-	CreditGrantSourceGift    = "gift"
-	CreditGrantSourceCheckin = "checkin"
-	CreditGrantSourceInvite  = "invite"
-	CreditGrantSourceRedeem  = "redeem"
-	CreditGrantSourcePromo   = "promo"
-	CreditGrantSourceAdmin   = "admin"
+	CreditGrantSourceGift     = "gift"
+	CreditGrantSourceCheckin  = "checkin"
+	CreditGrantSourceInvite   = "invite"
+	CreditGrantSourceRedeem   = "redeem"
+	CreditGrantSourcePromo    = "promo"
+	CreditGrantSourceAdmin    = "admin"
+	CreditGrantSourceReferral = "referral"
 )
 
 // CreditGrantMaxExpiryDays bounds one configured validity in days (ten years),
 // so a misconfigured option cannot create an expiry outside the supported
 // timestamp range.
 const CreditGrantMaxExpiryDays = 3650
+
+// CreditGrantReferralDefaultExpiryDays is the shipped validity of a referral
+// commission (six months): the commission is issued as a credit grant that
+// expires on its own, like every other grant, and an administrator can change
+// the validity through the per-source override.
+const CreditGrantReferralDefaultExpiryDays = 180
 
 // creditGrantSourceList is the canonical source order used by validation and
 // by administrator-facing listings.
@@ -35,6 +42,7 @@ var creditGrantSourceList = []string{
 	CreditGrantSourceRedeem,
 	CreditGrantSourcePromo,
 	CreditGrantSourceAdmin,
+	CreditGrantSourceReferral,
 }
 
 // CreditGrantSources returns the supported grant sources in display order.
@@ -54,6 +62,14 @@ func IsCreditGrantSource(source string) bool {
 	return false
 }
 
+// creditGrantSourceBuiltinExpiryDays is the shipped validity of a source that
+// differs from DefaultExpiryDays. A referral commission (RF-04) is issued as a
+// grant with a six month validity; an explicit entry in SourceExpiryDays,
+// including 0 (never expires), replaces it.
+var creditGrantSourceBuiltinExpiryDays = map[string]int{
+	CreditGrantSourceReferral: CreditGrantReferralDefaultExpiryDays,
+}
+
 // CreditGrantSetting configures how long grant-typed credits stay valid. 0
 // means the credit never expires.
 type CreditGrantSetting struct {
@@ -64,7 +80,8 @@ type CreditGrantSetting struct {
 	SourceExpiryDays map[string]int `json:"source_expiry_days"`
 }
 
-// 默认配置：赠送额度默认不设有效期，管理员按来源显式开启。
+// 默认配置：赠送额度默认不设有效期，管理员按来源显式开启；返佣佣金按
+// creditGrantSourceBuiltinExpiryDays 的 180 天默认值发放。
 var creditGrantSetting = CreditGrantSetting{
 	DefaultExpiryDays: 0,
 }
@@ -78,12 +95,17 @@ func GetCreditGrantSetting() *CreditGrantSetting {
 }
 
 // ExpiryDaysFor returns the effective validity of one source in days; 0 means
-// the credit never expires. Unknown sources inherit the default.
+// the credit never expires. An override wins over the built-in default of the
+// source, which wins over DefaultExpiryDays; unknown sources inherit the
+// default.
 func (s *CreditGrantSetting) ExpiryDaysFor(source string) int {
 	if s == nil {
 		return 0
 	}
 	if days, ok := s.SourceExpiryDays[source]; ok {
+		return clampCreditGrantExpiryDays(days)
+	}
+	if days, ok := creditGrantSourceBuiltinExpiryDays[source]; ok {
 		return clampCreditGrantExpiryDays(days)
 	}
 	return clampCreditGrantExpiryDays(s.DefaultExpiryDays)
@@ -141,7 +163,7 @@ func validateCreditGrantSourceExpiryDays(value string) error {
 		return nil
 	}
 	overrides := map[string]int{}
-	if err := json.Unmarshal([]byte(value), &overrides); err != nil {
+	if err := common.UnmarshalJsonStr(value, &overrides); err != nil {
 		return fmt.Errorf("credit_grant_setting.source_expiry_days must be a JSON object of source to days")
 	}
 	for source, days := range overrides {

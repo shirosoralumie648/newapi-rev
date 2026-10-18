@@ -408,6 +408,12 @@ func migrateDB() error {
 	if err := migratePlaygroundUserUsageCounters(DB); err != nil {
 		return err
 	}
+	// The settlement columns (RF-04) are appended to a commission table that
+	// already holds recorded events on upgraded installations; add them before
+	// AutoMigrate compares the model.
+	if err := migrateReferralCommissionSettlementColumns(DB); err != nil {
+		return err
+	}
 	// Migrate price_amount column from float/double to decimal for existing tables
 	migrateSubscriptionPlanPriceAmount()
 	// Migrate model_limits column from varchar to text for existing tables
