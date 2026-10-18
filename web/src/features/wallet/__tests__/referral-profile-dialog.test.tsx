@@ -95,7 +95,7 @@ test('shows the registration environment, identity and commission history', asyn
       'Registration environment and rewards of profile-user'
     )
   ).toBeVisible()
-  expect(screen.getByText('203.0.113.9')).toBeVisible()
+  expect(await screen.findByText('203.0.113.9')).toBeVisible()
   expect(screen.getByText('example.com')).toBeVisible()
   expect(screen.getByText('referral-test-agent/1.0')).toBeVisible()
   expect(screen.getByText('Identity reference: deadbeef')).toBeVisible()

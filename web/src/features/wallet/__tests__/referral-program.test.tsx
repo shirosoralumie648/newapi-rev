@@ -158,7 +158,7 @@ test('renders the unmarked state on the global default', async () => {
   renderProgram()
 
   expect(await screen.findByText('Not a referral agent')).toBeVisible()
-  expect(screen.getByText(formatPercent(20))).toBeVisible()
+  expect(await screen.findByText(formatPercent(20))).toBeVisible()
   expect(screen.getByText('Global default')).toBeVisible()
 })
 
