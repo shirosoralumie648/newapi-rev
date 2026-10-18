@@ -484,6 +484,14 @@ const AUDIT_TEMPLATES: Record<string, string> = {
   'user.binding_clear': 'Cleared {{bindingType}} binding for user {{username}}',
   'user.inviter_bind':
     'Bound user {{username}} (ID: {{id}}) to inviter {{inviter_id}}',
+  'user.referral_flag':
+    'Updated the referral flag of user {{username}} to {{level}}',
+  'user.referral_identity':
+    'Recorded the referral identity of user {{username}}',
+  'user.referral_identity_clear':
+    'Cleared the referral identity of user {{username}}',
+  'user.referral_review':
+    'Decided referral commission review #{{id}} as {{decision}}',
   'user.2fa_disable': 'Force-disabled two-factor authentication for the user',
   'user.passkey_register': 'Registered a passkey',
   'user.passkey_delete': 'Deleted a passkey',

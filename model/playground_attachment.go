@@ -512,6 +512,71 @@ func GetPlaygroundAttachment(userID int, sessionID, id string) (*PlaygroundAttac
 	return &attachment, nil
 }
 
+// GetPlaygroundAttachmentForUser resolves one attachment by its owner-scoped id
+// without requiring its partition. A canvas node stores the id only and the
+// canvas pin keeps the bytes alive independently of the conversation that
+// uploaded them, so the partition may be a conversation row that is already
+// gone. Ownership is still the row's user_id, so a foreign id is a 404.
+func GetPlaygroundAttachmentForUser(userID int, id string) (*PlaygroundAttachment, error) {
+	if userID <= 0 || id == "" {
+		return nil, ErrPlaygroundAttachmentInvalid
+	}
+	var attachment PlaygroundAttachment
+	err := DB.Where("id = ? AND user_id = ?", id, userID).First(&attachment).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrPlaygroundAttachmentNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &attachment, nil
+}
+
+// OpenPlaygroundAttachmentContent returns the stored bytes of one attachment
+// as a reader, hiding which backend holds them: database-backed rows are
+// decoded from their inline base64 payload, object-backed rows stream from the
+// object store after the stored size is checked against the row. The caller
+// closes the reader. Ownership must already have been resolved by the caller
+// (for example with GetPlaygroundAttachmentForUser).
+func OpenPlaygroundAttachmentContent(ctx context.Context, attachment *PlaygroundAttachment) (io.ReadCloser, error) {
+	if attachment == nil {
+		return nil, ErrPlaygroundAttachmentNotFound
+	}
+	if attachment.StoredInDatabase() {
+		if attachment.Data == nil {
+			return nil, errors.New("stored attachment data is missing")
+		}
+		data, err := base64.StdEncoding.DecodeString(string(*attachment.Data))
+		if err != nil {
+			return nil, errors.New("decoded attachment is invalid")
+		}
+		if int64(len(data)) != attachment.ByteSize {
+			return nil, errors.New("stored attachment bytes do not match their metadata")
+		}
+		return io.NopCloser(bytes.NewReader(data)), nil
+	}
+	store := objectstore.DefaultStore()
+	if store == nil {
+		return nil, ErrPlaygroundAttachmentStorage
+	}
+	reader, info, err := store.Get(ctx, attachment.ObjectKey)
+	if err != nil {
+		return nil, err
+	}
+	if info.Size != attachment.ByteSize {
+		_ = reader.Close()
+		return nil, errors.New("stored attachment size does not match its metadata")
+	}
+	return reader, nil
+}
+
+// PlaygroundAttachmentExtension returns the canonical file extension of one
+// allowlisted media type, so an exported resource keeps a usable name. An
+// unknown type has no extension.
+func PlaygroundAttachmentExtension(mediaType string) string {
+	return playgroundAttachmentExtensions[mediaType]
+}
+
 // GetPlaygroundAttachmentsByIDs resolves message references without loading bytes.
 func GetPlaygroundAttachmentsByIDs(userID int, sessionID string, ids []string) (map[string]PlaygroundAttachment, error) {
 	attachments := make(map[string]PlaygroundAttachment, len(ids))

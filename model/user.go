@@ -403,8 +403,12 @@ func lockNormalizedEmail(tx *gorm.DB, email string) error {
 			return err
 		}
 	case common.UsingMainDatabase(common.DatabaseTypeMySQL):
+		// The locking read goes through the model so the statement uses the
+		// session table name: a raw `users` would ignore a configured table
+		// prefix. Unscoped keeps soft-deleted accounts in the scanned range,
+		// exactly as the email uniqueness check that this lock protects.
 		var ids []int
-		if err := tx.Raw("SELECT id FROM users WHERE email = ? FOR UPDATE", email).Scan(&ids).Error; err != nil {
+		if err := lockForUpdate(tx).Unscoped().Model(&User{}).Where("email = ?", email).Pluck("id", &ids).Error; err != nil {
 			return err
 		}
 	}

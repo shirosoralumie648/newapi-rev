@@ -20,6 +20,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/go-redis/redis/v8"
 
@@ -69,7 +70,7 @@ func setupManageUserTestDB(t *testing.T) *gorm.DB {
 			}
 		}
 	})
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.CasbinRule{}, &model.AuthzRole{}, &model.AuthFlow{}, &model.TwoFA{}, &model.PasskeyCredential{}, &model.UserAccessToken{}, &model.WalletLedgerEntry{}, &model.CreditGrant{}, &model.ReferralBinding{}, &model.ReferralCommission{}, &model.ReferralRegistrationSignal{}, &model.ReferralIdentity{}, &model.ReferralFlag{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.CasbinRule{}, &model.AuthzRole{}, &model.AuthFlow{}, &model.TwoFA{}, &model.PasskeyCredential{}, &model.UserAccessToken{}, &model.WalletLedgerEntry{}, &model.CreditGrant{}, &model.ReferralBinding{}, &model.ReferralCommission{}, &model.ReferralRegistrationSignal{}, &model.ReferralIdentity{}, &model.ReferralFlag{}, &model.ReferralAgent{}))
 	require.NoError(t, logDB.AutoMigrate(&model.Log{}, &model.AuditLog{}))
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -917,23 +918,29 @@ func TestReferralAntiAbuseAdminEndpoints(t *testing.T) {
 
 	recorder = invoke(http.MethodPost, fmt.Sprintf("/api/user/referral/reviews/%d", rejected.Id), `{"decision":"reject"}`, userParams(rejected.Id), ReviewReferralCommission)
 	assert.Contains(t, recorder.Body.String(), `"success":true`)
-	require.NoError(t, db.First(&reloaded, rejected.Id).Error)
-	assert.Equal(t, model.ReferralCommissionStatusRejected, reloaded.Status)
+	var rejectedRow model.ReferralCommission
+	require.NoError(t, db.First(&rejectedRow, rejected.Id).Error)
+	assert.Equal(t, model.ReferralCommissionStatusRejected, rejectedRow.Status)
 
 	for _, expected := range []struct {
-		action  string
-		content string
+		action   string
+		contents []string
 	}{
-		{"user.referral_flag", "Updated the referral flag of user " + invitee.Username + " to frozen"},
-		{"user.referral_identity", "Recorded the referral identity of user " + inviter.Username},
-		{"user.referral_identity_clear", "Cleared the referral identity of user " + inviter.Username},
+		{"user.referral_flag", []string{
+			"Updated the referral flag of user " + invitee.Username + " to frozen",
+			"Updated the referral flag of user " + invitee.Username + " to clear",
+		}},
+		{"user.referral_identity", []string{"Recorded the referral identity of user " + inviter.Username}},
+		{"user.referral_identity_clear", []string{"Cleared the referral identity of user " + inviter.Username}},
 	} {
 		var audits []model.AuditLog
-		require.NoError(t, model.LOG_DB.Where("action = ?", expected.action).Find(&audits).Error)
-		require.Len(t, audits, 1, "%s must be audited exactly once", expected.action)
-		assert.Equal(t, expected.content, audits[0].Content)
-		assert.Equal(t, 9999, audits[0].UserId)
-		assert.Equal(t, "root-operator", audits[0].Username)
+		require.NoError(t, model.LOG_DB.Where("action = ?", expected.action).Order("id").Find(&audits).Error)
+		require.Len(t, audits, len(expected.contents), "%s must be audited once per call", expected.action)
+		for i, content := range expected.contents {
+			assert.Equal(t, content, audits[i].Content)
+			assert.Equal(t, 9999, audits[i].UserId)
+			assert.Equal(t, "root-operator", audits[i].Username)
+		}
 	}
 	var identityAudits []model.AuditLog
 	require.NoError(t, model.LOG_DB.Where("action = ?", "user.referral_identity").Find(&identityAudits).Error)
@@ -947,4 +954,228 @@ func TestReferralAntiAbuseAdminEndpoints(t *testing.T) {
 	require.Len(t, reviewAudits, 2)
 	assert.Equal(t, fmt.Sprintf("Decided referral commission review #%d as approve", review.Id), reviewAudits[0].Content)
 	assert.Equal(t, fmt.Sprintf("Decided referral commission review #%d as reject", rejected.Id), reviewAudits[1].Content)
+}
+
+// The invitation statistics endpoints are read-only: the inviter sees exactly
+// their own invitees with masked identifiers and without the anti-abuse
+// commission states, the administrator list carries the refused states and
+// the filtered summary, the export writes the same rows as CSV, and no call
+// moves a balance.
+func TestReferralInvitationStatisticsEndpoints(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	now := time.Now().Unix()
+	inviter := model.User{Username: "stats-inviter", Password: "password", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Quota: 12345, AffCode: "stats-inviter-aff"}
+	require.NoError(t, db.Create(&inviter).Error)
+	invitee := model.User{Username: "stats-invitee", Email: "stats-invitee@example.com", Password: "password", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "stats-invitee-aff"}
+	require.NoError(t, db.Create(&invitee).Error)
+	otherInviter := model.User{Username: "stats-other-inviter", Password: "password", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "stats-other-inviter-aff"}
+	require.NoError(t, db.Create(&otherInviter).Error)
+	otherInvitee := model.User{Username: "stats-other-invitee", Password: "password", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "stats-other-invitee-aff"}
+	require.NoError(t, db.Create(&otherInvitee).Error)
+
+	require.NoError(t, db.Create(&model.ReferralBinding{InviteeId: invitee.Id, InviterId: inviter.Id, Source: model.ReferralSourceLink, BoundAt: now}).Error)
+	require.NoError(t, db.Create(&model.ReferralBinding{InviteeId: otherInvitee.Id, InviterId: otherInviter.Id, Source: model.ReferralSourceCode, BoundAt: now + 1}).Error)
+	require.NoError(t, db.Create(&model.ReferralCommission{
+		InviterId: inviter.Id, InviteeId: invitee.Id, Source: model.ReferralCommissionSourceTopUp,
+		RefType: model.WalletLedgerRefTopUp, RefId: "stats-order-1",
+		BaseQuota: 5000000, RatePercent: "10", CommissionQuota: 500000,
+		Status: model.ReferralCommissionStatusPending, CreatedAt: now, UpdatedAt: now,
+	}).Error)
+	require.NoError(t, db.Create(&model.ReferralCommission{
+		InviterId: inviter.Id, InviteeId: invitee.Id, Source: model.ReferralCommissionSourceTopUp,
+		RefType: model.WalletLedgerRefTopUp, RefId: "stats-order-2",
+		BaseQuota: 2000000, RatePercent: "10", CommissionQuota: 200000,
+		Status: model.ReferralCommissionStatusBlocked, Reason: model.ReferralCommissionReasonDailyCap,
+		CreatedAt: now, UpdatedAt: now,
+	}).Error)
+
+	invoke := func(userID int, method, path string, handler gin.HandlerFunc) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(method, path, nil)
+		c.Set("id", userID)
+		c.Set("role", common.RoleAdminUser)
+		c.Set("username", "stats-caller")
+		handler(c)
+		return recorder
+	}
+
+	recorder := invoke(inviter.Id, http.MethodGet, "/api/user/self/referrals?p=1&page_size=20", GetSelfReferralInvitations)
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	selfBody := recorder.Body.String()
+	assert.Contains(t, selfBody, `"success":true`)
+	assert.Contains(t, selfBody, `"total":1`)
+	assert.Contains(t, selfBody, `"identifier":"s***@example.com"`)
+	assert.Contains(t, selfBody, fmt.Sprintf(`"invitee_id":%d`, invitee.Id))
+	assert.Contains(t, selfBody, `"pending_quota":500000`)
+	assert.Contains(t, selfBody, `"commission_enabled":`)
+	assert.NotContains(t, selfBody, "stats-invitee@example.com")
+	assert.NotContains(t, selfBody, fmt.Sprintf(`"invitee_id":%d`, otherInvitee.Id))
+	assert.NotContains(t, selfBody, `"blocked_quota"`, "the user view never exposes the anti-abuse states")
+
+	recorder = invoke(9999, http.MethodGet, "/api/user/referrals?p=1&page_size=20", GetReferralInvitations)
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	adminBody := recorder.Body.String()
+	assert.Contains(t, adminBody, `"total":2`)
+	assert.Contains(t, adminBody, `"username":"stats-invitee"`, "the administrator sees the raw identifiers")
+	assert.Contains(t, adminBody, `"inviter_username":"stats-inviter"`)
+	assert.Contains(t, adminBody, `"total_invitees":2`)
+	assert.Contains(t, adminBody, `"invitees_with_commission":1`)
+	assert.Contains(t, adminBody, `"total_paid_quota":7000000`)
+	assert.Contains(t, adminBody, `"pending_quota":500000`)
+	assert.Contains(t, adminBody, `"blocked_quota":200000`)
+
+	recorder = invoke(9999, http.MethodGet, "/api/user/referrals?p=1&page_size=20&status=blocked", GetReferralInvitations)
+	assert.Contains(t, recorder.Body.String(), `"total":1`)
+	recorder = invoke(9999, http.MethodGet, "/api/user/referrals?p=1&page_size=20&status=unknown", GetReferralInvitations)
+	assert.Contains(t, recorder.Body.String(), `"success":false`)
+	recorder = invoke(9999, http.MethodGet, "/api/user/referrals?p=1&page_size=20&source=unknown", GetReferralInvitations)
+	assert.Contains(t, recorder.Body.String(), `"success":false`)
+
+	recorder = invoke(9999, http.MethodGet, "/api/user/referrals/export?status=blocked", ExportReferralInvitations)
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, "text/csv; charset=utf-8", recorder.Header().Get("Content-Type"))
+	assert.Contains(t, recorder.Header().Get("Content-Disposition"), "referral-invitations.csv")
+	csvLines := strings.Split(strings.TrimSpace(strings.TrimPrefix(recorder.Body.String(), "\xEF\xBB\xBF")), "\n")
+	require.Len(t, csvLines, 2)
+	header := strings.Split(strings.TrimSpace(csvLines[0]), ",")
+	row := strings.Split(strings.TrimSpace(csvLines[1]), ",")
+	require.Len(t, row, len(header))
+	assert.Equal(t,
+		[]string{
+			"invitee_id", "username", "email", "display_name", "inviter_id", "inviter_username",
+			"source", "bound_at", "commission_ends_at",
+			"pending_quota", "locked_quota", "settled_quota",
+			"review_quota", "blocked_quota", "rejected_quota",
+			"total_paid_quota", "commission_count",
+		},
+		header)
+	assert.Equal(t, strconv.Itoa(invitee.Id), row[0])
+	assert.Equal(t, "stats-invitee", row[1])
+	assert.Equal(t, model.ReferralSourceLink, row[6])
+	assert.Equal(t, "500000", row[9])
+	assert.Equal(t, "200000", row[13])
+
+	var stored model.User
+	require.NoError(t, db.First(&stored, inviter.Id).Error)
+	assert.EqualValues(t, 12345, stored.Quota, "the read-only statistics never move a balance")
+}
+
+// TestReferralAgentAdminEndpoints pins the RF-08 administrator surface: the
+// agent mark (tier and/or single-account rate override), its validation, the
+// paginated agent list with the tier catalogue and the caller's own profile,
+// each audited with the target context.
+func TestReferralAgentAdminEndpoints(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	createQuotaTestOperator(t, db, common.RoleRootUser)
+	previousReferralSetting := *operation_setting.GetReferralSetting()
+	*operation_setting.GetReferralSetting() = operation_setting.ReferralSetting{
+		Enabled:               true,
+		CommissionRatePercent: 20,
+		WindowMonths:          operation_setting.ReferralWindowMonthsDefault,
+		AgentTiers: []operation_setting.ReferralAgentTier{
+			{Id: "partner", Name: "Partner", RatePercent: 40},
+		},
+	}
+	t.Cleanup(func() { *operation_setting.GetReferralSetting() = previousReferralSetting })
+
+	inviter := model.User{Username: "agent-inviter", Password: "password", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "agent-inviter-aff"}
+	require.NoError(t, db.Create(&inviter).Error)
+
+	invoke := func(method, path, body string, params gin.Params, id int, handler gin.HandlerFunc) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(method, path, strings.NewReader(body))
+		c.Request.Header.Set("Content-Type", "application/json")
+		c.Params = params
+		c.Set("id", id)
+		c.Set("role", common.RoleRootUser)
+		c.Set("username", "root-operator")
+		handler(c)
+		return recorder
+	}
+	userParams := func(id int) gin.Params {
+		return gin.Params{{Key: "id", Value: strconv.Itoa(id)}}
+	}
+
+	// The caller's own profile before the mark: single-level, inheriting the
+	// global default.
+	recorder := invoke(http.MethodGet, "/api/user/self/referral-agent", "", nil, inviter.Id, GetSelfReferralAgent)
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), `"success":true`)
+	assert.Contains(t, recorder.Body.String(), `"marked":false`)
+	assert.Contains(t, recorder.Body.String(), `"rate_percent":20`)
+	assert.Contains(t, recorder.Body.String(), `"rate_source":"default"`)
+
+	// Validation failures keep the mark unset.
+	recorder = invoke(http.MethodPut, fmt.Sprintf("/api/user/%d/referral-agent", inviter.Id), `{"tier_id":"missing"}`, userParams(inviter.Id), 9999, SetUserReferralAgent)
+	assert.Contains(t, recorder.Body.String(), `"success":false`)
+	assert.Contains(t, recorder.Body.String(), "Unknown referral agent tier")
+	recorder = invoke(http.MethodPut, fmt.Sprintf("/api/user/%d/referral-agent", inviter.Id), `{"rate_percent":150}`, userParams(inviter.Id), 9999, SetUserReferralAgent)
+	assert.Contains(t, recorder.Body.String(), `"success":false`)
+	assert.Contains(t, recorder.Body.String(), "Referral agent rate must be between 0 and 100")
+	agent, err := model.GetReferralAgent(inviter.Id)
+	require.NoError(t, err)
+	assert.Nil(t, agent)
+
+	// Marking with a tier and one single-account override.
+	recorder = invoke(http.MethodPut, fmt.Sprintf("/api/user/%d/referral-agent", inviter.Id), `{"tier_id":"partner","rate_percent":55,"note":"top partner"}`, userParams(inviter.Id), 9999, SetUserReferralAgent)
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), `"success":true`)
+	assert.Contains(t, recorder.Body.String(), "Referral agent updated")
+	agent, err = model.GetReferralAgent(inviter.Id)
+	require.NoError(t, err)
+	require.NotNil(t, agent)
+	assert.Equal(t, "partner", agent.TierId)
+	require.NotNil(t, agent.RatePercent)
+	assert.Equal(t, 55.0, *agent.RatePercent)
+	assert.Equal(t, "top partner", agent.Note)
+	assert.Equal(t, 9999, agent.MarkedBy)
+
+	// The caller's profile reflects the mark and its winning source.
+	recorder = invoke(http.MethodGet, "/api/user/self/referral-agent", "", nil, inviter.Id, GetSelfReferralAgent)
+	assert.Contains(t, recorder.Body.String(), `"marked":true`)
+	assert.Contains(t, recorder.Body.String(), `"tier_name":"Partner"`)
+	assert.Contains(t, recorder.Body.String(), `"rate_percent":55`)
+	assert.Contains(t, recorder.Body.String(), `"rate_source":"user"`)
+
+	// The administrator list carries the account context, the effective rate
+	// and the configured tier catalogue.
+	recorder = invoke(http.MethodGet, "/api/user/referral/agents?p=1&page_size=10", "", nil, 9999, GetReferralAgents)
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), `"success":true`)
+	assert.Contains(t, recorder.Body.String(), `"username":"agent-inviter"`)
+	assert.Contains(t, recorder.Body.String(), `"effective_rate_percent":55`)
+	assert.Contains(t, recorder.Body.String(), `"rate_source":"user"`)
+	assert.Contains(t, recorder.Body.String(), `"tier_name":"Partner"`)
+	assert.Contains(t, recorder.Body.String(), `"tiers":[{"id":"partner","name":"Partner","rate_percent":40}]`)
+
+	// Clearing the mark restores the inherited configuration.
+	recorder = invoke(http.MethodDelete, fmt.Sprintf("/api/user/%d/referral-agent", inviter.Id), "", userParams(inviter.Id), 9999, ClearUserReferralAgent)
+	assert.Contains(t, recorder.Body.String(), `"success":true`)
+	assert.Contains(t, recorder.Body.String(), "Referral agent cleared")
+	agent, err = model.GetReferralAgent(inviter.Id)
+	require.NoError(t, err)
+	assert.Nil(t, agent)
+
+	// Both changes are audited exactly once with the target context.
+	var agentAudits []model.AuditLog
+	require.NoError(t, model.LOG_DB.Where("action = ?", "user.referral_agent").Find(&agentAudits).Error)
+	require.Len(t, agentAudits, 1)
+	assert.Equal(t, "Updated the referral agent settings of user agent-inviter", agentAudits[0].Content)
+	assert.Equal(t, 9999, agentAudits[0].UserId)
+	assert.Equal(t, "root-operator", agentAudits[0].Username)
+	agentParams, err := common.Marshal(agentAudits[0].Other.Op.Params)
+	require.NoError(t, err)
+	assert.Contains(t, string(agentParams), `"tier_id":"partner"`)
+	assert.Contains(t, string(agentParams), `"rate_percent":55`)
+
+	var clearAudits []model.AuditLog
+	require.NoError(t, model.LOG_DB.Where("action = ?", "user.referral_agent_clear").Find(&clearAudits).Error)
+	require.Len(t, clearAudits, 1)
+	assert.Equal(t, "Cleared the referral agent mark of user agent-inviter", clearAudits[0].Content)
+
+	// The self route refuses an unauthenticated caller.
+	recorder = invoke(http.MethodGet, "/api/user/self/referral-agent", "", nil, 0, GetSelfReferralAgent)
+	assert.Contains(t, recorder.Body.String(), `"success":false`)
 }

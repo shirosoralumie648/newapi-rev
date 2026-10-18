@@ -40,8 +40,9 @@ const referralInvitationExportMaxRows = 100000
 // referralInvitationExportPageSize bounds one page of the export walk.
 const referralInvitationExportPageSize = 1000
 
-// referralInvitationStatsFields is the shared commission aggregate of one
-// listed invitation; quota amounts and the trigger window are read-only.
+// referralInvitationStatsFields is the shared payable commission aggregate of
+// one listed invitation: quota amounts, the binding channel and the trigger
+// window are read-only. The user-facing list exposes exactly these states.
 type referralInvitationStatsFields struct {
 	Source           string `json:"source"`
 	BoundAt          int64  `json:"bound_at"`
@@ -51,6 +52,16 @@ type referralInvitationStatsFields struct {
 	SettledQuota     int64  `json:"settled_quota"`
 	TotalPaidQuota   int64  `json:"total_paid_quota"`
 	CommissionCount  int64  `json:"commission_count"`
+}
+
+// referralInvitationAdminStatsFields adds the recorded states that wait for a
+// decision or never pay out. Only administrators see them; exposing them to
+// the inviter would leak the anti-abuse decisions of the platform.
+type referralInvitationAdminStatsFields struct {
+	referralInvitationStatsFields
+	ReviewQuota   int64 `json:"review_quota"`
+	BlockedQuota  int64 `json:"blocked_quota"`
+	RejectedQuota int64 `json:"rejected_quota"`
 }
 
 // referralInvitationSelfItem is one invitee as the inviter sees it: the
@@ -70,7 +81,7 @@ type referralInvitationAdminItem struct {
 	DisplayName     string `json:"display_name"`
 	InviterId       int    `json:"inviter_id"`
 	InviterUsername string `json:"inviter_username"`
-	referralInvitationStatsFields
+	referralInvitationAdminStatsFields
 }
 
 // referralInvitationSelfResponse is the caller's paginated invitation list
@@ -174,15 +185,20 @@ func GetReferralInvitations(c *gin.Context) {
 			DisplayName:     invitations[i].DisplayName,
 			InviterId:       invitations[i].InviterId,
 			InviterUsername: invitations[i].InviterUsername,
-			referralInvitationStatsFields: referralInvitationStatsFields{
-				Source:           invitations[i].Source,
-				BoundAt:          invitations[i].BoundAt,
-				CommissionEndsAt: invitations[i].CommissionEndsAt,
-				PendingQuota:     invitations[i].PendingQuota,
-				LockedQuota:      invitations[i].LockedQuota,
-				SettledQuota:     invitations[i].SettledQuota,
-				TotalPaidQuota:   invitations[i].TotalPaidQuota,
-				CommissionCount:  invitations[i].CommissionCount,
+			referralInvitationAdminStatsFields: referralInvitationAdminStatsFields{
+				referralInvitationStatsFields: referralInvitationStatsFields{
+					Source:           invitations[i].Source,
+					BoundAt:          invitations[i].BoundAt,
+					CommissionEndsAt: invitations[i].CommissionEndsAt,
+					PendingQuota:     invitations[i].PendingQuota,
+					LockedQuota:      invitations[i].LockedQuota,
+					SettledQuota:     invitations[i].SettledQuota,
+					TotalPaidQuota:   invitations[i].TotalPaidQuota,
+					CommissionCount:  invitations[i].CommissionCount,
+				},
+				ReviewQuota:   invitations[i].ReviewQuota,
+				BlockedQuota:  invitations[i].BlockedQuota,
+				RejectedQuota: invitations[i].RejectedQuota,
 			},
 		})
 	}
@@ -198,7 +214,8 @@ func GetReferralInvitations(c *gin.Context) {
 
 // ExportReferralInvitations streams the filtered invitation list as CSV. The
 // export is bounded and read-only: it walks the list page by page and never
-// moves a balance.
+// moves a balance. As an administrator view it carries the raw identifiers and
+// every recorded commission state, refused events included.
 func ExportReferralInvitations(c *gin.Context) {
 	query, err := referralInvitationQueryFromRequest(c)
 	if err != nil {
@@ -217,7 +234,9 @@ func ExportReferralInvitations(c *gin.Context) {
 	_ = writer.Write([]string{
 		"invitee_id", "username", "email", "display_name", "inviter_id", "inviter_username",
 		"source", "bound_at", "commission_ends_at",
-		"pending_quota", "locked_quota", "settled_quota", "total_paid_quota", "commission_count",
+		"pending_quota", "locked_quota", "settled_quota",
+		"review_quota", "blocked_quota", "rejected_quota",
+		"total_paid_quota", "commission_count",
 	})
 	for written := 0; written < referralInvitationExportMaxRows; {
 		limit := min(referralInvitationExportPageSize, referralInvitationExportMaxRows-written)
@@ -245,6 +264,9 @@ func ExportReferralInvitations(c *gin.Context) {
 				strconv.FormatInt(invitation.PendingQuota, 10),
 				strconv.FormatInt(invitation.LockedQuota, 10),
 				strconv.FormatInt(invitation.SettledQuota, 10),
+				strconv.FormatInt(invitation.ReviewQuota, 10),
+				strconv.FormatInt(invitation.BlockedQuota, 10),
+				strconv.FormatInt(invitation.RejectedQuota, 10),
 				strconv.FormatInt(invitation.TotalPaidQuota, 10),
 				strconv.FormatInt(invitation.CommissionCount, 10),
 			})
@@ -454,4 +476,149 @@ func ReviewReferralCommission(c *gin.Context) {
 		"commission_quota": commission.CommissionQuota,
 	})
 	common.ApiSuccessT(c, "Referral review updated", gin.H{"commission": commission})
+}
+
+// referralAgentSelfResponse is the caller's own agent profile: whether the
+// account is marked as a referral agent (推荐官/代理), the configured tier and
+// the effective commission rate with its source, plus the invitation summary
+// of the caller.
+type referralAgentSelfResponse struct {
+	Marked      bool                       `json:"marked"`
+	TierId      string                     `json:"tier_id"`
+	TierName    string                     `json:"tier_name"`
+	RatePercent float64                    `json:"rate_percent"`
+	RateSource  string                     `json:"rate_source"`
+	Enabled     bool                       `json:"enabled"`
+	Summary     model.ReferralStatsSummary `json:"summary"`
+}
+
+// GetSelfReferralAgent returns the caller's own referral agent profile:
+// single-level, read-only and only ever the caller's own mark.
+func GetSelfReferralAgent(c *gin.Context) {
+	userId := c.GetInt("id")
+	if userId <= 0 {
+		common.ApiErrorMsg(c, "unauthorized")
+		return
+	}
+	user, err := model.GetUserById(userId, false)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	agent, err := model.GetReferralAgent(userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	summary, err := model.SummarizeReferralInvitations(model.ReferralInvitationQuery{InviterId: userId})
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	response := referralAgentSelfResponse{
+		Marked:  agent != nil,
+		Enabled: referralCommissionEnabled(),
+		Summary: *summary,
+	}
+	if agent != nil {
+		response.TierId = agent.TierId
+		if tier, ok := operation_setting.GetReferralSetting().AgentTier(agent.TierId); ok {
+			response.TierName = tier.Name
+		}
+	}
+	response.RatePercent, response.RateSource = model.ReferralCommissionRateFor(agent, user.Group)
+	common.ApiSuccess(c, response)
+}
+
+// referralAgentAdminResponse is the paginated agent list with the configured
+// tier catalogue the marks refer to.
+type referralAgentAdminResponse struct {
+	*common.PageInfo
+	Tiers []operation_setting.ReferralAgentTier `json:"tiers"`
+}
+
+// GetReferralAgents lists the marked referral agent accounts with the account
+// context and the effective rate of every mark (administrator view).
+func GetReferralAgents(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	items, total, err := model.ListReferralAgents(pageInfo)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	tiers := operation_setting.GetReferralSetting().AgentTiers
+	if tiers == nil {
+		tiers = []operation_setting.ReferralAgentTier{}
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(items)
+	common.ApiSuccess(c, referralAgentAdminResponse{
+		PageInfo: pageInfo,
+		Tiers:    tiers,
+	})
+}
+
+type referralAgentUpdateRequest struct {
+	TierId      *string  `json:"tier_id"`
+	RatePercent *float64 `json:"rate_percent"`
+	Note        string   `json:"note"`
+}
+
+// SetUserReferralAgent marks a managed account as a referral agent with an
+// optional configured tier and/or single-account commission rate override.
+func SetUserReferralAgent(c *gin.Context) {
+	user, ok := requireManagedUser(c)
+	if !ok {
+		return
+	}
+	var request referralAgentUpdateRequest
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	tierId := ""
+	if request.TierId != nil {
+		tierId = strings.TrimSpace(*request.TierId)
+	}
+	agent, err := model.SetReferralAgent(user.Id, tierId, request.RatePercent, request.Note, c.GetInt("id"))
+	if err != nil {
+		if errors.Is(err, model.ErrReferralAgentTierUnknown) {
+			common.ApiErrorT(c, "Unknown referral agent tier")
+			return
+		}
+		if errors.Is(err, model.ErrReferralAgentRateInvalid) {
+			common.ApiErrorT(c, "Referral agent rate must be between 0 and 100")
+			return
+		}
+		common.ApiError(c, err)
+		return
+	}
+	params := map[string]any{
+		"username": user.Username,
+		"id":       user.Id,
+		"tier_id":  tierId,
+	}
+	if request.RatePercent != nil {
+		params["rate_percent"] = *request.RatePercent
+	}
+	recordManageAuditFor(c, user.Id, "user.referral_agent", params)
+	common.ApiSuccessT(c, "Referral agent updated", gin.H{"agent": agent})
+}
+
+// ClearUserReferralAgent removes the agent mark of a managed account; the
+// account then falls back to its group configuration.
+func ClearUserReferralAgent(c *gin.Context) {
+	user, ok := requireManagedUser(c)
+	if !ok {
+		return
+	}
+	if err := model.ClearReferralAgent(user.Id); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	recordManageAuditFor(c, user.Id, "user.referral_agent_clear", map[string]any{
+		"username": user.Username,
+		"id":       user.Id,
+	})
+	common.ApiSuccessT(c, "Referral agent cleared", nil)
 }
