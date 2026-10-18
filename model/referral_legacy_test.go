@@ -246,45 +246,46 @@ func TestLegacyReferralImportContainsFailuresMatrix(t *testing.T) {
 
 // The manual transfer is one ledger transaction keyed by the client request id:
 // the first call moves the quota, and every replay of the same request reports
-// success without a second movement, even after the balance was spent.
+// success without a second movement, even after the balance was spent. Every
+// amount stays above the production minimum of one common.QuotaPerUnit.
 func TestAffiliateTransferIdempotencyMatrix(t *testing.T) {
 	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
 		setupLegacyReferralTest(t, db)
 
 		fixture := createReferralCommissionTestUser(t, db, "transfer-user", "default")
-		setLegacyAffiliateQuota(t, db, fixture.Id, 2000, 2000)
+		setLegacyAffiliateQuota(t, db, fixture.Id, 2_000_000, 2_000_000)
 		var user User
 		require.NoError(t, db.First(&user, fixture.Id).Error)
 
-		require.NoError(t, user.TransferAffQuotaToQuota(600, "req-1"))
-		assert.EqualValues(t, 1400, user.AffQuota)
-		assert.EqualValues(t, 1600, user.Quota)
+		require.NoError(t, user.TransferAffQuotaToQuota(600_000, "req-1"))
+		assert.EqualValues(t, 1_400_000, user.AffQuota)
+		assert.EqualValues(t, 601_000, user.Quota)
 
 		var stored User
 		require.NoError(t, db.Select("quota", "aff_quota").First(&stored, fixture.Id).Error)
-		assert.EqualValues(t, 1600, stored.Quota)
-		assert.EqualValues(t, 1400, stored.AffQuota)
+		assert.EqualValues(t, 601_000, stored.Quota)
+		assert.EqualValues(t, 1_400_000, stored.AffQuota)
 
 		var entry WalletLedgerEntry
 		require.NoError(t, db.Where("ref_type = ? AND ref_id = ?", WalletLedgerRefAffiliate, fmt.Sprintf("%d:req-1", fixture.Id)).First(&entry).Error)
 		assert.Equal(t, WalletLedgerKindAffiliateTransfer, entry.Kind)
-		assert.EqualValues(t, 600, entry.Amount)
-		assert.EqualValues(t, 1600, entry.BalanceAfter)
+		assert.EqualValues(t, 600_000, entry.Amount)
+		assert.EqualValues(t, 601_000, entry.BalanceAfter)
 		assert.Equal(t, grantLedgerMeta(operation_setting.CreditGrantSourceInvite, 0), entry.Meta)
 
 		var grant CreditGrant
 		require.NoError(t, db.Where("user_id = ?", fixture.Id).First(&grant).Error)
 		assert.Equal(t, operation_setting.CreditGrantSourceInvite, grant.Source)
-		assert.EqualValues(t, 600, grant.Amount)
-		assert.EqualValues(t, 600, grant.Remaining)
+		assert.EqualValues(t, 600_000, grant.Amount)
+		assert.EqualValues(t, 600_000, grant.Remaining)
 		assert.Zero(t, grant.ExpiresAt)
 
 		// Replaying the same request reports success without a second movement
 		// and without a second grant.
-		require.NoError(t, user.TransferAffQuotaToQuota(600, "req-1"))
+		require.NoError(t, user.TransferAffQuotaToQuota(600_000, "req-1"))
 		require.NoError(t, db.Select("quota", "aff_quota").First(&stored, fixture.Id).Error)
-		assert.EqualValues(t, 1600, stored.Quota)
-		assert.EqualValues(t, 1400, stored.AffQuota)
+		assert.EqualValues(t, 601_000, stored.Quota)
+		assert.EqualValues(t, 1_400_000, stored.AffQuota)
 		var transferRows int64
 		require.NoError(t, db.Model(&WalletLedgerEntry{}).
 			Where("ref_type = ? AND user_id = ?", WalletLedgerRefAffiliate, fixture.Id).
@@ -296,17 +297,17 @@ func TestAffiliateTransferIdempotencyMatrix(t *testing.T) {
 
 		// A replay still succeeds after the balance was spent, because the
 		// reference check runs before the balance check.
-		require.NoError(t, user.TransferAffQuotaToQuota(1400, "req-2"))
+		require.NoError(t, user.TransferAffQuotaToQuota(1_400_000, "req-2"))
 		require.NoError(t, db.Select("quota", "aff_quota").First(&stored, fixture.Id).Error)
-		assert.EqualValues(t, 3000, stored.Quota)
+		assert.EqualValues(t, 2_001_000, stored.Quota)
 		assert.Zero(t, stored.AffQuota)
-		require.NoError(t, user.TransferAffQuotaToQuota(600, "req-1"))
+		require.NoError(t, user.TransferAffQuotaToQuota(600_000, "req-1"))
 		require.NoError(t, db.Select("quota", "aff_quota").First(&stored, fixture.Id).Error)
-		assert.EqualValues(t, 3000, stored.Quota)
+		assert.EqualValues(t, 2_001_000, stored.Quota)
 		assert.Zero(t, stored.AffQuota)
 
 		// Insufficient invitation quota is refused without a ledger claim.
-		err := user.TransferAffQuotaToQuota(600, "req-3")
+		err := user.TransferAffQuotaToQuota(600_000, "req-3")
 		var message *common.Message
 		require.ErrorAs(t, err, &message)
 		assert.Equal(t, "Invitation quota is insufficient!", message.Key)
@@ -318,7 +319,7 @@ func TestAffiliateTransferIdempotencyMatrix(t *testing.T) {
 
 		// A malformed request id and a request below the minimum are refused
 		// before any database work.
-		err = user.TransferAffQuotaToQuota(600, "bad id!")
+		err = user.TransferAffQuotaToQuota(600_000, "bad id!")
 		require.ErrorAs(t, err, &message)
 		assert.Equal(t, "Invalid parameters", message.Key)
 		err = user.TransferAffQuotaToQuota(10, "req-min")
@@ -327,16 +328,16 @@ func TestAffiliateTransferIdempotencyMatrix(t *testing.T) {
 
 		// Clients without a request id keep the historical behavior: a unique
 		// random reference still moves the quota exactly once per call.
-		require.NoError(t, db.Model(&User{}).Where("id = ?", fixture.Id).UpdateColumn("aff_quota", 700).Error)
-		require.NoError(t, user.TransferAffQuotaToQuota(700, ""))
+		require.NoError(t, db.Model(&User{}).Where("id = ?", fixture.Id).UpdateColumn("aff_quota", 700_000).Error)
+		require.NoError(t, user.TransferAffQuotaToQuota(700_000, ""))
 		require.NoError(t, db.Select("quota", "aff_quota").First(&stored, fixture.Id).Error)
-		assert.EqualValues(t, 3700, stored.Quota)
+		assert.EqualValues(t, 2_701_000, stored.Quota)
 		assert.Zero(t, stored.AffQuota)
 		require.NoError(t, db.Model(&WalletLedgerEntry{}).
 			Where("ref_type = ? AND user_id = ?", WalletLedgerRefAffiliate, fixture.Id).
 			Count(&transferRows).Error)
 		assert.EqualValues(t, 3, transferRows)
-		assert.EqualValues(t, 3700, legacyLedgerSum(t, db, fixture.Id))
+		assert.EqualValues(t, 2_701_000, legacyLedgerSum(t, db, fixture.Id))
 	})
 }
 
