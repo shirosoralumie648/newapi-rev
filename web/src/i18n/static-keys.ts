@@ -52,6 +52,13 @@ export const STATIC_I18N_KEYS = [
   // not start new generation or uploads.
   'Your wallet has unsettled debt. Top up to restore access; reading and exporting data stays available.',
   'Unable to check the account wallet debt.',
+  // Playground workflow run budget server messages (BL-03): the endpoints answer
+  // with these stable-code messages, so the literal scan cannot see them.
+  'Unable to price the workflow steps.',
+  'Insufficient wallet quota to cover this run budget.',
+  'Workflow run not found.',
+  'Unable to settle the run budget.',
+  'This workflow run has reached its budget cap; the remaining steps were not started.',
   // Wallet overdraft settings and administrative debt views.
   'Wallet Overdraft',
   'Wallet overdraft limit (USD)',
@@ -1061,6 +1068,13 @@ export const STATIC_I18N_KEYS = [
   'The step that produced this result is no longer on the canvas.',
   'A connected reference image could not be read.',
   'A connected reference image is larger than the 8 MiB limit.',
+  // Canvas workflow run budget feedback (BL-03): the estimate dialog reports
+  // these keys from constants, so the literal scan cannot see them.
+  'The run budget could not be opened.',
+  'Unable to price the run steps.',
+  'Some steps have no configured price; they still run and are charged when they finish.',
+  'Video steps are approximate: the final cost depends on the provider.',
+  'The cap is below the estimate; the run may stop before the last step.',
   // Canvas editing feedback: a drop and a paste report these keys from
   // constants, so the literal scan cannot see them.
   'Only images, videos, audio and PDF files can be added to the canvas.',

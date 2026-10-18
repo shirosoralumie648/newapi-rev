@@ -286,6 +286,12 @@ jobs:
       - name: Test subscription redemption code creation on MySQL and PostgreSQL
         run: go test ./controller/ -run 'TestAddRedemptionSubscriptionCodes' -count=1 -v
 
+      # The workspace workflow endpoints price steps, reserve a run cap as a
+      # wallet hold and settle the unspent part; the matrix runs on the same
+      # real databases.
+      - name: Test playground workflow run budgets on MySQL and PostgreSQL
+        run: go test ./controller/ -run 'TestPlaygroundWorkflowBudgetEndpoints' -count=1 -v
+
       # RF-08: the referral agent mark resolves its commission rate against the
       # real databases.
       - name: Test referral agent admin endpoints on MySQL

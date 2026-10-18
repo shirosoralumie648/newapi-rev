@@ -182,6 +182,19 @@ export const CANVAS_WORKFLOW_MESSAGES = {
     'A connected reference image is larger than the 8 MiB limit.',
 } as const
 
+// Run budget feedback keys the estimate dialog reports. The strings double as
+// English source text and as i18n keys.
+export const CANVAS_WORKFLOW_BUDGET_MESSAGES = {
+  START_FAILED: 'The run budget could not be opened.',
+  ESTIMATE_FAILED: 'Unable to price the run steps.',
+  UNAVAILABLE:
+    'Some steps have no configured price; they still run and are charged when they finish.',
+  APPROXIMATE:
+    'Video steps are approximate: the final cost depends on the provider.',
+  BELOW_ESTIMATE:
+    'The cap is below the estimate; the run may stop before the last step.',
+} as const
+
 export const CANVAS_DEFAULT_TITLE = 'New canvas'
 
 export const CANVAS_MESSAGE_SNAPSHOT_MAX_CHARS = 1000
