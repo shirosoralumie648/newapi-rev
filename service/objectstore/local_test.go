@@ -3,6 +3,7 @@ package objectstore
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -191,6 +192,7 @@ func TestLocalStoreRejectsCanceledContext(t *testing.T) {
 	assert.ErrorIs(t, err, context.Canceled)
 	_, _, err = store.Get(ctx, "pg/1/item")
 	assert.ErrorIs(t, err, context.Canceled)
+	assert.ErrorIs(t, store.List(ctx, "pg", func(ObjectInfo) error { return nil }), context.Canceled)
 }
 
 func TestLocalStorePresignIsUnsupported(t *testing.T) {
@@ -274,4 +276,56 @@ func TestServeStreamsWithSafetyHeaders(t *testing.T) {
 	missing := httptest.NewRecorder()
 	err = Serve(t.Context(), store, missing, "pg/1/attachments/missing.png", ServeOptions{})
 	assert.ErrorIs(t, err, ErrObjectNotFound)
+}
+
+// TestLocalStoreListsObjectsBelowPrefix proves the reconciliation listing walks
+// regular files in their logical key form, ignores everything outside the
+// requested prefix, and surfaces callback and key errors.
+func TestLocalStoreListsObjectsBelowPrefix(t *testing.T) {
+	root := t.TempDir()
+	store := newTestLocalStore(t, root, "v1")
+	ctx := t.Context()
+	for key, body := range map[string]string{
+		"pg/7/attachments/a":     "aa",
+		"pg/7/attachments/sub/b": "bbb",
+		"pg/8/attachments/c":     "c",
+		"other/d":                "dddd",
+	} {
+		_, err := store.Put(ctx, key, strings.NewReader(body))
+		require.NoError(t, err)
+	}
+
+	// Keys come back in their logical form, without the configured prefix, and
+	// only below the requested one.
+	listed := make(map[string]int64)
+	require.NoError(t, store.List(ctx, "pg/7", func(info ObjectInfo) error {
+		listed[info.Key] = info.Size
+		assert.False(t, info.ModTime.IsZero())
+		return nil
+	}))
+	assert.Equal(t, map[string]int64{
+		"pg/7/attachments/a":     2,
+		"pg/7/attachments/sub/b": 3,
+	}, listed)
+
+	// An empty prefix lists the whole configured store.
+	listed = make(map[string]int64)
+	require.NoError(t, store.List(ctx, "", func(info ObjectInfo) error {
+		listed[info.Key] = info.Size
+		return nil
+	}))
+	assert.Len(t, listed, 4)
+	assert.EqualValues(t, 4, listed["other/d"])
+
+	// Nothing below a prefix is not an error.
+	assert.NoError(t, store.List(ctx, "pg/9", func(ObjectInfo) error { return nil }))
+
+	// The callback error stops the walk and comes back untouched.
+	sentinel := errors.New("stop listing")
+	assert.ErrorIs(t, store.List(ctx, "pg", func(ObjectInfo) error { return sentinel }), sentinel)
+
+	// A traversal prefix is rejected before the filesystem is touched, and the
+	// callback is required.
+	assert.ErrorIs(t, store.List(ctx, "../escape", func(ObjectInfo) error { return nil }), ErrInvalidKey)
+	assert.ErrorContains(t, store.List(ctx, "pg", nil), "callback is required")
 }
