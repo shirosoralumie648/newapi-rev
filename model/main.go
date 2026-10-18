@@ -484,6 +484,7 @@ func migrateDB() error {
 		&PlaygroundTaskArtifact{},
 		&PlaygroundTaskArtifactPin{},
 		&PlaygroundTaskArtifactSync{},
+		&PlaygroundStorageLedger{},
 		&WalletLedgerEntry{},
 		&WalletHold{},
 		&WalletHoldGrant{},

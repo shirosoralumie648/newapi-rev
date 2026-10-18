@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { PlaygroundQuotaSection } from '../playground/playground-quota-section'
+import { PlaygroundStorageBillingSection } from '../playground/playground-storage-billing-section'
 import { RateLimitSection } from '../request-limits/rate-limit-section'
 import { SSRFSection } from '../request-limits/ssrf-section'
 import { TokenLimitSection } from '../request-limits/token-limit-section'
@@ -88,6 +89,15 @@ const SECURITY_SECTIONS = [
         sandboxPreviewEnabled={
           settings['playground_setting.sandbox_preview_enabled']
         }
+      />
+    ),
+  },
+  {
+    id: 'playground-storage-billing',
+    titleKey: 'Playground Storage Billing',
+    build: (settings: SecuritySettings) => (
+      <PlaygroundStorageBillingSection
+        storageBillingJson={settings['playground_setting.storage_billing']}
       />
     ),
   },

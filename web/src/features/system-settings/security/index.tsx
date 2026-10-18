@@ -44,6 +44,8 @@ const defaultSecuritySettings: SecuritySettings = {
   'token_setting.max_user_tokens': 1000,
   'playground_setting.defaults': '{}',
   'playground_setting.group_overrides': '{}',
+  'playground_setting.storage_billing':
+    '{"enabled":false,"price_usd_per_gb_month":0.015,"free_gb":1,"group_free_gb":{},"apply_group_ratio":false,"grace_days":7,"egress":{"mode":"unmetered","price_usd_per_gb":0,"daily_bytes_limit":0,"daily_requests_limit":0}}',
   'playground_setting.sandbox_preview_enabled': false,
 }
 

@@ -80,6 +80,10 @@ const (
 	// row per reversed top-up order, so a webhook replay can never reverse the
 	// same payment twice.
 	WalletLedgerRefTopUpReversal = "topup_reversal"
+	// WalletLedgerRefStorageDaily namespaces the optional metered storage
+	// settlement (BL-02): the reference id is "user:date", so one storage day
+	// can be charged exactly once no matter how often settlement replays.
+	WalletLedgerRefStorageDaily = "storage_daily"
 )
 
 // walletLedgerConsumeHourSeconds is the aggregation window for API consumption.

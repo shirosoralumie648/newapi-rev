@@ -41,6 +41,14 @@ const (
 	// SystemTaskTypePlaygroundTrashCleanup purges the trashed conversations and
 	// canvases whose recovery window elapsed, releasing their budgets.
 	SystemTaskTypePlaygroundTrashCleanup = "playground_trash_cleanup"
+	// SystemTaskTypePlaygroundStorageSample measures the stored bytes of every
+	// Playground account into today's metered-storage ledger row as a running
+	// peak. It only runs while the optional storage billing tier is enabled.
+	SystemTaskTypePlaygroundStorageSample = "playground_storage_sample"
+	// SystemTaskTypePlaygroundStorageSettle charges finished storage days to
+	// the wallet (uncovered parts become wallet debt) exactly once per day. It
+	// only runs while the optional storage billing tier is enabled.
+	SystemTaskTypePlaygroundStorageSettle = "playground_storage_settle"
 	// SystemTaskTypeWalletReconcile compares every wallet balance with the sum
 	// of its append-only ledger and alerts on deviation without changing balances.
 	SystemTaskTypeWalletReconcile = "wallet_reconcile"
