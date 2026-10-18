@@ -845,6 +845,61 @@ export async function getPlaygroundAttachmentContent(
   return response.data as Blob
 }
 
+const serverDocumentTextSchema = z.object({
+  id: z.string().min(1),
+  filename: z.string(),
+  media_type: z.string().min(1),
+  text: z.string(),
+  byte_size: z.number().int().nonnegative(),
+  page_count: z.number().int().nonnegative(),
+})
+
+export interface PlaygroundDocumentText {
+  id: string
+  filename: string
+  mediaType: string
+  /** Extracted text; byteSize counts the text, pageCount only a PDF. */
+  text: string
+  byteSize: number
+  pageCount: number
+}
+
+/**
+ * Text URL of one document attachment. The extraction endpoint lives next to
+ * the content endpoint, so the stored content URL names the partition and
+ * encodes the attachment id.
+ */
+export function playgroundDocumentTextUrl(contentUrl: string): string {
+  const suffix = '/content'
+  return contentUrl.endsWith(suffix)
+    ? `${contentUrl.slice(0, -suffix.length)}/text`
+    : `${contentUrl}/text`
+}
+
+/**
+ * Reads the text of one document attachment. The server extracts lazily and
+ * caches the outcome, so later reads of the same revision answer from the
+ * cache; a document without readable text answers with its stable code.
+ */
+export async function getPlaygroundDocumentText(
+  contentUrl: string,
+  signal?: AbortSignal
+): Promise<PlaygroundDocumentText> {
+  const response = await api.get(playgroundDocumentTextUrl(contentUrl), {
+    signal,
+  })
+  requireServerSuccess(response.data)
+  const document = serverDocumentTextSchema.parse(response.data.data)
+  return {
+    id: document.id,
+    filename: document.filename,
+    mediaType: document.media_type,
+    text: document.text,
+    byteSize: document.byte_size,
+    pageCount: document.page_count,
+  }
+}
+
 const playgroundUsageMetricSchema = z.object({
   used: z.number().int().nonnegative(),
   limit: z.number().int().nonnegative(),

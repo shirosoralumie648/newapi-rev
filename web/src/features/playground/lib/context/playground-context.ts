@@ -34,6 +34,7 @@ import type {
   PlaygroundContextSettings,
   PlaygroundContextSummary,
 } from '../../types'
+import { playgroundDocumentContextText } from '../document-context'
 import {
   applyModelMediaPolicy,
   modelAcceptsImageInput,
@@ -92,7 +93,10 @@ export interface PlaygroundContextPlan {
 export function formatMessageForRequest(
   message: Message
 ): ChatCompletionMessage[] {
-  const formatted = formatMessageForAPI(message)
+  const documentContext = playgroundDocumentContextText(
+    getCurrentVersion(message).attachments ?? []
+  )
+  const formatted = formatMessageForAPI(message, documentContext)
   if (message.from !== MESSAGE_ROLES.ASSISTANT) {
     return [formatted]
   }

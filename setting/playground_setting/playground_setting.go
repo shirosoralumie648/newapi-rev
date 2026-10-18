@@ -154,20 +154,26 @@ type PlaygroundQuotaPolicy struct {
 	AttachmentVideoMaxFileBytes    int64 `json:"attachment_video_max_file_bytes"`
 	AttachmentAudioMaxFileBytes    int64 `json:"attachment_audio_max_file_bytes"`
 	AttachmentDocumentMaxFileBytes int64 `json:"attachment_document_max_file_bytes"`
-	ArtifactSessionMaxCount        int   `json:"artifact_session_max_count"`
-	ArtifactSessionMaxRecords      int   `json:"artifact_session_max_records"`
-	ArtifactMaxVersions            int   `json:"artifact_max_versions"`
-	ArtifactContentMaxBytes        int64 `json:"artifact_content_max_bytes"`
-	ArtifactMaxBytes               int64 `json:"artifact_max_bytes"`
-	ArtifactSessionMaxBytes        int64 `json:"artifact_session_max_bytes"`
-	ArtifactUserMaxCount           int   `json:"artifact_user_max_count"`
-	ArtifactUserMaxBytes           int64 `json:"artifact_user_max_bytes"`
-	CanvasUserMaxProjects          int   `json:"canvas_user_max_projects"`
-	CanvasDocumentMaxBytes         int64 `json:"canvas_document_max_bytes"`
-	CanvasMaxNodes                 int   `json:"canvas_max_nodes"`
-	CanvasMaxEdges                 int   `json:"canvas_max_edges"`
-	CanvasNodeDataMaxBytes         int64 `json:"canvas_node_data_max_bytes"`
-	CanvasUserMaxBytes             int64 `json:"canvas_user_max_bytes"`
+	// DocumentTextMaxBytes and DocumentTextMaxPages bound the text one document
+	// attachment may contribute as chat context. PDF extraction stops at either
+	// limit, and a document above a limit is reported as too large instead of
+	// being silently truncated; the cached outcome keeps the decision stable.
+	DocumentTextMaxBytes      int64 `json:"document_text_max_bytes"`
+	DocumentTextMaxPages      int   `json:"document_text_max_pages"`
+	ArtifactSessionMaxCount   int   `json:"artifact_session_max_count"`
+	ArtifactSessionMaxRecords int   `json:"artifact_session_max_records"`
+	ArtifactMaxVersions       int   `json:"artifact_max_versions"`
+	ArtifactContentMaxBytes   int64 `json:"artifact_content_max_bytes"`
+	ArtifactMaxBytes          int64 `json:"artifact_max_bytes"`
+	ArtifactSessionMaxBytes   int64 `json:"artifact_session_max_bytes"`
+	ArtifactUserMaxCount      int   `json:"artifact_user_max_count"`
+	ArtifactUserMaxBytes      int64 `json:"artifact_user_max_bytes"`
+	CanvasUserMaxProjects     int   `json:"canvas_user_max_projects"`
+	CanvasDocumentMaxBytes    int64 `json:"canvas_document_max_bytes"`
+	CanvasMaxNodes            int   `json:"canvas_max_nodes"`
+	CanvasMaxEdges            int   `json:"canvas_max_edges"`
+	CanvasNodeDataMaxBytes    int64 `json:"canvas_node_data_max_bytes"`
+	CanvasUserMaxBytes        int64 `json:"canvas_user_max_bytes"`
 	// Canvas snapshot history is written while the board is saved: a snapshot
 	// is captured after every CanvasSnapshotEverySaves document saves, after
 	// CanvasSnapshotIntervalMinutes since the previous one, and once for the
@@ -334,12 +340,18 @@ func builtinPlaygroundQuotaPolicy() PlaygroundQuotaPolicy {
 		AttachmentVideoMaxFileBytes:    64 << 20,
 		AttachmentAudioMaxFileBytes:    16 << 20,
 		AttachmentDocumentMaxFileBytes: 16 << 20,
-		ArtifactSessionMaxCount:        32,
-		ArtifactSessionMaxRecords:      256,
-		ArtifactMaxVersions:            100,
-		ArtifactContentMaxBytes:        256 << 10,
-		ArtifactMaxBytes:               8 << 20,
-		ArtifactSessionMaxBytes:        32 << 20,
+		// A document contributes its extracted text as context. One document may
+		// contribute at most 256 KiB of text and a PDF at most 200 pages: both
+		// stay far below a context window while a single oversized document can
+		// never occupy the whole conversation.
+		DocumentTextMaxBytes:      256 << 10,
+		DocumentTextMaxPages:      200,
+		ArtifactSessionMaxCount:   32,
+		ArtifactSessionMaxRecords: 256,
+		ArtifactMaxVersions:       100,
+		ArtifactContentMaxBytes:   256 << 10,
+		ArtifactMaxBytes:          8 << 20,
+		ArtifactSessionMaxBytes:   32 << 20,
 		// The account-level artifact budget starts at the ceiling the per-session
 		// limits already imply (100 conversations x 32 active artifacts and
 		// 100 conversations x 32 MiB). It therefore never rejects a write that
@@ -486,6 +498,12 @@ func applyPlaygroundQuotaOverrides(policy *PlaygroundQuotaPolicy, override *Play
 	if override.AttachmentDocumentMaxFileBytes > 0 {
 		policy.AttachmentDocumentMaxFileBytes = override.AttachmentDocumentMaxFileBytes
 	}
+	if override.DocumentTextMaxBytes > 0 {
+		policy.DocumentTextMaxBytes = override.DocumentTextMaxBytes
+	}
+	if override.DocumentTextMaxPages > 0 {
+		policy.DocumentTextMaxPages = override.DocumentTextMaxPages
+	}
 	if override.ArtifactSessionMaxCount > 0 {
 		policy.ArtifactSessionMaxCount = override.ArtifactSessionMaxCount
 	}
@@ -575,7 +593,7 @@ func (policy PlaygroundQuotaPolicy) AttachmentMediaMaxFileBytes(mediaType string
 		return policy.AttachmentVideoMaxFileBytes
 	case strings.HasPrefix(mediaType, "audio/"):
 		return policy.AttachmentAudioMaxFileBytes
-	case mediaType == "application/pdf":
+	case mediaType == "application/pdf", strings.HasPrefix(mediaType, "text/"):
 		return policy.AttachmentDocumentMaxFileBytes
 	default:
 		return policy.AttachmentMaxFileBytes

@@ -24,6 +24,7 @@ import {
   applyParallelCompletionChoice,
   applyParallelVersionError,
   buildChatCompletionPayload,
+  ensurePlaygroundDocumentTexts,
   ensurePlaygroundMessageAttachments,
   getParallelPromptMessages,
   interruptParallelMessage,
@@ -231,7 +232,10 @@ export function useParallelChat(options: UseParallelChatOptions) {
       sessionRef.current = optionsRef.current.sessionId
 
       void (async () => {
-        await ensurePlaygroundMessageAttachments(promptMessages)
+        await Promise.all([
+          ensurePlaygroundMessageAttachments(promptMessages),
+          ensurePlaygroundDocumentTexts(promptMessages),
+        ])
         let contextSummary: PlaygroundContextSummary | null = null
         try {
           contextSummary =
@@ -262,7 +266,10 @@ export function useParallelChat(options: UseParallelChatOptions) {
         message.key
       )
       void (async () => {
-        await ensurePlaygroundMessageAttachments(promptMessages)
+        await Promise.all([
+          ensurePlaygroundMessageAttachments(promptMessages),
+          ensurePlaygroundDocumentTexts(promptMessages),
+        ])
         let contextSummary: PlaygroundContextSummary | null = null
         try {
           contextSummary =

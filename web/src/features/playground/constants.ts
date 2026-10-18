@@ -60,6 +60,15 @@ export const HISTORY_IMAGE_OMITTED_CONTENT =
 export const HISTORY_IMAGES_OMITTED_CONTENT =
   '[{{count}} images from earlier messages omitted for this model]'
 
+// Model-facing frame around the text the server extracted from a document
+// attachment. A document whose text cannot be read keeps a placeholder so the
+// model still knows an attachment was sent. This is protocol content, not user
+// interface text, so it stays untranslated.
+export const PLAYGROUND_DOCUMENT_CONTEXT_OPEN = '[document: {{name}}]'
+export const PLAYGROUND_DOCUMENT_CONTEXT_CLOSE = '[/document]'
+export const PLAYGROUND_DOCUMENT_CONTEXT_MISSING =
+  '[document: {{name}} could not be read as text]'
+
 // Local input caps for the manual result dialog. The server policy keeps the
 // authoritative argument/result byte limits.
 export const PLAYGROUND_TOOL_CALL_RESULT_MAX_CHARS = 64_000
@@ -225,11 +234,21 @@ export const PLAYGROUND_INPUT_HISTORY_ENTRY_MAX_CHARS = 8_000
 export const PLAYGROUND_INPUT_DRAFT_DEBOUNCE_MS = 400
 
 // Conversation attachment limits; the server enforces the same budgets. The
-// chat composer accepts images only. The canvas additionally accepts the
+// chat composer accepts images and documents; a document is read on the server
+// and injected as conversation context. The canvas additionally accepts the
 // extended kinds below, which upload through the reservation/presign flow
 // instead of a base64 JSON envelope.
 export const PLAYGROUND_ATTACHMENT_ACCEPT =
   'image/png,image/jpeg,image/webp,image/gif'
+// Document types the server can read as text. A chat upload of one of these
+// passes the same reservation/presign flow as a canvas file because the bytes
+// may exceed the base64 request envelope.
+export const PLAYGROUND_DOCUMENT_ACCEPT =
+  'application/pdf,text/plain,text/markdown'
+export const PLAYGROUND_CHAT_ATTACHMENT_ACCEPT = [
+  PLAYGROUND_ATTACHMENT_ACCEPT,
+  PLAYGROUND_DOCUMENT_ACCEPT,
+].join(',')
 export const PLAYGROUND_ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024
 export const PLAYGROUND_ATTACHMENT_MAX_COUNT = 8
 export const PLAYGROUND_VIDEO_MAX_BYTES = 64 * 1024 * 1024
@@ -248,6 +267,18 @@ export const PLAYGROUND_CANVAS_ATTACHMENT_ACCEPT = [
 ].join(',')
 
 /**
+ * Types whose text the server extracts and sends as conversation context.
+ * Mirrors the server's document allowlist; every entry has a text reader.
+ */
+export function isPlaygroundDocumentMediaType(mediaType: string): boolean {
+  return (
+    mediaType === 'application/pdf' ||
+    mediaType === 'text/plain' ||
+    mediaType === 'text/markdown'
+  )
+}
+
+/**
  * Per-file ceiling of one declared media type. The server resolves the same
  * rule from the owner's quota policy; the client keeps the defaults so an
  * obviously oversized drop is refused before any reservation is created.
@@ -255,7 +286,9 @@ export const PLAYGROUND_CANVAS_ATTACHMENT_ACCEPT = [
 export function playgroundAttachmentMaxBytes(mediaType: string): number {
   if (mediaType.startsWith('video/')) return PLAYGROUND_VIDEO_MAX_BYTES
   if (mediaType.startsWith('audio/')) return PLAYGROUND_AUDIO_MAX_BYTES
-  if (mediaType === 'application/pdf') return PLAYGROUND_DOCUMENT_MAX_BYTES
+  if (isPlaygroundDocumentMediaType(mediaType)) {
+    return PLAYGROUND_DOCUMENT_MAX_BYTES
+  }
   return PLAYGROUND_ATTACHMENT_MAX_BYTES
 }
 

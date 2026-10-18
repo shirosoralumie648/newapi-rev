@@ -179,6 +179,11 @@ func TestPlaygroundAttachmentStorageSchemaMigration(t *testing.T) {
 			assert.Equal(t, payload, string(*stored.Data))
 			assert.Equal(t, system_setting.ObjectStoreBackendDB, stored.StorageBackend)
 			assert.True(t, db.Migrator().HasIndex(&PlaygroundAttachment{}, "uk_playground_attachment_client"))
+			// The document text cache columns arrive with the same migration on
+			// a database that already holds attachment rows.
+			for _, column := range []string{"text_status", "text_content", "text_bytes", "text_page_count", "text_extracted_at"} {
+				assert.True(t, db.Migrator().HasColumn(&PlaygroundAttachment{}, column), column)
+			}
 
 			// Object-backed rows store NULL and no payload, and repeating the
 			// migration plus AutoMigrate keeps both states intact.

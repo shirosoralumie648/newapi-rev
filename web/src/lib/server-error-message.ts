@@ -92,6 +92,11 @@ const serverErrorMessageKeys = {
   PLAYGROUND_TASK_NOT_FOUND: 'Task not found.',
   PLAYGROUND_TASK_NOT_CANCELABLE: 'Only a running task can be canceled.',
   PLAYGROUND_TASK_CANCEL_FAILED: 'Unable to cancel the task.',
+  PLAYGROUND_DOCUMENT_UNSUPPORTED: 'This file type cannot be read as text.',
+  PLAYGROUND_DOCUMENT_LIMIT_EXCEEDED:
+    'The document is too large to read as text.',
+  PLAYGROUND_DOCUMENT_UNREADABLE: 'The document text could not be extracted.',
+  PLAYGROUND_DOCUMENT_NO_TEXT: 'The document contains no extractable text.',
   PLAYGROUND_CONTEXT_SUMMARY_LIMIT_EXCEEDED:
     'Playground context summary limit exceeded.',
   PLAYGROUND_PARALLEL_LIMIT_EXCEEDED:

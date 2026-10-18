@@ -1070,6 +1070,30 @@ func playgroundMP3Fixture(size int) []byte {
 	return data
 }
 
+// playgroundPDFFixture builds a PDF with one content stream per entry, so the
+// document tests upload bytes a real reader parses instead of a stub.
+func playgroundPDFFixture(t *testing.T, streams ...string) []byte {
+	t.Helper()
+	var body strings.Builder
+	body.WriteString("%PDF-1.7\n%\xe2\xe3\xcf\xd3\n")
+	writeObject := func(id int, content string) {
+		fmt.Fprintf(&body, "%d 0 obj\n%s\nendobj\n", id, content)
+	}
+	kids := make([]string, len(streams))
+	for index := range streams {
+		kids[index] = fmt.Sprintf("%d 0 R", 3+index*2)
+	}
+	writeObject(1, "<< /Type /Catalog /Pages 2 0 R >>")
+	writeObject(2, fmt.Sprintf("<< /Type /Pages /Kids [%s] /Count %d >>", strings.Join(kids, " "), len(streams)))
+	for index, stream := range streams {
+		pageID, contentID := 3+index*2, 4+index*2
+		writeObject(pageID, fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents %d 0 R >>", contentID))
+		fmt.Fprintf(&body, "%d 0 obj\n<< /Length %d >>\nstream\n%s\nendstream\nendobj\n", contentID, len(stream), stream)
+	}
+	body.WriteString("trailer\n<< /Root 1 0 R >>\n%%EOF\n")
+	return []byte(body.String())
+}
+
 // usePlaygroundQuotaDefaults overrides the global resource budget for one test
 // and restores it afterwards. The policy is the single source of the limits, so
 // tests no longer reach into package variables.
@@ -1282,7 +1306,7 @@ func TestPlaygroundAttachmentValidationLimits(t *testing.T) {
 	}
 	png := playgroundPNGFixture(64)
 	encoded := base64.StdEncoding.EncodeToString(png)
-	reject("unsupported media type", map[string]any{"client_key": "a", "media_type": "text/plain", "data": encoded}, http.StatusBadRequest)
+	reject("unsupported media type", map[string]any{"client_key": "a", "media_type": "application/json", "data": encoded}, http.StatusBadRequest)
 	reject("mismatched media type", map[string]any{"client_key": "b", "media_type": "image/webp", "data": encoded}, http.StatusBadRequest)
 	reject("invalid base64", map[string]any{"client_key": "c", "media_type": "image/png", "data": "not-base64!!"}, http.StatusBadRequest)
 	reject("empty client key", map[string]any{"client_key": " ", "media_type": "image/png", "data": encoded}, http.StatusBadRequest)
@@ -1321,6 +1345,92 @@ func TestPlaygroundAttachmentValidationLimits(t *testing.T) {
 		"data": base64.StdEncoding.EncodeToString(append(append([]byte{}, fixtures["video/mp4"]...), make([]byte, 4200)...)),
 	}, controller.CreatePlaygroundAttachment)
 	assert.Equal(t, http.StatusUnprocessableEntity, oversizedVideo.Code, oversizedVideo.Body.String())
+}
+
+// Documents contribute their text as chat context. The first read extracts and
+// caches the outcome on the attachment row, and an unsupported, oversized,
+// unreadable or text-free document answers with its stable code so the client
+// keeps the attachment without its text.
+func TestPlaygroundAttachmentDocumentText(t *testing.T) {
+	db := playgroundTestDB(t, "sqlite")
+	usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+		policy.AttachmentDocumentMaxFileBytes = 4096
+		policy.DocumentTextMaxBytes, policy.DocumentTextMaxPages = 256, 2
+	})
+	session := createPlayground(t, 7, "document-text")
+	id := session["id"].(string)
+	base := "/api/playground/sessions/" + id + "/attachments"
+	readText := func(t *testing.T, user int, attachmentID string) *httptest.ResponseRecorder {
+		t.Helper()
+		return playgroundRequest(t, user, http.MethodGet, base+"/"+attachmentID+"/text", nil, controller.GetPlaygroundAttachmentText)
+	}
+	textData := func(t *testing.T, response *httptest.ResponseRecorder) map[string]any {
+		t.Helper()
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		var envelope struct {
+			Success bool
+			Data    map[string]any
+		}
+		require.NoError(t, common.Unmarshal(response.Body.Bytes(), &envelope))
+		require.True(t, envelope.Success, response.Body.String())
+		return envelope.Data
+	}
+
+	// A text document is stored after the UTF-8 signature check and read back
+	// with unified line endings. The extraction is cached on the row.
+	plain := playgroundUploadAttachment(t, 7, id, "doc-plain", "text/plain", []byte("Hello document\r\nsecond line\r"))
+	plainData := textData(t, readText(t, 7, plain["id"].(string)))
+	assert.Equal(t, "Hello document\nsecond line", plainData["text"])
+	assert.EqualValues(t, 0, plainData["page_count"])
+	assert.EqualValues(t, len("Hello document\nsecond line"), plainData["byte_size"])
+	var cached model.PlaygroundAttachment
+	require.NoError(t, db.Where("id = ?", plain["id"].(string)).First(&cached).Error)
+	assert.Equal(t, model.PlaygroundDocumentTextStatusReady, cached.TextStatus)
+	assert.NotZero(t, cached.TextExtractedAt)
+	require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("id = ?", cached.ID).UpdateColumn("text_content", "cached answer").Error)
+	assert.Equal(t, "cached answer", textData(t, readText(t, 7, cached.ID))["text"])
+
+	// Markdown uses the same extractor, and a PDF contributes its page text and
+	// page count.
+	markdown := playgroundUploadAttachment(t, 7, id, "doc-markdown", "text/markdown", []byte("# Title\n\nBody\n"))
+	assert.Equal(t, "# Title\n\nBody", textData(t, readText(t, 7, markdown["id"].(string)))["text"])
+	pdf := playgroundUploadAttachment(t, 7, id, "doc-pdf", "application/pdf", playgroundPDFFixture(t,
+		"BT (First page) Tj ET", "BT (Second page) Tj ET"))
+	pdfData := textData(t, readText(t, 7, pdf["id"].(string)))
+	assert.Equal(t, "First page\nSecond page", pdfData["text"])
+	assert.EqualValues(t, 2, pdfData["page_count"])
+
+	// The failure outcomes are stable codes as well: page count, text size,
+	// media type, readability and an empty document each have their own. The
+	// code stays the same on the cached second read.
+	pages := playgroundUploadAttachment(t, 7, id, "doc-pages", "application/pdf", playgroundPDFFixture(t,
+		"BT (One) Tj ET", "BT (Two) Tj ET", "BT (Three) Tj ET"))
+	playgroundUploadErrorCode(t, readText(t, 7, pages["id"].(string)), http.StatusUnprocessableEntity, "PLAYGROUND_DOCUMENT_LIMIT_EXCEEDED")
+	playgroundUploadErrorCode(t, readText(t, 7, pages["id"].(string)), http.StatusUnprocessableEntity, "PLAYGROUND_DOCUMENT_LIMIT_EXCEEDED")
+
+	oversized := playgroundUploadAttachment(t, 7, id, "doc-oversized", "text/plain", []byte(strings.Repeat("x", 257)))
+	playgroundUploadErrorCode(t, readText(t, 7, oversized["id"].(string)), http.StatusUnprocessableEntity, "PLAYGROUND_DOCUMENT_LIMIT_EXCEEDED")
+
+	png := playgroundUploadAttachment(t, 7, id, "doc-image", "image/png", playgroundPNGFixture(64))
+	playgroundUploadErrorCode(t, readText(t, 7, png["id"].(string)), http.StatusBadRequest, "PLAYGROUND_DOCUMENT_UNSUPPORTED")
+	var unsupported model.PlaygroundAttachment
+	require.NoError(t, db.Where("id = ?", png["id"].(string)).First(&unsupported).Error)
+	assert.Equal(t, model.PlaygroundDocumentTextStatusUnsupported, unsupported.TextStatus)
+
+	encrypted := playgroundUploadAttachment(t, 7, id, "doc-encrypted", "application/pdf", []byte("%PDF-1.7\n/Encrypt 9 0 R\ntrailer\n"))
+	playgroundUploadErrorCode(t, readText(t, 7, encrypted["id"].(string)), http.StatusUnprocessableEntity, "PLAYGROUND_DOCUMENT_UNREADABLE")
+
+	empty := playgroundUploadAttachment(t, 7, id, "doc-empty", "application/pdf", playgroundPDFFixture(t, "0 0 m 10 10 l S"))
+	playgroundUploadErrorCode(t, readText(t, 7, empty["id"].(string)), http.StatusUnprocessableEntity, "PLAYGROUND_DOCUMENT_NO_TEXT")
+
+	// Only the account that owns the attachment reads its text, and bytes that
+	// are not UTF-8 text are rejected before the declared type is stored.
+	assert.Equal(t, http.StatusNotFound, readText(t, 8, plain["id"].(string)).Code)
+	binary := playgroundRequest(t, 7, http.MethodPost, base, map[string]any{
+		"client_key": "doc-binary", "media_type": "text/plain",
+		"data": base64.StdEncoding.EncodeToString([]byte{0xff, 0xfe, 0x00}),
+	}, controller.CreatePlaygroundAttachment)
+	assert.Equal(t, http.StatusBadRequest, binary.Code, binary.Body.String())
 }
 
 // The presigned upload flow reserves the account budgets before a byte moves,
@@ -2155,6 +2265,7 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodDelete, "/api/playground/snippets/missing"},
 		{http.MethodGet, attachmentBase}, {http.MethodPost, attachmentBase},
 		{http.MethodGet, attachmentBase + "/missing"}, {http.MethodGet, attachmentBase + "/missing/content"},
+		{http.MethodGet, attachmentBase + "/missing/text"},
 		{http.MethodDelete, attachmentBase + "/missing"},
 		{http.MethodPost, "/api/playground/uploads"},
 		{http.MethodPut, "/api/playground/uploads/missing/content"},

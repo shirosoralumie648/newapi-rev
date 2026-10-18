@@ -80,6 +80,10 @@ var (
 		"audio/mp4":       true,
 		"audio/webm":      true,
 		"application/pdf": true,
+		// Text documents are context, not rendered media: they are stored after a
+		// UTF-8 signature check and read back by the server-side text extractor.
+		"text/plain":    true,
+		"text/markdown": true,
 	}
 	playgroundAttachmentExtensions = map[string]string{
 		"image/png":       ".png",
@@ -95,6 +99,16 @@ var (
 		"audio/mp4":       ".m4a",
 		"audio/webm":      ".webm",
 		"application/pdf": ".pdf",
+		"text/plain":      ".txt",
+		"text/markdown":   ".md",
+	}
+	// playgroundDocumentMediaTypes are the allowlisted types whose text the
+	// server extracts and injects as conversation context. The set is a subset of
+	// the allowlist: every entry has a signature check and a text extractor.
+	playgroundDocumentMediaTypes = map[string]bool{
+		"application/pdf": true,
+		"text/plain":      true,
+		"text/markdown":   true,
 	}
 	// playgroundAttachmentISOBaseMediaBrands are the ISO base media file format
 	// brands the MP4/MOV family writes. The brand list is what separates a real
@@ -138,6 +152,16 @@ type PlaygroundAttachment struct {
 	// New uploads leave it NULL; the column stays readable so pre-migration
 	// rows and a rollback keep working.
 	Data *LongText
+	// The text extraction cache of a document attachment. TextStatus is empty
+	// while no extraction ran, otherwise one of the
+	// PlaygroundDocumentTextStatus values; TextExtractedAt marks that the
+	// outcome is final for the stored bytes. Documents only, so a media or text
+	// attachment keeps the zero values.
+	TextStatus      string `gorm:"size:16"`
+	TextContent     *LongText
+	TextBytes       int64 `gorm:"not null;default:0"`
+	TextPageCount   int   `gorm:"not null;default:0"`
+	TextExtractedAt int64 `gorm:"not null;default:0"`
 	// ReferencedAt is zero while no conversation message references the
 	// attachment; the cleanup task deletes long-orphaned rows.
 	ReferencedAt int64 `gorm:"not null;index"`
@@ -168,6 +192,12 @@ type PlaygroundAttachmentStorageMigrationResult struct {
 
 func IsPlaygroundAttachmentMediaType(mediaType string) bool {
 	return playgroundAttachmentMediaTypes[mediaType]
+}
+
+// IsPlaygroundDocumentMediaType reports whether one allowlisted media type has
+// a server-side text extractor, so its text can be injected as chat context.
+func IsPlaygroundDocumentMediaType(mediaType string) bool {
+	return playgroundDocumentMediaTypes[mediaType]
 }
 
 // normalizePlaygroundAttachmentText trims the user text of one upload in place
@@ -260,8 +290,29 @@ func playgroundAttachmentMatchesMediaType(mediaType string, data []byte) bool {
 		return bytes.HasPrefix(data, []byte("OggS"))
 	case "application/pdf":
 		return bytes.HasPrefix(data, []byte("%PDF-"))
+	case "text/plain", "text/markdown":
+		return playgroundAttachmentMatchesPlainText(data)
 	}
 	return false
+}
+
+// playgroundAttachmentMatchesPlainText accepts a UTF-8 text document: valid
+// UTF-8 without NUL (a binary marker) and without control characters other than
+// the whitespace a text file may contain. The check keeps the text types from
+// storing binary bytes a reader would later fail to decode.
+func playgroundAttachmentMatchesPlainText(data []byte) bool {
+	if len(data) == 0 || !utf8.Valid(data) {
+		return false
+	}
+	for _, current := range data {
+		if current == 0 {
+			return false
+		}
+		if current < 0x20 && current != '\t' && current != '\n' && current != '\r' && current != '\f' {
+			return false
+		}
+	}
+	return true
 }
 
 // playgroundAttachmentMatchesISOBaseMedia accepts the MP4/MOV container family:

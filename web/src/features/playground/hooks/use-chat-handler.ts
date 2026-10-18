@@ -28,6 +28,7 @@ import {
   applyToolCallDelta,
   attachMessageVersionUsage,
   buildChatCompletionPayload,
+  ensurePlaygroundDocumentTexts,
   ensurePlaygroundMessageAttachments,
   toMessageUsage,
   updateAssistantMessageWithError,
@@ -478,13 +479,17 @@ export function useChatHandler({
   )
 
   // Send chat request (stream or non-stream based on config). Older messages
-  // may reference attachments whose bytes are not cached yet; load them before
-  // the payload is built so the request still carries the images. The context
-  // summary (when automatic summary is on) is resolved first, because the
-  // payload must carry the node the plan then uses.
+  // may reference attachments whose bytes or document text are not cached yet;
+  // resolve them before the payload is built so the request still carries the
+  // images and the extracted document context. The context summary (when
+  // automatic summary is on) is resolved first, because the payload must carry
+  // the node the plan then uses.
   const sendChat = useCallback(
     (messages: Message[]) => {
-      void ensurePlaygroundMessageAttachments(messages).then(async () => {
+      void Promise.all([
+        ensurePlaygroundMessageAttachments(messages),
+        ensurePlaygroundDocumentTexts(messages),
+      ]).then(async () => {
         let contextSummary: PlaygroundContextSummary | null = null
         try {
           contextSummary = (await prepareContextSummary?.(messages)) ?? null

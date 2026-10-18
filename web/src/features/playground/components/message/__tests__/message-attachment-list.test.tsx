@@ -97,6 +97,28 @@ test('a missing attachment keeps its label and shows the placeholder', async () 
   expect(screen.getByTitle('gone.png')).toBeVisible()
 })
 
+test('a document attachment keeps its label without downloading bytes', () => {
+  const get = vi.spyOn(api, 'get')
+
+  render(
+    <MessageAttachmentList
+      attachments={[
+        {
+          id: 'pgf_doc',
+          url: '/api/playground/sessions/pgs_one/attachments/pgf_doc/content',
+          mediaType: 'text/markdown',
+          filename: 'notes.md',
+        },
+      ]}
+    />
+  )
+
+  expect(screen.getByText('notes.md')).toBeVisible()
+  expect(screen.getByTitle('notes.md')).toBeVisible()
+  expect(screen.queryByRole('img')).toBeNull()
+  expect(get).not.toHaveBeenCalled()
+})
+
 test('audio attachments play through the authenticated content endpoint', async () => {
   const contentUrl =
     '/api/playground/sessions/pgs_one/attachments/pgf_speech/content'

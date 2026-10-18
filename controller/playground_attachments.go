@@ -63,6 +63,18 @@ type playgroundAttachmentResponse struct {
 	UpdatedAt int64  `json:"updated_at"`
 }
 
+// playgroundDocumentTextResponse carries the extracted text of one document
+// attachment. ByteSize is the size of the extracted text, not of the file, and
+// PageCount is the page count of a PDF (zero for a text document).
+type playgroundDocumentTextResponse struct {
+	ID        string `json:"id"`
+	Filename  string `json:"filename"`
+	MediaType string `json:"media_type"`
+	Text      string `json:"text"`
+	ByteSize  int64  `json:"byte_size"`
+	PageCount int    `json:"page_count"`
+}
+
 func writePlaygroundAttachmentError(c *gin.Context, err error) {
 	status, code, message := http.StatusInternalServerError, "PLAYGROUND_STORAGE_ERROR", "Unable to load or save Playground attachments."
 	switch {
@@ -82,6 +94,16 @@ func writePlaygroundAttachmentError(c *gin.Context, err error) {
 		status, code, message = http.StatusUnprocessableEntity, "PLAYGROUND_ATTACHMENT_LIMIT_EXCEEDED", err.Error()
 	case errors.Is(err, model.ErrPlaygroundAttachmentInvalid):
 		status, code, message = http.StatusBadRequest, "PLAYGROUND_INVALID_REQUEST", err.Error()
+	case errors.Is(err, model.ErrPlaygroundDocumentUnsupported):
+		// The declared type is stored but has no text reader: the client keeps
+		// the attachment and sends it without context.
+		status, code, message = http.StatusBadRequest, "PLAYGROUND_DOCUMENT_UNSUPPORTED", err.Error()
+	case errors.Is(err, model.ErrPlaygroundDocumentLimit):
+		status, code, message = http.StatusUnprocessableEntity, "PLAYGROUND_DOCUMENT_LIMIT_EXCEEDED", err.Error()
+	case errors.Is(err, model.ErrPlaygroundDocumentUnreadable):
+		status, code, message = http.StatusUnprocessableEntity, "PLAYGROUND_DOCUMENT_UNREADABLE", err.Error()
+	case errors.Is(err, model.ErrPlaygroundDocumentNoText):
+		status, code, message = http.StatusUnprocessableEntity, "PLAYGROUND_DOCUMENT_NO_TEXT", err.Error()
 	case errors.Is(err, model.ErrPlaygroundUploadNotFound):
 		status, code, message = http.StatusNotFound, "PLAYGROUND_UPLOAD_NOT_FOUND", err.Error()
 	case errors.Is(err, model.ErrPlaygroundUploadIncomplete):
@@ -215,6 +237,26 @@ func GetPlaygroundAttachment(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, playgroundDecodeAttachment(attachment, "", false))
+}
+
+// GetPlaygroundAttachmentText returns the extracted text of one document
+// attachment as conversation context. The first request extracts and caches the
+// outcome; an unsupported, oversized or unreadable document answers with its
+// stable code and the client carries on without that document's text.
+func GetPlaygroundAttachmentText(c *gin.Context) {
+	result, err := model.GetPlaygroundAttachmentDocumentText(c.Request.Context(), c.GetInt("id"), c.Param("id"), c.Param("attachmentId"))
+	if err != nil {
+		writePlaygroundAttachmentError(c, err)
+		return
+	}
+	common.ApiSuccess(c, playgroundDocumentTextResponse{
+		ID:        result.Attachment.ID,
+		Filename:  result.Attachment.Filename,
+		MediaType: result.Attachment.MediaType,
+		Text:      result.Text,
+		ByteSize:  int64(len(result.Text)),
+		PageCount: result.PageCount,
+	})
 }
 
 func GetPlaygroundAttachmentContent(c *gin.Context) {
