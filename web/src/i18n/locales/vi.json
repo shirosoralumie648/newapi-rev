@@ -7709,6 +7709,7 @@
     "Context to send: {{messages}} messages · ~{{tokens}} tokens (estimated)": "Ngữ cảnh sẽ gửi: {{messages}} tin nhắn · ~{{tokens}} token (ước tính)",
     "The next send summarizes {{messages}} older messages (~{{tokens}} tokens).": "Lần gửi tiếp theo sẽ tóm tắt {{messages}} tin nhắn cũ hơn (~{{tokens}} token).",
     "{{messages}} older messages are left out of the next request (~{{tokens}} tokens).": "{{messages}} tin nhắn cũ hơn sẽ không được gửi trong yêu cầu tiếp theo (~{{tokens}} token).",
+    "{{images}} images from earlier messages are left out of the next request.": "{{images}} hình ảnh từ các tin nhắn trước sẽ không được gửi trong yêu cầu tiếp theo.",
     "History message limit": "Giới hạn số tin nhắn lịch sử",
     "Token budget": "Ngân sách token",
     "0 means no limit. Older messages stay in this conversation but are not sent to the model.": "0 nghĩa là không giới hạn. Tin nhắn cũ vẫn được giữ trong cuộc trò chuyện nhưng không được gửi đến mô hình.",

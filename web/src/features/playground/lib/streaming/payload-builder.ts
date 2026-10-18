@@ -29,6 +29,7 @@ import {
   formatMessageForRequest,
   planPlaygroundContext,
 } from '../context/playground-context'
+import { applyModelMediaPolicy } from '../message/message-media-utils'
 import { isValidMessage } from '../message/message-utils'
 
 /**
@@ -63,6 +64,7 @@ export function buildChatCompletionPayload(
         settings: context.settings,
         summary: context.summary,
         systemPrompt,
+        model: config.model,
       })
     : null
   const processedMessages: ChatCompletionMessage[] = plan
@@ -70,9 +72,16 @@ export function buildChatCompletionPayload(
     : messages.filter(isValidMessage).flatMap(formatMessageForRequest)
 
   const prompt = systemPrompt.trim()
-  const requestMessages: ChatCompletionMessage[] = prompt
+  const baseMessages: ChatCompletionMessage[] = prompt
     ? [{ role: 'system', content: prompt }, ...processedMessages]
     : processedMessages
+  // Stored messages stay untouched: the policy only changes this request, so a
+  // base64 payload produced by an image model or an image a text-only model
+  // cannot accept is replaced without deleting anything from the conversation.
+  const requestMessages = applyModelMediaPolicy(
+    baseMessages,
+    config.model
+  ).messages
 
   const payload: ChatCompletionRequest = {
     model: config.model,

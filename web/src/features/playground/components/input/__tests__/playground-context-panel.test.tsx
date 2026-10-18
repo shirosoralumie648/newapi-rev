@@ -86,6 +86,8 @@ beforeAll(() => {
       'Context to send: {{messages}} messages · ~{{tokens}} tokens (estimated)',
     '{{messages}} older messages are left out of the next request (~{{tokens}} tokens).':
       '{{messages}} older messages are left out of the next request (~{{tokens}} tokens).',
+    '{{images}} images from earlier messages are left out of the next request.':
+      '{{images}} images from earlier messages are left out of the next request.',
     'The next send summarizes {{messages}} older messages (~{{tokens}} tokens).':
       'The next send summarizes {{messages}} older messages (~{{tokens}} tokens).',
     'Summarize automatically': 'Summarize automatically',
@@ -134,6 +136,48 @@ test('an automatic summary marks the dropped messages as summarized', async () =
   expect(
     await screen.findByText(
       'The next send summarizes 2 older messages (~4 tokens).'
+    )
+  ).toBeInTheDocument()
+})
+
+test('a text-only model reports history images left out of the next request', async () => {
+  const user = userEvent.setup()
+  const messages: Message[] = [
+    {
+      key: 'm1',
+      from: 'user',
+      versions: [
+        {
+          id: 'v1',
+          content: 'look',
+          attachments: [{ id: 'a1', url: '', mediaType: 'image/png' }],
+        },
+      ],
+    },
+    {
+      key: 'm2',
+      from: 'assistant',
+      versions: [{ id: 'v2', content: 'seen' }],
+    },
+    {
+      key: 'm3',
+      from: 'user',
+      versions: [{ id: 'v3', content: 'next' }],
+    },
+  ]
+  mount({
+    settings: { ...DEFAULT_CONTEXT_SETTINGS },
+    plan: planPlaygroundContext({
+      messages,
+      settings: { ...DEFAULT_CONTEXT_SETTINGS },
+      model: 'deepseek-chat',
+    }),
+  })
+  await openPanel(user)
+
+  expect(
+    await screen.findByText(
+      '1 images from earlier messages are left out of the next request.'
     )
   ).toBeInTheDocument()
 })

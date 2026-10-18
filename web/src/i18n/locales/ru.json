@@ -7709,6 +7709,7 @@
     "Context to send: {{messages}} messages · ~{{tokens}} tokens (estimated)": "Отправляемый контекст: {{messages}} сообщений · ~{{tokens}} токенов (оценка)",
     "The next send summarizes {{messages}} older messages (~{{tokens}} tokens).": "Перед следующей отправкой будут суммаризированы {{messages}} старых сообщений (~{{tokens}} токенов).",
     "{{messages}} older messages are left out of the next request (~{{tokens}} tokens).": "В следующий запрос не войдут {{messages}} старых сообщений (~{{tokens}} токенов).",
+    "{{images}} images from earlier messages are left out of the next request.": "В следующий запрос не войдут {{images}} изображений из предыдущих сообщений.",
     "History message limit": "Лимит сообщений истории",
     "Token budget": "Бюджет токенов",
     "0 means no limit. Older messages stay in this conversation but are not sent to the model.": "0 означает отсутствие ограничения. Старые сообщения остаются в беседе, но не отправляются модели.",

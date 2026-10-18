@@ -20,6 +20,7 @@ import { describe, expect, test } from 'vitest'
 
 import {
   DEFAULT_CONTEXT_SETTINGS,
+  HISTORY_IMAGE_OMITTED_CONTENT,
   PLAYGROUND_CONTEXT_HISTORY_LIMIT_MAX,
   PLAYGROUND_CONTEXT_IMAGE_TOKEN_ESTIMATE,
   PLAYGROUND_CONTEXT_TOKEN_BUDGET_MAX,
@@ -273,6 +274,34 @@ describe('context planning', () => {
       settings: settings({ tokenBudget: 5 }),
     })
     expect(tiny.includedMessages.map((item) => item.key)).toEqual(['m3'])
+  })
+
+  test('a text-only model replaces earlier images and reports them', () => {
+    const messages: Message[] = [
+      {
+        key: 'm1',
+        from: 'user',
+        versions: [
+          {
+            id: 'v1',
+            content: 'look',
+            attachments: [{ id: 'a1', url: '', mediaType: 'image/png' }],
+          },
+        ],
+      },
+      message('m2', 'next', 'user'),
+    ]
+    const plan = planPlaygroundContext({
+      messages,
+      settings: settings(),
+      model: 'deepseek-chat',
+    })
+
+    expect(plan.omittedImages).toBe(1)
+    expect(plan.requestMessages[0].content).toEqual([
+      { type: 'text', text: 'look' },
+      { type: 'text', text: HISTORY_IMAGE_OMITTED_CONTENT },
+    ])
   })
 
   test('a compression node replaces the covered prefix and its text counts toward the budget', () => {

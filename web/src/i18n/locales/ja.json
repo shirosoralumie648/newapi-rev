@@ -7709,6 +7709,7 @@
     "Context to send: {{messages}} messages · ~{{tokens}} tokens (estimated)": "送信するコンテキスト：{{messages}} 件のメッセージ · 約 {{tokens}} トークン（推定）",
     "The next send summarizes {{messages}} older messages (~{{tokens}} tokens).": "次回送信時に古い {{messages}} 件のメッセージを要約します（約 {{tokens}} トークン）。",
     "{{messages}} older messages are left out of the next request (~{{tokens}} tokens).": "次回リクエストでは古い {{messages}} 件のメッセージが除外されます（約 {{tokens}} トークン）。",
+    "{{images}} images from earlier messages are left out of the next request.": "次回リクエストでは、以前のメッセージの画像 {{images}} 件が除外されます。",
     "History message limit": "履歴メッセージ数の上限",
     "Token budget": "トークン予算",
     "0 means no limit. Older messages stay in this conversation but are not sent to the model.": "0 は無制限を意味します。古いメッセージは会話に残りますが、モデルには送信されません。",

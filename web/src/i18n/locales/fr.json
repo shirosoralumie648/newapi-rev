@@ -7709,6 +7709,7 @@
     "Context to send: {{messages}} messages · ~{{tokens}} tokens (estimated)": "Contexte envoyé : {{messages}} messages · ~{{tokens}} jetons (estimation)",
     "The next send summarizes {{messages}} older messages (~{{tokens}} tokens).": "Le prochain envoi résumera {{messages}} messages plus anciens (~{{tokens}} jetons).",
     "{{messages}} older messages are left out of the next request (~{{tokens}} tokens).": "{{messages}} messages plus anciens seront exclus de la prochaine requête (~{{tokens}} jetons).",
+    "{{images}} images from earlier messages are left out of the next request.": "{{images}} images de messages précédents seront exclues de la prochaine requête.",
     "History message limit": "Limite de messages d'historique",
     "Token budget": "Budget de jetons",
     "0 means no limit. Older messages stay in this conversation but are not sent to the model.": "0 signifie aucune limite. Les messages plus anciens restent dans la conversation mais ne sont pas envoyés au modèle.",

@@ -7709,6 +7709,7 @@
     "Context to send: {{messages}} messages · ~{{tokens}} tokens (estimated)": "將傳送的上下文：{{messages}} 則訊息 · 約 {{tokens}} token（估算）",
     "The next send summarizes {{messages}} older messages (~{{tokens}} tokens).": "下次傳送前將摘要較早的 {{messages}} 則訊息（約 {{tokens}} token）。",
     "{{messages}} older messages are left out of the next request (~{{tokens}} tokens).": "下次請求將不包含較早的 {{messages}} 則訊息（約 {{tokens}} token）。",
+    "{{images}} images from earlier messages are left out of the next request.": "下次請求將不包含較早訊息中的 {{images}} 張圖片。",
     "History message limit": "歷史訊息則數上限",
     "Token budget": "Token 預算",
     "0 means no limit. Older messages stay in this conversation but are not sent to the model.": "0 表示不限制。較早的訊息仍保留在會話中，但不會傳送給模型。",

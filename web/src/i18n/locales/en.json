@@ -7709,6 +7709,7 @@
     "Context to send: {{messages}} messages · ~{{tokens}} tokens (estimated)": "Context to send: {{messages}} messages · ~{{tokens}} tokens (estimated)",
     "The next send summarizes {{messages}} older messages (~{{tokens}} tokens).": "The next send summarizes {{messages}} older messages (~{{tokens}} tokens).",
     "{{messages}} older messages are left out of the next request (~{{tokens}} tokens).": "{{messages}} older messages are left out of the next request (~{{tokens}} tokens).",
+    "{{images}} images from earlier messages are left out of the next request.": "{{images}} images from earlier messages are left out of the next request.",
     "History message limit": "History message limit",
     "Token budget": "Token budget",
     "0 means no limit. Older messages stay in this conversation but are not sent to the model.": "0 means no limit. Older messages stay in this conversation but are not sent to the model.",
