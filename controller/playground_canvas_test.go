@@ -30,6 +30,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/playground_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
@@ -153,18 +154,21 @@ func TestPlaygroundWorkflowBudgetEndpoints(t *testing.T) {
 			previousMain, previousLog := common.MainDatabaseType(), common.LogDatabaseType()
 			previousRedis := common.RedisEnabled
 			previousBatchUpdate := common.BatchUpdateEnabled
+			previousSessionSecret := common.SessionSecret
 			model.DB, model.LOG_DB = db, db
 			common.SetDatabaseTypes(dbType, dbType)
 			common.RedisEnabled = false
 			common.BatchUpdateEnabled = false
+			common.SessionSecret = "canvas-workflow-budget-test-secret"
 			t.Cleanup(func() {
 				model.DB, model.LOG_DB = previousDB, previousLogDB
 				common.SetDatabaseTypes(previousMain, previousLog)
 				common.RedisEnabled = previousRedis
 				common.BatchUpdateEnabled = previousBatchUpdate
+				common.SessionSecret = previousSessionSecret
 			})
 			for _, table := range []any{
-				&model.User{}, &model.Option{}, &model.WalletHold{},
+				&model.User{}, &model.UserSession{}, &model.Option{}, &model.WalletHold{},
 				&model.WalletHoldGrant{}, &model.CreditGrant{}, &model.WalletDebt{},
 				&model.WalletLedgerEntry{},
 			} {
@@ -177,22 +181,29 @@ func TestPlaygroundWorkflowBudgetEndpoints(t *testing.T) {
 			// ratio maps main.go initializes for real runs.
 			ratio_setting.InitRatioSettings()
 
-			ownerToken := "canvas-budget-owner-token"
+			// The workflow budget endpoints belong to the session-only
+			// Playground workspace, so the two accounts authenticate with real
+			// dashboard login sessions instead of opaque access tokens.
 			owner := model.User{
 				Username: "canvas-budget-owner", Password: "unused",
 				Role: common.RoleCommonUser, Status: common.UserStatusEnabled,
 				Group: "default", Quota: 1_000_000, AffCode: "canvas-budget-owner-aff",
-				AccessToken: &ownerToken,
+				AuthVersion: 1,
 			}
 			require.NoError(t, db.Create(&owner).Error)
-			otherToken := "canvas-budget-other-token"
 			other := model.User{
 				Username: "canvas-budget-other", Password: "unused",
 				Role: common.RoleCommonUser, Status: common.UserStatusEnabled,
 				Group: "default", Quota: 1_000_000, AffCode: "canvas-budget-other-aff",
-				AccessToken: &otherToken,
+				AuthVersion: 1,
 			}
 			require.NoError(t, db.Create(&other).Error)
+			ownerBundle, err := service.CreateLoginSession(owner.Id, "password", "127.0.0.1", "canvas-budget-owner")
+			require.NoError(t, err)
+			ownerToken := ownerBundle.AccessToken
+			otherBundle, err := service.CreateLoginSession(other.Id, "password", "127.0.0.1", "canvas-budget-other")
+			require.NoError(t, err)
+			otherToken := otherBundle.AccessToken
 
 			router := gin.New()
 			router.Use(middleware.RequestId())
