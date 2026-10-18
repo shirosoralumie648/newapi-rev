@@ -475,10 +475,12 @@ func TestPlaygroundArtifactPersistenceMatrix(t *testing.T) {
 	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
 		t.Run(dialect, func(t *testing.T) {
 			db := playgroundTestDB(t, dialect)
+			sessionID, input := playgroundArtifactSourceFixture(t, 7, "artifact-upgrade")
 			// Upgrade a populated Phase 2 schema, then migrate populated artifacts
 			// twice. This is not a substitute for the latest released-schema matrix.
+			// The requests above need the schema AutoMigrate already established at
+			// startup, so the drop simulates the missing tables only from here on.
 			require.NoError(t, db.Migrator().DropTable(&model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}))
-			sessionID, input := playgroundArtifactSourceFixture(t, 7, "artifact-upgrade")
 			require.NoError(t, db.AutoMigrate(&model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}))
 			path := "/api/playground/sessions/" + sessionID + "/artifacts"
 			created := artifactResult(t, playgroundRequest(t, 7, http.MethodPost, path, input, controller.CreatePlaygroundArtifact))
@@ -2025,12 +2027,14 @@ func TestPlaygroundQuotaPolicyResolutionAndSessionLimit(t *testing.T) {
 	playgroundTestDB(t, "sqlite")
 	usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
 		policy.SessionMaxCount = 2
+		policy.ObjectUserMaxBytes = 4096
 	})
-	usePlaygroundGroupQuota(t, "default", playground_setting.PlaygroundQuotaPolicy{SessionMaxCount: 1})
+	usePlaygroundGroupQuota(t, "default", playground_setting.PlaygroundQuotaPolicy{SessionMaxCount: 1, ObjectUserMaxBytes: 8192})
 
 	policy, err := model.PlaygroundQuotaPolicyForUser(7)
 	require.NoError(t, err)
 	assert.Equal(t, 1, policy.SessionMaxCount, "the group override wins over the global default")
+	assert.EqualValues(t, 8192, policy.ObjectUserMaxBytes, "a group override can grant a larger storage entitlement")
 	assert.Equal(t, playground_setting.GetPlaygroundQuotaPolicy("").MessageMaxCount, policy.MessageMaxCount, "unset group fields inherit")
 
 	first := createPlayground(t, 7, "quota-first")
@@ -2082,7 +2086,43 @@ func TestPlaygroundAttachmentCountLimit(t *testing.T) {
 	assert.Contains(t, response.Body.String(), "PLAYGROUND_ATTACHMENT_LIMIT_EXCEEDED")
 }
 
-// The unified usage view reports the owner's stored conversations, attachments,
+// The account-level object-store budget is part of the resource quota policy,
+// so the group a subscription plan upgrades the buyer into can grant a larger
+// storage entitlement. A write over the budget is rejected with the stable
+// attachment code while the stored objects stay readable.
+func TestPlaygroundObjectStorageQuotaLimit(t *testing.T) {
+	playgroundTestDB(t, "sqlite")
+	usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+		policy.AttachmentUserMaxCount = 10
+		policy.AttachmentUserMaxBytes = 1 << 20
+		policy.ObjectUserMaxBytes = 64
+	})
+	session := createPlayground(t, 7, "object-budget")
+	id := session["id"].(string)
+	stored := playgroundUploadAttachment(t, 7, id, "object-a", "image/png", playgroundPNGFixture(64))
+
+	overflow := playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions/"+id+"/attachments", map[string]any{
+		"client_key": "object-b", "media_type": "image/png", "data": base64.StdEncoding.EncodeToString(playgroundPNGFixture(16)),
+	}, controller.CreatePlaygroundAttachment)
+	require.Equal(t, http.StatusUnprocessableEntity, overflow.Code, overflow.Body.String())
+	assert.Contains(t, overflow.Body.String(), "PLAYGROUND_ATTACHMENT_LIMIT_EXCEEDED")
+
+	// Over budget only blocks new writes: the stored attachment is still
+	// listed and its bytes are still served.
+	listed := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+id+"/attachments", nil, controller.ListPlaygroundAttachments)
+	require.Equal(t, http.StatusOK, listed.Code, listed.Body.String())
+	assert.Contains(t, listed.Body.String(), stored["id"].(string))
+	content := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+id+"/attachments/"+stored["id"].(string)+"/content", nil, controller.GetPlaygroundAttachmentContent)
+	require.Equal(t, http.StatusOK, content.Code, content.Body.String())
+	assert.Equal(t, playgroundPNGFixture(64), content.Body.Bytes())
+
+	// The upgrade target group's override grants the larger entitlement the
+	// plan sells, and the same upload then succeeds.
+	usePlaygroundGroupQuota(t, "default", playground_setting.PlaygroundQuotaPolicy{ObjectUserMaxBytes: 1 << 20})
+	playgroundUploadAttachment(t, 7, id, "object-c", "image/png", playgroundPNGFixture(16))
+}
+
+// The unified usage view reports the owner's stored conversations,
 // artifacts and canvases against the effective policy, and never mixes in
 // another account's rows. The limit column must follow the group override, so
 // it always matches what the write paths enforce.
@@ -2098,8 +2138,9 @@ func TestPlaygroundUsageForUserReportsOwnerTotals(t *testing.T) {
 		policy.CanvasUserMaxBytes = 16384
 		policy.TaskMaxConcurrency = 4
 		policy.TaskUserResultMaxBytes = 1 << 20
+		policy.ObjectUserMaxBytes = 1 << 21
 	})
-	usePlaygroundGroupQuota(t, "default", playground_setting.PlaygroundQuotaPolicy{CanvasUserMaxProjects: 9})
+	usePlaygroundGroupQuota(t, "default", playground_setting.PlaygroundQuotaPolicy{CanvasUserMaxProjects: 9, ObjectUserMaxBytes: 1 << 22})
 
 	sessionID, input := playgroundArtifactSourceFixture(t, 7, "usage-owner")
 	artifactResult(t, playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions/"+sessionID+"/artifacts", input, controller.CreatePlaygroundArtifact))
@@ -2126,6 +2167,7 @@ func TestPlaygroundUsageForUserReportsOwnerTotals(t *testing.T) {
 	usage, err := model.PlaygroundUsageForUser(7)
 	require.NoError(t, err)
 
+	assert.Equal(t, "default", usage.Group, "the view names the group its limits came from")
 	assert.EqualValues(t, 1, usage.Sessions.Used)
 	assert.EqualValues(t, 5, usage.Sessions.Limit)
 	assert.EqualValues(t, 1, usage.Attachments.Used)
@@ -2140,6 +2182,8 @@ func TestPlaygroundUsageForUserReportsOwnerTotals(t *testing.T) {
 	assert.EqualValues(t, 9, usage.Canvas.Limit)
 	assert.NotZero(t, usage.Canvas.UsedBytes)
 	assert.EqualValues(t, 16384, usage.Canvas.LimitBytes)
+	assert.EqualValues(t, 64, usage.Storage.UsedBytes, "object-store bytes are the upload budget figure")
+	assert.EqualValues(t, 1<<22, usage.Storage.LimitBytes, "the group override sets the storage entitlement")
 	assert.EqualValues(t, 1, usage.Tasks.Used)
 	assert.EqualValues(t, 4, usage.Tasks.Limit)
 	assert.EqualValues(t, len(playgroundTaskDataFixture(512)), usage.Tasks.UsedBytes)
@@ -2200,6 +2244,8 @@ func TestPlaygroundUserUsageCounters(t *testing.T) {
 			assert.EqualValues(t, counters.ArtifactBytes, usage.Artifacts.UsedBytes)
 			assert.EqualValues(t, counters.CanvasCount, usage.Canvas.Used)
 			assert.EqualValues(t, counters.CanvasBytes, usage.Canvas.UsedBytes)
+			assert.EqualValues(t, counters.ObjectBytes, usage.Storage.UsedBytes)
+			assert.Equal(t, "default", usage.Group)
 
 			// Another account never observes these counters.
 			var foreignCount int64
@@ -2320,15 +2366,17 @@ func TestPlaygroundUserUsageBudgetSerialization(t *testing.T) {
 
 			outcomes := make(chan error, 2)
 			start := make(chan struct{})
-			upload := func(partition, clientKey string) {
+			upload := func(create func(context.Context, int, string, model.PlaygroundAttachmentInput) (*model.PlaygroundAttachment, bool, error), partition, clientKey string) {
 				<-start
-				_, _, err := model.CreatePlaygroundAttachment(context.Background(), 7, partition, model.PlaygroundAttachmentInput{
+				_, _, err := create(context.Background(), 7, partition, model.PlaygroundAttachmentInput{
 					ClientKey: clientKey, MediaType: "image/png", Filename: "image.png", Data: playgroundPNGFixture(64),
 				})
 				outcomes <- err
 			}
-			go upload(sessionID, "usage-budget-a")
-			go upload(canvasID, "usage-budget-b")
+			// Each upload locks its own partition first, so the two only
+			// serialize on the shared account counter row.
+			go upload(model.CreatePlaygroundAttachment, sessionID, "usage-budget-a")
+			go upload(model.CreatePlaygroundCanvasAttachment, canvasID, "usage-budget-b")
 			close(start)
 			first, second := <-outcomes, <-outcomes
 			if first == nil {
@@ -3009,7 +3057,10 @@ func TestPlaygroundMessageCostLookup(t *testing.T) {
 				require.NoError(t, db.Migrator().DropTable(&model.Log{}))
 			})
 			require.NoError(t, db.Create(&[]model.Log{
-				{UserId: 7, Type: model.LogTypeConsume, RequestId: "pg-cost-owner", Quota: 1234, PromptTokens: 10, CompletionTokens: 20, ModelName: "cost-model", CreatedAt: 100},
+				{UserId: 7, Type: model.LogTypeConsume, RequestId: "pg-cost-owner", Quota: 1234, PromptTokens: 10, CompletionTokens: 20, ModelName: "cost-model", CreatedAt: 100,
+					Other: `{"request_timing":{"total_ms":1320,"auth_ms":24,"channel_select_ms":8,"upstream_ms":411,"first_token_ms":445,"retries":1},"admin_info":{"use_channel":[3]}}`},
+				{UserId: 7, Type: model.LogTypeConsume, RequestId: "pg-cost-no-timing", Quota: 50, PromptTokens: 2, CompletionTokens: 3, ModelName: "cost-model", CreatedAt: 100,
+					Other: `{"request_path":"/v1/chat/completions"}`},
 				{UserId: 8, Type: model.LogTypeConsume, RequestId: "pg-cost-other", Quota: 9999, PromptTokens: 1, CompletionTokens: 1, ModelName: "other-model", CreatedAt: 100},
 				{UserId: 7, Type: model.LogTypeError, RequestId: "pg-cost-error", Quota: 0, CreatedAt: 100},
 			}).Error)
@@ -3019,6 +3070,9 @@ func TestPlaygroundMessageCostLookup(t *testing.T) {
 			require.Len(t, logs, 1)
 			assert.Equal(t, "pg-cost-owner", logs[0].RequestId)
 			assert.Equal(t, 1234, logs[0].Quota)
+			// The stored other document is loaded so the caller can project the
+			// public request timing out of it.
+			assert.Contains(t, logs[0].Other, "request_timing")
 
 			empty, err := model.GetUserConsumeLogsByRequestIds(7, nil)
 			require.NoError(t, err)
@@ -3041,6 +3095,14 @@ func TestPlaygroundMessageCostLookup(t *testing.T) {
 						TotalTokens      int    `json:"total_tokens"`
 						ModelName        string `json:"model_name"`
 						CreatedAt        int64  `json:"created_at"`
+						Timing           *struct {
+							TotalMs         *int64 `json:"total_ms"`
+							AuthMs          *int64 `json:"auth_ms"`
+							ChannelSelectMs *int64 `json:"channel_select_ms"`
+							UpstreamMs      *int64 `json:"upstream_ms"`
+							FirstTokenMs    *int64 `json:"first_token_ms"`
+							Retries         *int   `json:"retries"`
+						} `json:"timing"`
 					} `json:"items"`
 				} `json:"data"`
 			}
@@ -3056,6 +3118,35 @@ func TestPlaygroundMessageCostLookup(t *testing.T) {
 			assert.Equal(t, 30, item.TotalTokens)
 			assert.Equal(t, "cost-model", item.ModelName)
 			assert.EqualValues(t, 100, item.CreatedAt)
+			// The public phase breakdown of the settle row is projected for the
+			// conversation metadata; nothing else from the stored other is.
+			require.NotNil(t, item.Timing)
+			require.NotNil(t, item.Timing.TotalMs)
+			assert.EqualValues(t, 1320, *item.Timing.TotalMs)
+			require.NotNil(t, item.Timing.UpstreamMs)
+			assert.EqualValues(t, 411, *item.Timing.UpstreamMs)
+			require.NotNil(t, item.Timing.Retries)
+			assert.Equal(t, 1, *item.Timing.Retries)
+			assert.NotContains(t, response.Body.String(), "use_channel")
+
+			// A settle row stored before the timing field existed answers with
+			// the cost figures and no timing object.
+			legacyResponse := playgroundRequest(t, 7, http.MethodGet, "/api/playground/message-costs?request_ids=pg-cost-no-timing", nil, controller.GetPlaygroundMessageCosts)
+			require.Equal(t, http.StatusOK, legacyResponse.Code, legacyResponse.Body.String())
+			var legacyEnvelope struct {
+				Data struct {
+					Items []struct {
+						RequestID string `json:"request_id"`
+						Timing    *struct {
+							TotalMs *int64 `json:"total_ms"`
+						} `json:"timing"`
+					} `json:"items"`
+				} `json:"data"`
+			}
+			require.NoError(t, common.Unmarshal(legacyResponse.Body.Bytes(), &legacyEnvelope))
+			require.Len(t, legacyEnvelope.Data.Items, 1)
+			assert.Equal(t, "pg-cost-no-timing", legacyEnvelope.Data.Items[0].RequestID)
+			assert.Nil(t, legacyEnvelope.Data.Items[0].Timing)
 
 			invalidQueries := []string{
 				"",
@@ -3123,8 +3214,8 @@ func TestPlaygroundTaskArtifactRecordsAndPins(t *testing.T) {
 			videoRecord, videoOK := recordsByKey["video"]
 			thumbRecord, thumbOK := recordsByKey["thumb"]
 			require.True(t, videoOK && thumbOK)
-			require.NoError(t, model.MarkPlaygroundTaskArtifactStored(videoRecord.ID, "local", "pg/7/task/x/video", "video/mp4", 2048, "hash-video", expiresAt))
-			require.NoError(t, model.MarkPlaygroundTaskArtifactStored(thumbRecord.ID, "local", "pg/7/task/x/thumb", "image/png", 1024, "hash-thumb", expiresAt))
+			require.NoError(t, model.MarkPlaygroundTaskArtifactStored(videoRecord.ID, "local", "pg/7/task/x/video", "video/mp4", 2048, "hash-video", expiresAt, "https://upstream.invalid/video.mp4"))
+			require.NoError(t, model.MarkPlaygroundTaskArtifactStored(thumbRecord.ID, "local", "pg/7/task/x/thumb", "image/png", 1024, "hash-thumb", expiresAt, "https://upstream.invalid/thumb.png"))
 			storedBytes, err := model.PlaygroundTaskArtifactStoredBytes(7)
 			require.NoError(t, err)
 			assert.EqualValues(t, 3072, storedBytes)

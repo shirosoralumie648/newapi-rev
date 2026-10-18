@@ -293,7 +293,7 @@ func storeOneTaskArtifact(ctx context.Context, collector TaskArtifactCollector, 
 		return settleTaskArtifactFailure(ctx, record, taskArtifactUpstreamRef(source), err)
 	}
 	expiresAt := common.GetTimestamp() + int64(TaskArtifactRetention().Seconds())
-	if err := model.MarkPlaygroundTaskArtifactStored(record.ID, ref.Backend, ref.ObjectKey, fetched.mimeType, fetched.size, fetched.hash, expiresAt); err != nil {
+	if err := model.MarkPlaygroundTaskArtifactStored(record.ID, ref.Backend, ref.ObjectKey, fetched.mimeType, fetched.size, fetched.hash, expiresAt, taskArtifactUpstreamRef(source)); err != nil {
 		// The object exists but no record points at it; remove it instead of
 		// leaking bytes that only a retry could reach.
 		if store := taskArtifactObjectStore(); store != nil {
@@ -516,16 +516,11 @@ func validateTaskArtifactFetchTarget(ctx context.Context, parsed *url.URL) error
 	if host == "" {
 		return fmt.Errorf("%w: the provider URL has no host", errTaskArtifactPermanent)
 	}
-	port := 80
-	if parsed.Scheme == "https" {
-		port = 443
-	}
 	if portText := parsed.Port(); portText != "" {
 		parsedPort, err := strconv.Atoi(portText)
 		if err != nil || parsedPort < 1 || parsedPort > 65535 {
 			return fmt.Errorf("%w: the provider URL port is invalid", errTaskArtifactPermanent)
 		}
-		port = parsedPort
 	}
 	protection := &common.SSRFProtection{
 		AllowPrivateIp:         false,

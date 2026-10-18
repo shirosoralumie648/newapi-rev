@@ -263,3 +263,32 @@ func TestResponseModelDoesNotRecordSynthesizedModel(t *testing.T) {
 	require.Nil(t, apiErr)
 	assert.Nil(t, info.ResponseModel)
 }
+
+// A main entry point's consume log carries the phase breakdown the timing
+// middleware collected, including the retry count; entries without a session
+// keep their previous log shape.
+func TestGenerateTextOtherInfoAttachesRequestTiming(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	info := &relaycommon.RelayInfo{OriginModelName: "requested", RetryIndex: 2}
+
+	withoutSession := service.GenerateTextOtherInfo(c, info, 1, 1, 1, 0, 0, 0, 1)
+	assert.NotContains(t, withoutSession.Snapshot(), "request_timing")
+
+	session := common.NewRequestTimingSession()
+	common.SetRequestTimingSession(c, session)
+	common.MarkRequestTiming(c, common.RequestTimingPhaseAuthenticated)
+	common.MarkRequestTiming(c, common.RequestTimingPhaseChannelSelected)
+
+	other := service.GenerateTextOtherInfo(c, info, 1, 1, 1, 0, 0, 0, 1)
+	payload, ok := other.Snapshot()["request_timing"].(*common.RequestTimingPayload)
+	require.True(t, ok)
+	require.NotNil(t, payload.TotalMs)
+	require.NotNil(t, payload.AuthMs)
+	require.NotNil(t, payload.ChannelSelectMs)
+	// The request never reached an upstream response or a client write.
+	assert.Nil(t, payload.UpstreamMs)
+	assert.Nil(t, payload.FirstTokenMs)
+	require.NotNil(t, payload.Retries)
+	assert.Equal(t, 2, *payload.Retries)
+}

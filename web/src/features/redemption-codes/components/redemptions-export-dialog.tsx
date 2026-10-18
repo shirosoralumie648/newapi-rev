@@ -25,10 +25,15 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 
+import { REDEMPTION_TYPE_SUBSCRIPTION, type RedemptionType } from '../types'
+
 export type RedemptionExportData = {
   keys: string[]
   name: string
   quota: string
+  type?: RedemptionType
+  planTitle?: string
+  duration?: string
 }
 
 type RedemptionsExportDialogProps = {
@@ -39,10 +44,12 @@ type RedemptionsExportDialogProps = {
 export function RedemptionsExportDialog(props: RedemptionsExportDialogProps) {
   const { t } = useTranslation()
   const id = useId()
+  const isSubscription = props.data.type === REDEMPTION_TYPE_SUBSCRIPTION
   const [saveToFile, setSaveToFile] = useState(false)
   const [format, setFormat] = useState<'txt' | 'md'>('txt')
   const [includeName, setIncludeName] = useState(true)
   const [includeQuota, setIncludeQuota] = useState(true)
+  const [includePlan, setIncludePlan] = useState(true)
 
   const handleComplete = () => {
     if (!saveToFile) {
@@ -52,13 +59,23 @@ export function RedemptionsExportDialog(props: RedemptionsExportDialogProps) {
     const headers: string[] = []
     if (includeName) headers.push(t('Name'))
     headers.push(t('Code'))
-    if (includeQuota) headers.push(t('Quota'))
+    if (isSubscription) {
+      if (includePlan) headers.push(t('Plan'), t('Duration'))
+    } else if (includeQuota) {
+      headers.push(t('Quota'))
+    }
 
     const rows = props.data.keys.map((key) => {
       const row: string[] = []
       if (includeName) row.push(props.data.name)
       row.push(key)
-      if (includeQuota) row.push(props.data.quota)
+      if (isSubscription) {
+        if (includePlan) {
+          row.push(props.data.planTitle ?? '', props.data.duration ?? '')
+        }
+      } else if (includeQuota) {
+        row.push(props.data.quota)
+      }
       return row.map((value) => value.replaceAll(/[\t\r\n]+/g, ' '))
     })
 
@@ -152,14 +169,27 @@ export function RedemptionsExportDialog(props: RedemptionsExportDialogProps) {
               />
               <Label htmlFor={`${id}-name`}>{t('Include name')}</Label>
             </div>
-            <div className='flex items-center gap-2'>
-              <Checkbox
-                id={`${id}-quota`}
-                checked={includeQuota}
-                onCheckedChange={setIncludeQuota}
-              />
-              <Label htmlFor={`${id}-quota`}>{t('Include quota')}</Label>
-            </div>
+            {isSubscription ? (
+              <div className='flex items-center gap-2'>
+                <Checkbox
+                  id={`${id}-plan`}
+                  checked={includePlan}
+                  onCheckedChange={setIncludePlan}
+                />
+                <Label htmlFor={`${id}-plan`}>
+                  {t('Include plan details')}
+                </Label>
+              </div>
+            ) : (
+              <div className='flex items-center gap-2'>
+                <Checkbox
+                  id={`${id}-quota`}
+                  checked={includeQuota}
+                  onCheckedChange={setIncludeQuota}
+                />
+                <Label htmlFor={`${id}-quota`}>{t('Include quota')}</Label>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -30,12 +30,26 @@ import {
 } from '@/components/ui/tooltip'
 import { formatQuota, formatTimestampToDate } from '@/lib/format'
 
-import { REDEMPTION_FILTER_EXPIRED, REDEMPTION_STATUSES } from '../constants'
-import { isRedemptionExpired, isTimestampExpired } from '../lib'
-import type { Redemption } from '../types'
+import {
+  REDEMPTION_FILTER_EXPIRED,
+  REDEMPTION_STATUSES,
+  REDEMPTION_TYPES,
+} from '../constants'
+import {
+  formatRedemptionDuration,
+  isRedemptionExpired,
+  isTimestampExpired,
+} from '../lib'
+import {
+  REDEMPTION_TYPE_SUBSCRIPTION,
+  redemptionTypeOf,
+  type Redemption,
+} from '../types'
 import { DataTableRowActions } from './data-table-row-actions'
 
-export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
+export function useRedemptionsColumns(
+  planTitles: Map<number, string> = new Map()
+): ColumnDef<Redemption>[] {
   const { t } = useTranslation()
   return [
     {
@@ -80,6 +94,39 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
         <span className='font-medium'>{row.getValue('name')}</span>
       ),
       size: 180,
+    },
+    {
+      id: 'type',
+      accessorKey: 'type',
+      header: t('Type'),
+      cell: ({ row }) => {
+        const redemption = row.original
+        const type = redemptionTypeOf(redemption)
+        const config = REDEMPTION_TYPES[type]
+        const planTitle =
+          type === REDEMPTION_TYPE_SUBSCRIPTION
+            ? (planTitles.get(redemption.plan_id) ??
+              t('Plan #{{id}}', { id: redemption.plan_id }))
+            : ''
+        return (
+          <div className='flex flex-col items-start gap-1'>
+            <StatusBadge
+              label={t(config.labelKey)}
+              variant={config.variant}
+              copyable={false}
+              className='-ml-1.5'
+            />
+            {type === REDEMPTION_TYPE_SUBSCRIPTION && (
+              <span className='text-muted-foreground text-xs'>
+                {planTitle} · {formatRedemptionDuration(redemption, t)}
+              </span>
+            )}
+          </div>
+        )
+      },
+      filterFn: (row, _id, value: string[]) =>
+        value.includes(redemptionTypeOf(row.original)),
+      size: 200,
     },
     {
       accessorKey: 'status',
@@ -158,6 +205,10 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
       accessorKey: 'quota',
       header: t('Quota'),
       cell: ({ row }) => {
+        const redemption = row.original
+        if (redemptionTypeOf(redemption) === REDEMPTION_TYPE_SUBSCRIPTION) {
+          return <span className='text-muted-foreground text-sm'>-</span>
+        }
         const quota = row.getValue('quota') as number
         return (
           <StatusBadge

@@ -35,6 +35,10 @@ const (
 	SubscriptionResetCustom  = "custom"
 )
 
+// SubscriptionSourceRedemption marks a subscription granted by redeeming a
+// redemption code.
+const SubscriptionSourceRedemption = "redemption"
+
 var (
 	ErrSubscriptionOrderNotFound      = errors.New("subscription order not found")
 	ErrSubscriptionOrderStatusInvalid = errors.New("subscription order status invalid")

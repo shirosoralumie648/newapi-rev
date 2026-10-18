@@ -33,7 +33,18 @@ export interface ApiResponse<T = unknown> {
  * Standard API response types
  */
 export type TopupInfoResponse = ApiResponse<TopupInfo>
-export type RedemptionResponse = ApiResponse<number>
+
+/** Result of redeeming a code: quota credited or subscription activated. */
+export interface RedemptionResult {
+  type: string
+  quota: number
+  plan_id: number
+  plan_title: string
+  subscription_id: number
+  end_time: number
+}
+
+export type RedemptionResponse = ApiResponse<RedemptionResult>
 export type AmountResponse = ApiResponse<string>
 export type PaymentResponse = ApiResponse<Record<string, unknown>> & {
   url?: string

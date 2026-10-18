@@ -34,6 +34,7 @@ Object.defineProperty(HTMLElement.prototype, 'getAnimations', {
 })
 
 const usage = {
+  group: 'pro',
   sessions: { used: 3, limit: 10, used_bytes: 0, limit_bytes: 0 },
   attachments: {
     used: 1,
@@ -43,19 +44,25 @@ const usage = {
   },
   artifacts: { used: 0, limit: 5, used_bytes: 0, limit_bytes: 1024 },
   canvas: { used: 2, limit: 20, used_bytes: 0, limit_bytes: 0 },
+  storage: {
+    used: 0,
+    limit: 0,
+    used_bytes: 2048,
+    limit_bytes: 128 * 1024 * 1024,
+  },
   tasks: { used: 1, limit: 3, used_bytes: 4096, limit_bytes: 64 * 1024 * 1024 },
 }
 
 let testI18n: i18n
 
-function renderPopover(userId: number | null = 7) {
+function renderPopover(userId: number | null = 7, onOpenUpgrade?: () => void) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   return render(
     <I18nextProvider i18n={testI18n}>
       <QueryClientProvider client={client}>
-        <PlaygroundUsagePopover userId={userId} />
+        <PlaygroundUsagePopover userId={userId} onOpenUpgrade={onOpenUpgrade} />
       </QueryClientProvider>
     </I18nextProvider>
   )
@@ -84,6 +91,9 @@ test('opening the usage popover lists each resource against its account limit', 
   expect(screen.getByText('3 of 10')).toBeVisible()
   expect(screen.getByText('1 of 4')).toBeVisible()
   expect(screen.getByText('2 KiB of 8 MiB')).toBeVisible()
+  expect(screen.getByText('Object storage')).toBeVisible()
+  expect(screen.getByText('2 KiB of 128 MiB')).toBeVisible()
+  expect(screen.queryByText('0 of 0')).not.toBeInTheDocument()
   expect(screen.getByText('Tasks')).toBeVisible()
   expect(screen.getByText('1 of 3')).toBeVisible()
   expect(screen.getByText('4 KiB of 64 MiB')).toBeVisible()
@@ -91,6 +101,50 @@ test('opening the usage popover lists each resource against its account limit', 
     '/api/playground/usage',
     expect.anything()
   )
+})
+
+test('the popover names the group the limits were resolved from', async () => {
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: { success: true, data: usage },
+  })
+  const user = userEvent.setup()
+  renderPopover()
+
+  await user.click(screen.getByRole('button', { name: 'Resource usage' }))
+
+  expect(await screen.findByText('Current group')).toBeVisible()
+  expect(screen.getByText('pro')).toBeVisible()
+})
+
+test('the upgrade entry opens the plan purchase path when provided', async () => {
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: { success: true, data: usage },
+  })
+  const onOpenUpgrade = vi.fn()
+  const user = userEvent.setup()
+  renderPopover(7, onOpenUpgrade)
+
+  await user.click(screen.getByRole('button', { name: 'Resource usage' }))
+  await user.click(
+    await screen.findByRole('button', { name: 'Upgrade for more storage' })
+  )
+
+  expect(onOpenUpgrade).toHaveBeenCalledTimes(1)
+})
+
+test('without an upgrade handler the popover offers no upgrade entry', async () => {
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: { success: true, data: usage },
+  })
+  const user = userEvent.setup()
+  renderPopover()
+
+  await user.click(screen.getByRole('button', { name: 'Resource usage' }))
+
+  expect(await screen.findByText('Conversations')).toBeVisible()
+  expect(
+    screen.queryByRole('button', { name: 'Upgrade for more storage' })
+  ).not.toBeInTheDocument()
 })
 
 test('a failed usage request shows the error state instead of the summary', async () => {

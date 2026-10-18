@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
   fireEvent,
   render,
@@ -73,10 +74,15 @@ function readDownload(download: Download): Promise<string> {
 
 function CreateDrawer() {
   const [open, setOpen] = useState(true)
+  const [client] = useState(
+    () => new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  )
   return (
-    <RedemptionsProvider>
-      <RedemptionsMutateDrawer open={open} onOpenChange={setOpen} />
-    </RedemptionsProvider>
+    <QueryClientProvider client={client}>
+      <RedemptionsProvider>
+        <RedemptionsMutateDrawer open={open} onOpenChange={setOpen} />
+      </RedemptionsProvider>
+    </QueryClientProvider>
   )
 }
 
@@ -308,4 +314,63 @@ test('unchecking save as a file hides export settings and completes without down
   await user.click(screen.getByRole('button', { name: 'Done' }))
   expect(downloads).toEqual([])
   expect(onClose).toHaveBeenCalledOnce()
+})
+
+test('exports subscription codes with plan and duration instead of quota', async () => {
+  const downloads = captureDownloads()
+  const user = userEvent.setup()
+  const onClose = vi.fn()
+  render(
+    <RedemptionsExportDialog
+      data={{
+        keys: ['subA'],
+        name: 'subs',
+        quota: '',
+        type: 'subscription',
+        planTitle: 'Pro plan',
+        duration: '3 months',
+      }}
+      onClose={onClose}
+    />
+  )
+  await user.click(screen.getByRole('checkbox', { name: 'Save as a file' }))
+  await user.click(screen.getByRole('radio', { name: 'Save as TXT' }))
+  expect(
+    screen.queryByRole('checkbox', { name: 'Include quota' })
+  ).not.toBeInTheDocument()
+  expect(
+    screen.getByRole('checkbox', { name: 'Include plan details' })
+  ).toBeChecked()
+  await user.click(screen.getByRole('button', { name: 'Done' }))
+  expect(await readDownload(downloads[0])).toBe(
+    'subs\tsubA\tPro plan\t3 months\n'
+  )
+  expect(onClose).toHaveBeenCalledOnce()
+})
+
+test('can omit the subscription plan details from the export', async () => {
+  const downloads = captureDownloads()
+  const user = userEvent.setup()
+  render(
+    <RedemptionsExportDialog
+      data={{
+        keys: ['subA'],
+        name: 'subs',
+        quota: '',
+        type: 'subscription',
+        planTitle: 'Pro plan',
+        duration: 'Plan duration',
+      }}
+      onClose={() => undefined}
+    />
+  )
+  await user.click(screen.getByRole('checkbox', { name: 'Save as a file' }))
+  await user.click(screen.getByRole('radio', { name: 'Save as Markdown' }))
+  await user.click(
+    screen.getByRole('checkbox', { name: 'Include plan details' })
+  )
+  await user.click(screen.getByRole('button', { name: 'Done' }))
+  expect(await readDownload(downloads[0])).toBe(
+    '| Name | Code |\n| --- | --- |\n| subs | subA |\n'
+  )
 })

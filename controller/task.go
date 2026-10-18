@@ -150,7 +150,7 @@ type taskArtifactPersistenceState struct {
 // the persistence state of every key. A provider URL error and a persistence
 // read error stay distinguishable so the endpoint keeps its stable codes.
 func buildTaskArtifactResponses(task *model.Task, artifacts []relaychannel.TaskArtifact) ([]taskArtifactResponse, error) {
-	persistence, err := taskArtifactPersistenceState(task)
+	persistence, err := buildTaskArtifactPersistenceState(task)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", errTaskArtifactPersistence, err)
 	}
@@ -177,7 +177,7 @@ func buildTaskArtifactResponses(task *model.Task, artifacts []relaychannel.TaskA
 	return items, nil
 }
 
-func taskArtifactPersistenceState(task *model.Task) (taskArtifactPersistenceState, error) {
+func buildTaskArtifactPersistenceState(task *model.Task) (taskArtifactPersistenceState, error) {
 	if task == nil {
 		return taskArtifactPersistenceState{records: map[string]model.PlaygroundTaskArtifact{}, pinned: map[string]bool{}}, nil
 	}

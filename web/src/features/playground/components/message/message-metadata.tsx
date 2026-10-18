@@ -26,6 +26,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { RequestTimingBreakdown } from '@/features/usage-logs/components/request-timing-breakdown'
 import { toIntlLocale } from '@/i18n/languages'
 import { formatLogQuota, formatNumber } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -120,6 +121,45 @@ function MessageUsageIndicator(props: {
   )
 }
 
+// The trigger shows the server-measured end-to-end first-token latency (or the
+// total when the entry never reported a first token); the phase breakdown is
+// one hover or focus away.
+function MessageTimingIndicator(props: {
+  timing: NonNullable<PlaygroundMessageCost['timing']>
+}) {
+  const { t } = useTranslation()
+  const firstToken = props.timing.first_token_ms
+  const value = firstToken ?? props.timing.total_ms
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return null
+  }
+  const duration = formatDuration(value, t)
+  if (!duration) {
+    return null
+  }
+  const label = firstToken === undefined ? t('Total') : t('First token')
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <span
+              className='cursor-help underline decoration-dotted underline-offset-2'
+              tabIndex={0}
+            >
+              {label}: {duration}
+            </span>
+          }
+        />
+        <TooltipContent>
+          <RequestTimingBreakdown timing={props.timing} />
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
+
 export function MessageMetadata(props: MessageMetadataProps) {
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
@@ -127,6 +167,7 @@ export function MessageMetadata(props: MessageMetadataProps) {
   const duration = formatDuration(props.message.durationMs, t)
   const usage = getVersionUsage(props.version, props.cost)
   const cost = props.cost ? formatLogQuota(props.cost.quota) : undefined
+  const timing = props.cost?.timing
   const details: Array<{ key: string; node: ReactNode }> = []
 
   if (messageTime) {
@@ -148,6 +189,12 @@ export function MessageMetadata(props: MessageMetadataProps) {
     details.push({
       key: 'cost',
       node: <span>{t('Cost: {{cost}}', { cost })}</span>,
+    })
+  }
+  if (timing) {
+    details.push({
+      key: 'timing',
+      node: <MessageTimingIndicator timing={timing} />,
     })
   }
 

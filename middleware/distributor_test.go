@@ -341,3 +341,43 @@ func TestSharedEndpointRebindsToBoundNewAPIExtension(t *testing.T) {
 	assert.Equal(t, "alpha", c.GetString("task_plugin_key"), "the first bound candidate executes regardless of the earlier pin")
 	assert.Equal(t, "alpha", c.MustGet(jsplugin.ContextKeyPinnedEndpoint).(jsplugin.PinnedEndpoint).Plugin.Meta.Key)
 }
+
+// Only the main LLM entry points record a phase breakdown. Everything else
+// (embeddings, media, websocket, the console API) must stay untracked so its
+// logs keep their current shape and the middleware stays free.
+func TestRequestTimingSessionCoversMainEntriesOnly(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, test := range []struct {
+		name    string
+		method  string
+		path    string
+		tracked bool
+	}{
+		{name: "chat completions", method: http.MethodPost, path: "/v1/chat/completions", tracked: true},
+		{name: "legacy completions", method: http.MethodPost, path: "/v1/completions", tracked: true},
+		{name: "claude messages", method: http.MethodPost, path: "/v1/messages", tracked: true},
+		{name: "responses", method: http.MethodPost, path: "/v1/responses", tracked: true},
+		{name: "playground chat", method: http.MethodPost, path: "/pg/chat/completions", tracked: true},
+		{name: "gemini generate content", method: http.MethodPost, path: "/v1beta/models/gemini-2.5-flash:generateContent", tracked: true},
+		{name: "gemini stream generate content", method: http.MethodPost, path: "/v1beta/models/gemini-2.5-flash:streamGenerateContent", tracked: true},
+		{name: "gemini count tokens", method: http.MethodPost, path: "/v1beta/models/gemini-2.5-flash:countTokens", tracked: false},
+		{name: "embeddings", method: http.MethodPost, path: "/v1/embeddings", tracked: false},
+		{name: "audio speech", method: http.MethodPost, path: "/v1/audio/speech", tracked: false},
+		{name: "responses websocket handshake", method: http.MethodGet, path: "/v1/responses", tracked: false},
+		{name: "playground image generation", method: http.MethodPost, path: "/pg/images/generations", tracked: false},
+		{name: "console session api", method: http.MethodPost, path: "/api/playground/sessions", tracked: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(test.method, test.path, nil)
+
+			RequestTiming()(c)
+
+			if test.tracked {
+				require.NotNil(t, common.GetRequestTimingSession(c))
+				return
+			}
+			assert.Nil(t, common.GetRequestTimingSession(c))
+		})
+	}
+}

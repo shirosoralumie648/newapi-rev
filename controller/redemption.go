@@ -1,8 +1,10 @@
 package controller
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
@@ -29,8 +31,9 @@ func GetAllRedemptions(c *gin.Context) {
 func SearchRedemptions(c *gin.Context) {
 	keyword := c.Query("keyword")
 	status := c.Query("status")
+	redemptionType := c.Query("type")
 	pageInfo := common.GetPageQuery(c)
-	redemptions, total, err := model.SearchRedemptions(keyword, status, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	redemptions, total, err := model.SearchRedemptions(keyword, status, redemptionType, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -84,12 +87,7 @@ func AddRedemption(c *gin.Context) {
 		common.ApiErrorT(c, "Maximum 100 redemption codes can be generated at once")
 		return
 	}
-	if redemption.Quota <= 0 {
-		common.ApiErrorT(c, "Redemption quota must be positive")
-		return
-	}
-	if err := common.ValidateWalletQuota(redemption.Quota); err != nil {
-		common.ApiError(c, err)
+	if !validateRedemptionPayload(c, &redemption) {
 		return
 	}
 	if err := validateExpiredTime(redemption.ExpiredTime); err != nil {
@@ -100,12 +98,17 @@ func AddRedemption(c *gin.Context) {
 	for i := 0; i < redemption.Count; i++ {
 		key := common.GetUUID()
 		cleanRedemption := model.Redemption{
-			UserId:      c.GetInt("id"),
-			Name:        redemption.Name,
-			Key:         key,
-			CreatedTime: common.GetTimestamp(),
-			Quota:       redemption.Quota,
-			ExpiredTime: redemption.ExpiredTime,
+			UserId:          c.GetInt("id"),
+			Name:            redemption.Name,
+			Key:             key,
+			CreatedTime:     common.GetTimestamp(),
+			Quota:           redemption.Quota,
+			ExpiredTime:     redemption.ExpiredTime,
+			Type:            redemption.Type,
+			PlanId:          redemption.PlanId,
+			DurationUnit:    redemption.DurationUnit,
+			DurationValue:   redemption.DurationValue,
+			DurationSeconds: redemption.DurationSeconds,
 		}
 		err = cleanRedemption.Insert()
 		if err != nil {
@@ -115,17 +118,69 @@ func AddRedemption(c *gin.Context) {
 		}
 		keys = append(keys, key)
 	}
-	recordManageAudit(c, "redemption.create", map[string]any{
+	auditParams := map[string]any{
 		"name":  redemption.Name,
 		"count": redemption.Count,
-		"quota": logger.FormatQuota(redemption.Quota),
-	})
+		"type":  redemption.Type,
+	}
+	if redemption.Type == model.RedemptionTypeSubscription {
+		auditParams["plan_id"] = redemption.PlanId
+	} else {
+		auditParams["quota"] = logger.FormatQuota(redemption.Quota)
+	}
+	recordManageAudit(c, "redemption.create", auditParams)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
 		"data":    keys,
 	})
 	return
+}
+
+// validateRedemptionPayload normalizes and validates the shared fields of a
+// create/update request, writing the API error itself when the payload is
+// rejected.
+func validateRedemptionPayload(c *gin.Context, redemption *model.Redemption) bool {
+	redemptionType, ok := model.NormalizeRedemptionType(redemption.Type)
+	if !ok {
+		common.ApiErrorT(c, "Redemption code type must be quota or subscription")
+		return false
+	}
+	redemption.Type = redemptionType
+	if redemptionType == model.RedemptionTypeSubscription {
+		if redemption.PlanId <= 0 {
+			common.ApiErrorT(c, "Select a subscription plan for this redemption code")
+			return false
+		}
+		if _, err := model.GetSubscriptionPlanById(redemption.PlanId); err != nil {
+			common.ApiErrorT(c, "The selected subscription plan does not exist")
+			return false
+		}
+		redemption.Quota = 0
+		redemption.DurationUnit = strings.TrimSpace(redemption.DurationUnit)
+		switch err := model.ValidateRedemptionDuration(redemption.DurationUnit, redemption.DurationValue, redemption.DurationSeconds); {
+		case errors.Is(err, model.ErrRedemptionDurationTooLong):
+			common.ApiErrorT(c, "Duration override cannot exceed 10 years")
+			return false
+		case err != nil:
+			common.ApiErrorT(c, "Duration override must be a positive duration")
+			return false
+		}
+		return true
+	}
+	if redemption.Quota <= 0 {
+		common.ApiErrorT(c, "Redemption quota must be positive")
+		return false
+	}
+	if err := common.ValidateWalletQuota(redemption.Quota); err != nil {
+		common.ApiError(c, err)
+		return false
+	}
+	redemption.PlanId = 0
+	redemption.DurationUnit = ""
+	redemption.DurationValue = 0
+	redemption.DurationSeconds = 0
+	return true
 }
 
 func DeleteRedemption(c *gin.Context) {
@@ -156,12 +211,7 @@ func UpdateRedemption(c *gin.Context) {
 		return
 	}
 	if statusOnly == "" {
-		if redemption.Quota <= 0 {
-			common.ApiErrorT(c, "Redemption quota must be positive")
-			return
-		}
-		if err := common.ValidateWalletQuota(redemption.Quota); err != nil {
-			common.ApiError(c, err)
+		if !validateRedemptionPayload(c, &redemption) {
 			return
 		}
 		if err := validateExpiredTime(redemption.ExpiredTime); err != nil {
@@ -172,11 +222,18 @@ func UpdateRedemption(c *gin.Context) {
 		cleanRedemption.Name = redemption.Name
 		cleanRedemption.Quota = redemption.Quota
 		cleanRedemption.ExpiredTime = redemption.ExpiredTime
+		cleanRedemption.Type = redemption.Type
+		cleanRedemption.PlanId = redemption.PlanId
+		cleanRedemption.DurationUnit = redemption.DurationUnit
+		cleanRedemption.DurationValue = redemption.DurationValue
+		cleanRedemption.DurationSeconds = redemption.DurationSeconds
 	}
 	if statusOnly != "" {
 		cleanRedemption.Status = redemption.Status
+		err = cleanRedemption.SelectUpdate()
+	} else {
+		err = cleanRedemption.Update()
 	}
-	err = cleanRedemption.Update()
 	if err != nil {
 		common.ApiError(c, err)
 		return

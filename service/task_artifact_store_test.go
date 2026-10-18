@@ -343,7 +343,7 @@ func TestS3TaskArtifactStorePersistsRecordsAndServes(t *testing.T) {
 	records, err := model.EnsurePlaygroundTaskArtifacts(7, "task-1", []model.PlaygroundTaskArtifactSeed{{Key: "video", Type: "video", MimeType: "video/mp4"}})
 	require.NoError(t, err)
 	require.Len(t, records, 1)
-	require.NoError(t, model.MarkPlaygroundTaskArtifactStored(records[0].ID, ref.Backend, ref.ObjectKey, ref.MimeType, ref.Size, "hash", common.GetTimestamp()+3600))
+	require.NoError(t, model.MarkPlaygroundTaskArtifactStored(records[0].ID, ref.Backend, ref.ObjectKey, ref.MimeType, ref.Size, "hash", common.GetTimestamp()+3600, ""))
 
 	resolved, err = store.Resolve(t.Context(), task, artifact)
 	require.NoError(t, err)
@@ -368,7 +368,7 @@ func TestS3TaskArtifactStorePersistsRecordsAndServes(t *testing.T) {
 	require.NotEmpty(t, location)
 	assert.Contains(t, location, "X-Amz-Signature=")
 	assert.Contains(t, location, "X-Amz-Expires=900")
-	assert.Contains(t, location, "/artifact-bucket/tasks/v1/pg/7/2026/10/task-1/video")
+	assert.Contains(t, location, "/artifact-bucket/tasks/v1/pg/7/task/2026/10/task-1/video")
 
 	// A record whose object vanished is not served, so the caller falls back.
 	require.NoError(t, store.(*objectTaskArtifactStore).objects.Delete(t.Context(), ref.ObjectKey))
@@ -562,7 +562,11 @@ func TestPlaygroundTaskArtifactStoreRejectsUnsupportedProviderContent(t *testing
 				for name, value := range testCase.headers {
 					w.Header().Set(name, value)
 				}
-				w.WriteHeader(testCase.status)
+				// A zero status means the case serves a plain 200; writing it
+				// would panic the handler and turn the case into a dead link.
+				if testCase.status != 0 {
+					w.WriteHeader(testCase.status)
+				}
 				_, _ = w.Write(testCase.payload)
 			}))
 			defer provider.Close()
@@ -724,7 +728,7 @@ func TestDeleteExpiredTaskArtifactObjectsSkipsPinnedResults(t *testing.T) {
 		objectKey := "pg/7/task/2026/10/" + task.TaskID + "/" + records[index].ArtifactKey
 		_, err := store.Put(t.Context(), objectKey, bytes.NewReader(mp4Fixture(64)))
 		require.NoError(t, err)
-		require.NoError(t, model.MarkPlaygroundTaskArtifactStored(records[index].ID, store.Backend(), objectKey, "video/mp4", 64, "hash", expiredAt))
+		require.NoError(t, model.MarkPlaygroundTaskArtifactStored(records[index].ID, store.Backend(), objectKey, "video/mp4", 64, "hash", expiredAt, ""))
 	}
 	require.NoError(t, model.SetPlaygroundTaskArtifactPin(7, task.TaskID, "thumb", true))
 

@@ -1001,11 +1001,13 @@ export const STATIC_I18N_KEYS = [
   'Edges per canvas',
   'Node data size limit',
   'Canvas storage per user',
+  'Object storage per user',
   'Concurrent Playground tasks',
   'Task result storage per user',
   'Presets',
   'Presets per user',
   'System prompt size limit',
+  'Storage',
   // Channel priority ordering API errors.
   'Channel priorities changed. Refresh and try again.',
   'Invalid channel priority move',
@@ -1053,4 +1055,19 @@ export const STATIC_I18N_KEYS = [
   'Video',
   'Audio',
   'Group',
+  // Subscription redemption code server messages and the redemption log
+  // sentence: they are returned from Go, so the literal scan cannot see them.
+  'Redemption code type must be quota or subscription',
+  'Select a subscription plan for this redemption code',
+  'The selected subscription plan does not exist',
+  'Duration override cannot exceed 10 years',
+  'Duration override must be a positive duration',
+  'Subscription redeemed with a redemption code, plan: {{plan}}, code ID {{id}}',
+  // Request timing phase labels render through t(label) from
+  // REQUEST_TIMING_PHASES.
+  'Auth',
+  'Channel selection',
+  'Upstream first byte',
+  'First token',
+  'Total',
 ] as const

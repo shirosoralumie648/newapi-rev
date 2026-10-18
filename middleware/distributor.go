@@ -34,6 +34,10 @@ type ModelRequest struct {
 
 func Distribute() func(c *gin.Context) {
 	return func(c *gin.Context) {
+		// Distribute runs directly behind authentication, so its entry is the
+		// end of the admission phase and its exit is the channel-selection
+		// milestone for the request's timing breakdown.
+		common.MarkRequestTiming(c, common.RequestTimingPhaseAuthenticated)
 		var channel *model.Channel
 		defer func() {
 			if c.Writer.Status() >= 400 {
@@ -124,6 +128,7 @@ func Distribute() func(c *gin.Context) {
 			}
 		}
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
+		common.MarkRequestTiming(c, common.RequestTimingPhaseChannelSelected)
 		SetupContextForSelectedChannel(c, channel, modelRequest.Model)
 		c.Next()
 		if channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
