@@ -1136,4 +1136,11 @@ export const STATIC_I18N_KEYS = [
   // from Go through message_key, so the literal scan cannot see them.
   'No periodic limit',
   'Invalid periodic reset cycle',
+  // Legacy referral migration (RF-09): the binding source label renders
+  // through t(label) from REFERRAL_SOURCE_LABEL_KEYS, and the migration log
+  // line and the reconciliation warning are returned from Go, so the literal
+  // scan cannot see them.
+  'Legacy',
+  'Legacy invitation reward transferred to balance {{quota}}',
+  'Legacy referral reconciliation found {{count}} deviating accounts; see the legacy_referral_reconcile system task result',
 ] as const

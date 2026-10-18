@@ -28,6 +28,7 @@ export const REFERRAL_SOURCE_LABEL_KEYS: Record<string, string> = {
   code: 'Invitation Code',
   oauth: 'OAuth',
   admin: 'Admin',
+  legacy: 'Legacy',
 }
 
 /** Commission states of one invitation or event, mapped to their translation key. */
