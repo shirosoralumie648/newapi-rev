@@ -429,7 +429,6 @@ describe('group settings workspace', () => {
   })
 
   it('rejects a display name that repeats another group identifier', async () => {
-    const user = userEvent.setup()
     const onSave = vi.fn(async (_values: typeof defaults) => {})
     render(
       <Fixture
