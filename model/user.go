@@ -703,62 +703,117 @@ func inviteUser(inviterId int) error {
 	return nil
 }
 
-func (user *User) TransferAffQuotaToQuota(quota int) error {
+// affiliateTransferRequestIdMaxLength bounds the idempotency key a client may
+// attach to a manual affiliate transfer.
+const affiliateTransferRequestIdMaxLength = 64
+
+// isValidAffiliateTransferRequestId accepts the idempotency key of a transfer:
+// an optional token of ASCII letters, digits, dots, dashes and underscores, at
+// most affiliateTransferRequestIdMaxLength characters.
+func isValidAffiliateTransferRequestId(requestId string) bool {
+	if len(requestId) > affiliateTransferRequestIdMaxLength {
+		return false
+	}
+	for _, r := range requestId {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// TransferAffQuotaToQuota moves invitation quota into the wallet balance. The
+// movement is one ledger transaction: the row claims the client request id as
+// its reference, so retrying the same transfer (same request_id) reports
+// success without moving anything a second time and without re-checking the
+// remaining balance. The transferred amount becomes an invite credit grant
+// that follows the configured invitation validity.
+func (user *User) TransferAffQuotaToQuota(quota int, requestId string) error {
 	// 检查quota是否小于最小额度
 	if float64(quota) < common.QuotaPerUnit {
 		return common.NewMessage("Minimum transfer quota is {{min}}!", map[string]any{"min": logger.FormatQuota(common.QuotaFromFloat(common.QuotaPerUnit))})
 	}
-
-	// 开始数据库事务
-	tx := DB.Begin()
-	if tx.Error != nil {
-		return tx.Error
+	requestId = strings.TrimSpace(requestId)
+	if !isValidAffiliateTransferRequestId(requestId) {
+		return common.NewMessage("Invalid parameters")
 	}
-	defer tx.Rollback() // 确保在函数退出时事务能回滚
-
-	// 加锁查询用户以确保数据一致性
-	err := lockForUpdate(tx).First(user, user.Id).Error
-	if err != nil {
-		return err
+	// 请求引用：同一账号 + 同一 request_id 只能占用一条账本行，这就是幂等键。
+	refId := ""
+	if requestId != "" {
+		refId = fmt.Sprintf("%d:%s", user.Id, requestId)
 	}
 
-	// 再次检查用户的AffQuota是否足够
-	if user.AffQuota < quota {
-		return common.NewMessage("Invitation quota is insufficient!")
-	}
+	applied := false
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		// 加锁查询用户以确保数据一致性
+		var locked User
+		if err := lockForUpdate(tx).First(&locked, user.Id).Error; err != nil {
+			return err
+		}
 
-	// 更新用户额度
-	user.AffQuota -= quota
-	user.Quota += quota
+		// 重放检查先于余额检查：重试同一请求必须成功返回，且不得因期间余额
+		// 变化而二次扣减或报“余额不足”。
+		if refId != "" {
+			var existing WalletLedgerEntry
+			findErr := tx.Select("id").
+				Where("ref_type = ? AND ref_id = ?", WalletLedgerRefAffiliate, refId).
+				First(&existing).Error
+			if findErr == nil {
+				return nil
+			}
+			if !errors.Is(findErr, gorm.ErrRecordNotFound) {
+				return findErr
+			}
+		}
 
-	// 保存用户状态
-	if err := tx.Save(user).Error; err != nil {
-		return err
-	}
+		// 再次检查用户的AffQuota是否足够
+		if locked.AffQuota < quota {
+			return common.NewMessage("Invitation quota is insufficient!")
+		}
+		if refId == "" {
+			// 兼容不发送 request_id 的客户端：沿用旧的随机引用，不提供重放保护。
+			refId = fmt.Sprintf("%d-%d-%s", locked.Id, common.GetTimestamp(), common.GetRandomString(8))
+		}
 
-	// 邀请额度转入钱包：账本行与余额变更同一事务。
-	applied, err := AppendWalletLedgerTx(tx, &WalletLedgerEntry{
-		UserId:       user.Id,
-		Kind:         WalletLedgerKindAffiliateTransfer,
-		Amount:       int64(quota),
-		BalanceAfter: int64(user.Quota),
-		RefType:      WalletLedgerRefAffiliate,
-		RefId:        fmt.Sprintf("%d-%d-%s", user.Id, common.GetTimestamp(), common.GetRandomString(8)),
-		CreatedAt:    common.GetTimestamp(),
+		// 邀请额度转入钱包：账本行与余额变更通过 ApplyWalletLedgerDelta 同一事务完成。
+		expiresAt := CreditGrantExpiryFor(operation_setting.CreditGrantSourceInvite, common.GetTimestamp())
+		appliedNow, err := ApplyWalletLedgerDelta(tx, locked.Id, WalletLedgerKindAffiliateTransfer, int64(quota),
+			WalletLedgerRefAffiliate, refId, grantLedgerMeta(operation_setting.CreditGrantSourceInvite, expiresAt))
+		if err != nil {
+			return err
+		}
+		if !appliedNow {
+			// 并发重放已抢先记账，本次不再变动余额。
+			return nil
+		}
+		// 转入的邀请额度进入 invite 桶，按配置的邀请额度有效期生效。
+		if _, err := createCreditGrantTx(tx, locked.Id, operation_setting.CreditGrantSourceInvite, int64(quota), expiresAt, ""); err != nil {
+			return err
+		}
+		// 用相对更新扣减存量邀请额度，避免整行写入丢失并发的邀请累积。
+		update := tx.Model(&User{}).
+			Where("id = ? AND aff_quota >= ?", locked.Id, quota).
+			UpdateColumn("aff_quota", gorm.Expr("aff_quota - ?", quota))
+		if update.Error != nil {
+			return update.Error
+		}
+		if update.RowsAffected == 0 {
+			return common.NewMessage("Invitation quota is insufficient!")
+		}
+		applied = true
+		user.AffQuota = locked.AffQuota - quota
+		user.Quota = locked.Quota + quota
+		return nil
 	})
 	if err != nil {
 		return err
 	}
-	if !applied {
-		return errors.New("wallet ledger reference conflict")
+	if applied {
+		syncCreditUserQuotaCache(user.Id, quota, "affiliate transfer")
 	}
-	// 转入的邀请额度进入 invite 桶，按配置的邀请额度有效期生效。
-	if _, err := createCreditGrantTx(tx, user.Id, operation_setting.CreditGrantSourceInvite, int64(quota), CreditGrantExpiryFor(operation_setting.CreditGrantSourceInvite, common.GetTimestamp()), ""); err != nil {
-		return err
-	}
-
-	// 提交事务
-	return tx.Commit().Error
+	return nil
 }
 
 func (user *User) prepareForInsert(tx *gorm.DB) error {

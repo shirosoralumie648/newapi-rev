@@ -35,6 +35,17 @@ import { generateAffiliateLink } from '../lib'
 // Affiliate Hook
 // ============================================================================
 
+/**
+ * A fresh idempotency key for one transfer attempt: the server stores it in
+ * the wallet ledger, so a repeated request cannot move quota twice.
+ */
+function createTransferRequestId(): string {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID()
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
 export function useAffiliate() {
   const [affiliateCode, setAffiliateCode] = useState<string>('')
   const [affiliateLink, setAffiliateLink] = useState<string>('')
@@ -69,7 +80,10 @@ export function useAffiliate() {
   const transferQuota = useCallback(async (quota: number): Promise<boolean> => {
     try {
       setTransferring(true)
-      const response = await transferAffiliateQuota({ quota })
+      const response = await transferAffiliateQuota({
+        quota,
+        request_id: createTransferRequestId(),
+      })
 
       if (response.success) {
         toast.success(
