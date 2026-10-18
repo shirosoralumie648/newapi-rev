@@ -1661,6 +1661,9 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodGet, "/api/playground/settings"},
 		{http.MethodGet, "/api/playground/message-costs?request_ids=route-cost"},
 		{http.MethodGet, "/api/playground/assets?kind=attachment"},
+		{http.MethodGet, "/api/playground/trash"},
+		{http.MethodGet, "/api/playground/sessions/" + sessionID + "/export"},
+		{http.MethodPost, "/api/playground/sessions/" + sessionID + "/restore"},
 		{http.MethodPost, "/api/playground/tasks/missing/cancel"},
 		{http.MethodGet, "/api/playground/presets"},
 		{http.MethodPost, "/api/playground/presets"},
@@ -1750,6 +1753,7 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodGet, canvasBase}, {http.MethodPost, canvasBase},
 		{http.MethodGet, canvasBase + "/missing"}, {http.MethodPatch, canvasBase + "/missing"},
 		{http.MethodDelete, canvasBase + "/missing"},
+		{http.MethodPost, canvasBase + "/missing/restore"},
 		{http.MethodPost, canvasBase + "/missing/attachments"},
 	} {
 		response := playgroundAuthenticatedRequest(t, engine, "", route.method, route.path, upload)
@@ -3684,6 +3688,214 @@ func TestPlaygroundTaskArtifactRecordsAndPins(t *testing.T) {
 			hasWork, err = model.HasPlaygroundTasksAwaitingArtifacts(cutoff)
 			require.NoError(t, err)
 			assert.False(t, hasWork)
+		})
+	}
+}
+
+// playgroundExportDownload is the server-rendered download contract of the
+// conversation export endpoint.
+type playgroundExportDownload struct {
+	Format      string `json:"format"`
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type"`
+	Content     string `json:"content"`
+}
+
+// playgroundExportDownloadFixture exports one owned conversation through the
+// production handler and returns the parsed download contract.
+func playgroundExportDownloadFixture(t *testing.T, user int, sessionID string, format string) playgroundExportDownload {
+	t.Helper()
+	path := "/api/playground/sessions/" + sessionID + "/export?format=" + format
+	response := playgroundRequest(t, user, http.MethodGet, path, nil, controller.ExportPlaygroundSession)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var envelope struct {
+		Success bool
+		Data    playgroundExportDownload
+	}
+	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &envelope))
+	require.True(t, envelope.Success, response.Body.String())
+	require.Equal(t, format, envelope.Data.Format)
+	return envelope.Data
+}
+
+// playgroundTrashListingFixture reads one account's trash through the
+// production handler.
+func playgroundTrashListingFixture(t *testing.T, user int) model.PlaygroundTrashListing {
+	t.Helper()
+	response := playgroundRequest(t, user, http.MethodGet, "/api/playground/trash", nil, controller.ListPlaygroundTrash)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var envelope struct {
+		Success bool
+		Data    model.PlaygroundTrashListing
+	}
+	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &envelope))
+	require.True(t, envelope.Success, response.Body.String())
+	return envelope.Data
+}
+
+// The conversation trash lifecycle: export renders a conversation in both
+// formats — active or trashed — without reading attachment bytes; deleting
+// hides it from every active read and blocks new writes while its rows and its
+// share of the account budgets stay stored; restore returns it intact and
+// accepts only a trashed row; and the retention sweep purges only the entries
+// whose owner-configured window elapsed.
+func TestPlaygroundTrashLifecycle(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			usePlaygroundGroupQuota(t, "default", playground_setting.PlaygroundQuotaPolicy{TrashRetentionDays: 2})
+			usePlaygroundGroupQuota(t, "team", playground_setting.PlaygroundQuotaPolicy{TrashRetentionDays: 30})
+			require.NoError(t, db.Model(&model.User{}).Where("id = ?", 9).Update("group", "team").Error)
+
+			session := createPlayground(t, 7, "trash-lifecycle")
+			id := session["id"].(string)
+			attachment := playgroundUploadAttachment(t, 7, id, "trash-file", "image/png", playgroundPNGFixture(64))
+			attachmentID := attachment["id"].(string)
+			messagePath := "/api/playground/sessions/" + id + "/messages"
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodPut, messagePath, map[string]any{
+				"revision": 0, "messages": []any{map[string]any{"client_key": "u1", "payload": map[string]any{
+					"key": "u1", "from": "user",
+					"versions": []any{map[string]any{"id": "u1-v1", "content": "hello trash",
+						"attachments": []any{map[string]any{"id": attachmentID}}}},
+				}}},
+			}, controller.ReplacePlaygroundMessages).Code)
+
+			// Export renders both formats server-side, derives the file name
+			// from the title and links attachments through the owner-scoped
+			// content endpoint instead of embedding their bytes.
+			markdown := playgroundExportDownloadFixture(t, 7, id, "markdown")
+			assert.Equal(t, "Conversation.md", markdown.Filename)
+			assert.Equal(t, "text/markdown; charset=utf-8", markdown.ContentType)
+			assert.Contains(t, markdown.Content, "# Conversation")
+			assert.Contains(t, markdown.Content, "hello trash")
+			assert.Contains(t, markdown.Content, "- [image.png](/api/playground/sessions/"+id+"/attachments/"+attachmentID+"/content)")
+			jsonExport := playgroundExportDownloadFixture(t, 7, id, "json")
+			assert.Equal(t, "Conversation.json", jsonExport.Filename)
+			assert.Equal(t, "application/json; charset=utf-8", jsonExport.ContentType)
+			var document struct {
+				Session struct {
+					ID      string `json:"id"`
+					Title   string `json:"title"`
+					Trashed bool   `json:"trashed"`
+				} `json:"session"`
+				Messages []struct {
+					ClientKey string `json:"client_key"`
+				} `json:"messages"`
+			}
+			require.NoError(t, common.UnmarshalJsonStr(jsonExport.Content, &document))
+			assert.Equal(t, id, document.Session.ID)
+			assert.Equal(t, "Conversation", document.Session.Title)
+			assert.False(t, document.Session.Trashed)
+			require.Len(t, document.Messages, 1)
+			assert.Equal(t, "u1", document.Messages[0].ClientKey)
+
+			// Export stays owner-scoped and rejects an unknown format.
+			assert.Equal(t, http.StatusBadRequest, playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+id+"/export?format=pdf", nil, controller.ExportPlaygroundSession).Code)
+			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 8, http.MethodGet, "/api/playground/sessions/"+id+"/export?format=json", nil, controller.ExportPlaygroundSession).Code)
+
+			before := playgroundUsageCounters(t, db, 7)
+			require.EqualValues(t, 1, before.Sessions)
+			require.EqualValues(t, 1, before.AttachmentCount)
+			require.Positive(t, before.ObjectBytes)
+			assert.Empty(t, playgroundTrashListingFixture(t, 7).Items)
+			// Restore is trash-only: an active conversation is not found.
+			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions/"+id+"/restore", nil, controller.RestorePlaygroundSession).Code)
+
+			// Moving the conversation to the trash hides it from every active
+			// read and blocks new writes while its rows and counters stay.
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+id, nil, controller.DeletePlaygroundSession).Code)
+			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+id, nil, controller.GetPlaygroundSession).Code)
+			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 7, http.MethodGet, messagePath, nil, controller.ListPlaygroundMessages).Code)
+			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 7, http.MethodPut, messagePath, map[string]any{"revision": 1, "messages": []any{}}, controller.ReplacePlaygroundMessages).Code)
+			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 8, http.MethodGet, "/api/playground/sessions/"+id, nil, controller.GetPlaygroundSession).Code)
+			assert.Contains(t, playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions", nil, controller.ListPlaygroundSessions).Body.String(), `"total":0`)
+			assert.Equal(t, playgroundUsageCounterValues(before), playgroundUsageCounterValues(playgroundUsageCounters(t, db, 7)))
+			var rows int64
+			require.NoError(t, db.Model(&model.PlaygroundMessage{}).Where("session_id = ?", id).Count(&rows).Error)
+			assert.EqualValues(t, 1, rows)
+			require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("session_id = ?", id).Count(&rows).Error)
+			assert.EqualValues(t, 1, rows)
+
+			// The trash listing reports the entry, the account's retention
+			// window and the moment the cleanup may purge it.
+			listing := playgroundTrashListingFixture(t, 7)
+			assert.Equal(t, 2, listing.RetentionDays)
+			require.Len(t, listing.Items, 1)
+			assert.Equal(t, "session", listing.Items[0].Kind)
+			assert.Equal(t, id, listing.Items[0].ID)
+			assert.Equal(t, "Conversation", listing.Items[0].Title)
+			assert.Positive(t, listing.Items[0].DeletedAt)
+			assert.Equal(t, listing.Items[0].DeletedAt+2*24*60*60, listing.Items[0].PurgeAt)
+
+			// A trashed conversation still exports, and the file says so.
+			trashedMarkdown := playgroundExportDownloadFixture(t, 7, id, "markdown")
+			assert.Contains(t, trashedMarkdown.Content, "In trash since")
+			trashedJSON := playgroundExportDownloadFixture(t, 7, id, "json")
+			require.NoError(t, common.UnmarshalJsonStr(trashedJSON.Content, &document))
+			assert.True(t, document.Session.Trashed)
+			require.Len(t, document.Messages, 1)
+
+			// Restore accepts only the owner's trashed row and returns the
+			// conversation with its messages and counters untouched.
+			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 8, http.MethodPost, "/api/playground/sessions/"+id+"/restore", nil, controller.RestorePlaygroundSession).Code)
+			restored := playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions/"+id+"/restore", nil, controller.RestorePlaygroundSession)
+			require.Equal(t, http.StatusOK, restored.Code, restored.Body.String())
+			restoredRow, err := model.GetPlaygroundSession(7, id)
+			require.NoError(t, err)
+			assert.Zero(t, restoredRow.DeletedAt)
+			messages, _, err := model.ListPlaygroundMessages(7, id)
+			require.NoError(t, err)
+			require.Len(t, messages, 1)
+			assert.Equal(t, playgroundUsageCounterValues(before), playgroundUsageCounterValues(playgroundUsageCounters(t, db, 7)))
+			assert.Empty(t, playgroundTrashListingFixture(t, 7).Items)
+			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions/"+id+"/restore", nil, controller.RestorePlaygroundSession).Code)
+
+			// A fresh trashing survives a sweep: the candidate age floors the
+			// window before the owner's policy is re-checked under the lock.
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+id, nil, controller.DeletePlaygroundSession).Code)
+			sweep, err := model.PurgeExpiredPlaygroundTrash(100)
+			require.NoError(t, err)
+			assert.Zero(t, sweep.Sessions)
+			assert.Zero(t, sweep.Canvases)
+
+			// A group with a longer window keeps its entry while the same
+			// sweep purges the default group's aged one.
+			groupSession := createPlayground(t, 9, "trash-lifecycle-group")
+			groupID := groupSession["id"].(string)
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 9, http.MethodDelete, "/api/playground/sessions/"+groupID, nil, controller.DeletePlaygroundSession).Code)
+			expired := common.GetTimestamp() - 3*24*60*60
+			require.NoError(t, db.Model(&model.PlaygroundSession{}).Where("id = ?", id).Update("deleted_at", expired).Error)
+			require.NoError(t, db.Model(&model.PlaygroundSession{}).Where("id = ?", groupID).Update("deleted_at", expired).Error)
+			sweep, err = model.PurgeExpiredPlaygroundTrash(100)
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, sweep.Sessions)
+			assert.Zero(t, sweep.Canvases)
+
+			// The purge released the rows, the stored bytes and the counter
+			// share, and the conversation is no longer exportable or
+			// restorable.
+			require.NoError(t, db.Model(&model.PlaygroundSession{}).Where("id = ?", id).Count(&rows).Error)
+			assert.Zero(t, rows)
+			require.NoError(t, db.Model(&model.PlaygroundMessage{}).Where("session_id = ?", id).Count(&rows).Error)
+			assert.Zero(t, rows)
+			require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("session_id = ?", id).Count(&rows).Error)
+			assert.Zero(t, rows)
+			assert.Equal(t, []int64{0, 0, 0, 0, 0, 0, 0, 0, 0}, playgroundUsageCounterValues(playgroundUsageCounters(t, db, 7)))
+			assert.Empty(t, playgroundTrashListingFixture(t, 7).Items)
+			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+id+"/export?format=json", nil, controller.ExportPlaygroundSession).Code)
+			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions/"+id+"/restore", nil, controller.RestorePlaygroundSession).Code)
+
+			// The preserved entry waits through its own window and still
+			// restores with its messages.
+			groupListing := playgroundTrashListingFixture(t, 9)
+			assert.Equal(t, 30, groupListing.RetentionDays)
+			require.Len(t, groupListing.Items, 1)
+			assert.Equal(t, "session", groupListing.Items[0].Kind)
+			assert.Equal(t, groupID, groupListing.Items[0].ID)
+			assert.Equal(t, groupListing.Items[0].DeletedAt+30*24*60*60, groupListing.Items[0].PurgeAt)
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 9, http.MethodPost, "/api/playground/sessions/"+groupID+"/restore", nil, controller.RestorePlaygroundSession).Code)
+			_, err = model.GetPlaygroundSession(9, groupID)
+			require.NoError(t, err)
 		})
 	}
 }
