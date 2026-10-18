@@ -15,6 +15,7 @@ import (
 	"github.com/samber/hot"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // Subscription duration units
@@ -1533,7 +1534,11 @@ func getSubscriptionWindowUsageTx(tx *gorm.DB, subscriptionId int, window string
 		return nil, errors.New("invalid window usage args")
 	}
 	var row SubscriptionWindowUsage
-	err := tx.Where("subscription_id = ? AND window = ?", subscriptionId, window).First(&row).Error
+	// "window" is a reserved word on MySQL and PostgreSQL, so the condition is
+	// built from a quoted identifier instead of raw SQL.
+	err := tx.Where("subscription_id = ?", subscriptionId).
+		Where(clause.Eq{Column: clause.Column{Name: "window"}, Value: window}).
+		First(&row).Error
 	if err == nil {
 		return &row, nil
 	}
