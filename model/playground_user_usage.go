@@ -42,10 +42,14 @@ import (
 // back any drift by writing the measured values without touching, deleting or
 // moving a single resource.
 type PlaygroundUserUsage struct {
-	UserID          int   `json:"user_id" gorm:"primaryKey"`
-	Sessions        int64 `json:"sessions" gorm:"not null"`
-	Presets         int64 `json:"presets" gorm:"not null"`
-	Snippets        int64 `json:"snippets" gorm:"not null"`
+	UserID   int   `json:"user_id" gorm:"primaryKey"`
+	Sessions int64 `json:"sessions" gorm:"not null"`
+	Presets  int64 `json:"presets" gorm:"not null"`
+	// Snippets counts the account's stored prompt snippets. The column was
+	// appended to a counter table that already holds rows, so it carries the
+	// same DEFAULT 0 as the canvas snapshot counters: a NOT NULL column can
+	// only be added to a non-empty table when it has one.
+	Snippets        int64 `json:"snippets" gorm:"not null;default:0"`
 	AttachmentCount int64 `json:"attachment_count" gorm:"not null"`
 	// AttachmentBytes counts every stored attachment byte, database-backed
 	// legacy rows included, because that is the budget AttachmentUserMaxBytes

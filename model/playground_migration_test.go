@@ -245,11 +245,14 @@ func TestPlaygroundUserUsageCountersMigration(t *testing.T) {
 			assert.Zero(t, stored.CanvasSnapshotCount)
 			assert.Zero(t, stored.CanvasSnapshotBytes)
 
-			// Counter rows written afterwards carry snapshot usage.
+			// Counter rows written afterwards carry snapshot usage. The read
+			// uses a fresh destination: the primary key of an already loaded
+			// struct becomes an extra query condition.
 			require.NoError(t, db.Create(&PlaygroundUserUsage{UserID: 8, CanvasSnapshotCount: 2, CanvasSnapshotBytes: 128, CreatedAt: 1, UpdatedAt: 1}).Error)
-			require.NoError(t, db.Where("user_id = ?", 8).First(&stored).Error)
-			assert.EqualValues(t, 2, stored.CanvasSnapshotCount)
-			assert.EqualValues(t, 128, stored.CanvasSnapshotBytes)
+			var created PlaygroundUserUsage
+			require.NoError(t, db.Where("user_id = ?", 8).First(&created).Error)
+			assert.EqualValues(t, 2, created.CanvasSnapshotCount)
+			assert.EqualValues(t, 128, created.CanvasSnapshotBytes)
 		})
 	}
 }
