@@ -397,6 +397,11 @@ func migrateDB() error {
 	if err := migratePlaygroundAttachmentStorage(DB); err != nil {
 		return err
 	}
+	// The trash tombstone is a NOT NULL column on tables that already hold rows
+	// on upgraded installations; add it with a default first.
+	if err := migratePlaygroundTrashColumns(DB); err != nil {
+		return err
+	}
 	// Migrate price_amount column from float/double to decimal for existing tables
 	migrateSubscriptionPlanPriceAmount()
 	// Migrate model_limits column from varchar to text for existing tables

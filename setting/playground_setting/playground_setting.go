@@ -54,6 +54,12 @@ type PlaygroundQuotaPolicy struct {
 	ObjectUserMaxBytes     int64 `json:"object_user_max_bytes"`
 	TaskMaxConcurrency     int   `json:"task_max_concurrency"`
 	TaskUserResultMaxBytes int64 `json:"task_user_result_max_bytes"`
+	// TrashRetentionDays is how long a soft-deleted conversation or canvas
+	// stays recoverable in the trash before the cleanup task purges it. A
+	// resource in the trash keeps occupying the account budgets until that
+	// purge, so restoring it can never exceed a limit the account already
+	// enforced; only the purge releases the stored rows and bytes.
+	TrashRetentionDays int `json:"trash_retention_days"`
 }
 
 // PlaygroundSetting is the persisted configuration. Defaults is the global
@@ -123,6 +129,9 @@ func builtinPlaygroundQuotaPolicy() PlaygroundQuotaPolicy {
 		// tasks. Scheduled expiry frees finished task rows after the retention
 		// window, so a healthy workspace stays far below this ceiling.
 		TaskUserResultMaxBytes: 64 << 20,
+		// A deleted conversation or canvas stays in the trash for 30 days
+		// before the cleanup task removes its rows and bytes.
+		TrashRetentionDays: 30,
 	}
 }
 
@@ -262,4 +271,14 @@ func applyPlaygroundQuotaOverrides(policy *PlaygroundQuotaPolicy, override *Play
 	if override.TaskUserResultMaxBytes > 0 {
 		policy.TaskUserResultMaxBytes = override.TaskUserResultMaxBytes
 	}
+	if override.TrashRetentionDays > 0 {
+		policy.TrashRetentionDays = override.TrashRetentionDays
+	}
+}
+
+// TrashRetentionSeconds is the resolved trash window in seconds, floored at one
+// day so a misconfigured policy can never purge a conversation right after it
+// was deleted.
+func (policy PlaygroundQuotaPolicy) TrashRetentionSeconds() int64 {
+	return int64(max(policy.TrashRetentionDays, 1)) * 24 * 60 * 60
 }

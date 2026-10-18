@@ -70,13 +70,16 @@ func resolvePlaygroundCanvasReference(userID int, reference PlaygroundCanvasRefe
 	sessionOwned := false
 	if reference.SessionID != "" {
 		var session PlaygroundSession
-		if err := DB.Select("id, user_id").Where("id = ?", reference.SessionID).First(&session).Error; err != nil {
+		if err := DB.Select("id, user_id, deleted_at").Where("id = ?", reference.SessionID).First(&session).Error; err != nil {
 			if !errors.Is(err, gorm.ErrRecordNotFound) {
 				return false, false, err
 			}
 		} else if session.UserID != userID {
 			return false, true, nil
-		} else {
+		} else if session.DeletedAt == 0 {
+			// A trashed conversation is not an ownership violation: its node is
+			// reported as "source deleted" while it waits in the trash, and it
+			// becomes available again if the owner restores it.
 			sessionOwned = true
 		}
 	}
@@ -204,8 +207,13 @@ type PlaygroundCanvasProject struct {
 	NodeCount     int   `gorm:"not null"`
 	EdgeCount     int   `gorm:"not null"`
 	Revision      int64 `gorm:"not null"`
-	CreatedAt     int64 `gorm:"not null;index"`
-	UpdatedAt     int64 `gorm:"not null;index"`
+	// DeletedAt is the trash tombstone, like the one on PlaygroundSession: 0
+	// means the canvas is active, a positive value is when it was soft-deleted.
+	// A trashed canvas keeps its document, pins and counter share until the
+	// trash cleanup purges it after the configured retention window.
+	DeletedAt int64 `json:"deleted_at" gorm:"not null;default:0;index"`
+	CreatedAt int64 `gorm:"not null;index"`
+	UpdatedAt int64 `gorm:"not null;index"`
 }
 
 type PlaygroundCanvasSummary struct {
@@ -247,7 +255,7 @@ func FindPlaygroundCanvasProjectByClientID(userID int, clientID string) (*Playgr
 		return nil, ErrPlaygroundCanvasNotFound
 	}
 	var project PlaygroundCanvasProject
-	if err := DB.Where("user_id = ? AND client_id = ?", userID, clientID).First(&project).Error; err != nil {
+	if err := DB.Where("user_id = ? AND client_id = ? AND deleted_at = 0", userID, clientID).First(&project).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrPlaygroundCanvasNotFound
 		}
@@ -316,6 +324,16 @@ func CreatePlaygroundCanvasProject(userID int, project *PlaygroundCanvasProject,
 		if usage.CanvasBytes+size > policy.CanvasUserMaxBytes {
 			return ErrPlaygroundCanvasLimit
 		}
+		// A trashed canvas keeps its client key for restore; a client that
+		// creates a board with the same key again gets a fresh one, so the
+		// trashed row gives the key up instead of blocking the unique index.
+		if project.ClientID != nil {
+			if err := tx.Model(&PlaygroundCanvasProject{}).
+				Where("user_id = ? AND client_id = ? AND deleted_at > 0", userID, *project.ClientID).
+				Update("client_id", nil).Error; err != nil {
+				return err
+			}
+		}
 		if err := tx.Create(project).Error; err != nil {
 			return err
 		}
@@ -346,7 +364,7 @@ func CreatePlaygroundCanvasProject(userID int, project *PlaygroundCanvasProject,
 
 func GetPlaygroundCanvasProject(userID int, id string) (*PlaygroundCanvasProject, error) {
 	var project PlaygroundCanvasProject
-	err := DB.Where("id = ? AND user_id = ?", id, userID).First(&project).Error
+	err := DB.Where("id = ? AND user_id = ? AND deleted_at = 0", id, userID).First(&project).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrPlaygroundCanvasNotFound
 	}
@@ -359,14 +377,14 @@ func GetPlaygroundCanvasProject(userID int, id string) (*PlaygroundCanvasProject
 // lockPlaygroundCanvasProject acquires the canvas row a canvas-scoped child
 // resource (an attachment upload) belongs to. It runs inside the writer's
 // transaction so capacity checks and project deletion serialize against the
-// upload, and a foreign or missing canvas is rejected before any row is
-// written.
+// upload, and a foreign, missing or trashed canvas is rejected before any row
+// is written.
 func lockPlaygroundCanvasProject(tx *gorm.DB, userID int, canvasID string) error {
 	if userID <= 0 {
 		return ErrPlaygroundCanvasNotFound
 	}
 	var project PlaygroundCanvasProject
-	err := lockForUpdate(tx).Where("id = ? AND user_id = ?", canvasID, userID).First(&project).Error
+	err := lockForUpdate(tx).Where("id = ? AND user_id = ? AND deleted_at = 0", canvasID, userID).First(&project).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return ErrPlaygroundCanvasNotFound
 	}
@@ -379,7 +397,7 @@ func ListPlaygroundCanvasProjects(userID int, offset, limit int) ([]PlaygroundCa
 	}
 	projects := make([]PlaygroundCanvasProject, 0)
 	var count int64
-	query := DB.Model(&PlaygroundCanvasProject{}).Where("user_id = ?", userID)
+	query := DB.Model(&PlaygroundCanvasProject{}).Where("user_id = ? AND deleted_at = 0", userID)
 	if err := query.Count(&count).Error; err != nil {
 		return nil, 0, err
 	}
@@ -405,7 +423,7 @@ func UpdatePlaygroundCanvasProject(userID int, id string, revision int64, input 
 	}
 	var project PlaygroundCanvasProject
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		if err := lockForUpdate(tx).Where("id = ? AND user_id = ?", id, userID).First(&project).Error; err != nil {
+		if err := lockForUpdate(tx).Where("id = ? AND user_id = ? AND deleted_at = 0", id, userID).First(&project).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrPlaygroundCanvasNotFound
 			}
@@ -468,37 +486,125 @@ func UpdatePlaygroundCanvasProject(userID int, id string, revision int64, input 
 	return &project, nil
 }
 
+// DeletePlaygroundCanvasProject moves one canvas to the trash. The document,
+// its attachment pins and its generated-result pins stay stored — and the
+// account canvas budgets keep counting them — until the trash cleanup purges
+// the project after the configured retention window, so a restore shows the
+// same board with the same resources. RestorePlaygroundCanvasProject brings it
+// back, and a purge is what releases the pins.
 func DeletePlaygroundCanvasProject(userID int, id string) error {
 	return DB.Transaction(func(tx *gorm.DB) error {
 		var project PlaygroundCanvasProject
-		err := lockForUpdate(tx).Where("id = ? AND user_id = ?", id, userID).First(&project).Error
+		err := lockForUpdate(tx).Where("id = ? AND user_id = ? AND deleted_at = 0", id, userID).First(&project).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrPlaygroundCanvasNotFound
 		}
 		if err != nil {
 			return err
 		}
-		usage, err := lockPlaygroundUserUsage(tx, userID)
+		return tx.Model(&PlaygroundCanvasProject{}).
+			Where("id = ? AND user_id = ? AND deleted_at = 0", project.ID, userID).
+			Update("deleted_at", common.GetTimestamp()).Error
+	})
+}
+
+// RestorePlaygroundCanvasProject returns a trashed canvas to the active list.
+// The project never left the account counters, so no capacity check is needed.
+func RestorePlaygroundCanvasProject(userID int, id string) (*PlaygroundCanvasProject, error) {
+	var project PlaygroundCanvasProject
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockForUpdate(tx).Where("id = ? AND user_id = ? AND deleted_at > 0", id, userID).First(&project).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrPlaygroundCanvasNotFound
+			}
+			return err
+		}
+		now := common.GetTimestamp()
+		if err := tx.Model(&PlaygroundCanvasProject{}).Where("id = ? AND user_id = ?", project.ID, userID).
+			Updates(map[string]any{"deleted_at": 0, "updated_at": now}).Error; err != nil {
+			return err
+		}
+		project.DeletedAt = 0
+		project.UpdatedAt = now
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &project, nil
+}
+
+// PurgePlaygroundCanvasProject permanently removes one trashed canvas, releases
+// the attachment and generated-result pins it held and returns its document
+// bytes to the account budget. Only the trash cleanup and tests use it; the API
+// only ever soft deletes.
+func PurgePlaygroundCanvasProject(userID int, id string) error {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var project PlaygroundCanvasProject
+		err := lockForUpdate(tx).Where("id = ? AND user_id = ? AND deleted_at > 0", id, userID).First(&project).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrPlaygroundCanvasNotFound
+		}
 		if err != nil {
 			return err
 		}
-		// Deleting the canvas releases every attachment pin it held, so the
-		// orphan cleanup can collect images this board was the last user of.
-		if err := tx.Where("canvas_id = ? AND user_id = ?", id, userID).Delete(&PlaygroundCanvasAsset{}).Error; err != nil {
-			return err
-		}
-		// The canvas also releases the generated results it kept alive, so the
-		// result retention window resumes for them.
-		if err := tx.Where("source = ? AND source_id = ? AND user_id = ?", PlaygroundTaskArtifactPinSourceCanvas, id, userID).
-			Delete(&PlaygroundTaskArtifactPin{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("id = ? AND user_id = ?", id, userID).Delete(&PlaygroundCanvasProject{}).Error; err != nil {
-			return err
-		}
-		usage.apply(playgroundUserUsageDelta{CanvasCount: -1, CanvasBytes: -project.DocumentBytes})
-		return savePlaygroundUserUsage(tx, usage)
+		return purgePlaygroundCanvasProjectTx(tx, &project)
 	})
+}
+
+// purgePlaygroundCanvasProjectTx removes one locked canvas and everything it
+// held inside the caller's transaction.
+func purgePlaygroundCanvasProjectTx(tx *gorm.DB, project *PlaygroundCanvasProject) error {
+	usage, err := lockPlaygroundUserUsage(tx, project.UserID)
+	if err != nil {
+		return err
+	}
+	// Deleting the canvas releases every attachment pin it held, so the orphan
+	// cleanup can collect images this board was the last user of.
+	if err := tx.Where("canvas_id = ? AND user_id = ?", project.ID, project.UserID).Delete(&PlaygroundCanvasAsset{}).Error; err != nil {
+		return err
+	}
+	// The canvas also releases the generated results it kept alive, so the
+	// result retention window resumes for them.
+	if err := tx.Where("source = ? AND source_id = ? AND user_id = ?", PlaygroundTaskArtifactPinSourceCanvas, project.ID, project.UserID).
+		Delete(&PlaygroundTaskArtifactPin{}).Error; err != nil {
+		return err
+	}
+	if err := tx.Where("id = ? AND user_id = ?", project.ID, project.UserID).Delete(&PlaygroundCanvasProject{}).Error; err != nil {
+		return err
+	}
+	usage.apply(playgroundUserUsageDelta{CanvasCount: -1, CanvasBytes: -project.DocumentBytes})
+	return savePlaygroundUserUsage(tx, usage)
+}
+
+// purgeExpiredPlaygroundCanvasProject removes one trash candidate inside a
+// row-locked transaction, re-checking the owner's retention window so raising
+// the policy between the sweep query and the lock skips the row instead of
+// purging it early. A candidate that was restored in the meantime is skipped.
+func purgeExpiredPlaygroundCanvasProject(candidate *PlaygroundCanvasProject, now int64) (int64, error) {
+	purged := int64(0)
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var project PlaygroundCanvasProject
+		if err := lockForUpdate(tx).Where("id = ? AND user_id = ? AND deleted_at > 0", candidate.ID, candidate.UserID).First(&project).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+		retention, err := playgroundTrashRetentionSeconds(tx, project.UserID)
+		if err != nil {
+			return err
+		}
+		if now-project.DeletedAt < retention {
+			return nil
+		}
+		if err := purgePlaygroundCanvasProjectTx(tx, &project); err != nil {
+			return err
+		}
+		purged = 1
+		return nil
+	})
+	return purged, err
 }
 
 // PlaygroundCanvasAsset pins one attachment while at least one canvas node

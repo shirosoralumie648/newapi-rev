@@ -116,6 +116,41 @@ func migratePlaygroundAttachmentStorage(db *gorm.DB) error {
 	return nil
 }
 
+// playgroundTrashTables are the tables that gained a trash tombstone. The
+// resolved table name comes from the statement parser so the migration honors
+// the configured naming strategy (including a table prefix).
+var playgroundTrashTables = []any{&PlaygroundSession{}, &PlaygroundCanvasProject{}}
+
+// migratePlaygroundTrashColumns adds the trash tombstone to installations that
+// predate it. PostgreSQL refuses to add a NOT NULL column to a non-empty table
+// without a default, so the column is created with DEFAULT 0 before
+// AutoMigrate sees it; AutoMigrate then only verifies the model contract. The
+// migration is a no-op on a fresh database and once the column exists.
+func migratePlaygroundTrashColumns(db *gorm.DB) error {
+	if db == nil {
+		return fmt.Errorf("migrate playground trash columns: database is nil")
+	}
+	for _, target := range playgroundTrashTables {
+		if !db.Migrator().HasTable(target) {
+			continue
+		}
+		if db.Migrator().HasColumn(target, "DeletedAt") {
+			continue
+		}
+		statement := &gorm.Statement{DB: db}
+		if err := statement.Parse(target); err != nil {
+			return fmt.Errorf("resolve playground trash table: %w", err)
+		}
+		if statement.Table == "" {
+			return fmt.Errorf("resolve playground trash table: empty table name")
+		}
+		if err := db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN deleted_at bigint NOT NULL DEFAULT 0", statement.Table)).Error; err != nil {
+			return fmt.Errorf("add %s.deleted_at: %w", statement.Table, err)
+		}
+	}
+	return nil
+}
+
 // ensurePlaygroundAttachmentStorageBackend marks rows written before the
 // object store existed (and rows that an older node of a rolling upgrade kept
 // writing) as database-backed after AutoMigrate added the column. AutoMigrate
