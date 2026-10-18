@@ -257,17 +257,25 @@ func (p *SubscriptionPlan) NormalizeDefaults() {
 
 // Subscription order (payment -> webhook -> create UserSubscription)
 type SubscriptionOrder struct {
-	Id     int     `json:"id"`
-	UserId int     `json:"user_id" gorm:"index"`
-	PlanId int     `json:"plan_id" gorm:"index"`
-	Money  float64 `json:"money"`
-
-	TradeNo         string `json:"trade_no" gorm:"unique;type:varchar(255);index"`
-	PaymentMethod   string `json:"payment_method" gorm:"type:varchar(50)"`
-	PaymentProvider string `json:"payment_provider" gorm:"type:varchar(50);default:''"`
-	Status          string `json:"status"`
-	CreateTime      int64  `json:"create_time"`
-	CompleteTime    int64  `json:"complete_time"`
+	Id     int `json:"id"`
+	UserId int `json:"user_id" gorm:"index"`
+	PlanId int `json:"plan_id" gorm:"index"`
+	// Money is the exact plan price in Currency (no conversion is applied).
+	Money           decimal.Decimal `json:"money" gorm:"type:decimal(20,6);not null;default:0"`
+	TradeNo         string          `json:"trade_no" gorm:"unique;type:varchar(255);index"`
+	PaymentMethod   string          `json:"payment_method" gorm:"type:varchar(50)"`
+	PaymentProvider string          `json:"payment_provider" gorm:"type:varchar(50);default:''"`
+	// Currency is the currency the plan is collected in; an empty value marks
+	// orders created before the currency was recorded.
+	Currency string `json:"currency" gorm:"type:varchar(8);not null;default:''"`
+	// ProviderPaymentId is the provider-side payment reference (Stripe
+	// PaymentIntent, Creem order, ...) used to match refund/dispute webhooks.
+	ProviderPaymentId string `json:"provider_payment_id" gorm:"type:varchar(255);not null;default:'';index"`
+	Status            string `json:"status"`
+	CreateTime        int64  `json:"create_time"`
+	CompleteTime      int64  `json:"complete_time"`
+	// RefundTime is when a provider refund or chargeback reversal was applied.
+	RefundTime int64 `json:"refund_time" gorm:"bigint;not null;default:0"`
 
 	ProviderPayload string `json:"provider_payload" gorm:"type:text"`
 }
@@ -308,6 +316,10 @@ type UserSubscription struct {
 	Status    string `json:"status" gorm:"type:varchar(32);index;index:idx_user_sub_active,priority:2"` // active/expired/cancelled
 
 	Source string `json:"source" gorm:"type:varchar(32);default:'order'"` // order/admin
+
+	// TradeNo links the subscription to the order that created it, so a
+	// provider refund or chargeback can cancel exactly this instance.
+	TradeNo string `json:"trade_no" gorm:"type:varchar(255);not null;default:'';index"`
 
 	LastResetTime int64 `json:"last_reset_time" gorm:"type:bigint;default:0"`
 	NextResetTime int64 `json:"next_reset_time" gorm:"type:bigint;default:0;index"`
@@ -613,7 +625,7 @@ func refreshSubscriptionUserGroupCache(userId int, operation string) {
 // Complete a subscription order (idempotent). Creates a UserSubscription snapshot from the plan.
 // expectedPaymentProvider guards against cross-gateway callback attacks (empty skips the check).
 // actualPaymentMethod updates the order's PaymentMethod to reflect the real payment type used (empty skips update).
-func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedPaymentProvider string, actualPaymentMethod string) error {
+func CompleteSubscriptionOrder(tradeNo string, payment TopUpPaymentInfo, providerPayload string, expectedPaymentProvider string, actualPaymentMethod string) error {
 	if tradeNo == "" {
 		return errors.New("tradeNo is empty")
 	}
@@ -623,9 +635,9 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 	}
 	var logUserId int
 	var logPlanTitle string
-	var logMoney float64
+	var logMoney decimal.Decimal
 	var logPaymentMethod string
-	var upgradeGroup string
+	var groupChanged bool
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var order SubscriptionOrder
 		if err := lockForUpdate(tx).Where(refCol+" = ?", tradeNo).First(&order).Error; err != nil {
@@ -657,8 +669,17 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 		if err != nil {
 			return err
 		}
+		if err := tx.Model(subscription).Update("trade_no", order.TradeNo).Error; err != nil {
+			return err
+		}
 		if subscription.PrevUserGroup != "" {
-			upgradeGroup = group_setting.ResolveGroupID(subscription.UpgradeGroup)
+			groupChanged = group_setting.ResolveGroupID(subscription.UpgradeGroup) != ""
+		}
+		if payment.ProviderPaymentID != "" {
+			order.ProviderPaymentId = payment.ProviderPaymentID
+		}
+		if payment.Currency != "" {
+			order.Currency = payment.Currency
 		}
 		if err := upsertSubscriptionTopUpTx(tx, &order); err != nil {
 			return err
@@ -683,13 +704,13 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 	if err != nil {
 		return err
 	}
-	if upgradeGroup != "" && logUserId > 0 {
+	if groupChanged && logUserId > 0 {
 		refreshSubscriptionUserGroupCache(logUserId, common.LogText("subscription payment completion"))
 	}
 	if logUserId > 0 {
 		RecordLog(logUserId, LogTypeTopup, common.NewMessage("Subscription purchased, plan: {{plan}}, payment amount: {{amount}}, payment method: {{method}}", map[string]any{
 			"plan":   logPlanTitle,
-			"amount": fmt.Sprintf("%.2f", logMoney),
+			"amount": formatTopUpMoney(logMoney),
 			"method": logPaymentMethod,
 		}))
 	}
@@ -705,20 +726,32 @@ func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
 	if err := tx.Where("trade_no = ?", order.TradeNo).First(&topup).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			topup = TopUp{
-				UserId:        order.UserId,
-				Amount:        0,
-				Money:         order.Money,
-				TradeNo:       order.TradeNo,
-				PaymentMethod: order.PaymentMethod,
-				CreateTime:    order.CreateTime,
-				CompleteTime:  now,
-				Status:        common.TopUpStatusSuccess,
+				UserId:            order.UserId,
+				Amount:            0,
+				Money:             order.Money,
+				Currency:          order.Currency,
+				TradeNo:           order.TradeNo,
+				PaymentMethod:     order.PaymentMethod,
+				PaymentProvider:   order.PaymentProvider,
+				ProviderPaymentId: order.ProviderPaymentId,
+				CreateTime:        order.CreateTime,
+				CompleteTime:      now,
+				Status:            common.TopUpStatusSuccess,
 			}
 			return tx.Create(&topup).Error
 		}
 		return err
 	}
 	topup.Money = order.Money
+	if topup.Currency == "" {
+		topup.Currency = order.Currency
+	}
+	if topup.PaymentProvider == "" {
+		topup.PaymentProvider = order.PaymentProvider
+	}
+	if topup.ProviderPaymentId == "" {
+		topup.ProviderPaymentId = order.ProviderPaymentId
+	}
 	if topup.PaymentMethod == "" {
 		topup.PaymentMethod = order.PaymentMethod
 	} else if topup.PaymentMethod != order.PaymentMethod {
@@ -809,7 +842,7 @@ func PurchaseSubscriptionWithBalance(userId int, planId int) error {
 	}
 
 	var logPlanTitle string
-	var logMoney float64
+	var logMoney decimal.Decimal
 	var chargedQuota int
 	var upgradeGroup string
 	err := DB.Transaction(func(tx *gorm.DB) error {
@@ -856,7 +889,8 @@ func PurchaseSubscriptionWithBalance(userId int, planId int) error {
 		order := &SubscriptionOrder{
 			UserId:          userId,
 			PlanId:          plan.Id,
-			Money:           plan.PriceAmount,
+			Money:           decimal.NewFromFloat(plan.PriceAmount),
+			Currency:        plan.Currency,
 			TradeNo:         tradeNo,
 			PaymentMethod:   PaymentMethodBalance,
 			PaymentProvider: PaymentProviderBalance,
@@ -890,7 +924,7 @@ func PurchaseSubscriptionWithBalance(userId int, planId int) error {
 		}
 
 		logPlanTitle = plan.Title
-		logMoney = plan.PriceAmount
+		logMoney = decimal.NewFromFloat(plan.PriceAmount)
 		chargedQuota = requiredQuota
 		if subscription.PrevUserGroup != "" {
 			upgradeGroup = group_setting.ResolveGroupID(subscription.UpgradeGroup)
@@ -911,7 +945,7 @@ func PurchaseSubscriptionWithBalance(userId int, planId int) error {
 	}
 	RecordLog(userId, LogTypeTopup, common.NewMessage("Subscription purchased with balance, plan: {{plan}}, payment amount: {{amount}}, quota deducted: {{quota}}", map[string]any{
 		"plan":   logPlanTitle,
-		"amount": fmt.Sprintf("%.2f", logMoney),
+		"amount": formatTopUpMoney(logMoney),
 		"quota":  chargedQuota,
 	}))
 	return nil

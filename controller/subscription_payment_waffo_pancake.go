@@ -82,7 +82,8 @@ func SubscriptionRequestWaffoPancakePay(c *gin.Context) {
 	order := &model.SubscriptionOrder{
 		UserId:          userId,
 		PlanId:          plan.Id,
-		Money:           plan.PriceAmount,
+		Money:           decimal.NewFromFloat(plan.PriceAmount),
+		Currency:        plan.Currency,
 		TradeNo:         tradeNo,
 		PaymentMethod:   model.PaymentMethodWaffoPancake,
 		PaymentProvider: model.PaymentProviderWaffoPancake,

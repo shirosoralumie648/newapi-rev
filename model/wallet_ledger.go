@@ -72,6 +72,10 @@ const (
 	WalletLedgerRefGrantExpire = "grant_expire"
 	// WalletLedgerRefAdminGrant namespaces administrator-issued credit grants.
 	WalletLedgerRefAdminGrant = "admin_grant"
+	// WalletLedgerRefTopUpReversal namespaces refund/chargeback reversals: one
+	// row per reversed top-up order, so a webhook replay can never reverse the
+	// same payment twice.
+	WalletLedgerRefTopUpReversal = "topup_reversal"
 )
 
 // walletLedgerConsumeHourSeconds is the aggregation window for API consumption.

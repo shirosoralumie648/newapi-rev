@@ -119,7 +119,7 @@ func (*StripeAdaptor) RequestPay(c *gin.Context, req *StripePayRequest) {
 	topUp := &model.TopUp{
 		UserId:          id,
 		Amount:          req.Amount,
-		Money:           chargedMoney,
+		Money:           decimal.NewFromFloat(chargedMoney),
 		TradeNo:         referenceId,
 		PaymentMethod:   model.PaymentMethodStripe,
 		PaymentProvider: model.PaymentProviderStripe,
@@ -199,11 +199,45 @@ func StripeWebhook(c *gin.Context) {
 		sessionAsyncPaymentSucceeded(ctx, event, callerIp)
 	case stripe.EventTypeCheckoutSessionAsyncPaymentFailed:
 		sessionAsyncPaymentFailed(ctx, event, callerIp)
+	case stripe.EventTypeChargeRefunded:
+		chargeReversed(ctx, event, callerIp, false)
+	case stripe.EventTypeChargeDisputeCreated:
+		chargeReversed(ctx, event, callerIp, true)
 	default:
 		logger.LogInfo(ctx, common.LogText("Stripe webhook ignored event event_type=%s client_ip=%s", string(event.Type), callerIp))
 	}
 
 	c.Status(http.StatusOK)
+}
+
+// chargeReversed handles charge.refunded and charge.dispute.created: the
+// provider took the money back, so the local order is reversed through the
+// wallet ledger (down to zero, remainder as debt). Partial refunds are left
+// for manual handling because reversing the full credit would over-withdraw.
+func chargeReversed(ctx context.Context, event stripe.Event, callerIp string, disputed bool) {
+	paymentIntentId := event.GetObjectValue("payment_intent")
+	if paymentIntentId == "" {
+		logger.LogWarn(ctx, common.LogText("Stripe charge reversal event missing payment_intent event_type=%s client_ip=%s", string(event.Type), callerIp))
+		return
+	}
+	if !disputed {
+		refunded, _ := strconv.ParseInt(event.GetObjectValue("amount_refunded"), 10, 64)
+		total, _ := strconv.ParseInt(event.GetObjectValue("amount"), 10, 64)
+		if total > 0 && refunded < total {
+			logger.LogWarn(ctx, common.LogText("Stripe partial charge refund needs manual handling payment_intent=%s amount_refunded=%d amount=%d client_ip=%s", paymentIntentId, refunded, total, callerIp))
+			return
+		}
+	}
+	handled, err := model.ReversePaymentByProviderPaymentId(model.PaymentProviderStripe, paymentIntentId, disputed)
+	if err != nil {
+		logger.LogError(ctx, common.LogText("Stripe charge reversal failed payment_intent=%s event_type=%s client_ip=%s error=%q", paymentIntentId, string(event.Type), callerIp, err.Error()))
+		return
+	}
+	if !handled {
+		logger.LogWarn(ctx, common.LogText("Stripe charge reversal found no local order payment_intent=%s event_type=%s client_ip=%s", paymentIntentId, string(event.Type), callerIp))
+		return
+	}
+	logger.LogInfo(ctx, common.LogText("Stripe charge reversal applied payment_intent=%s event_type=%s client_ip=%s", paymentIntentId, string(event.Type), callerIp))
 }
 
 func sessionCompleted(ctx context.Context, event stripe.Event, callerIp string) {
@@ -281,13 +315,18 @@ func fulfillOrder(ctx context.Context, event stripe.Event, referenceId string, c
 
 	LockOrder(referenceId)
 	defer UnlockOrder(referenceId)
+	payment := model.TopUpPaymentInfo{
+		CustomerID:        customerId,
+		ProviderPaymentID: event.GetObjectValue("payment_intent"),
+		Currency:          strings.ToUpper(event.GetObjectValue("currency")),
+	}
 	payload := map[string]any{
 		"customer":     customerId,
 		"amount_total": event.GetObjectValue("amount_total"),
-		"currency":     strings.ToUpper(event.GetObjectValue("currency")),
+		"currency":     payment.Currency,
 		"event_type":   string(event.Type),
 	}
-	if err := model.CompleteSubscriptionOrder(referenceId, common.GetJsonString(payload), model.PaymentProviderStripe, ""); err == nil {
+	if err := model.CompleteSubscriptionOrder(referenceId, payment, common.GetJsonString(payload), model.PaymentProviderStripe, ""); err == nil {
 		logger.LogInfo(ctx, common.LogText("Stripe subscription order processed trade_no=%s event_type=%s client_ip=%s", referenceId, string(event.Type), callerIp))
 		return
 	} else if err != nil && !errors.Is(err, model.ErrSubscriptionOrderNotFound) {
@@ -295,7 +334,7 @@ func fulfillOrder(ctx context.Context, event stripe.Event, referenceId string, c
 		return
 	}
 
-	err := model.Recharge(referenceId, customerId, callerIp)
+	err := model.Recharge(referenceId, payment, callerIp)
 	if err != nil {
 		logger.LogError(ctx, common.LogText("Stripe top-up processing failed trade_no=%s event_type=%s client_ip=%s error=%q", referenceId, string(event.Type), callerIp, err.Error()))
 		return
@@ -382,6 +421,11 @@ func genStripeLink(referenceId string, customerId string, email string, amount i
 		},
 		Mode:                stripe.String(string(stripe.CheckoutSessionModePayment)),
 		AllowPromotionCodes: stripe.Bool(setting.StripePromotionCodesEnabled),
+	}
+	if setting.StripeAutoInvoiceEnabled {
+		params.InvoiceCreation = &stripe.CheckoutSessionInvoiceCreationParams{
+			Enabled: stripe.Bool(true),
+		}
 	}
 
 	if "" == customerId {
