@@ -283,7 +283,7 @@ func TestTokenCacheSchemaAndPeriodBudgetGovernCachedReads(t *testing.T) {
 	token := createReserveTestToken(t, 100)
 	loaded, err := GetTokenByKey(token.Key, true)
 	require.NoError(t, err)
-	require.NoError(t, server.HSet(getTokenCacheKey(token.Key), "CacheSchema", "1"))
+	server.HSet(getTokenCacheKey(token.Key), "CacheSchema", "1")
 
 	_, err = cacheGetTokenByKey(token.Key)
 	require.Error(t, err, "a stale hash must not be served")
