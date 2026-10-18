@@ -809,7 +809,8 @@ func TestTokenRateLimitAPIContract(t *testing.T) {
 			"name": "rate-limit-add", "expired_time": -1, "remain_quota": 100,
 			"unlimited_quota": false, "rpm_limit": 30, "tpm_limit": 500,
 		}
-		_, recorder := newAuthenticatedContext(t, http.MethodPost, "/api/token/", body, 1)
+		ctx, recorder := newAuthenticatedContext(t, http.MethodPost, "/api/token/", body, 1)
+		AddToken(ctx)
 		response := decodeAPIResponse(t, recorder)
 		assert.True(t, response.Success, response.Message)
 
