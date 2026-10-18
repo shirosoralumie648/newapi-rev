@@ -36,6 +36,7 @@ export const WALLET_LEDGER_KIND_LABELS: Record<string, string> = {
   storage_daily: 'Storage Fee',
   debt: 'Wallet Debt',
   debt_repayment: 'Debt Repayment',
+  grant_expire: 'Credit Grant Expired',
 }
 
 /**

@@ -26,9 +26,9 @@ import {
   getUserCreditGrants,
   issueCreditGrant,
 } from '../api'
-import type { CreditGrantIssueRequest } from '../types'
+import type { CreditGrantIssueRequest, CreditGrantWallet } from '../types'
 
-const EMPTY_WALLET = {
+const EMPTY_WALLET: CreditGrantWallet = {
   user_id: 0,
   total_quota: 0,
   paid_quota: 0,
