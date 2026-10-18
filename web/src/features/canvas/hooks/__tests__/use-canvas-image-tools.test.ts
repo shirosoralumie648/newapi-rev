@@ -213,15 +213,15 @@ test('cropping stores the rendered bytes and links a new image node', async () =
     applied = await hook.result.current.crop({
       x: 10,
       y: 20,
-      width: 100,
-      height: 50,
+      width: 80,
+      height: 30,
     })
   })
 
   expect(applied).toBe(true)
   expect(cropCanvasImage).toHaveBeenCalledWith(
     expect.stringContaining('data:image/png;base64,'),
-    { x: 10, y: 20, width: 100, height: 50 }
+    { x: 10, y: 20, width: 80, height: 30 }
   )
   expect(post).toHaveBeenCalledWith(
     UPLOAD_URL,
