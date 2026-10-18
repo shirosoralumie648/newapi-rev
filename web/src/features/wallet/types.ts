@@ -450,6 +450,12 @@ export interface ReferralInvitation {
   pending_quota: number
   locked_quota: number
   settled_quota: number
+  /** Administrator view only: events waiting for a manual decision. */
+  review_quota?: number
+  /** Administrator view only: events refused by an anti-abuse rule. */
+  blocked_quota?: number
+  /** Administrator view only: events declined in review. */
+  rejected_quota?: number
   total_paid_quota: number
   commission_count: number
 }
@@ -475,6 +481,9 @@ export interface ReferralStatsSummary {
   pending_quota: number
   locked_quota: number
   settled_quota: number
+  review_quota: number
+  blocked_quota: number
+  rejected_quota: number
 }
 
 /** Administrator filters of the invitation list; empty string means "any". */

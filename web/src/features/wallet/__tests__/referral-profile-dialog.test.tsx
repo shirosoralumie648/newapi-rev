@@ -102,7 +102,7 @@ test('shows the registration environment, identity and commission history', asyn
   expect(screen.getByText('Invitees: 3')).toBeVisible()
   expect(screen.getByText('Current mark: Watch')).toBeVisible()
   expect(screen.getByText('Pending')).toBeVisible()
-  expect(screen.getByText('Blocked')).toBeVisible()
+  expect(screen.getByText('Blocked by risk control')).toBeVisible()
   expect(screen.getByText(formatQuota(1000))).toBeVisible()
   expect(get).toHaveBeenCalledWith('/api/user/9/referral-profile')
 })
