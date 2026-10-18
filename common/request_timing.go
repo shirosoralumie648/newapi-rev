@@ -111,8 +111,11 @@ type RequestTimingPayload struct {
 	Retries *int `json:"retries,omitempty"`
 }
 
-// Snapshot renders the phases observed so far. retries is the request's retry
-// index and is always recorded, because zero (no retry) is a real answer.
+// Snapshot renders the phases observed so far. Each phase is measured from the
+// previous milestone the request actually reached, falling back to arrival when
+// an earlier layer did not mark its phase, so a partially observed request still
+// reports the wait it served. retries is the request's retry index and is always
+// recorded, because zero (no retry) is a real answer.
 func (s *RequestTimingSession) Snapshot(retries int) *RequestTimingPayload {
 	if s == nil {
 		return nil
@@ -125,11 +128,19 @@ func (s *RequestTimingSession) Snapshot(retries int) *RequestTimingPayload {
 	firstToken := s.firstToken
 	s.mu.Unlock()
 
+	channelSelectStart := authenticated
+	if channelSelectStart.IsZero() {
+		channelSelectStart = arrival
+	}
+	upstreamStart := channelSelected
+	if upstreamStart.IsZero() {
+		upstreamStart = channelSelectStart
+	}
 	payload := &RequestTimingPayload{
 		TotalMs:         timingMillisBetween(arrival, s.currentTime()),
 		AuthMs:          timingMillisBetween(arrival, authenticated),
-		ChannelSelectMs: timingMillisBetween(authenticated, channelSelected),
-		UpstreamMs:      timingMillisBetween(channelSelected, upstreamFirstByte),
+		ChannelSelectMs: timingMillisBetween(channelSelectStart, channelSelected),
+		UpstreamMs:      timingMillisBetween(upstreamStart, upstreamFirstByte),
 		FirstTokenMs:    timingMillisBetween(arrival, firstToken),
 		Retries:         &retries,
 	}
