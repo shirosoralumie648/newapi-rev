@@ -1153,6 +1153,14 @@ export const STATIC_I18N_KEYS = [
   'Under review',
   'Watch',
   'Watched account',
+  // Referral agent (RF-08) rate source labels render through t(labelKey) from
+  // REFERRAL_RATE_SOURCE_LABEL_KEYS in features/wallet/lib/referral.ts, and
+  // the agent mark audit actions through the AUDIT_TEMPLATES map in
+  // features/usage-logs/lib/format.ts, so the literal scan cannot see them.
+  'Account override',
+  'Agent tier',
+  'Updated the referral agent settings of user {{username}}',
+  'Cleared the referral agent mark of user {{username}}',
   // API key periodic quota options render through t(option.label) from
   // API_KEY_PERIOD_RESET_OPTIONS, and the invalid-cycle message is returned
   // from Go through message_key, so the literal scan cannot see them.
