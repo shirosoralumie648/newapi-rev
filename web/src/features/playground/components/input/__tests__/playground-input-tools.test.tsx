@@ -39,7 +39,8 @@ Object.defineProperty(HTMLElement.prototype, 'getAnimations', {
 function renderTools(
   onClearMessages = vi.fn(),
   onSystemPromptChange = vi.fn(),
-  systemPrompt = ''
+  systemPrompt = '',
+  onDictateTranscript?: (text: string) => void
 ) {
   render(
     <PromptInputProvider>
@@ -56,6 +57,7 @@ function renderTools(
         onClearMessages={onClearMessages}
         onConfigChange={() => undefined}
         onContextSettingsChange={() => undefined}
+        onDictateTranscript={onDictateTranscript}
         onParameterEnabledChange={() => undefined}
         onRemoveContextSummary={() => undefined}
         onSummarizeContext={() => undefined}
@@ -121,4 +123,16 @@ test('clearing the stored system prompt persists an empty value', async () => {
   await user.click(await screen.findByRole('button', { name: 'Clear' }))
 
   expect(onSystemPromptChange).toHaveBeenCalledWith('')
+})
+
+test('the dictation entry is offered when the composer accepts transcripts', () => {
+  renderTools(vi.fn(), vi.fn(), '', vi.fn())
+
+  expect(screen.getByRole('button', { name: 'Dictation' })).toBeVisible()
+})
+
+test('the dictation entry is hidden when the composer accepts no transcripts', () => {
+  renderTools()
+
+  expect(screen.queryByRole('button', { name: 'Dictation' })).toBeNull()
 })

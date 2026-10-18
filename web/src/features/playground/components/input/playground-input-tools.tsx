@@ -44,6 +44,7 @@ import type {
 } from '../../types'
 import { PlaygroundComparePanel } from './playground-compare-panel'
 import { PlaygroundContextPanel } from './playground-context-panel'
+import { PlaygroundDictationPanel } from './playground-dictation-panel'
 import { PlaygroundParameterPanel } from './playground-parameter-panel'
 import { PlaygroundSystemPromptPanel } from './playground-system-prompt-panel'
 
@@ -52,6 +53,8 @@ type PlaygroundInputToolsProps = {
   disabled?: boolean
   hasMessages?: boolean
   models: ModelOption[]
+  /** Inserts a dictation transcript into the composer. */
+  onDictateTranscript?: (text: string) => void
   /** Models of the next comparison; empty or single means an ordinary send. */
   compareModels: string[]
   onCompareModelsChange: (models: string[]) => void
@@ -81,6 +84,7 @@ export function PlaygroundInputTools({
   disabled,
   hasMessages = false,
   models,
+  onDictateTranscript,
   compareModels,
   onCompareModelsChange,
   onClearMessages,
@@ -152,6 +156,15 @@ export function PlaygroundInputTools({
             <p>{t('Search')}</p>
           </TooltipContent>
         </Tooltip>
+
+        {onDictateTranscript ? (
+          <PlaygroundDictationPanel
+            disabled={disabled}
+            group={config.group}
+            models={models}
+            onTranscript={onDictateTranscript}
+          />
+        ) : null}
 
         <PlaygroundComparePanel
           compareModels={compareModels}

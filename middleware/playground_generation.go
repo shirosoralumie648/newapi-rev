@@ -41,26 +41,34 @@ import (
 //
 // The optional `group` member of a JSON request body selects the group the
 // caller may already use, exactly like the chat workspace: the override is
-// validated against the account's usable groups and never widens access.
+// validated against the account's usable groups and never widens access. A
+// multipart request (audio dictation) has no JSON member, so it names the
+// override in the X-Playground-Group header instead; either way the override
+// is consumed here and can never leak into the upstream request.
 func PlaygroundRelayBridge(canonicalPath string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !strings.HasPrefix(c.Request.URL.Path, "/pg/") {
 			c.Next()
 			return
 		}
-		if strings.HasPrefix(c.Request.Header.Get("Content-Type"), "application/json") {
+		requestedGroup := strings.TrimSpace(c.Request.Header.Get("X-Playground-Group"))
+		c.Request.Header.Del("X-Playground-Group")
+		if requestedGroup == "" && strings.HasPrefix(c.Request.Header.Get("Content-Type"), "application/json") {
 			request := &dto.PlayGroundRequest{}
 			if err := common.UnmarshalBodyReusable(c, request); err == nil && request.Group != "" {
-				usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
-				// A submitted display name is resolved to the stable identifier
-				// before it reaches channel selection and billing.
-				group := group_setting.ResolveGroupID(request.Group)
-				if !service.GroupInUserUsableGroups(usingGroup, group) && group != usingGroup {
-					abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorGroupAccessDenied))
-					return
-				}
-				common.SetContextKey(c, constant.ContextKeyUsingGroup, group)
+				requestedGroup = request.Group
 			}
+		}
+		if requestedGroup != "" {
+			usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+			// A submitted display name is resolved to the stable identifier
+			// before it reaches channel selection and billing.
+			group := group_setting.ResolveGroupID(requestedGroup)
+			if !service.GroupInUserUsableGroups(usingGroup, group) && group != usingGroup {
+				abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorGroupAccessDenied))
+				return
+			}
+			common.SetContextKey(c, constant.ContextKeyUsingGroup, group)
 		}
 		c.Request.URL.Path = canonicalPath
 		c.Next()

@@ -225,6 +225,11 @@ export function PlaygroundInput({
                 onClearMessages={onClearMessages}
                 onConfigChange={onConfigChange}
                 onContextSettingsChange={onContextSettingsChange}
+                onDictateTranscript={(transcript) =>
+                  setText((current) =>
+                    current ? `${current} ${transcript}` : transcript
+                  )
+                }
                 onParameterEnabledChange={onParameterEnabledChange}
                 onRemoveContextSummary={onRemoveContextSummary}
                 onSummarizeContext={onSummarizeContext}

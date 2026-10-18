@@ -65,6 +65,7 @@ interface PlaygroundChatProps {
   /** Settled cost rows of the conversation's relay requests, by request id. */
   costs?: ReadonlyMap<string, PlaygroundMessageCost>
   onCopyMessage?: (message: MessageType) => void
+  onReadAloud?: (message: MessageType) => void
   onRegenerateMessage?: (message: MessageType) => void
   onEditMessage?: (message: MessageType) => void
   onDeleteMessage?: (message: MessageType) => void
@@ -98,6 +99,7 @@ export function PlaygroundChat({
   messages,
   costs,
   onCopyMessage,
+  onReadAloud,
   onRegenerateMessage,
   onEditMessage,
   onDeleteMessage,
@@ -173,6 +175,7 @@ export function PlaygroundChat({
       <MessageActions
         message={message}
         onCopy={onCopyMessage}
+        onReadAloud={onReadAloud}
         onRegenerate={onRegenerateMessage}
         onToggleSource={handleToggleMessageSource}
         onEdit={onEditMessage}

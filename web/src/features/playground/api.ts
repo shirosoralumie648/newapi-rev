@@ -291,8 +291,27 @@ function mapServerAttachment(value: unknown): PlaygroundServerAttachment {
   }
 }
 
+// One stored attachment/reference keeps the owned metadata; the client adds the
+// content URL of the owning conversation, which is the only field the server
+// derives on read.
+function normalizeServerMessageAttachment(
+  attachment: unknown,
+  sessionId: string
+): unknown {
+  const stored = serverMessageAttachmentSchema.safeParse(attachment)
+  if (!stored.success) return attachment
+  return {
+    id: stored.data.id,
+    url: playgroundAttachmentContentUrl(sessionId, stored.data.id),
+    mediaType: stored.data.media_type,
+    filename: stored.data.filename,
+    byteSize: stored.data.byte_size,
+  }
+}
+
 // The stored message snapshot keeps attachment references only; display and
-// request fields are derived from the owned attachment rows on read.
+// request fields are derived from the owned attachment rows on read. A cached
+// read-aloud reference (`speech`) is resolved the same way.
 function normalizeServerMessagePayload(
   payload: unknown,
   sessionId: string
@@ -304,22 +323,24 @@ function normalizeServerMessagePayload(
     ...(payload as Record<string, unknown>),
     versions: versions.map((version) => {
       if (!version || typeof version !== 'object') return version
-      const attachments = (version as { attachments?: unknown }).attachments
-      if (!Array.isArray(attachments) || attachments.length === 0)
-        return version
+      const record = version as Record<string, unknown>
+      const attachments = Array.isArray(record.attachments)
+        ? record.attachments
+        : null
+      const speech = record.speech ?? null
+      if (!attachments?.length && !speech) return version
       return {
-        ...(version as Record<string, unknown>),
-        attachments: attachments.map((attachment) => {
-          const stored = serverMessageAttachmentSchema.safeParse(attachment)
-          if (!stored.success) return attachment
-          return {
-            id: stored.data.id,
-            url: playgroundAttachmentContentUrl(sessionId, stored.data.id),
-            mediaType: stored.data.media_type,
-            filename: stored.data.filename,
-            byteSize: stored.data.byte_size,
-          }
-        }),
+        ...record,
+        ...(attachments?.length
+          ? {
+              attachments: attachments.map((attachment) =>
+                normalizeServerMessageAttachment(attachment, sessionId)
+              ),
+            }
+          : {}),
+        ...(speech
+          ? { speech: normalizeServerMessageAttachment(speech, sessionId) }
+          : {}),
       }
     }),
   }

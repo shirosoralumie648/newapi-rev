@@ -66,12 +66,22 @@ var (
 		"image/jpeg": true,
 		"image/webp": true,
 		"image/gif":  true,
+		// Speech results are cached as conversation attachments, so the
+		// generated audio formats must be storable under their real type.
+		"audio/mpeg": true,
+		"audio/wav":  true,
+		"audio/ogg":  true,
+		"audio/webm": true,
 	}
 	playgroundAttachmentExtensions = map[string]string{
 		"image/png":  ".png",
 		"image/jpeg": ".jpg",
 		"image/webp": ".webp",
 		"image/gif":  ".gif",
+		"audio/mpeg": ".mp3",
+		"audio/wav":  ".wav",
+		"audio/ogg":  ".ogg",
+		"audio/webm": ".webm",
 	}
 )
 
@@ -176,6 +186,17 @@ func playgroundAttachmentMatchesMediaType(mediaType string, data []byte) bool {
 		return bytes.HasPrefix(data, []byte("GIF87a")) || bytes.HasPrefix(data, []byte("GIF89a"))
 	case "image/webp":
 		return len(data) >= 12 && bytes.Equal(data[0:4], []byte("RIFF")) && bytes.Equal(data[8:12], []byte("WEBP"))
+	case "audio/mpeg":
+		// An ID3 tag or a bare MPEG audio frame sync.
+		return bytes.HasPrefix(data, []byte("ID3")) ||
+			(len(data) >= 2 && data[0] == 0xff && data[1]&0xe0 == 0xe0)
+	case "audio/wav":
+		return len(data) >= 12 && bytes.Equal(data[0:4], []byte("RIFF")) && bytes.Equal(data[8:12], []byte("WAVE"))
+	case "audio/ogg":
+		return bytes.HasPrefix(data, []byte("OggS"))
+	case "audio/webm":
+		// The EBML header shared by WebM containers.
+		return len(data) >= 4 && bytes.Equal(data[0:4], []byte{0x1a, 0x45, 0xdf, 0xa3})
 	}
 	return false
 }

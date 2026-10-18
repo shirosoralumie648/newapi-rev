@@ -76,6 +76,10 @@ type playgroundStoredMessageReferences struct {
 		Attachments []struct {
 			ID string `json:"id"`
 		} `json:"attachments"`
+		// Speech is the cached read-aloud audio reference of a version.
+		Speech *struct {
+			ID string `json:"id"`
+		} `json:"speech"`
 	} `json:"versions"`
 }
 
@@ -827,6 +831,13 @@ func deletePlaygroundMessageRow(tx *gorm.DB, userID int, sessionID string, messa
 func playgroundMessageAttachmentReferences(messages map[string]*PlaygroundMessage) []string {
 	seen := make(map[string]bool)
 	references := make([]string, 0)
+	add := func(id string) {
+		if id == "" || seen[id] {
+			return
+		}
+		seen[id] = true
+		references = append(references, id)
+	}
 	for _, message := range messages {
 		var stored playgroundStoredMessageReferences
 		if err := common.Unmarshal([]byte(message.Payload), &stored); err != nil {
@@ -834,11 +845,10 @@ func playgroundMessageAttachmentReferences(messages map[string]*PlaygroundMessag
 		}
 		for _, version := range stored.Versions {
 			for _, attachment := range version.Attachments {
-				if attachment.ID == "" || seen[attachment.ID] {
-					continue
-				}
-				seen[attachment.ID] = true
-				references = append(references, attachment.ID)
+				add(attachment.ID)
+			}
+			if version.Speech != nil {
+				add(version.Speech.ID)
 			}
 		}
 	}

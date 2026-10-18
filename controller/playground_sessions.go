@@ -142,7 +142,11 @@ type playgroundMessagePayload struct {
 		Status      string                        `json:"status,omitempty"`
 		ErrorCode   *string                       `json:"errorCode,omitempty"`
 		Attachments []playgroundMessageAttachment `json:"attachments,omitempty"`
-		ToolCalls   []playgroundMessageToolCall   `json:"toolCalls,omitempty"`
+		// Speech references the cached read-aloud audio of this version. The
+		// bytes are an owned conversation attachment; only the reference is
+		// stored on the message, exactly like an attachment reference.
+		Speech    *playgroundMessageAttachment `json:"speech,omitempty"`
+		ToolCalls []playgroundMessageToolCall  `json:"toolCalls,omitempty"`
 		// RequestId and Usage are the display-only record of the generation
 		// that produced this version: the relay request id plus the token
 		// usage it reported. Neither feeds billing; the settled consume log
@@ -684,19 +688,27 @@ func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroun
 					return nil, err
 				}
 			}
-			if len(version.Attachments) == 0 {
-				continue
-			}
-			if !allowAttachments || payload.From != "user" || len(version.Attachments) > policy.AttachmentMaxCount {
-				return nil, common.NewMessage("Invalid Playground message.")
-			}
-			seen := make(map[string]bool, len(version.Attachments))
-			for _, attachment := range version.Attachments {
-				if attachment.ID == "" || len(attachment.ID) > 200 || seen[attachment.ID] {
+			if len(version.Attachments) > 0 {
+				if !allowAttachments || payload.From != "user" || len(version.Attachments) > policy.AttachmentMaxCount {
 					return nil, common.NewMessage("Invalid Playground message.")
 				}
-				seen[attachment.ID] = true
-				attachmentIDs[attachment.ID] = true
+				seen := make(map[string]bool, len(version.Attachments))
+				for _, attachment := range version.Attachments {
+					if attachment.ID == "" || len(attachment.ID) > 200 || seen[attachment.ID] {
+						return nil, common.NewMessage("Invalid Playground message.")
+					}
+					seen[attachment.ID] = true
+					attachmentIDs[attachment.ID] = true
+				}
+			}
+			// Cached read-aloud audio is a reference like an attachment, but
+			// it belongs to a user or assistant reply, never to a system
+			// message.
+			if version.Speech != nil {
+				if !allowAttachments || (payload.From != "user" && payload.From != "assistant") || version.Speech.ID == "" || len(version.Speech.ID) > 200 {
+					return nil, common.NewMessage("Invalid Playground message.")
+				}
+				attachmentIDs[version.Speech.ID] = true
 			}
 		}
 		if len(payload.Sources) > 100 {
@@ -740,6 +752,12 @@ func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroun
 				attachment.MediaType = stored.MediaType
 				attachment.Filename = stored.Filename
 				attachment.ByteSize = stored.ByteSize
+			}
+			if version.Speech != nil {
+				stored := resolved[version.Speech.ID]
+				version.Speech.MediaType = stored.MediaType
+				version.Speech.Filename = stored.Filename
+				version.Speech.ByteSize = stored.ByteSize
 			}
 		}
 		// Only the message contract is persisted; unknown credential/provider fields are discarded.

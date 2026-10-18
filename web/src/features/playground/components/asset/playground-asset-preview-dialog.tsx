@@ -74,19 +74,35 @@ export function PlaygroundAssetPreviewDialog(
 
   const artifact = artifactQuery.data?.artifact
   const version = artifactQuery.data?.version
+  const isAudio = (asset?.mediaType ?? '').startsWith('audio/')
   let body: ReactNode = null
   if (isAttachment) {
-    body = previewUrl ? (
-      <img
-        alt={asset.title || t('Attachment')}
-        className='max-h-[60vh] w-full rounded-md object-contain'
-        src={previewUrl}
-      />
-    ) : (
-      <p className='text-muted-foreground p-6 text-center text-sm'>
-        {t('Preview unavailable')}
-      </p>
-    )
+    if (isAudio) {
+      body = previewUrl ? (
+        <audio
+          aria-label={asset.title || t('Attachment')}
+          className='w-full'
+          controls
+          src={previewUrl}
+        />
+      ) : (
+        <p className='text-muted-foreground p-6 text-center text-sm'>
+          {t('Preview unavailable')}
+        </p>
+      )
+    } else {
+      body = previewUrl ? (
+        <img
+          alt={asset.title || t('Attachment')}
+          className='max-h-[60vh] w-full rounded-md object-contain'
+          src={previewUrl}
+        />
+      ) : (
+        <p className='text-muted-foreground p-6 text-center text-sm'>
+          {t('Preview unavailable')}
+        </p>
+      )
+    }
   } else if (artifactSessionId !== null) {
     if (artifactQuery.isPending) {
       body = <LoadingState className='min-h-40' />
