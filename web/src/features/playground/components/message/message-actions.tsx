@@ -26,6 +26,7 @@ import {
   MoreHorizontal,
   RefreshCw,
   Trash2,
+  Volume2,
   type LucideIcon,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -54,6 +55,7 @@ import { MessageActionButton } from './message-action-button'
 interface MessageActionsProps {
   message: Message
   onCopy?: (message: Message) => void
+  onReadAloud?: (message: Message) => void
   onRegenerate?: (message: Message) => void
   onToggleSource?: (message: Message) => void
   onEdit?: (message: Message) => void
@@ -78,6 +80,7 @@ type MessageActionItem = {
 export function MessageActions({
   message,
   onCopy,
+  onReadAloud,
   onRegenerate,
   onToggleSource,
   onEdit,
@@ -122,6 +125,15 @@ export function MessageActions({
         ? MESSAGE_ACTION_LABELS.COPIED
         : MESSAGE_ACTION_LABELS.COPY,
       onClick: handleCopy,
+    })
+  }
+
+  if (hasContent && !isLoading && message.status !== 'error' && onReadAloud) {
+    actions.push({
+      disabled: isGenerating,
+      icon: Volume2,
+      label: MESSAGE_ACTION_LABELS.READ_ALOUD,
+      onClick: guardAction(() => onReadAloud(message)),
     })
   }
 

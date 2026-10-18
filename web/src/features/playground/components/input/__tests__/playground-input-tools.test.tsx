@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import i18next from 'i18next'
@@ -39,31 +40,44 @@ Object.defineProperty(HTMLElement.prototype, 'getAnimations', {
 function renderTools(
   onClearMessages = vi.fn(),
   onSystemPromptChange = vi.fn(),
-  systemPrompt = ''
+  systemPrompt = '',
+  config = DEFAULT_CONFIG,
+  onDictateTranscript?: (text: string) => void
 ) {
+  // The dictation panel mounts a transcription mutation, which needs the query
+  // client the app installs at its root.
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
   render(
-    <PromptInputProvider>
-      <PlaygroundInputTools
-        config={DEFAULT_CONFIG}
-        contextPlan={planPlaygroundContext({
-          messages: [],
-          settings: DEFAULT_CONTEXT_SETTINGS,
-        })}
-        contextSettings={DEFAULT_CONTEXT_SETTINGS}
-        contextSummary={null}
-        hasMessages
-        models={[{ label: 'gpt-4o', value: 'gpt-4o' }]}
-        onClearMessages={onClearMessages}
-        onConfigChange={() => undefined}
-        onContextSettingsChange={() => undefined}
-        onParameterEnabledChange={() => undefined}
-        onRemoveContextSummary={() => undefined}
-        onSummarizeContext={() => undefined}
-        onSystemPromptChange={onSystemPromptChange}
-        parameterEnabled={DEFAULT_PARAMETER_ENABLED}
-        systemPrompt={systemPrompt}
-      />
-    </PromptInputProvider>
+    <QueryClientProvider client={client}>
+      <PromptInputProvider>
+        <PlaygroundInputTools
+          config={config}
+          contextPlan={planPlaygroundContext({
+            messages: [],
+            settings: DEFAULT_CONTEXT_SETTINGS,
+          })}
+          contextSettings={DEFAULT_CONTEXT_SETTINGS}
+          contextSummary={null}
+          hasMessages
+          models={[{ label: 'gpt-4o', value: 'gpt-4o' }]}
+          compareModels={[]}
+          onCompareModelsChange={() => undefined}
+          onClearMessages={onClearMessages}
+          onConfigChange={() => undefined}
+          onContextSettingsChange={() => undefined}
+          onDictateTranscript={onDictateTranscript}
+          onInsertText={() => undefined}
+          onParameterEnabledChange={() => undefined}
+          onRemoveContextSummary={() => undefined}
+          onSummarizeContext={() => undefined}
+          onSystemPromptChange={onSystemPromptChange}
+          parameterEnabled={DEFAULT_PARAMETER_ENABLED}
+          systemPrompt={systemPrompt}
+        />
+      </PromptInputProvider>
+    </QueryClientProvider>
   )
   return { onClearMessages, onSystemPromptChange }
 }
@@ -74,6 +88,9 @@ beforeAll(() => {
     Clear: 'Clear',
     'Clear chat history': 'Clear chat history',
     'Clear chat history?': 'Clear chat history?',
+    Parameters: 'Parameters',
+    'Prompt snippets': 'Prompt snippets',
+    'Reasoning Effort': 'Reasoning Effort',
     Save: 'Save',
     Search: 'Search',
     'System prompt': 'System prompt',
@@ -121,4 +138,35 @@ test('clearing the stored system prompt persists an empty value', async () => {
   await user.click(await screen.findByRole('button', { name: 'Clear' }))
 
   expect(onSystemPromptChange).toHaveBeenCalledWith('')
+})
+
+test('the dictation entry is offered when the composer accepts transcripts', () => {
+  renderTools(vi.fn(), vi.fn(), '', DEFAULT_CONFIG, vi.fn())
+
+  expect(screen.getByRole('button', { name: 'Dictation' })).toBeVisible()
+})
+
+test('the dictation entry is hidden when the composer accepts no transcripts', () => {
+  renderTools()
+
+  expect(screen.queryByRole('button', { name: 'Dictation' })).toBeNull()
+})
+
+test('offers the reasoning effort control for a model that accepts an effort', async () => {
+  const user = userEvent.setup()
+  renderTools(vi.fn(), vi.fn(), '', { ...DEFAULT_CONFIG, model: 'gpt-5' })
+
+  await user.click(screen.getByRole('button', { name: 'Parameters' }))
+
+  expect(await screen.findByText('Reasoning Effort')).toBeVisible()
+})
+
+test('hides the reasoning effort control for a model without an effort', async () => {
+  const user = userEvent.setup()
+  renderTools()
+
+  await user.click(screen.getByRole('button', { name: 'Parameters' }))
+  await screen.findByText('Temperature')
+
+  expect(screen.queryByText('Reasoning Effort')).toBeNull()
 })

@@ -62,6 +62,14 @@ export interface PlaygroundAudioSpeechInput {
   voice: string
 }
 
+export interface PlaygroundAudioTranscriptionInput {
+  model: string
+  group: string
+  /** Recorded clip; the relay forwards it to the transcription model as-is. */
+  file: Blob
+  filename: string
+}
+
 const imageGenerationSchema = z.object({
   data: z.array(
     z.object({
@@ -220,4 +228,33 @@ export async function submitAudioSpeech(
     { signal, responseType: 'blob', skipErrorHandler: true }
   )
   return response.data as Blob
+}
+
+const audioTranscriptionSchema = z.object({
+  text: z.string(),
+})
+
+/**
+ * Transcribes one recorded clip through the Playground transcription bridge.
+ * The request is multipart, so the workspace group travels in the
+ * X-Playground-Group header: the server consumes and validates it before the
+ * canonical relay request, and it never reaches the upstream provider.
+ */
+export async function submitAudioTranscription(
+  input: PlaygroundAudioTranscriptionInput,
+  signal?: AbortSignal
+): Promise<string> {
+  const form = new FormData()
+  form.append('model', input.model)
+  form.append('file', input.file, input.filename)
+  const response = await api.post(API_ENDPOINTS.AUDIO_TRANSCRIPTIONS, form, {
+    signal,
+    skipErrorHandler: true,
+    headers: { 'X-Playground-Group': input.group },
+  })
+  const parsed = audioTranscriptionSchema.safeParse(response.data)
+  if (!parsed.success) {
+    throw new Error('Transcription failed')
+  }
+  return parsed.data.text
 }

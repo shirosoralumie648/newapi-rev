@@ -19,9 +19,15 @@ type PlaygroundQuotaPolicy struct {
 	SessionMaxCount      int   `json:"session_max_count"`
 	PresetUserMaxCount   int   `json:"preset_user_max_count"`
 	SystemPromptMaxBytes int64 `json:"system_prompt_max_bytes"`
-	MessageMaxCount      int   `json:"message_max_count"`
-	MessageMaxVersions   int   `json:"message_max_versions"`
-	MessageMaxBytes      int64 `json:"message_max_bytes"`
+	// SnippetUserMaxCount and SnippetContentMaxBytes bound the account's prompt
+	// snippet library: how many snippets it may store and how many bytes one
+	// snippet's text may occupy. Snippets are reusable composer text, not
+	// stored attachments, so they have no account-level byte budget.
+	SnippetUserMaxCount    int   `json:"snippet_user_max_count"`
+	SnippetContentMaxBytes int64 `json:"snippet_content_max_bytes"`
+	MessageMaxCount        int   `json:"message_max_count"`
+	MessageMaxVersions     int   `json:"message_max_versions"`
+	MessageMaxBytes        int64 `json:"message_max_bytes"`
 	// ParallelCompareMaxModels bounds one parallel-comparison message group:
 	// how many models a single send may fan out to. Each comparison request is
 	// an ordinary /pg call whose own rate limit, channel and billing apply, so
@@ -89,6 +95,11 @@ type PlaygroundQuotaPolicy struct {
 type PlaygroundSetting struct {
 	Defaults       *PlaygroundQuotaPolicy           `json:"defaults"`
 	GroupOverrides map[string]PlaygroundQuotaPolicy `json:"group_overrides"`
+	// SandboxPreviewEnabled turns on the sandboxed preview of HTML and SVG
+	// artifacts. It stays off by default: artifact content is model output the
+	// account did not author, so an administrator must opt in before the
+	// Playground mounts it inside the sandboxed iframe.
+	SandboxPreviewEnabled bool `json:"sandbox_preview_enabled"`
 }
 
 var playgroundSetting = newPlaygroundSetting()
@@ -109,6 +120,8 @@ func builtinPlaygroundQuotaPolicy() PlaygroundQuotaPolicy {
 		SessionMaxCount:           100,
 		PresetUserMaxCount:        50,
 		SystemPromptMaxBytes:      16 << 10,
+		SnippetUserMaxCount:       100,
+		SnippetContentMaxBytes:    8 << 10,
 		MessageMaxCount:           100,
 		MessageMaxVersions:        100,
 		MessageMaxBytes:           1 << 20,
@@ -176,6 +189,13 @@ func GetPlaygroundSetting() *PlaygroundSetting {
 	return &playgroundSetting
 }
 
+// IsSandboxPreviewEnabled reports whether administrators enabled the sandboxed
+// HTML/SVG artifact preview. A zero value (the shipped default) means the
+// browser must not render artifact content at all.
+func IsSandboxPreviewEnabled() bool {
+	return playgroundSetting.SandboxPreviewEnabled
+}
+
 // GetPlaygroundQuotaPolicy resolves the effective budget for a user group:
 // built-in defaults, then the global configuration, then the group override.
 // A group reference may still use an editable display name, so it is resolved
@@ -223,6 +243,12 @@ func applyPlaygroundQuotaOverrides(policy *PlaygroundQuotaPolicy, override *Play
 	}
 	if override.SystemPromptMaxBytes > 0 {
 		policy.SystemPromptMaxBytes = override.SystemPromptMaxBytes
+	}
+	if override.SnippetUserMaxCount > 0 {
+		policy.SnippetUserMaxCount = override.SnippetUserMaxCount
+	}
+	if override.SnippetContentMaxBytes > 0 {
+		policy.SnippetContentMaxBytes = override.SnippetContentMaxBytes
 	}
 	if override.MessageMaxCount > 0 {
 		policy.MessageMaxCount = override.MessageMaxCount

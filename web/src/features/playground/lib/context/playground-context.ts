@@ -35,6 +35,11 @@ import type {
   PlaygroundContextSummary,
 } from '../../types'
 import {
+  applyModelMediaPolicy,
+  modelAcceptsImageInput,
+  omitInlineBase64Media,
+} from '../message/message-media-utils'
+import {
   getMessageToolCalls,
   getToolCallResponseContent,
 } from '../message/message-tool-call-utils'
@@ -67,6 +72,8 @@ export interface PlaygroundContextPlan {
   estimatedTokens: number
   /** Estimated tokens of the messages a limit leaves out. */
   droppedTokens: number
+  /** Images replaced by placeholder text in the request. */
+  omittedImages: number
   /** The summary this plan substitutes, or null when none applies. */
   summaryUsed: PlaygroundContextSummary | null
   /** Whether a history limit or token budget is configured. */
@@ -137,19 +144,24 @@ export function estimateTextTokens(text: string): number {
   return Math.ceil(ascii / 4) + nonAscii
 }
 
+function countMessageImages(message: Message): number {
+  return (getCurrentVersion(message).attachments ?? []).filter((attachment) =>
+    attachment.mediaType.startsWith('image/')
+  ).length
+}
+
 /**
  * Estimated tokens of one stored message: its active version text and tool
- * call arguments, plus a fixed allowance per image attachment. The data URL
- * length is irrelevant for planning because vision pricing is per image, not
- * per encoded byte.
+ * call arguments, plus a fixed allowance per image attachment. Inline base64
+ * media is measured after scrubbing, because the placeholder is what the
+ * model actually receives. The data URL length is irrelevant for planning
+ * because vision pricing is per image, not per encoded byte.
  */
 export function estimateMessageTokens(message: Message): number {
   const version = getCurrentVersion(message)
-  let tokens = estimateTextTokens(version.content)
-  const imageCount = (version.attachments ?? []).filter((attachment) =>
-    attachment.mediaType.startsWith('image/')
-  ).length
-  tokens += imageCount * PLAYGROUND_CONTEXT_IMAGE_TOKEN_ESTIMATE
+  let tokens = estimateTextTokens(omitInlineBase64Media(version.content).text)
+  tokens +=
+    countMessageImages(message) * PLAYGROUND_CONTEXT_IMAGE_TOKEN_ESTIMATE
   for (const call of version.toolCalls ?? []) {
     tokens += estimateTextTokens(call.arguments)
   }
@@ -253,11 +265,13 @@ export function planPlaygroundContext(options: {
   settings: PlaygroundContextSettings
   summary?: PlaygroundContextSummary | null
   systemPrompt?: string
+  /** Target model; omitted means unknown, which keeps structured images. */
+  model?: string
 }): PlaygroundContextPlan {
   const settings = normalizeContextSettings(options.settings)
   const validMessages = options.messages.filter(isValidMessage)
   const systemTokens = options.systemPrompt
-    ? estimateTextTokens(options.systemPrompt)
+    ? estimateTextTokens(omitInlineBase64Media(options.systemPrompt).text)
     : 0
 
   let summaryUsed: PlaygroundContextSummary | null = null
@@ -281,13 +295,45 @@ export function planPlaygroundContext(options: {
     dropped = rest.slice(0, rest.length - settings.historyLimit)
   }
 
+  // A text-only model cannot receive structured images. Images from the newest
+  // user turn stay: the user just attached them for this send, so dropping them
+  // silently would be worse than the upstream error. Earlier images become a
+  // placeholder, and their fixed allowance leaves the estimate as well (the
+  // placeholder itself is only a few tokens).
+  const acceptsImages = modelAcceptsImageInput(options.model ?? '')
+  let newestUserIndex = -1
+  for (let index = included.length - 1; index >= 0; index--) {
+    if (included[index].from === MESSAGE_ROLES.USER) {
+      newestUserIndex = index
+      break
+    }
+  }
+  const imageKeepingKeys = new Set(
+    newestUserIndex >= 0
+      ? included.slice(newestUserIndex).map((message) => message.key)
+      : []
+  )
+  const estimateRequestMessageTokens = (message: Message): number => {
+    let tokens = estimateMessageTokens(message)
+    if (!acceptsImages && !imageKeepingKeys.has(message.key)) {
+      tokens = Math.max(
+        0,
+        tokens -
+          countMessageImages(message) * PLAYGROUND_CONTEXT_IMAGE_TOKEN_ESTIMATE
+      )
+    }
+    return tokens
+  }
+  const summaryTokens = summaryUsed
+    ? estimateTextTokens(omitInlineBase64Media(summaryUsed.content).text)
+    : 0
+
   if (settings.tokenBudget > 0) {
-    const baseTokens =
-      systemTokens + (summaryUsed ? estimateTextTokens(summaryUsed.content) : 0)
+    const baseTokens = systemTokens + summaryTokens
     const kept: Message[] = []
     let tokens = baseTokens
     for (let index = included.length - 1; index >= 0; index--) {
-      const cost = estimateMessageTokens(included[index])
+      const cost = estimateRequestMessageTokens(included[index])
       if (kept.length > 0 && tokens + cost > settings.tokenBudget) break
       kept.unshift(included[index])
       tokens += cost
@@ -301,12 +347,9 @@ export function planPlaygroundContext(options: {
     }
   }
 
-  let estimatedTokens = systemTokens
-  if (summaryUsed) {
-    estimatedTokens += estimateTextTokens(summaryUsed.content)
-  }
+  let estimatedTokens = systemTokens + summaryTokens
   for (const message of included) {
-    estimatedTokens += estimateMessageTokens(message)
+    estimatedTokens += estimateRequestMessageTokens(message)
   }
 
   let droppedTokens = 0
@@ -314,18 +357,22 @@ export function planPlaygroundContext(options: {
     droppedTokens += estimateMessageTokens(message)
   }
 
-  const requestMessages = [
-    ...(summaryUsed ? [formatContextSummaryMessage(summaryUsed)] : []),
-    ...included.flatMap(formatMessageForRequest),
-  ]
+  const mediaPolicy = applyModelMediaPolicy(
+    [
+      ...(summaryUsed ? [formatContextSummaryMessage(summaryUsed)] : []),
+      ...included.flatMap(formatMessageForRequest),
+    ],
+    options.model ?? ''
+  )
 
   return {
-    requestMessages,
+    requestMessages: mediaPolicy.messages,
     includedMessages: included,
     compressedMessages,
     droppedMessages: dropped,
     estimatedTokens,
     droppedTokens,
+    omittedImages: mediaPolicy.omittedImages,
     summaryUsed,
     hasLimits: settings.historyLimit > 0 || settings.tokenBudget > 0,
     exceedsLimits: compressedMessages.length > 0 || dropped.length > 0,
@@ -341,8 +388,9 @@ function formatMessageForSummary(
 ): ChatCompletionMessage | null {
   const version = getCurrentVersion(message)
   const parts: string[] = []
-  if (version.content.trim()) {
-    parts.push(version.content)
+  const text = omitInlineBase64Media(version.content).text
+  if (text.trim()) {
+    parts.push(text)
   }
   const callNames = (version.toolCalls ?? [])
     .map((call) => call.name)

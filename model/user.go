@@ -557,15 +557,6 @@ func GetSelfUserById(id int) (*User, error) {
 	return &profile.User, err
 }
 
-func GetUserIdByAffCode(affCode string) (int, error) {
-	if affCode == "" {
-		return 0, errors.New("affiliate code is empty")
-	}
-	var user User
-	err := DB.Select("id").First(&user, "aff_code = ?", affCode).Error
-	return user.Id, err
-}
-
 // generateAvailableAffCode returns a code that no user row holds yet. The
 // lookup is unscoped because soft-deleted rows still reserve their code: the
 // unique index covers them, so reusing a deleted account's code would fail the
@@ -817,7 +808,7 @@ func ensureEmailAvailableWithTx(tx *gorm.DB, email string, excludeUserID int) er
 	return nil
 }
 
-func (user *User) Insert(inviterId int) error {
+func (user *User) Insert(attribution ReferralAttribution) error {
 	if err := DB.Transaction(func(tx *gorm.DB) error {
 		return withNormalizedEmailLock(tx, user.Email, func(tx *gorm.DB) error {
 			if err := user.prepareForInsert(tx); err != nil {
@@ -835,6 +826,11 @@ func (user *User) Insert(inviterId int) error {
 			if err := createUserWithAffCode(tx, user); err != nil {
 				return err
 			}
+			// The invitation relation is recorded in the same transaction as the
+			// account, so a referral reward can never exist without a binding.
+			if err := bindReferralAttribution(tx, user, attribution); err != nil {
+				return err
+			}
 			// The sign-up bonus is the wallet's opening balance: it is recorded
 			// in the same transaction as the user row.
 			return insertSignupOpeningBalance(tx, user)
@@ -843,15 +839,15 @@ func (user *User) Insert(inviterId int) error {
 		return err
 	}
 
-	user.finishInsert(inviterId)
+	user.finishInsert()
 	return nil
 }
 
-func (user *User) finishInsert(inviterId int) {
+func (user *User) finishInsert() {
 	// 用户创建成功后，根据角色初始化边栏配置
 	// 需要重新获取用户以确保有正确的ID和Role
 	var createdUser User
-	if err := DB.Where("username = ?", user.Username).First(&createdUser).Error; err == nil {
+	if err := DB.Where("id = ?", user.Id).First(&createdUser).Error; err == nil {
 		// 生成基于角色的默认边栏配置
 		defaultSidebarConfig := generateDefaultSidebarConfigForRole(createdUser.Role)
 		if defaultSidebarConfig != "" {
@@ -866,29 +862,41 @@ func (user *User) finishInsert(inviterId int) {
 	if common.QuotaForNewUser > 0 {
 		RecordLog(user.Id, LogTypeSystem, common.NewMessage("New user sign-up bonus {{quota}}", map[string]any{"quota": logger.FormatQuota(common.QuotaForNewUser)}))
 	}
-	if inviterId != 0 && operation_setting.IsPaymentComplianceConfirmed() {
-		if common.QuotaForInvitee > 0 {
-			if err := GrantWalletQuotaWithSource(user.Id, common.QuotaForInvitee, operation_setting.CreditGrantSourceInvite, WalletLedgerRefInviteeBonus, strconv.Itoa(user.Id)); err != nil {
-				common.SysLog(common.LogText("failed to grant invitee bonus to user %d: %s", user.Id, err.Error()))
-			}
-			RecordLog(user.Id, LogTypeSystem, common.NewMessage("Invitation code bonus {{quota}}", map[string]any{"quota": logger.FormatQuota(common.QuotaForInvitee)}))
+	// Referral rewards follow the persisted binding instead of a value passed
+	// down the call chain: a banned inviter is dropped here as well, and the
+	// invitation count grows with the relation even when no inviter reward is
+	// configured (#6362/#6363).
+	inviterId, err := ActiveReferralInviter(user.Id)
+	if err != nil {
+		common.SysLog(common.LogText("failed to resolve the invitation of new user %s: %s", user.Username, err.Error()))
+		return
+	}
+	if inviterId == 0 || !operation_setting.IsPaymentComplianceConfirmed() {
+		return
+	}
+	if common.QuotaForInvitee > 0 {
+		if err := GrantWalletQuotaWithSource(user.Id, common.QuotaForInvitee, operation_setting.CreditGrantSourceInvite, WalletLedgerRefInviteeBonus, strconv.Itoa(user.Id)); err != nil {
+			common.SysLog(common.LogText("failed to grant invitee bonus to user %d: %s", user.Id, err.Error()))
 		}
-		if common.QuotaForInviter > 0 {
-			//_ = IncreaseUserQuota(inviterId, common.QuotaForInviter)
-			RecordLog(inviterId, LogTypeSystem, common.NewMessage("Bonus for inviting a user {{quota}}", map[string]any{"quota": logger.FormatQuota(common.QuotaForInviter)}))
-			_ = inviteUser(inviterId)
-		}
+		RecordLog(user.Id, LogTypeSystem, common.NewMessage("Invitation code bonus {{quota}}", map[string]any{"quota": logger.FormatQuota(common.QuotaForInvitee)}))
+	}
+	if common.QuotaForInviter > 0 {
+		RecordLog(inviterId, LogTypeSystem, common.NewMessage("Bonus for inviting a user {{quota}}", map[string]any{"quota": logger.FormatQuota(common.QuotaForInviter)}))
+	}
+	if err := inviteUser(inviterId); err != nil {
+		common.SysLog(common.LogText("failed to record the invitation of user %d: %s", user.Id, err.Error()))
 	}
 }
 
-func (user *User) FinishInsert(inviterId int) {
-	user.finishInsert(inviterId)
+func (user *User) FinishInsert() {
+	user.finishInsert()
 }
 
-// InsertWithTx inserts a new user within an existing transaction.
+// InsertWithTx inserts a new user within an existing transaction and records
+// its invitation relation in that same transaction.
 // This is used for OAuth registration where user creation and binding need to be atomic.
 // Post-creation tasks (sidebar config, logs, inviter rewards) are handled after the transaction commits.
-func (user *User) InsertWithTx(tx *gorm.DB, inviterId int) error {
+func (user *User) InsertWithTx(tx *gorm.DB, attribution ReferralAttribution) error {
 	return withNormalizedEmailLock(tx, user.Email, func(tx *gorm.DB) error {
 		if err := user.prepareForInsert(tx); err != nil {
 			return err
@@ -904,41 +912,11 @@ func (user *User) InsertWithTx(tx *gorm.DB, inviterId int) error {
 		if err := createUserWithAffCode(tx, user); err != nil {
 			return err
 		}
+		if err := bindReferralAttribution(tx, user, attribution); err != nil {
+			return err
+		}
 		return insertSignupOpeningBalance(tx, user)
 	})
-}
-
-// FinalizeOAuthUserCreation performs post-transaction tasks for OAuth user creation.
-// This should be called after the transaction commits successfully.
-func (user *User) FinalizeOAuthUserCreation(inviterId int) {
-	// 用户创建成功后，根据角色初始化边栏配置
-	var createdUser User
-	if err := DB.Where("id = ?", user.Id).First(&createdUser).Error; err == nil {
-		defaultSidebarConfig := generateDefaultSidebarConfigForRole(createdUser.Role)
-		if defaultSidebarConfig != "" {
-			currentSetting := createdUser.GetSetting()
-			currentSetting.SidebarModules = defaultSidebarConfig
-			createdUser.SetSetting(currentSetting)
-			createdUser.Update(false)
-			common.SysLog(common.LogText("initialized the sidebar config for new user %s (role: %d)", createdUser.Username, createdUser.Role))
-		}
-	}
-
-	if common.QuotaForNewUser > 0 {
-		RecordLog(user.Id, LogTypeSystem, common.NewMessage("New user sign-up bonus {{quota}}", map[string]any{"quota": logger.FormatQuota(common.QuotaForNewUser)}))
-	}
-	if inviterId != 0 && operation_setting.IsPaymentComplianceConfirmed() {
-		if common.QuotaForInvitee > 0 {
-			if err := GrantWalletQuotaWithSource(user.Id, common.QuotaForInvitee, operation_setting.CreditGrantSourceInvite, WalletLedgerRefInviteeBonus, strconv.Itoa(user.Id)); err != nil {
-				common.SysLog(common.LogText("failed to grant invitee bonus to user %d: %s", user.Id, err.Error()))
-			}
-			RecordLog(user.Id, LogTypeSystem, common.NewMessage("Invitation code bonus {{quota}}", map[string]any{"quota": logger.FormatQuota(common.QuotaForInvitee)}))
-		}
-		if common.QuotaForInviter > 0 {
-			RecordLog(inviterId, LogTypeSystem, common.NewMessage("Bonus for inviting a user {{quota}}", map[string]any{"quota": logger.FormatQuota(common.QuotaForInviter)}))
-			_ = inviteUser(inviterId)
-		}
-	}
 }
 
 func (user *User) Update(updatePassword bool) error {

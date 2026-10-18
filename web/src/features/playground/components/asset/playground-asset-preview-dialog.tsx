@@ -77,6 +77,7 @@ export function PlaygroundAssetPreviewDialog(
 
   const artifact = artifactQuery.data?.artifact
   const version = artifactQuery.data?.version
+  const isAudio = (asset?.mediaType ?? '').startsWith('audio/')
   let body: ReactNode = null
   if (isAttachment) {
     const attachmentKind = playgroundAttachmentKind(asset.mediaType)
@@ -102,6 +103,15 @@ export function PlaygroundAssetPreviewDialog(
             {t('Open file')}
           </a>
         </div>
+      )
+    } else if (isAudio) {
+      body = (
+        <audio
+          aria-label={asset.title || t('Attachment')}
+          className='w-full'
+          controls
+          src={previewUrl}
+        />
       )
     } else {
       body = (

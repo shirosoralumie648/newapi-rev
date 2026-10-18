@@ -20,12 +20,16 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import i18next from 'i18next'
 import type { ComponentProps } from 'react'
-import { beforeAll, expect, test, vi } from 'vitest'
+import { afterEach, beforeAll, expect, test, vi } from 'vitest'
 
 import { PromptInputProvider } from '@/components/ai-elements/prompt-input'
 
 import { DEFAULT_CONTEXT_SETTINGS } from '../../../constants'
 import { planPlaygroundContext } from '../../../lib'
+import {
+  clearPlaygroundAttachmentCache,
+  primePlaygroundAttachment,
+} from '../../../lib/attachment-store'
 import type { Message, PlaygroundContextSummary } from '../../../types'
 import { PlaygroundContextPanel } from '../playground-context-panel'
 
@@ -79,6 +83,10 @@ async function openPanel(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('button', { name: 'Context management' }))
 }
 
+afterEach(() => {
+  clearPlaygroundAttachmentCache()
+})
+
 beforeAll(() => {
   i18next.addResourceBundle('en', 'translation', {
     'Context management': 'Context management',
@@ -86,6 +94,8 @@ beforeAll(() => {
       'Context to send: {{messages}} messages · ~{{tokens}} tokens (estimated)',
     '{{messages}} older messages are left out of the next request (~{{tokens}} tokens).':
       '{{messages}} older messages are left out of the next request (~{{tokens}} tokens).',
+    '{{images}} images from earlier messages are left out of the next request.':
+      '{{images}} images from earlier messages are left out of the next request.',
     'The next send summarizes {{messages}} older messages (~{{tokens}} tokens).':
       'The next send summarizes {{messages}} older messages (~{{tokens}} tokens).',
     'Summarize automatically': 'Summarize automatically',
@@ -134,6 +144,52 @@ test('an automatic summary marks the dropped messages as summarized', async () =
   expect(
     await screen.findByText(
       'The next send summarizes 2 older messages (~4 tokens).'
+    )
+  ).toBeInTheDocument()
+})
+
+test('a text-only model reports history images left out of the next request', async () => {
+  const user = userEvent.setup()
+  // A send caches the attachment bytes before the plan is built
+  // (ensurePlaygroundMessageAttachments), so the request carries the image
+  // part the policy then has to replace.
+  primePlaygroundAttachment('a1', 'data:image/png;base64,iVBORw0KGgo=')
+  const messages: Message[] = [
+    {
+      key: 'm1',
+      from: 'user',
+      versions: [
+        {
+          id: 'v1',
+          content: 'look',
+          attachments: [{ id: 'a1', url: '', mediaType: 'image/png' }],
+        },
+      ],
+    },
+    {
+      key: 'm2',
+      from: 'assistant',
+      versions: [{ id: 'v2', content: 'seen' }],
+    },
+    {
+      key: 'm3',
+      from: 'user',
+      versions: [{ id: 'v3', content: 'next' }],
+    },
+  ]
+  mount({
+    settings: { ...DEFAULT_CONTEXT_SETTINGS },
+    plan: planPlaygroundContext({
+      messages,
+      settings: { ...DEFAULT_CONTEXT_SETTINGS },
+      model: 'deepseek-chat',
+    }),
+  })
+  await openPanel(user)
+
+  expect(
+    await screen.findByText(
+      '1 images from earlier messages are left out of the next request.'
     )
   ).toBeInTheDocument()
 })

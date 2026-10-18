@@ -56,6 +56,7 @@ import type {
 import { MessageAttachmentList } from './message-attachment-list'
 import { MessageError } from './message-error'
 import { MessageMetadata } from './message-metadata'
+import { MessageSpeech } from './message-speech'
 import { MessageToolCalls } from './message-tool-calls'
 
 type PlaygroundMessageContentProps = {
@@ -108,7 +109,8 @@ export function PlaygroundMessageContent({
     message.status !== MESSAGE_STATUS.LOADING &&
     message.status !== MESSAGE_STATUS.STREAMING
   const hasAttachments = (version.attachments?.length ?? 0) > 0
-  const hasVisibleContent = versionContent.length > 0 || hasAttachments
+  const hasVisibleContent =
+    versionContent.length > 0 || hasAttachments || Boolean(version.speech)
 
   return (
     <div
@@ -192,6 +194,9 @@ export function PlaygroundMessageContent({
                   <Response final={isMessageFinal}>{displayContent}</Response>
                 </MessageContent>
               )}
+              {version.speech ? (
+                <MessageSpeech speech={version.speech} />
+              ) : null}
             </>
           )}
           <MessageToolCalls

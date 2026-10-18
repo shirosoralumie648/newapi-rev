@@ -138,6 +138,80 @@ describe('assistant preset settings', () => {
   })
 })
 
+describe('reasoning effort copy and payload', () => {
+  test('applying a preset copies its reasoning effort and enabled state', () => {
+    const settings = presetSessionSettings(
+      preset({
+        config: { ...DEFAULT_CONFIG, reasoning_effort: 'high' },
+        parameterEnabled: {
+          ...DEFAULT_PARAMETER_ENABLED,
+          reasoning_effort: true,
+        },
+      }),
+      {
+        config: DEFAULT_CONFIG,
+        parameterEnabled: DEFAULT_PARAMETER_ENABLED,
+      }
+    )
+
+    expect(settings.config.reasoning_effort).toBe('high')
+    expect(settings.parameterEnabled.reasoning_effort).toBe(true)
+  })
+
+  test('building a preset payload copies the reasoning effort', () => {
+    const input = presetInputFromSettings('Reviewer', '', {
+      config: { ...DEFAULT_CONFIG, reasoning_effort: 'minimal' },
+      parameterEnabled: {
+        ...DEFAULT_PARAMETER_ENABLED,
+        reasoning_effort: true,
+      },
+      systemPrompt: '',
+    })
+
+    expect(input.config.reasoning_effort).toBe('minimal')
+    expect(input.parameter_enabled?.reasoning_effort).toBe(true)
+  })
+
+  test('the request carries the effort only while enabled and accepted', () => {
+    const enabled = buildChatCompletionPayload(
+      [userMessage('Hello')],
+      { ...DEFAULT_CONFIG, model: 'gpt-5', reasoning_effort: 'xhigh' },
+      { ...DEFAULT_PARAMETER_ENABLED, reasoning_effort: true }
+    )
+    expect(enabled.reasoning_effort).toBe('xhigh')
+
+    const disabled = buildChatCompletionPayload(
+      [userMessage('Hello')],
+      { ...DEFAULT_CONFIG, model: 'gpt-5', reasoning_effort: 'xhigh' },
+      DEFAULT_PARAMETER_ENABLED
+    )
+    expect(disabled).not.toHaveProperty('reasoning_effort')
+
+    const invalid = buildChatCompletionPayload(
+      [userMessage('Hello')],
+      { ...DEFAULT_CONFIG, model: 'gpt-5', reasoning_effort: 'turbo' },
+      { ...DEFAULT_PARAMETER_ENABLED, reasoning_effort: true }
+    )
+    expect(invalid).not.toHaveProperty('reasoning_effort')
+
+    const unset = buildChatCompletionPayload(
+      [userMessage('Hello')],
+      { ...DEFAULT_CONFIG, model: 'gpt-5' },
+      { ...DEFAULT_PARAMETER_ENABLED, reasoning_effort: true }
+    )
+    expect(unset).not.toHaveProperty('reasoning_effort')
+
+    // The control is hidden for a model that does not accept an effort, so a
+    // stale enabled flag never sends the parameter upstream.
+    const unsupported = buildChatCompletionPayload(
+      [userMessage('Hello')],
+      { ...DEFAULT_CONFIG, reasoning_effort: 'xhigh' },
+      { ...DEFAULT_PARAMETER_ENABLED, reasoning_effort: true }
+    )
+    expect(unsupported).not.toHaveProperty('reasoning_effort')
+  })
+})
+
 describe('preset avatar rendering', () => {
   test('only http(s) URLs are treated as image sources', () => {
     expect(presetAvatarUrl('https://example.com/a.png')).toBe(

@@ -67,7 +67,8 @@ var (
 		"image/jpeg": true,
 		"image/webp": true,
 		"image/gif":  true,
-		// Extended conversation and canvas kinds. Every type is verified against
+		// Extended conversation and canvas kinds, including the speech formats
+		// cached as conversation attachments. Every type is verified against
 		// its signature before it is stored, so the allowlist can never be used
 		// to store a renderable type the bytes are not.
 		"video/mp4":       true,
@@ -77,6 +78,7 @@ var (
 		"audio/wav":       true,
 		"audio/ogg":       true,
 		"audio/mp4":       true,
+		"audio/webm":      true,
 		"application/pdf": true,
 	}
 	playgroundAttachmentExtensions = map[string]string{
@@ -91,6 +93,7 @@ var (
 		"audio/wav":       ".wav",
 		"audio/ogg":       ".ogg",
 		"audio/mp4":       ".m4a",
+		"audio/webm":      ".webm",
 		"application/pdf": ".pdf",
 	}
 	// playgroundAttachmentISOBaseMediaBrands are the ISO base media file format
@@ -243,9 +246,12 @@ func playgroundAttachmentMatchesMediaType(mediaType string, data []byte) bool {
 		atom := data[4:8]
 		return bytes.Equal(atom, []byte("moov")) || bytes.Equal(atom, []byte("mdat")) ||
 			bytes.Equal(atom, []byte("wide")) || bytes.Equal(atom, []byte("free"))
-	case "video/webm":
+	case "video/webm", "audio/webm":
+		// The EBML header and WebM doctype shared by WebM containers, audio
+		// and video alike.
 		return playgroundAttachmentMatchesWebM(data)
 	case "audio/mpeg":
+		// An ID3 tag or a bare MPEG audio frame sync.
 		return bytes.HasPrefix(data, []byte("ID3")) ||
 			(len(data) >= 2 && data[0] == 0xff && data[1]&0xe0 == 0xe0)
 	case "audio/wav":

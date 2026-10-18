@@ -1085,4 +1085,34 @@ export const STATIC_I18N_KEYS = [
   'Upstream first byte',
   'First token',
   'Total',
+  // Composer reasoning effort options render through t(labelKey) from
+  // PLAYGROUND_REASONING_EFFORT_OPTIONS.
+  'None',
+  'Minimal',
+  'Low',
+  'Medium',
+  'High',
+  'Extra high',
+  'Maximum',
+  // Prompt snippet failure messages render from PLAYGROUND_SNIPPET_ERRORS and
+  // the server returns the rest through message_key, so the literal scan
+  // cannot see them.
+  'Failed to load prompt snippets',
+  'Failed to save the prompt snippet',
+  'Failed to delete the prompt snippet',
+  'Invalid prompt snippet.',
+  'Prompt snippet not found.',
+  'Prompt snippet limit exceeded.',
+  'Prompt snippet content limit exceeded.',
+  'Prompt snippets per user',
+  'Prompt snippet size limit',
+  // Read-aloud and dictation messages render from PLAYGROUND_SPEECH_ERRORS and
+  // PLAYGROUND_DICTATION_ERRORS, and the message action label from
+  // MESSAGE_ACTION_LABELS, so the literal scan cannot see them.
+  'Read aloud',
+  'Unable to save the audio to the conversation.',
+  'Audio recording is not supported in this browser.',
+  'Microphone access failed.',
+  'Transcription failed',
+  'No speech was detected.',
 ] as const

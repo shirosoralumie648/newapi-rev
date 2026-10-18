@@ -96,3 +96,28 @@ test('a missing attachment keeps its label and shows the placeholder', async () 
   expect(screen.queryByRole('img')).toBeNull()
   expect(screen.getByTitle('gone.png')).toBeVisible()
 })
+
+test('audio attachments play through the authenticated content endpoint', async () => {
+  const contentUrl =
+    '/api/playground/sessions/pgs_one/attachments/pgf_speech/content'
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: new Blob([new Uint8Array([0x49, 0x44, 0x33])], {
+      type: 'audio/mpeg',
+    }),
+  })
+
+  render(
+    <MessageAttachmentList
+      attachments={[
+        {
+          id: 'pgf_speech',
+          url: contentUrl,
+          mediaType: 'audio/mpeg',
+          filename: 'speech.mp3',
+        },
+      ]}
+    />
+  )
+
+  expect(await screen.findByLabelText('speech.mp3')).toBeVisible()
+})

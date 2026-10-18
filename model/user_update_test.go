@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -274,7 +275,7 @@ func TestInsertRejectsDuplicateEmailWithoutUniqueIndex(t *testing.T) {
 		Status:   common.UserStatusEnabled,
 	}
 
-	err := user.Insert(0)
+	err := user.Insert(ReferralAttribution{})
 	require.ErrorIs(t, err, ErrEmailAlreadyTaken)
 
 	var count int64
@@ -291,7 +292,7 @@ func TestInsertKeepsBlankPasswordForPasswordlessUser(t *testing.T) {
 		Status:   common.UserStatusEnabled,
 	}
 
-	require.NoError(t, user.Insert(0))
+	require.NoError(t, user.Insert(ReferralAttribution{}))
 
 	var stored User
 	require.NoError(t, DB.Where("username = ?", user.Username).First(&stored).Error)
@@ -356,7 +357,7 @@ func TestAffCodeGenerationMatrix(t *testing.T) {
 			useAffCodeSequence(t, "TakenAAA", "TakenBBB", "FreshCCC")
 
 			user := User{Username: "aff-collision-user", Password: "password", Status: common.UserStatusEnabled}
-			require.NoError(t, user.Insert(0))
+			require.NoError(t, user.Insert(ReferralAttribution{}))
 
 			var stored User
 			require.NoError(t, DB.Where("username = ?", user.Username).First(&stored).Error)
@@ -370,7 +371,7 @@ func TestAffCodeGenerationMatrix(t *testing.T) {
 			seen := map[string]bool{}
 			for i := range 5 {
 				user := User{Username: "aff-length-user-" + strconv.Itoa(i), Password: "password", Status: common.UserStatusEnabled}
-				require.NoError(t, user.Insert(0))
+				require.NoError(t, user.Insert(ReferralAttribution{}))
 				assert.GreaterOrEqual(t, len(user.AffCode), 8, "new affiliate codes must have at least 8 characters")
 				assert.LessOrEqual(t, len(user.AffCode), 12, "new affiliate codes must have at most 12 characters")
 				assert.Regexp(t, `^[A-Za-z0-9]{8,12}$`, user.AffCode)
@@ -387,7 +388,7 @@ func TestAffCodeGenerationMatrix(t *testing.T) {
 
 			user := User{Username: "oauth-aff-user", Status: common.UserStatusEnabled}
 			require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
-				return user.InsertWithTx(tx, 0)
+				return user.InsertWithTx(tx, ReferralAttribution{})
 			}))
 
 			var stored User
@@ -402,7 +403,7 @@ func TestAffCodeGenerationMatrix(t *testing.T) {
 			useAffCodeSequence(t, "TakenFFF")
 
 			user := User{Username: "aff-exhaustion-user", Password: "password", Status: common.UserStatusEnabled}
-			err := user.Insert(0)
+			err := user.Insert(ReferralAttribution{})
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "affiliate code")
 
@@ -447,11 +448,12 @@ func TestAffCodeBackfillMatrix(t *testing.T) {
 			require.NoError(t, DB.Create(&short).Error)
 			require.NoError(t, short.EnsureAffCode())
 			assert.Equal(t, "a1B2", short.AffCode)
-			id, err := GetUserIdByAffCode("a1B2")
+			id, err := LookupReferralInviter("a1B2")
 			require.NoError(t, err)
 			assert.Equal(t, short.Id, id)
-			_, err = GetUserIdByAffCode("missing00")
-			require.ErrorIs(t, err, gorm.ErrRecordNotFound)
+			id, err = LookupReferralInviter("missing00")
+			require.NoError(t, err)
+			assert.Zero(t, id, "an unknown code must resolve to no inviter instead of an error")
 		})
 
 		t.Run("skips claimed codes and returns a raced assignment", func(t *testing.T) {
@@ -474,6 +476,227 @@ func TestAffCodeBackfillMatrix(t *testing.T) {
 			raced := User{Id: stale.Id, Username: stale.Username}
 			require.NoError(t, raced.EnsureAffCode())
 			assert.Equal(t, "WinnerIII", raced.AffCode)
+		})
+	})
+}
+
+// clearReferralTestBindings empties the isolated relation table so every
+// referral scenario starts without leftover attributions.
+func clearReferralTestBindings(t *testing.T) {
+	t.Helper()
+	require.NoError(t, DB.Where("1 = 1").Delete(&ReferralBinding{}).Error)
+}
+
+// confirmPaymentComplianceForTest opens the referral reward gate for the
+// duration of the test, because invitation bookkeeping only runs for a
+// deployment that confirmed the payment compliance terms.
+func confirmPaymentComplianceForTest(t *testing.T) {
+	t.Helper()
+	payment := operation_setting.GetPaymentSetting()
+	previousConfirmed, previousTerms := payment.ComplianceConfirmed, payment.ComplianceTermsVersion
+	payment.ComplianceConfirmed = true
+	payment.ComplianceTermsVersion = operation_setting.CurrentComplianceTermsVersion
+	t.Cleanup(func() {
+		payment.ComplianceConfirmed = previousConfirmed
+		payment.ComplianceTermsVersion = previousTerms
+	})
+}
+
+func TestReferralBindingMatrix(t *testing.T) {
+	runAffCodeDialectMatrix(t, func(t *testing.T) {
+		t.Run("records one binding and mirrors it onto the user row", func(t *testing.T) {
+			clearAffCodeTestUsers(t)
+			clearReferralTestBindings(t)
+
+			inviter := User{Username: "referral-inviter", Password: "password", AffCode: "InviterAAA", Status: common.UserStatusEnabled}
+			require.NoError(t, DB.Create(&inviter).Error)
+
+			invitee := User{Username: "referral-invitee", Password: "password", Status: common.UserStatusEnabled}
+			require.NoError(t, invitee.Insert(ReferralAttribution{InviterId: inviter.Id, Source: ReferralSourceCode}))
+
+			binding, err := GetReferralBindingForInvitee(invitee.Id)
+			require.NoError(t, err)
+			require.NotNil(t, binding)
+			assert.Equal(t, inviter.Id, binding.InviterId)
+			assert.Equal(t, ReferralSourceCode, binding.Source)
+			assert.NotZero(t, binding.BoundAt)
+
+			var stored User
+			require.NoError(t, DB.First(&stored, invitee.Id).Error)
+			assert.Equal(t, inviter.Id, stored.InviterId, "the binding must be mirrored onto users.inviter_id")
+			assert.Equal(t, inviter.Id, invitee.InviterId)
+
+			// A bound account is never rebound, not even by an administrator.
+			other := User{Username: "referral-other-inviter", Password: "password", AffCode: "InviterBBB", Status: common.UserStatusEnabled}
+			require.NoError(t, DB.Create(&other).Error)
+			_, err = BindReferralInviterByAdmin(invitee.Id, other.Id)
+			require.ErrorIs(t, err, ErrReferralAlreadyBound)
+
+			// Ordinary user updates keep the relation intact.
+			require.NoError(t, stored.Update(false))
+			var reloaded User
+			require.NoError(t, DB.First(&reloaded, invitee.Id).Error)
+			assert.Equal(t, inviter.Id, reloaded.InviterId, "user updates must not change the inviter")
+		})
+
+		t.Run("drops invalid attributions without failing registration", func(t *testing.T) {
+			clearAffCodeTestUsers(t)
+			clearReferralTestBindings(t)
+
+			disabled := User{Username: "referral-disabled-inviter", Password: "password", AffCode: "DisabledAA", Status: common.UserStatusDisabled}
+			require.NoError(t, DB.Create(&disabled).Error)
+			deleted := User{Username: "referral-deleted-inviter", Password: "password", AffCode: "DeletedAAA", Status: common.UserStatusEnabled}
+			require.NoError(t, DB.Create(&deleted).Error)
+			require.NoError(t, DB.Delete(&deleted).Error)
+
+			cases := []struct {
+				name      string
+				username  string
+				inviterId int
+			}{
+				{"unknown inviter", "referral-dropped-unknown", 999999},
+				{"disabled inviter", "referral-dropped-disabled", disabled.Id},
+				{"deleted inviter", "referral-dropped-deleted", deleted.Id},
+			}
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					user := User{Username: tc.username, Password: "password", Status: common.UserStatusEnabled}
+					require.NoError(t, user.Insert(ReferralAttribution{InviterId: tc.inviterId, Source: ReferralSourceCode}))
+
+					binding, err := GetReferralBindingForInvitee(user.Id)
+					require.NoError(t, err)
+					assert.Nil(t, binding)
+
+					var stored User
+					require.NoError(t, DB.First(&stored, user.Id).Error)
+					assert.Zero(t, stored.InviterId)
+				})
+			}
+
+			// Lookup reports a banned code and resolves unknown or empty codes
+			// to no inviter instead of an error.
+			_, err := LookupReferralInviter("DisabledAA")
+			require.ErrorIs(t, err, ErrReferralInviterDisabled)
+			inviterId, err := LookupReferralInviter("DeletedAAA")
+			require.NoError(t, err)
+			assert.Zero(t, inviterId)
+			inviterId, err = LookupReferralInviter("missingcode")
+			require.NoError(t, err)
+			assert.Zero(t, inviterId)
+			inviterId, err = LookupReferralInviter("")
+			require.NoError(t, err)
+			assert.Zero(t, inviterId)
+		})
+
+		t.Run("refuses self-invitation by id and by email", func(t *testing.T) {
+			clearAffCodeTestUsers(t)
+			clearReferralTestBindings(t)
+
+			inviter := User{Username: "referral-self-inviter", Password: "password", Email: "shared@example.com", AffCode: "SelfInviter", Status: common.UserStatusEnabled}
+			require.NoError(t, DB.Create(&inviter).Error)
+			invitee := User{Username: "referral-self-invitee", Password: "password", Email: "Shared@Example.com", Status: common.UserStatusEnabled}
+			require.NoError(t, DB.Create(&invitee).Error)
+
+			_, err := BindReferralInviterByAdmin(invitee.Id, invitee.Id)
+			require.ErrorIs(t, err, ErrReferralSelfInvite)
+			_, err = BindReferralInviterByAdmin(invitee.Id, inviter.Id)
+			require.ErrorIs(t, err, ErrReferralSelfInvite)
+
+			binding, err := GetReferralBindingForInvitee(invitee.Id)
+			require.NoError(t, err)
+			assert.Nil(t, binding)
+		})
+
+		t.Run("admin binds only accounts without an inviter", func(t *testing.T) {
+			clearAffCodeTestUsers(t)
+			clearReferralTestBindings(t)
+
+			inviter := User{Username: "referral-admin-inviter", Password: "password", AffCode: "AdminInvAA", Status: common.UserStatusEnabled}
+			require.NoError(t, DB.Create(&inviter).Error)
+			disabled := User{Username: "referral-admin-disabled", Password: "password", AffCode: "AdminDisAA", Status: common.UserStatusDisabled}
+			require.NoError(t, DB.Create(&disabled).Error)
+			invitee := User{Username: "referral-admin-invitee", Password: "password", Status: common.UserStatusEnabled}
+			require.NoError(t, DB.Create(&invitee).Error)
+
+			_, err := BindReferralInviterByAdmin(invitee.Id, 999999)
+			require.ErrorIs(t, err, ErrReferralInviterNotFound)
+			_, err = BindReferralInviterByAdmin(invitee.Id, disabled.Id)
+			require.ErrorIs(t, err, ErrReferralInviterDisabled)
+
+			binding, err := BindReferralInviterByAdmin(invitee.Id, inviter.Id)
+			require.NoError(t, err)
+			assert.Equal(t, ReferralSourceAdmin, binding.Source)
+			assert.Equal(t, inviter.Id, binding.InviterId)
+
+			var stored User
+			require.NoError(t, DB.First(&stored, invitee.Id).Error)
+			assert.Equal(t, inviter.Id, stored.InviterId)
+
+			_, err = BindReferralInviterByAdmin(invitee.Id, inviter.Id)
+			require.ErrorIs(t, err, ErrReferralAlreadyBound)
+		})
+
+		t.Run("OAuth-style InsertWithTx persists the inviter relation", func(t *testing.T) {
+			clearAffCodeTestUsers(t)
+			clearReferralTestBindings(t)
+
+			inviter := User{Username: "referral-oauth-inviter", Password: "password", AffCode: "OAuthInvAA", Status: common.UserStatusEnabled}
+			require.NoError(t, DB.Create(&inviter).Error)
+
+			user := User{Username: "referral-oauth-invitee", Status: common.UserStatusEnabled}
+			require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+				return user.InsertWithTx(tx, ReferralAttribution{InviterId: inviter.Id, Source: ReferralSourceOAuth})
+			}))
+
+			var stored User
+			require.NoError(t, DB.First(&stored, user.Id).Error)
+			assert.Equal(t, inviter.Id, stored.InviterId)
+
+			binding, err := GetReferralBindingForInvitee(user.Id)
+			require.NoError(t, err)
+			require.NotNil(t, binding)
+			assert.Equal(t, ReferralSourceOAuth, binding.Source)
+
+			resolved, err := ActiveReferralInviter(user.Id)
+			require.NoError(t, err)
+			assert.Equal(t, inviter.Id, resolved)
+		})
+
+		t.Run("counts invitations without a configured reward and skips banned inviters", func(t *testing.T) {
+			clearAffCodeTestUsers(t)
+			clearReferralTestBindings(t)
+			confirmPaymentComplianceForTest(t)
+			previousInviterQuota, previousInviteeQuota := common.QuotaForInviter, common.QuotaForInvitee
+			common.QuotaForInviter, common.QuotaForInvitee = 0, 0
+			t.Cleanup(func() {
+				common.QuotaForInviter, common.QuotaForInvitee = previousInviterQuota, previousInviteeQuota
+			})
+
+			inviter := User{Username: "referral-count-inviter", Password: "password", AffCode: "CountInvAA", Status: common.UserStatusEnabled}
+			require.NoError(t, DB.Create(&inviter).Error)
+
+			invitee := User{Username: "referral-count-invitee", Password: "password", Status: common.UserStatusEnabled}
+			require.NoError(t, invitee.Insert(ReferralAttribution{InviterId: inviter.Id, Source: ReferralSourceCode}))
+
+			var counted User
+			require.NoError(t, DB.First(&counted, inviter.Id).Error)
+			require.Equal(t, 1, counted.AffCount, "the invitation count must grow even when QuotaForInviter is zero")
+
+			// The inviter is banned between the binding transaction and the
+			// post-commit bookkeeping: the relation stands, the reward does not.
+			oauthInvitee := User{Username: "referral-count-banned", Status: common.UserStatusEnabled}
+			require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+				return oauthInvitee.InsertWithTx(tx, ReferralAttribution{InviterId: inviter.Id, Source: ReferralSourceOAuth})
+			}))
+			require.NoError(t, DB.Model(&User{}).Where("id = ?", inviter.Id).Update("status", common.UserStatusDisabled).Error)
+			oauthInvitee.FinishInsert()
+
+			require.NoError(t, DB.First(&counted, inviter.Id).Error)
+			assert.Equal(t, 1, counted.AffCount, "a banned inviter must not collect invitation counts")
+
+			resolved, err := ActiveReferralInviter(oauthInvitee.Id)
+			require.NoError(t, err)
+			assert.Zero(t, resolved)
 		})
 	})
 }

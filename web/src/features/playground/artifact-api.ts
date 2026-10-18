@@ -21,7 +21,12 @@ import { z } from 'zod'
 import { api } from '@/lib/api'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
-export const playgroundArtifactKindSchema = z.enum(['markdown', 'code'])
+export const playgroundArtifactKindSchema = z.enum([
+  'markdown',
+  'code',
+  'html',
+  'svg',
+])
 export type PlaygroundArtifactKind = z.infer<
   typeof playgroundArtifactKindSchema
 >

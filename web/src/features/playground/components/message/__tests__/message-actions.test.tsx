@@ -47,3 +47,21 @@ test('the send-to-canvas action is hidden without a handler', () => {
     screen.queryByRole('button', { name: 'Send to canvas' })
   ).not.toBeInTheDocument()
 })
+
+test('the read-aloud action reports the message it was used on', async () => {
+  const user = userEvent.setup()
+  const onReadAloud = vi.fn()
+
+  render(<MessageActions message={message} onReadAloud={onReadAloud} />)
+  await user.click(screen.getByRole('button', { name: 'Read aloud' }))
+
+  expect(onReadAloud).toHaveBeenCalledWith(message)
+})
+
+test('the read-aloud action is hidden without a handler', () => {
+  render(<MessageActions message={message} />)
+
+  expect(
+    screen.queryByRole('button', { name: 'Read aloud' })
+  ).not.toBeInTheDocument()
+})

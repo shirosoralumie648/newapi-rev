@@ -60,6 +60,7 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 
 	// router/api-router.go: /api/playground
 	"GET /api/playground/usage":                                                  accessTokenSessionRule,
+	"GET /api/playground/settings":                                               accessTokenSessionRule,
 	"GET /api/playground/message-costs":                                          accessTokenSessionRule,
 	"GET /api/playground/trash":                                                  accessTokenSessionRule,
 	"GET /api/playground/assets":                                                 accessTokenSessionRule,
@@ -70,6 +71,11 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/playground/presets/:presetId":                                      accessTokenSessionRule,
 	"PATCH /api/playground/presets/:presetId":                                    accessTokenSessionRule,
 	"DELETE /api/playground/presets/:presetId":                                   accessTokenSessionRule,
+	"GET /api/playground/snippets":                                               accessTokenSessionRule,
+	"POST /api/playground/snippets":                                              accessTokenSessionRule,
+	"GET /api/playground/snippets/:snippetId":                                    accessTokenSessionRule,
+	"PATCH /api/playground/snippets/:snippetId":                                  accessTokenSessionRule,
+	"DELETE /api/playground/snippets/:snippetId":                                 accessTokenSessionRule,
 	"GET /api/playground/sessions":                                               accessTokenSessionRule,
 	"POST /api/playground/sessions":                                              accessTokenSessionRule,
 	"GET /api/playground/sessions/:id":                                           accessTokenSessionRule,
@@ -165,6 +171,7 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/user/:id/oauth/bindings":                 accessTokenScopeRule("user:read"),
 	"DELETE /api/user/:id/oauth/bindings/:provider_id": accessTokenScopeRule("user:write"),
 	"DELETE /api/user/:id/bindings/:binding_type":      accessTokenScopeRule("user:write"),
+	"POST /api/user/:id/inviter":                       accessTokenScopeRule("user:write"),
 	"GET /api/user/:id":                                accessTokenScopeRule("user:read"),
 	"POST /api/user/":                                  accessTokenScopeRule("user:write"),
 	"POST /api/user/manage":                            accessTokenScopeRule("user:write"),
@@ -365,11 +372,12 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 
 	// router/relay-router.go: the Playground workspace, chat and media
 	// bridges alike, is session-only.
-	"POST /pg/chat/completions":   accessTokenSessionRule,
-	"POST /pg/images/generations": accessTokenSessionRule,
-	"POST /pg/images/edits":       accessTokenSessionRule,
-	"POST /pg/videos":             accessTokenSessionRule,
-	"POST /pg/audio/speech":       accessTokenSessionRule,
+	"POST /pg/chat/completions":     accessTokenSessionRule,
+	"POST /pg/images/generations":   accessTokenSessionRule,
+	"POST /pg/images/edits":         accessTokenSessionRule,
+	"POST /pg/videos":               accessTokenSessionRule,
+	"POST /pg/audio/speech":         accessTokenSessionRule,
+	"POST /pg/audio/transcriptions": accessTokenSessionRule,
 }
 
 var (

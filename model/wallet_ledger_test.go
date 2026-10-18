@@ -63,7 +63,7 @@ func accountingTestDB(t *testing.T, dialect string) *gorm.DB {
 	DB = db
 	LOG_DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&WalletLedgerEntry{}, &WalletHold{}, &WalletHoldGrant{}, &WalletDebt{}, &CreditGrant{}, &SubscriptionPreConsumeRecord{}, &UserSubscription{}, &SubscriptionPlan{}, &User{}))
+		require.NoError(t, db.Migrator().DropTable(&WalletLedgerEntry{}, &WalletHold{}, &WalletHoldGrant{}, &WalletDebt{}, &CreditGrant{}, &SubscriptionWindowUsage{}, &SubscriptionPreConsumeRecord{}, &UserSubscription{}, &SubscriptionPlan{}, &User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
@@ -76,8 +76,8 @@ func accountingTestDB(t *testing.T, dialect string) *gorm.DB {
 
 	// A fresh migration and a repeated migration both succeed, so the new
 	// tables are created idempotently on every engine.
-	require.NoError(t, db.AutoMigrate(&User{}, &WalletLedgerEntry{}, &WalletHold{}, &WalletHoldGrant{}, &WalletDebt{}, &CreditGrant{}, &SubscriptionPlan{}, &UserSubscription{}, &SubscriptionPreConsumeRecord{}))
-	require.NoError(t, db.AutoMigrate(&User{}, &WalletLedgerEntry{}, &WalletHold{}, &WalletHoldGrant{}, &WalletDebt{}, &CreditGrant{}, &SubscriptionPlan{}, &UserSubscription{}, &SubscriptionPreConsumeRecord{}))
+	require.NoError(t, db.AutoMigrate(&User{}, &WalletLedgerEntry{}, &WalletHold{}, &WalletHoldGrant{}, &WalletDebt{}, &CreditGrant{}, &SubscriptionPlan{}, &UserSubscription{}, &SubscriptionWindowUsage{}, &SubscriptionPreConsumeRecord{}))
+	require.NoError(t, db.AutoMigrate(&User{}, &WalletLedgerEntry{}, &WalletHold{}, &WalletHoldGrant{}, &WalletDebt{}, &CreditGrant{}, &SubscriptionPlan{}, &UserSubscription{}, &SubscriptionWindowUsage{}, &SubscriptionPreConsumeRecord{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -988,11 +988,11 @@ func TestCreditGrantSpendOrderAndRefundReturnsToTheBucket(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, reserved)
 		RecordWalletConsumeDelta(301, -100)
-		assert.Zero(t, grantRemaining(t, promo))
+		assert.EqualValues(t, 50, grantRemaining(t, promo), "the reservation only claims what it deducts")
 		reserved, err = TryReserveUserQuota(301, 900, "grant-order-d")
 		require.NoError(t, err)
 		assert.False(t, reserved, "the paid balance cannot cover a reservation the grants no longer cover")
-		assert.Zero(t, grantRemaining(t, promo))
+		assert.EqualValues(t, 50, grantRemaining(t, promo))
 		charged, err = SettleWalletHold(301, "grant-order-c", 50)
 		require.NoError(t, err)
 		assert.EqualValues(t, 50, charged)

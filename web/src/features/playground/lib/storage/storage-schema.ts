@@ -34,6 +34,9 @@ export const playgroundConfigSchema = z.object({
   frequency_penalty: z.number().finite().optional(),
   presence_penalty: z.number().finite().optional(),
   seed: z.number().finite().nullable().optional(),
+  // Kept permissive on purpose: payload-builder only forwards a value the
+  // relay accepts, so an edited store cannot produce an invalid request.
+  reasoning_effort: z.string().max(16).optional(),
   stream: z.boolean().optional(),
 })
 
@@ -44,6 +47,7 @@ export const parameterEnabledSchema = z.object({
   frequency_penalty: z.boolean().optional(),
   presence_penalty: z.boolean().optional(),
   seed: z.boolean().optional(),
+  reasoning_effort: z.boolean().optional(),
 })
 
 // Context management settings of one conversation. The stored shape stays
@@ -101,6 +105,7 @@ const messageVersionSchema = z.object({
   status: messageStatusSchema.optional(),
   errorCode: z.string().max(500).nullable().optional(),
   attachments: z.array(messageAttachmentSchema).optional(),
+  speech: messageAttachmentSchema.optional(),
   toolCalls: z.array(messageToolCallSchema).optional(),
   // Display-only generation record. A stored version that carries it keeps the
   // relay request id (64 characters, the logs.request_id column) and the token
