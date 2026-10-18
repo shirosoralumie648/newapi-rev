@@ -30,8 +30,8 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { handleServerError } from '@/lib/handle-server-error'
 
-import { exportPlaygroundSessionFile } from '../lib/export'
-import type { PlaygroundExportFormat } from '../types'
+import { exportPlaygroundSessionFile } from '../../lib/export'
+import type { PlaygroundExportFormat } from '../../types'
 
 interface PlaygroundSessionExportMenuProps {
   /** Canonical server id of the conversation to export. */
