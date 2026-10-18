@@ -170,7 +170,11 @@ import {
   channelFormSchema,
   channelsQueryKeys,
   getAdvancedCustomStats,
+  MAX_CHANNEL_CONCURRENCY,
   MAX_FIRST_TOKEN_TIMEOUT_SECONDS,
+  MAX_RATE_LIMIT_RPM,
+  MAX_RATE_LIMIT_TPM,
+  normalizeAdmissionLimit,
   normalizeFirstTokenTimeout,
   transformChannelToFormDefaults,
   type ChannelFormValues,
@@ -305,6 +309,9 @@ const SENSITIVE_FORM_FIELDS = [
   'http2_connection_shards',
   'tls_insecure_skip_verify',
   'first_token_timeout',
+  'max_concurrency',
+  'rpm_limit',
+  'tpm_limit',
   'pass_through_body_enabled',
   'responses_websocket_enabled',
   'system_prompt',
@@ -2220,6 +2227,100 @@ export function ChannelMutateDrawer({
         </FormItem>
       )}
     />
+  )
+
+  const admissionLimitFields = (
+    <>
+      <FormField
+        control={form.control}
+        name='max_concurrency'
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>{t('Max Concurrency')}</FormLabel>
+            <FormControl>
+              <Input
+                type='number'
+                min={0}
+                max={MAX_CHANNEL_CONCURRENCY}
+                placeholder='0'
+                disabled={sensitiveLocked}
+                value={field.value ?? 0}
+                onChange={(event) =>
+                  field.onChange(
+                    normalizeAdmissionLimit(
+                      Number(event.target.value),
+                      MAX_CHANNEL_CONCURRENCY
+                    )
+                  )
+                }
+              />
+            </FormControl>
+            <FormDescription>
+              {t(FIELD_DESCRIPTIONS.MAX_CONCURRENCY)}
+            </FormDescription>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+      <FormField
+        control={form.control}
+        name='rpm_limit'
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>{t('Requests per minute')}</FormLabel>
+            <FormControl>
+              <Input
+                type='number'
+                min={0}
+                max={MAX_RATE_LIMIT_RPM}
+                placeholder='0'
+                disabled={sensitiveLocked}
+                value={field.value ?? 0}
+                onChange={(event) =>
+                  field.onChange(
+                    normalizeAdmissionLimit(
+                      Number(event.target.value),
+                      MAX_RATE_LIMIT_RPM
+                    )
+                  )
+                }
+              />
+            </FormControl>
+            <FormDescription>{t(FIELD_DESCRIPTIONS.RPM_LIMIT)}</FormDescription>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+      <FormField
+        control={form.control}
+        name='tpm_limit'
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>{t('Tokens per minute')}</FormLabel>
+            <FormControl>
+              <Input
+                type='number'
+                min={0}
+                max={MAX_RATE_LIMIT_TPM}
+                placeholder='0'
+                disabled={sensitiveLocked}
+                value={field.value ?? 0}
+                onChange={(event) =>
+                  field.onChange(
+                    normalizeAdmissionLimit(
+                      Number(event.target.value),
+                      MAX_RATE_LIMIT_TPM
+                    )
+                  )
+                }
+              />
+            </FormControl>
+            <FormDescription>{t(FIELD_DESCRIPTIONS.TPM_LIMIT)}</FormDescription>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+    </>
   )
 
   const routingFields = (
@@ -4826,6 +4927,7 @@ export function ChannelMutateDrawer({
                 {httpShardsFields}
                 {tlsInsecureSkipVerifyFields}
                 {firstTokenTimeoutFields}
+                {admissionLimitFields}
               </fieldset>
             </div>
             {upstreamModelDetectionFields}

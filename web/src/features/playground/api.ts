@@ -1036,6 +1036,111 @@ export async function getPlaygroundUsage(
   }
 }
 
+const playgroundStorageLedgerRowSchema = z.object({
+  id: z.number().int(),
+  user_id: z.number().int(),
+  date: z.string(),
+  peak_bytes: z.number().int().nonnegative(),
+  free_bytes: z.number().int().nonnegative(),
+  billable_bytes: z.number().int().nonnegative(),
+  egress_bytes: z.number().int().nonnegative(),
+  egress_requests: z.number().int().nonnegative(),
+  quota: z.number().int(),
+  debt_quota: z.number().int(),
+  egress_quota: z.number().int(),
+  status: z.string(),
+  grace_until: z.number().int().nonnegative(),
+  settled_at: z.number().int().nonnegative(),
+  created_at: z.number().int().nonnegative(),
+  updated_at: z.number().int().nonnegative(),
+})
+
+const playgroundStorageBillingSchema = z.object({
+  enabled: z.boolean(),
+  group: z.string(),
+  price_usd_per_gb_month: z.number(),
+  free_bytes: z.number().int().nonnegative(),
+  apply_group_ratio: z.boolean(),
+  grace_days: z.number().int().nonnegative(),
+  egress_mode: z.string(),
+  egress_price_usd_per_gb: z.number(),
+  egress_daily_bytes_limit: z.number().int().nonnegative(),
+  egress_daily_requests_limit: z.number().int().nonnegative(),
+  today: playgroundStorageLedgerRowSchema.optional(),
+  debt_quota: z.number().int(),
+  grace_until: z.number().int().nonnegative(),
+  read_only: z.boolean(),
+})
+
+/**
+ * The caller's read-only view of the optional metered storage tier. `today` is
+ * the day still accruing (null before the first sample); `readOnly` mirrors the
+ * shared wallet lock a settled-but-unpaid day triggers, and `graceUntil` is the
+ * latest recorded payment deadline.
+ */
+export interface PlaygroundStorageBillingStatus {
+  enabled: boolean
+  group: string
+  priceUsdPerGbMonth: number
+  freeBytes: number
+  applyGroupRatio: boolean
+  graceDays: number
+  egressMode: string
+  egressPriceUsdPerGb: number
+  egressDailyBytesLimit: number
+  egressDailyRequestsLimit: number
+  today: PlaygroundStorageToday | null
+  debtQuota: number
+  graceUntil: number
+  readOnly: boolean
+}
+
+export interface PlaygroundStorageToday {
+  peakBytes: number
+  billableBytes: number
+  quota: number
+  debtQuota: number
+  egressBytes: number
+  egressRequests: number
+  status: string
+}
+
+export async function getPlaygroundStorageBilling(
+  signal?: AbortSignal
+): Promise<PlaygroundStorageBillingStatus> {
+  const response = await api.get(API_ENDPOINTS.PLAYGROUND_STORAGE_BILLING, {
+    signal,
+  })
+  requireServerSuccess(response.data)
+  const status = playgroundStorageBillingSchema.parse(response.data.data)
+  return {
+    enabled: status.enabled,
+    group: status.group,
+    priceUsdPerGbMonth: status.price_usd_per_gb_month,
+    freeBytes: status.free_bytes,
+    applyGroupRatio: status.apply_group_ratio,
+    graceDays: status.grace_days,
+    egressMode: status.egress_mode,
+    egressPriceUsdPerGb: status.egress_price_usd_per_gb,
+    egressDailyBytesLimit: status.egress_daily_bytes_limit,
+    egressDailyRequestsLimit: status.egress_daily_requests_limit,
+    today: status.today
+      ? {
+          peakBytes: status.today.peak_bytes,
+          billableBytes: status.today.billable_bytes,
+          quota: status.today.quota,
+          debtQuota: status.today.debt_quota,
+          egressBytes: status.today.egress_bytes,
+          egressRequests: status.today.egress_requests,
+          status: status.today.status,
+        }
+      : null,
+    debtQuota: status.debt_quota,
+    graceUntil: status.grace_until,
+    readOnly: status.read_only,
+  }
+}
+
 /**
  * Server-side Playground feature switches. `sandboxPreviewEnabled` is the
  * administrator opt-in for rendering HTML/SVG artifact content inside the

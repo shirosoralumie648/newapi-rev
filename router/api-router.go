@@ -76,6 +76,7 @@ func SetApiRouter(router *gin.Engine) {
 		playgroundRoute.Use(middleware.DisableCache(), middleware.UserAuth())
 		{
 			playgroundRoute.GET("/usage", controller.GetPlaygroundUsage)
+			playgroundRoute.GET("/storage/billing", controller.GetPlaygroundStorageBilling)
 			// One canvas workflow run may open a budget cap and settle it when
 			// the run stops (BL-03).
 			playgroundRoute.POST("/workflows/estimate", controller.PlaygroundWorkflowEstimate)
@@ -274,6 +275,9 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.GET("/:id/wallet/reconcile", controller.GetUserWalletReconcile)
 				adminRoute.GET("/:id/wallet/grants", controller.GetUserCreditGrantWallet)
 				adminRoute.GET("/wallet/debts", controller.GetWalletDebtors)
+				adminRoute.GET("/playground/storage/ledger", controller.GetPlaygroundStorageLedger)
+				adminRoute.GET("/playground/storage/ledger/export", controller.ExportPlaygroundStorageLedger)
+				adminRoute.GET("/playground/storage/reconcile", controller.GetPlaygroundStorageReconcile)
 				adminRoute.GET("/wallet/grants/stats", controller.GetCreditGrantStats)
 				adminRoute.POST("/wallet/grants", middleware.CriticalRateLimit(), controller.IssueCreditGrant)
 				adminRoute.GET("/referrals", controller.GetReferralInvitations)

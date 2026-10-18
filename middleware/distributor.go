@@ -127,6 +127,11 @@ func Distribute() func(c *gin.Context) {
 				return
 			}
 		}
+		if channel != nil {
+			// The relay admission reads the channel's limits for the first
+			// attempt from this record.
+			common.SetContextKey(c, constant.ContextKeySelectedChannel, channel)
+		}
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
 		common.MarkRequestTiming(c, common.RequestTimingPhaseChannelSelected)
 		SetupContextForSelectedChannel(c, channel, modelRequest.Model)

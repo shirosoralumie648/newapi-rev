@@ -174,31 +174,25 @@ func readPlaygroundStoredPayload(store objectstore.Store, objectKey, encoding st
 	return payload, nil
 }
 
-// deletePlaygroundObject removes stored bytes after their row is gone. Failure
-// is logged, never returned: a leftover object is reconciled by later
-// maintenance instead of failing a request whose database state committed.
-func deletePlaygroundObject(store objectstore.Store, objectKey string) {
+// deletePlaygroundObject removes stored bytes after their row is gone. The
+// error is returned to the delete-outbox caller, which keeps its queued entry
+// for the retry worker; the logged failure remains the operator's breadcrumb.
+func deletePlaygroundObject(store objectstore.Store, objectKey string) error {
 	if objectKey == "" {
-		return
+		return nil
 	}
 	if store == nil {
 		store = objectstore.DefaultStore()
 	}
 	if store == nil {
 		common.SysError(common.LogText("failed to delete Playground object %s: object store is not configured", objectKey))
-		return
+		return ErrPlaygroundPayloadStorage
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), playgroundPayloadObjectTimeout)
 	defer cancel()
 	if err := store.Delete(ctx, objectKey); err != nil && !errors.Is(err, objectstore.ErrObjectNotFound) {
 		common.SysError(common.LogText("failed to delete Playground object %s: %s", objectKey, err.Error()))
+		return err
 	}
-}
-
-// deletePlaygroundObjects drains the objects one committed change replaced,
-// pruned or purged.
-func deletePlaygroundObjects(objects []playgroundStoredObject) {
-	for index := range objects {
-		deletePlaygroundObject(nil, objects[index].ObjectKey)
-	}
+	return nil
 }

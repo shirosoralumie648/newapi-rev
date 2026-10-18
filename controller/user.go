@@ -443,6 +443,9 @@ func GetUser(c *gin.Context) {
 
 type TransferAffQuotaRequest struct {
 	Quota int `json:"quota" binding:"required"`
+	// RequestId is the client's idempotency key: retrying a transfer with the
+	// same value reports the first outcome without moving quota twice.
+	RequestId string `json:"request_id"`
 }
 
 func TransferAffQuota(c *gin.Context) {
@@ -461,7 +464,7 @@ func TransferAffQuota(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	err = user.TransferAffQuotaToQuota(tran.Quota)
+	err = user.TransferAffQuotaToQuota(tran.Quota, tran.RequestId)
 	var message *common.Message
 	if errors.As(err, &message) {
 		common.ApiError(c, err)

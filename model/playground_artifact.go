@@ -672,6 +672,7 @@ func DeletePlaygroundArtifact(userID int, sessionID, artifactID string, revision
 		return ErrPlaygroundArtifactInvalid
 	}
 	var removedObjects []playgroundStoredObject
+	var queued []playgroundQueuedObjectDelete
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		if _, err := lockPlaygroundArtifactSession(tx, userID, sessionID); err != nil {
 			return err
@@ -716,6 +717,10 @@ func DeletePlaygroundArtifact(userID int, sessionID, artifactID string, revision
 				removedObjects = append(removedObjects, playgroundStoredObject{ObjectKey: storedVersions[index].ObjectKey})
 			}
 		}
+		queued, err = enqueuePlaygroundObjectDeletes(tx, removedObjects, playgroundObjectOriginArtifact)
+		if err != nil {
+			return err
+		}
 		now := common.GetTimestamp()
 		updated := tx.Model(&PlaygroundArtifact{}).Where("id = ? AND user_id = ? AND session_id = ? AND revision = ? AND deleted_at = 0", artifact.ID, userID, sessionID, revision).
 			Updates(map[string]any{"deleted_at": now, "updated_at": now, "revision": revision + 1, "current_version_id": "", "title": "", "language": "", "kind": "", "source": ""})
@@ -731,6 +736,6 @@ func DeletePlaygroundArtifact(userID int, sessionID, artifactID string, revision
 	if err != nil {
 		return err
 	}
-	deletePlaygroundObjects(removedObjects)
+	drainPlaygroundObjectDeletes(nil, queued)
 	return nil
 }

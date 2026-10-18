@@ -36,6 +36,14 @@ import (
 // the JSON envelope.
 const playgroundAttachmentRequestMaxBytes = 12 << 20
 
+// PlaygroundEgressLimitErrorCode is the stable error code of a refused
+// attachment download that would cross the account's daily egress budget.
+const PlaygroundEgressLimitErrorCode = "PLAYGROUND_EGRESS_LIMIT_EXCEEDED"
+
+// PlaygroundEgressLimitMessage is the English source message of that refusal;
+// the frontend translates it by code.
+const PlaygroundEgressLimitMessage = "You have reached the daily Playground storage download limit. It resets with the next storage day."
+
 type playgroundAttachmentRequest struct {
 	ClientKey string `json:"client_key"`
 	MediaType string `json:"media_type"`
@@ -102,6 +110,10 @@ func writePlaygroundAttachmentError(c *gin.Context, err error) {
 		status, code, message = http.StatusUnprocessableEntity, "PLAYGROUND_UPLOAD_INCOMPLETE", err.Error()
 	case errors.Is(err, model.ErrPlaygroundUploadContentMismatch):
 		status, code, message = http.StatusBadRequest, "PLAYGROUND_UPLOAD_CONTENT_MISMATCH", err.Error()
+	case errors.Is(err, model.ErrPlaygroundEgressLimitExceeded):
+		// The refusal happens before a byte is served; the stored data stays
+		// untouched and the budget resets with the next storage day.
+		status, code, message = http.StatusTooManyRequests, PlaygroundEgressLimitErrorCode, PlaygroundEgressLimitMessage
 	}
 	common.ApiErrorStatus(c, status, common.NewMessage(message), gin.H{"code": code})
 }
@@ -265,6 +277,13 @@ func GetPlaygroundAttachmentContent(c *gin.Context) {
 			writePlaygroundAttachmentError(c, errors.New("decoded attachment is invalid"))
 			return
 		}
+		// The served bytes are accounted before they are written, so a day
+		// that crosses its egress budget refuses the next transfer instead of
+		// overshooting it.
+		if err := model.ReservePlaygroundEgress(c.GetInt("id"), int64(len(data)), 1); err != nil {
+			writePlaygroundAttachmentError(c, err)
+			return
+		}
 		// Inline rendering is restricted to the stored media type, and the
 		// filename is wrapped so it can never split the response headers.
 		c.Header("Content-Disposition", "inline; filename*=UTF-8''"+url.PathEscape(attachment.Filename))
@@ -287,9 +306,20 @@ func GetPlaygroundAttachmentContent(c *gin.Context) {
 	// http(s) links are trusted; anything else falls back to streaming.
 	if location, presignErr := store.PresignGet(c.Request.Context(), attachment.ObjectKey, objectstore.DefaultPresignTTL()); presignErr == nil {
 		if parsed, parseErr := url.Parse(location); parseErr == nil && parsed.Host != "" && (parsed.Scheme == "http" || parsed.Scheme == "https") {
+			// The bytes are served by the object store itself, so only the
+			// request is accounted here; the gateway cannot observe the
+			// transferred volume of a presigned redirect.
+			if err := model.ReservePlaygroundEgress(c.GetInt("id"), 0, 1); err != nil {
+				writePlaygroundAttachmentError(c, err)
+				return
+			}
 			c.Redirect(http.StatusFound, location)
 			return
 		}
+	}
+	if err := model.ReservePlaygroundEgress(c.GetInt("id"), attachment.ByteSize, 1); err != nil {
+		writePlaygroundAttachmentError(c, err)
+		return
 	}
 	if err := objectstore.Serve(c.Request.Context(), store, c.Writer, attachment.ObjectKey, objectstore.ServeOptions{
 		Filename: attachment.Filename, ContentType: attachment.MediaType,

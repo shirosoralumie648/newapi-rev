@@ -60,6 +60,7 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 
 	// router/api-router.go: /api/playground
 	"GET /api/playground/usage":                                                  accessTokenSessionRule,
+	"GET /api/playground/storage/billing":                                        accessTokenSessionRule,
 	"POST /api/playground/workflows/estimate":                                    accessTokenSessionRule,
 	"POST /api/playground/workflows/runs":                                        accessTokenSessionRule,
 	"POST /api/playground/workflows/runs/:runId/settle":                          accessTokenSessionRule,
@@ -203,6 +204,9 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/user/:id/wallet/reconcile":               accessTokenScopeRule("user:read"),
 	"GET /api/user/:id/wallet/grants":                  accessTokenScopeRule("user:read"),
 	"GET /api/user/wallet/debts":                       accessTokenScopeRule("user:read"),
+	"GET /api/user/playground/storage/ledger":          accessTokenScopeRule("user:read"),
+	"GET /api/user/playground/storage/ledger/export":   accessTokenScopeRule("user:read"),
+	"GET /api/user/playground/storage/reconcile":       accessTokenScopeRule("user:read"),
 	"GET /api/user/wallet/grants/stats":                accessTokenScopeRule("user:read"),
 	"POST /api/user/wallet/grants":                     accessTokenScopeRule("user:write"),
 	"GET /api/user/referrals":                          accessTokenScopeRule("user:read"),

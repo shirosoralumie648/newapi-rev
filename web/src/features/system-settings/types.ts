@@ -435,6 +435,7 @@ export type SecuritySettings = {
   'token_setting.max_user_tokens': number
   'playground_setting.defaults': string
   'playground_setting.group_overrides': string
+  'playground_setting.storage_billing': string
   'playground_setting.sandbox_preview_enabled': boolean
 }
 

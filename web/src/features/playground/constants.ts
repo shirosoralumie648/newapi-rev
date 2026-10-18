@@ -77,6 +77,7 @@ export const PLAYGROUND_TOOL_CALL_RESULT_MAX_CHARS = 64_000
 export const API_ENDPOINTS = {
   CHAT_COMPLETIONS: '/pg/chat/completions',
   IMAGE_GENERATIONS: '/pg/images/generations',
+  IMAGE_EDITS: '/pg/images/edits',
   VIDEO_GENERATIONS: '/pg/videos',
   AUDIO_SPEECH: '/pg/audio/speech',
   AUDIO_TRANSCRIPTIONS: '/pg/audio/transcriptions',
@@ -89,6 +90,7 @@ export const API_ENDPOINTS = {
   PLAYGROUND_PRESETS: '/api/playground/presets',
   PLAYGROUND_SNIPPETS: '/api/playground/snippets',
   PLAYGROUND_USAGE: '/api/playground/usage',
+  PLAYGROUND_STORAGE_BILLING: '/api/playground/storage/billing',
   PLAYGROUND_SETTINGS: '/api/playground/settings',
   PLAYGROUND_MESSAGE_COSTS: '/api/playground/message-costs',
   PLAYGROUND_ASSETS: '/api/playground/assets',

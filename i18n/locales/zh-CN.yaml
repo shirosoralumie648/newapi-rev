@@ -42,6 +42,8 @@ relay.retry_get_channel_failed: "获取分组 {{.Group}} 下模型 {{.Model}} �
 relay.retry_no_available_channel: "分组 {{.Group}} 下模型 {{.Model}} 的可用渠道不存在（retry）"
 relay.access_token_unsupported: "暂不支持使用 access token"
 relay.first_token_timeout: "上游渠道在 {{.Seconds}}s 内没有返回任何数据，请稍后重试"
+relay.channel_capacity_exhausted: "分组 {{.Group}} 下模型 {{.Model}} 的渠道当前均已达到容量上限，请稍后重试"
+relay.token_rate_limit_exceeded: "该令牌已达到 RPM 或 TPM 速率上限，请稍后重试"
 
 # Emails and the name of the token created at registration
 user.default_token_name: "{{.Username}}的初始令牌"

@@ -381,3 +381,61 @@ test('hides the result retry while the workflow is running', () => {
 
   expect(screen.queryByRole('button', { name: 'Retry generation' })).toBeNull()
 })
+
+test('opens one image tool per image node', async () => {
+  const user = userEvent.setup()
+  const onOpenImageTools = vi.fn()
+  const node = makeNode({
+    kind: 'image',
+    label: 'photo',
+    ref: { sessionId: 'pgc_1', attachmentId: 'pgf_1' },
+  })
+  render(
+    <CanvasNodeInspector
+      node={node}
+      onDelete={vi.fn()}
+      onOpenImageTools={onOpenImageTools}
+      onUpdateData={vi.fn()}
+    />
+  )
+
+  expect(screen.getByText('Image tools')).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Crop image' }))
+  expect(onOpenImageTools).toHaveBeenCalledWith(node, 'crop')
+  await user.click(screen.getByRole('button', { name: 'Redraw image area' }))
+  expect(onOpenImageTools).toHaveBeenCalledWith(node, 'redraw')
+  await user.click(screen.getByRole('button', { name: 'Upscale image' }))
+  expect(onOpenImageTools).toHaveBeenCalledWith(node, 'upscale')
+})
+
+test('hides the image tools when the inspector cannot open them', () => {
+  render(
+    <CanvasNodeInspector
+      node={makeNode({
+        kind: 'image',
+        ref: { sessionId: 'pgc_1', attachmentId: 'pgf_1' },
+      })}
+      onDelete={vi.fn()}
+      onUpdateData={vi.fn()}
+    />
+  )
+
+  expect(screen.queryByText('Image tools')).toBeNull()
+})
+
+test('hides the image tools for a node that carries no image', () => {
+  render(
+    <CanvasNodeInspector
+      node={makeNode({
+        kind: 'attachment',
+        mediaType: 'video/mp4',
+        ref: { sessionId: 'pgc_1', attachmentId: 'pgf_2' },
+      })}
+      onDelete={vi.fn()}
+      onOpenImageTools={vi.fn()}
+      onUpdateData={vi.fn()}
+    />
+  )
+
+  expect(screen.queryByText('Image tools')).toBeNull()
+})

@@ -66,6 +66,7 @@ function makeInvitation(
     pending_quota: pendingQuota,
     locked_quota: 0,
     settled_quota: 0,
+    refunded_quota: 0,
     total_paid_quota: 0,
     commission_count: pendingQuota > 0 ? 1 : 0,
   }
@@ -158,7 +159,7 @@ test('renders the unmarked state on the global default', async () => {
   renderProgram()
 
   expect(await screen.findByText('Not a referral agent')).toBeVisible()
-  expect(screen.getByText(formatPercent(20))).toBeVisible()
+  expect(await screen.findByText(formatPercent(20))).toBeVisible()
   expect(screen.getByText('Global default')).toBeVisible()
 })
 

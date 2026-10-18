@@ -1850,7 +1850,7 @@ func TestMaskReferralIdentifier(t *testing.T) {
 // sources and known commission states are accepted, the empty string meaning
 // "any".
 func TestReferralInvitationQueryValidation(t *testing.T) {
-	for _, source := range []string{"", ReferralSourceLink, ReferralSourceCode, ReferralSourceOAuth, ReferralSourceAdmin} {
+	for _, source := range []string{"", ReferralSourceLink, ReferralSourceCode, ReferralSourceOAuth, ReferralSourceAdmin, ReferralSourceLegacy} {
 		assert.True(t, IsReferralSource(source), "source %q must be accepted", source)
 	}
 	assert.False(t, IsReferralSource("unknown"))

@@ -1,11 +1,118 @@
 package playground_setting
 
 import (
+	"math"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/group_setting"
 )
+
+// PlaygroundStorageBytesPerGB is the byte unit the optional storage billing
+// weighs: one GiB at the account's peak daily footprint is one GB-day.
+const PlaygroundStorageBytesPerGB = int64(1) << 30
+
+// Egress modes of the storage billing. Unmetered keeps the daily byte and
+// request ceilings but never charges for downloads; metered adds the egress
+// volume to the day's settlement charge.
+const (
+	PlaygroundStorageEgressModeUnmetered = "unmetered"
+	PlaygroundStorageEgressModeMetered   = "metered"
+)
+
+// PlaygroundStorageEgressSetting bounds and (optionally) bills attachment
+// egress. The daily limits are enforced for every download regardless of the
+// mode: zero means unlimited, and a negative value is treated as unlimited so
+// a misconfigured ceiling can never reject every request.
+type PlaygroundStorageEgressSetting struct {
+	Mode               string  `json:"mode"`
+	PriceUSDPerGB      float64 `json:"price_usd_per_gb"`
+	DailyBytesLimit    int64   `json:"daily_bytes_limit"`
+	DailyRequestsLimit int64   `json:"daily_requests_limit"`
+}
+
+// PlaygroundStorageBillingSetting is the optional metered storage tier
+// (plan section 9.3): every day the account's peak stored bytes are weighed as
+// GB-days at PriceUSDPerGBMonth/30, the free allowance is subtracted, and the
+// result is charged to the same wallet the relay consumes from. While the
+// charge stays uncovered the account is read-only through the shared wallet
+// debt lock; stored data is never deleted.
+type PlaygroundStorageBillingSetting struct {
+	Enabled            bool    `json:"enabled"`
+	PriceUSDPerGBMonth float64 `json:"price_usd_per_gb_month"`
+	FreeGB             float64 `json:"free_gb"`
+	// GroupFreeGB replaces the free allowance of one user group. The key is a
+	// stable group identifier (an editable display name still matches); a
+	// present entry applies even when it is zero, so a paid group can be
+	// billed from the first byte.
+	GroupFreeGB     map[string]float64 `json:"group_free_gb"`
+	ApplyGroupRatio bool               `json:"apply_group_ratio"`
+	// GraceDays is the settlement grace window recorded on an unpaid day: the
+	// account stays read-only until the wallet covers the charge, and the
+	// deadline tells the user and the administrator how long that read-only
+	// grace already lasts. Data is never deleted.
+	GraceDays int                            `json:"grace_days"`
+	Egress    PlaygroundStorageEgressSetting `json:"egress"`
+}
+
+// IsEnabled reports whether the optional storage billing tier is switched on.
+// Everything else in this file may be configured freely while it is off; the
+// flag is the single switch that makes the configured prices and limits take
+// effect.
+func (setting *PlaygroundStorageBillingSetting) IsEnabled() bool {
+	return setting != nil && setting.Enabled
+}
+
+// PlaygroundStorageEgressModeMetered reports whether egress volume is charged.
+func (setting *PlaygroundStorageBillingSetting) EgressMetered() bool {
+	return setting != nil && setting.Egress.Mode == PlaygroundStorageEgressModeMetered
+}
+
+// EffectivePriceUSDPerGBMonth is the monthly GB price with invalid values
+// clamped to zero and audited, so a negative configuration can never turn a
+// charge into a credit.
+func (setting *PlaygroundStorageBillingSetting) EffectivePriceUSDPerGBMonth() float64 {
+	if setting == nil {
+		return 0
+	}
+	return sanitizedStorageBillingPrice(setting.PriceUSDPerGBMonth, "storage billing monthly price")
+}
+
+// EffectiveEgressPriceUSDPerGB is the egress GB price with the same guard.
+func (setting *PlaygroundStorageBillingSetting) EffectiveEgressPriceUSDPerGB() float64 {
+	if setting == nil {
+		return 0
+	}
+	return sanitizedStorageBillingPrice(setting.Egress.PriceUSDPerGB, "storage billing egress price")
+}
+
+// EffectiveGraceDays keeps the grace window in a sane range: a negative value
+// becomes zero (unpaid days are locked immediately) and an absurd value is
+// capped at ten years.
+func (setting *PlaygroundStorageBillingSetting) EffectiveGraceDays() int {
+	if setting == nil {
+		return 0
+	}
+	days := setting.GraceDays
+	if days < 0 {
+		common.SysError(common.LogText("playground storage billing grace days is negative, using 0: %d", days))
+		return 0
+	}
+	if days > 3650 {
+		common.SysError(common.LogText("playground storage billing grace days exceeds 3650, using 3650: %d", days))
+		return 3650
+	}
+	return days
+}
+
+func sanitizedStorageBillingPrice(value float64, label string) float64 {
+	if math.IsNaN(value) || value < 0 {
+		common.SysError(common.LogText("playground %s is invalid, using 0: %v", label, value))
+		return 0
+	}
+	return value
+}
 
 // PlaygroundQuotaPolicy is the effective per-account resource budget for the
 // Playground workspace: conversations, messages, attachments, artifacts and
@@ -106,6 +213,10 @@ type PlaygroundSetting struct {
 	// account did not author, so an administrator must opt in before the
 	// Playground mounts it inside the sandboxed iframe.
 	SandboxPreviewEnabled bool `json:"sandbox_preview_enabled"`
+	// StorageBilling is the optional metered storage tier. It is off by
+	// default: enabling it is the explicit administrator decision to charge
+	// the same wallet for the bytes an account keeps.
+	StorageBilling *PlaygroundStorageBillingSetting `json:"storage_billing"`
 }
 
 var playgroundSetting = newPlaygroundSetting()
@@ -116,7 +227,90 @@ func init() {
 
 func newPlaygroundSetting() PlaygroundSetting {
 	defaults := builtinPlaygroundQuotaPolicy()
-	return PlaygroundSetting{Defaults: &defaults, GroupOverrides: map[string]PlaygroundQuotaPolicy{}}
+	return PlaygroundSetting{
+		Defaults:       &defaults,
+		GroupOverrides: map[string]PlaygroundQuotaPolicy{},
+		StorageBilling: builtinPlaygroundStorageBillingSetting(),
+	}
+}
+
+// builtinPlaygroundStorageBillingSetting returns the disabled starting
+// configuration. The reference prices follow the plan's storage research
+// (Cloudflare R2, 0.015 USD per GB-month); they only take effect after an
+// administrator enables the tier, and the egress price starts at zero so
+// enabling metered egress without a price bills nothing.
+func builtinPlaygroundStorageBillingSetting() *PlaygroundStorageBillingSetting {
+	return &PlaygroundStorageBillingSetting{
+		Enabled:            false,
+		PriceUSDPerGBMonth: 0.015,
+		FreeGB:             1,
+		GroupFreeGB:        map[string]float64{},
+		ApplyGroupRatio:    true,
+		GraceDays:          7,
+		Egress: PlaygroundStorageEgressSetting{
+			Mode:          PlaygroundStorageEgressModeUnmetered,
+			PriceUSDPerGB: 0,
+		},
+	}
+}
+
+// GetPlaygroundStorageBillingSetting returns the persisted storage billing
+// configuration. Callers must not mutate it outside tests.
+func GetPlaygroundStorageBillingSetting() *PlaygroundStorageBillingSetting {
+	return playgroundSetting.StorageBilling
+}
+
+// FreeBytesForGroup resolves the free storage allowance of one user group in
+// bytes. The global FreeGB applies unless the group has an explicit override,
+// which applies even when it is zero; an editable display name still matches
+// its stable identifier. Invalid values are clamped to zero and audited, so a
+// misconfigured allowance can only reduce the billable amount.
+func (setting *PlaygroundStorageBillingSetting) FreeBytesForGroup(group string) int64 {
+	if setting == nil {
+		return 0
+	}
+	gb := setting.FreeGB
+	if len(setting.GroupFreeGB) > 0 {
+		identifier := group_setting.ResolveGroupID(group)
+		if override, ok := setting.GroupFreeGB[identifier]; ok {
+			gb = override
+		} else {
+			for rawGroup, override := range setting.GroupFreeGB {
+				if rawGroup != identifier && group_setting.ResolveGroupID(rawGroup) == identifier {
+					gb = override
+					break
+				}
+			}
+		}
+	}
+	if math.IsNaN(gb) || gb < 0 {
+		common.SysError(common.LogText("playground storage billing free GB for group %q is invalid, using 0: %v", group, gb))
+		return 0
+	}
+	if gb > 1<<40 {
+		common.SysError(common.LogText("playground storage billing free GB for group %q exceeds 1 PiB, using 1 PiB: %v", group, gb))
+		gb = 1 << 40
+	}
+	return int64(gb * float64(PlaygroundStorageBytesPerGB))
+}
+
+// EgressDailyLimits resolves the daily download ceilings of one group: the
+// uploaded bytes and the request count. Zero means unlimited, and a negative
+// configuration is treated as unlimited after an audit line.
+func (setting *PlaygroundStorageBillingSetting) EgressDailyLimits(group string) (bytesLimit int64, requestsLimit int64) {
+	if setting == nil {
+		return 0, 0
+	}
+	bytesLimit, requestsLimit = setting.Egress.DailyBytesLimit, setting.Egress.DailyRequestsLimit
+	if bytesLimit < 0 {
+		common.SysError(common.LogText("playground storage billing egress byte limit for group %q is negative, treating it as unlimited: %d", group, bytesLimit))
+		bytesLimit = 0
+	}
+	if requestsLimit < 0 {
+		common.SysError(common.LogText("playground storage billing egress request limit for group %q is negative, treating it as unlimited: %d", group, requestsLimit))
+		requestsLimit = 0
+	}
+	return bytesLimit, requestsLimit
 }
 
 // builtinPlaygroundQuotaPolicy returns the values Playground enforced before

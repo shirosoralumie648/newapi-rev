@@ -40,6 +40,10 @@ type Token struct {
 	// 周期窗口内的累计消费与窗口起点；只能由服务端维护，客户端 JSON 不可写。
 	PeriodUsed        int   `json:"period_used" gorm:"type:bigint;default:0"`
 	PeriodWindowStart int64 `json:"period_window_start" gorm:"type:bigint;default:0"`
+	// 令牌级准入限制：RPMLimit 限制该令牌每分钟发起的上游请求次数，TPMLimit
+	// 限制其每分钟消耗的 token 数（按预估预留、结算后校正）。0 表示不限制。
+	RPMLimit int `json:"rpm_limit" gorm:"default:0"`
+	TPMLimit int `json:"tpm_limit" gorm:"default:0"`
 	// CacheSchema 标记 Redis 令牌哈希的结构版本，仅用于缓存自检。
 	CacheSchema int `json:"-" gorm:"-:all"`
 }
@@ -329,7 +333,7 @@ func (token *Token) Insert() error {
 // UpdateWithQuotaTarget and is deliberately not client-writable.
 var tokenConfigFields = []string{"name", "status", "expired_time", "unlimited_quota",
 	"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry", "auto_groups",
-	"allow_user_quota_query", "period_quota", "period_reset_period"}
+	"allow_user_quota_query", "period_quota", "period_reset_period", "rpm_limit", "tpm_limit"}
 
 // Update Make sure your token's fields is completed, because this will update non-zero values
 func (token *Token) Update() (err error) {

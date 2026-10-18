@@ -63,6 +63,7 @@ func TestMain(m *testing.M) {
 		&model.PlaygroundTaskArtifact{},
 		&model.PlaygroundTaskArtifactPin{},
 		&model.PlaygroundTaskArtifactSync{},
+		&model.PlaygroundObjectDeleteOutbox{},
 		&model.WalletLedgerEntry{},
 		&model.WalletHold{},
 		&model.WalletHoldGrant{},

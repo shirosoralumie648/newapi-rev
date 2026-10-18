@@ -89,6 +89,13 @@ const (
 	// ErrorCodeTokenPeriodQuotaExhausted marks a token whose per-period budget
 	// is used up; the request is refused until the window resets.
 	ErrorCodeTokenPeriodQuotaExhausted ErrorCode = "token_period_quota_exhausted"
+	// ErrorCodeChannelCapacityExhausted marks a request every candidate channel
+	// refused for lack of admission capacity (concurrency, RPM or TPM). The
+	// client retries later; the code is stable for backoff handling.
+	ErrorCodeChannelCapacityExhausted ErrorCode = "channel_capacity_exhausted"
+	// ErrorCodeTokenRateLimitExceeded marks a request the token's own RPM or
+	// TPM limit refused.
+	ErrorCodeTokenRateLimitExceeded ErrorCode = "token_rate_limit_exceeded"
 	// ErrorCodeWorkflowBudgetExceeded marks a workspace workflow step the run
 	// budget cannot admit: the step is refused before it starts, and the client
 	// stops the remaining nodes of that run (BL-03).
