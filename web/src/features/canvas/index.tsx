@@ -232,6 +232,7 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
       <CanvasEditor
         key={`${project.id}:${epoch}`}
         disabled={status === 'loading'}
+        onBeforeExportArchive={controller.flushNow}
         onChange={handleDocumentChange}
         onImportArchive={handleImportArchive}
         onOpenSource={handleOpenSource}

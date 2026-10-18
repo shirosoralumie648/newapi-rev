@@ -492,6 +492,10 @@ const AUDIT_TEMPLATES: Record<string, string> = {
     'Cleared the referral identity of user {{username}}',
   'user.referral_review':
     'Decided referral commission review #{{id}} as {{decision}}',
+  'user.referral_agent':
+    'Updated the referral agent settings of user {{username}}',
+  'user.referral_agent_clear':
+    'Cleared the referral agent mark of user {{username}}',
   'user.2fa_disable': 'Force-disabled two-factor authentication for the user',
   'user.passkey_register': 'Registered a passkey',
   'user.passkey_delete': 'Deleted a passkey',

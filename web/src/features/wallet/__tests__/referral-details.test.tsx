@@ -120,6 +120,33 @@ it('keeps the invitee list reachable without referral rewards', () => {
   ).not.toBeInTheDocument()
 })
 
+it('opens the dedicated referral program page from the rewards card', () => {
+  const onOpenProgram = vi.fn()
+  const user: UserWalletData = {
+    id: 1,
+    username: 'owner',
+    quota: 0,
+    used_quota: 0,
+    request_count: 0,
+    aff_quota: 0,
+    aff_history_quota: 0,
+    aff_count: 0,
+    group: 'default',
+  }
+  render(
+    <AffiliateRewardsCard
+      user={user}
+      affiliateLink='https://example.com/?aff=1'
+      onTransfer={vi.fn()}
+      onViewReferrals={vi.fn()}
+      onOpenProgram={onOpenProgram}
+    />
+  )
+
+  fireEvent.click(screen.getByRole('button', { name: 'Open referral program' }))
+  expect(onOpenProgram).toHaveBeenCalledTimes(1)
+})
+
 it('shows the configured validity window when invitations never expire', async () => {
   vi.spyOn(api, 'get').mockResolvedValue(
     mockInvitationPage([makeInvitation(7, 'al***', 0)], 1, -1)

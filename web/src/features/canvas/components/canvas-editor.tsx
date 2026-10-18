@@ -47,6 +47,10 @@ import {
 } from '../hooks/use-canvas-editor'
 import { useCanvasWorkflowOptions } from '../hooks/use-canvas-workflow-options'
 import { useCanvasWorkflowRunner } from '../hooks/use-canvas-workflow-runner'
+import type {
+  CanvasWorkflowRunBudgetRef,
+  CanvasWorkflowRunPlan,
+} from '../hooks/use-canvas-workflow-runner'
 import {
   CANVAS_ERRORS,
   parseCanvasImport,
@@ -70,6 +74,7 @@ import { CanvasDropZone } from './canvas-drop-zone'
 import { CanvasInspectorViewToggle } from './canvas-inspector-view-toggle'
 import { CanvasFlowNodeView, CanvasGroupNodeView } from './canvas-node'
 import { CanvasNodeInspector } from './canvas-node-inspector'
+import { CanvasRunBudgetDialog } from './canvas-run-budget-dialog'
 import { CanvasToolbar } from './canvas-toolbar'
 
 const canvasNodeTypes: NodeTypes = {
@@ -93,6 +98,11 @@ interface CanvasEditorProps {
   disabled?: boolean
   onChange: (document: CanvasServerDocument) => void
   onImportArchive: (file: File) => void
+  /**
+   * Persists pending edits before an archive export, so the server builds the
+   * zip from the latest saved document.
+   */
+  onBeforeExportArchive?: () => Promise<void>
   onOpenSource?: (target: CanvasSourceTarget) => void
 }
 
@@ -139,6 +149,10 @@ export function CanvasEditor(props: CanvasEditorProps) {
     updateNodeData: editor.updateNodeData,
     addLinkedNode: editor.addLinkedNode,
   })
+
+  // The validated run the run-budget dialog is confirming; the dialog opens
+  // only when the same click would also start a run.
+  const [runPlan, setRunPlan] = useState<CanvasWorkflowRunPlan | null>(null)
 
   const [inspectorView, setInspectorView] =
     useState<CanvasInspectorView>('details')
@@ -267,6 +281,7 @@ export function CanvasEditor(props: CanvasEditorProps) {
   const handleExportArchive = useCallback(
     async (nodeIds?: string[]) => {
       try {
+        await props.onBeforeExportArchive?.()
         const archive = await exportCanvasArchive(props.project.id, nodeIds)
         downloadCanvasFile(archive.filename, archive.blob)
       } catch (error) {
@@ -278,7 +293,7 @@ export function CanvasEditor(props: CanvasEditorProps) {
         )
       }
     },
-    [props.project.id, t]
+    [props.onBeforeExportArchive, props.project.id, t]
   )
 
   const handleImportFile = useCallback(
@@ -411,7 +426,7 @@ export function CanvasEditor(props: CanvasEditorProps) {
                     onImportFile={handleImportFile}
                     onPaste={handlePaste}
                     onRedo={editor.redo}
-                    onRunWorkflow={() => workflow.run()}
+                    onRunWorkflow={() => setRunPlan(workflow.estimate())}
                     onSelectAll={editor.selectAll}
                     onToggleAssistant={handleToggleAssistant}
                     onUndo={editor.undo}
@@ -429,6 +444,18 @@ export function CanvasEditor(props: CanvasEditorProps) {
       >
         {inspector}
       </WorkspaceInspector>
+      <CanvasRunBudgetDialog
+        group={workflowOptions.group}
+        onOpenChange={(open) => {
+          if (!open) setRunPlan(null)
+        }}
+        onRun={(budget?: CanvasWorkflowRunBudgetRef) => {
+          setRunPlan(null)
+          workflow.run(undefined, budget)
+        }}
+        open={runPlan !== null}
+        steps={runPlan?.steps ?? []}
+      />
     </div>
   )
 }
