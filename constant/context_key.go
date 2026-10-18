@@ -29,6 +29,10 @@ const (
 	// reset cycle (day/week/month).
 	ContextKeyTokenPeriodLimited ContextKey = "token_period_limited"
 	ContextKeyTokenPeriodReset   ContextKey = "token_period_reset"
+	// ContextKeyTokenRPMLimit and ContextKeyTokenTPMLimit carry the token's
+	// admission limits (0 = unlimited) to the relay admission.
+	ContextKeyTokenRPMLimit ContextKey = "token_rpm_limit"
+	ContextKeyTokenTPMLimit ContextKey = "token_tpm_limit"
 
 	/* channel related keys */
 	ContextKeyChannelId                ContextKey = "channel_id"
@@ -47,6 +51,10 @@ const (
 	ContextKeyChannelIsMultiKey        ContextKey = "channel_is_multi_key"
 	ContextKeyChannelMultiKeyIndex     ContextKey = "channel_multi_key_index"
 	ContextKeyChannelKey               ContextKey = "channel_key"
+	// ContextKeySelectedChannel carries the full channel record the distributor
+	// selected for the first attempt, so the relay admission can read the
+	// channel's limits without a second cache lookup.
+	ContextKeySelectedChannel ContextKey = "selected_channel"
 
 	// ContextKeyUpstreamRequestOrigin is the scheme and host of the last upstream
 	// request, which differs from the base URL for absolute Advanced Custom routes

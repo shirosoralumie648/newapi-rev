@@ -41,6 +41,48 @@ type ChannelSettings struct {
 	// this window. Zero inherits the global STREAMING_FIRST_TOKEN_TIMEOUT
 	// default (itself disabled by zero).
 	FirstTokenTimeout int `json:"first_token_timeout,omitempty"`
+	// MaxConcurrency caps how many upstream dispatches the channel serves at
+	// the same time. Zero means unlimited.
+	MaxConcurrency int `json:"max_concurrency,omitempty"`
+	// RPMLimit caps the channel to this many upstream dispatches per minute.
+	// The reservation happens right before dispatch, so retried-away channels
+	// are not counted. Zero means unlimited.
+	RPMLimit int `json:"rpm_limit,omitempty"`
+	// TPMLimit caps the estimated prompt and completion tokens the channel
+	// serves per minute. A dispatch reserves its prompt estimate before
+	// sending and settles the actual usage afterwards. Zero means unlimited.
+	TPMLimit int `json:"tpm_limit,omitempty"`
+}
+
+// Admission limit bounds keep a typo from disabling a channel for a very long
+// time. They are far above any real channel capacity.
+const (
+	MaxChannelConcurrency = 100000
+	MaxRateLimitRPM       = 1000000
+	MaxRateLimitTPM       = 1000000000
+)
+
+// ValidateRateLimits rejects admission limit values outside the supported
+// range. Zero means "unlimited" for every limit.
+func ValidateRateLimits(maxConcurrency, rpmLimit, tpmLimit int) error {
+	if maxConcurrency < 0 || maxConcurrency > MaxChannelConcurrency {
+		return fmt.Errorf("invalid max_concurrency: %d (0 means unlimited, maximum %d)", maxConcurrency, MaxChannelConcurrency)
+	}
+	if rpmLimit < 0 || rpmLimit > MaxRateLimitRPM {
+		return fmt.Errorf("invalid rpm_limit: %d (0 means unlimited, maximum %d)", rpmLimit, MaxRateLimitRPM)
+	}
+	if tpmLimit < 0 || tpmLimit > MaxRateLimitTPM {
+		return fmt.Errorf("invalid tpm_limit: %d (0 means unlimited, maximum %d)", tpmLimit, MaxRateLimitTPM)
+	}
+	return nil
+}
+
+// ValidateRateLimits validates the channel's admission limits.
+func (s *ChannelSettings) ValidateRateLimits() error {
+	if s == nil {
+		return nil
+	}
+	return ValidateRateLimits(s.MaxConcurrency, s.RPMLimit, s.TPMLimit)
 }
 
 // MaxFirstTokenTimeoutSeconds bounds the per-channel first-token window so a

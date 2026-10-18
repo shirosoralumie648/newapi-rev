@@ -1198,4 +1198,11 @@ export const STATIC_I18N_KEYS = [
   'The generated image could not be added to the canvas.',
   'The canvas is full; the result could not be added.',
   'The image operation failed.',
+  // Legacy referral migration (RF-09): the binding source label renders
+  // through t(label) from REFERRAL_SOURCE_LABEL_KEYS, and the migration log
+  // line and the reconciliation warning are returned from Go, so the literal
+  // scan cannot see them.
+  'Legacy',
+  'Legacy invitation reward transferred to balance {{quota}}',
+  'Legacy referral reconciliation found {{count}} deviating accounts; see the legacy_referral_reconcile system task result',
 ] as const

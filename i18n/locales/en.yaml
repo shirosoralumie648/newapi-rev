@@ -41,6 +41,8 @@ relay.retry_get_channel_failed: "Failed to get available channel for model {{.Mo
 relay.retry_no_available_channel: "No available channel for model {{.Model}} under group {{.Group}} (retry)"
 relay.access_token_unsupported: "Access tokens are not supported here"
 relay.first_token_timeout: "The upstream channel sent no data within {{.Seconds}}s, please try again later"
+relay.channel_capacity_exhausted: "No channel under group {{.Group}} has capacity for model {{.Model}} right now, please try again later"
+relay.token_rate_limit_exceeded: "This token has reached its RPM or TPM rate limit, please try again later"
 
 # Emails and the name of the token created at registration
 user.default_token_name: "{{.Username}}'s initial token"

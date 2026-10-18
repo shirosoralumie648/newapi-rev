@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/common/admission"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/types"
 
@@ -337,6 +338,11 @@ type RecordConsumeLogParams struct {
 }
 
 func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams) {
+	// The settled usage corrects the token reservations of the request's
+	// admission leases. This is accounting, not logging, so it runs even when
+	// consume logging is disabled.
+	admission.SettleLease(c, admission.ChannelLeaseContextKey, params.PromptTokens+params.CompletionTokens)
+	admission.SettleLease(c, admission.TokenLeaseContextKey, params.PromptTokens+params.CompletionTokens)
 	if !common.LogConsumeEnabled {
 		return
 	}
