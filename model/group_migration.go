@@ -44,17 +44,17 @@ func migrateStableGroupReferences(db *gorm.DB) error {
 	if len(displayNames) == 0 {
 		return nil
 	}
-	aliases := make([]string, 0, len(displayNames))
-	for displayName := range displayNames {
-		aliases = append(aliases, displayName)
+	identifiers := make([]string, 0, len(displayNames))
+	for identifier := range displayNames {
+		identifiers = append(identifiers, identifier)
 	}
-	slices.Sort(aliases)
-	for _, displayName := range aliases {
-		identifier := displayNames[displayName]
+	slices.Sort(identifiers)
+	for _, identifier := range identifiers {
+		displayName := displayNames[identifier]
 		// Only rewrite an alias that resolves to a real group and that does not
 		// shadow an identifier. Validation rejects such display names, and the
 		// guard also skips a hand-edited option row.
-		if identifier == displayName || !group_setting.IsKnownGroupID(identifier) || group_setting.IsKnownGroupID(displayName) {
+		if displayName == "" || displayName == identifier || !group_setting.IsKnownGroupID(identifier) || group_setting.IsKnownGroupID(displayName) {
 			continue
 		}
 		if err := migrateGroupReferenceColumn(db, &Token{}, displayName, identifier); err != nil {
