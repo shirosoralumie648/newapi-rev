@@ -7857,6 +7857,24 @@
     "Select one reply to continue the conversation": "Sélectionnez une réponse pour poursuivre la conversation",
     "Sending the same message to each selected model. Every reply is billed separately.": "Le même message est envoyé à chaque modèle sélectionné. Chaque réponse est facturée séparément.",
     "Use this reply": "Utiliser cette réponse",
-    "You can compare up to {{count}} models at once": "Vous pouvez comparer jusqu'à {{count}} modèles à la fois"
+    "You can compare up to {{count}} models at once": "Vous pouvez comparer jusqu'à {{count}} modèles à la fois",
+    "Additional hour, day, week, and month quotas. The subscription only funds a request while every configured window still has enough quota. 0 means unlimited.": "Quotas supplémentaires par heure, jour, semaine et mois. L'abonnement ne finance une requête que si chaque fenêtre configurée dispose encore d'assez de quota. 0 signifie illimité.",
+    "All groups by default": "Tous les groupes par défaut",
+    "All models by default": "Tous les modèles par défaut",
+    "Allowed Groups": "Groupes autorisés",
+    "Allowed Models": "Modèles autorisés",
+    "Allowed groups contain an unknown group": "Les groupes autorisés contiennent un groupe inconnu",
+    "Allowed models are invalid": "Les modèles autorisés sont invalides",
+    "Daily Quota ({{currency}})": "Quota journalier ({{currency}})",
+    "Daily quota cannot be negative": "Le quota journalier ne peut pas être négatif",
+    "Hourly Quota ({{currency}})": "Quota horaire ({{currency}})",
+    "Hourly quota cannot be negative": "Le quota horaire ne peut pas être négatif",
+    "Monthly Quota ({{currency}})": "Quota mensuel ({{currency}})",
+    "Monthly quota cannot be negative": "Le quota mensuel ne peut pas être négatif",
+    "Quota Windows": "Fenêtres de quota",
+    "Restrict quota usage to these groups. Leave empty to allow every group.": "Limiter l'utilisation du quota à ces groupes. Laisser vide pour autoriser tous les groupes.",
+    "Restrict quota usage to these models. A trailing * matches a prefix. Leave empty to allow every model.": "Limiter l'utilisation du quota à ces modèles. Un * final correspond à un préfixe. Laisser vide pour autoriser tous les modèles.",
+    "Weekly Quota ({{currency}})": "Quota hebdomadaire ({{currency}})",
+    "Weekly quota cannot be negative": "Le quota hebdomadaire ne peut pas être négatif"
   }
 }

@@ -18,9 +18,15 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useNavigate } from '@tanstack/react-router'
-import { CalendarClock, CreditCard, RefreshCw, Settings2 } from 'lucide-react'
+import {
+  CalendarClock,
+  CreditCard,
+  RefreshCw,
+  Settings2,
+  Timer,
+} from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { useForm, type Resolver } from 'react-hook-form'
+import { useForm, type Control, type Resolver } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -32,6 +38,7 @@ import {
   sideDrawerHeaderClassName,
   sideDrawerSwitchItemClassName,
 } from '@/components/drawer-layout'
+import { MultiSelect } from '@/components/multi-select'
 import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
 import {
@@ -90,6 +97,56 @@ interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
   currentRow?: PlanRecord
+}
+
+interface PlanWindowQuotaFieldProps {
+  control: Control<PlanFormValues>
+  name:
+    | 'quota_window_hour'
+    | 'quota_window_day'
+    | 'quota_window_week'
+    | 'quota_window_month'
+  label: string
+  currencyLabel: string
+  tokensOnly: boolean
+}
+
+/**
+ * One hour/day/week/month quota input of the plan form. Window quotas share
+ * the currency/token display semantics of the total quota field.
+ */
+function PlanWindowQuotaField(props: PlanWindowQuotaFieldProps) {
+  const { t } = useTranslation()
+  return (
+    <FormField
+      control={props.control}
+      name={props.name}
+      render={({ field }) => (
+        <FormItem>
+          <FormLabel>{props.label}</FormLabel>
+          <FormControl>
+            <Input
+              {...field}
+              type='number'
+              min={0}
+              step={props.tokensOnly ? 1 : 0.01}
+              placeholder={
+                props.tokensOnly
+                  ? t('Enter quota in tokens')
+                  : t('Enter quota in {{currency}}', {
+                      currency: props.currencyLabel,
+                    })
+              }
+              onChange={(e) =>
+                field.onChange(Number.parseFloat(e.target.value) || 0)
+              }
+            />
+          </FormControl>
+          <FormMessage />
+        </FormItem>
+      )}
+    />
+  )
 }
 
 export function SubscriptionsMutateDrawer({
@@ -506,6 +563,78 @@ export function SubscriptionsMutateDrawer({
                 />
               </div>
 
+              <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
+                <FormField
+                  control={form.control}
+                  name='allowed_groups'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Allowed Groups')}</FormLabel>
+                      <FormControl>
+                        <MultiSelect
+                          options={groupOptions.map((g) => ({
+                            value: g,
+                            label: g,
+                          }))}
+                          selected={
+                            field.value
+                              ? field.value
+                                  .split(',')
+                                  .map((v) => v.trim())
+                                  .filter(Boolean)
+                              : []
+                          }
+                          onChange={(values) =>
+                            field.onChange(values.join(','))
+                          }
+                          placeholder={t('All groups by default')}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Restrict quota usage to these groups. Leave empty to allow every group.'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name='allowed_models'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Allowed Models')}</FormLabel>
+                      <FormControl>
+                        <MultiSelect
+                          options={[]}
+                          allowCreate
+                          selected={
+                            field.value
+                              ? field.value
+                                  .split(',')
+                                  .map((v) => v.trim())
+                                  .filter(Boolean)
+                              : []
+                          }
+                          onChange={(values) =>
+                            field.onChange(values.join(','))
+                          }
+                          placeholder={t('All models by default')}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Restrict quota usage to these models. A trailing * matches a prefix. Leave empty to allow every model.'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
               {watchedUpgradeGroup ? (
                 <PlaygroundGroupQuotaEditor
                   group={watchedUpgradeGroup}
@@ -758,6 +887,61 @@ export function SubscriptionsMutateDrawer({
                       <FormMessage />
                     </FormItem>
                   )}
+                />
+              </div>
+            </SideDrawerSection>
+
+            {/* Quota Windows */}
+            <SideDrawerSection>
+              <h3 className='flex items-center gap-2 text-sm font-medium'>
+                <IconBadge tone='chart-2' size='xs'>
+                  <Timer />
+                </IconBadge>
+                {t('Quota Windows')}
+              </h3>
+
+              <p className='text-muted-foreground text-sm'>
+                {t(
+                  'Additional hour, day, week, and month quotas. The subscription only funds a request while every configured window still has enough quota. 0 means unlimited.'
+                )}
+              </p>
+
+              <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
+                <PlanWindowQuotaField
+                  control={form.control}
+                  name='quota_window_hour'
+                  label={t('Hourly Quota ({{currency}})', {
+                    currency: currencyLabel,
+                  })}
+                  currencyLabel={currencyLabel}
+                  tokensOnly={tokensOnly}
+                />
+                <PlanWindowQuotaField
+                  control={form.control}
+                  name='quota_window_day'
+                  label={t('Daily Quota ({{currency}})', {
+                    currency: currencyLabel,
+                  })}
+                  currencyLabel={currencyLabel}
+                  tokensOnly={tokensOnly}
+                />
+                <PlanWindowQuotaField
+                  control={form.control}
+                  name='quota_window_week'
+                  label={t('Weekly Quota ({{currency}})', {
+                    currency: currencyLabel,
+                  })}
+                  currencyLabel={currencyLabel}
+                  tokensOnly={tokensOnly}
+                />
+                <PlanWindowQuotaField
+                  control={form.control}
+                  name='quota_window_month'
+                  label={t('Monthly Quota ({{currency}})', {
+                    currency: currencyLabel,
+                  })}
+                  currencyLabel={currencyLabel}
+                  tokensOnly={tokensOnly}
                 />
               </div>
             </SideDrawerSection>

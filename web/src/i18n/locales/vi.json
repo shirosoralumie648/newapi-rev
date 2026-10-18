@@ -7857,6 +7857,24 @@
     "Select one reply to continue the conversation": "Chọn một phản hồi để tiếp tục cuộc trò chuyện",
     "Sending the same message to each selected model. Every reply is billed separately.": "Cùng một tin nhắn được gửi đến từng mô hình đã chọn. Mỗi phản hồi được tính phí riêng.",
     "Use this reply": "Dùng phản hồi này",
-    "You can compare up to {{count}} models at once": "Bạn có thể so sánh tối đa {{count}} mô hình cùng lúc"
+    "You can compare up to {{count}} models at once": "Bạn có thể so sánh tối đa {{count}} mô hình cùng lúc",
+    "Additional hour, day, week, and month quotas. The subscription only funds a request while every configured window still has enough quota. 0 means unlimited.": "Hạn mức bổ sung theo giờ, ngày, tuần và tháng. Gói đăng ký chỉ chi trả cho yêu cầu khi mọi cửa sổ đã cấu hình vẫn còn đủ hạn mức. 0 có nghĩa là không giới hạn.",
+    "All groups by default": "Mặc định là tất cả nhóm",
+    "All models by default": "Mặc định là tất cả mô hình",
+    "Allowed Groups": "Nhóm được phép",
+    "Allowed Models": "Mô hình được phép",
+    "Allowed groups contain an unknown group": "Nhóm được phép chứa nhóm không tồn tại",
+    "Allowed models are invalid": "Mô hình được phép không hợp lệ",
+    "Daily Quota ({{currency}})": "Hạn mức theo ngày ({{currency}})",
+    "Daily quota cannot be negative": "Hạn mức theo ngày không được là số âm",
+    "Hourly Quota ({{currency}})": "Hạn mức theo giờ ({{currency}})",
+    "Hourly quota cannot be negative": "Hạn mức theo giờ không được là số âm",
+    "Monthly Quota ({{currency}})": "Hạn mức theo tháng ({{currency}})",
+    "Monthly quota cannot be negative": "Hạn mức theo tháng không được là số âm",
+    "Quota Windows": "Cửa sổ hạn mức",
+    "Restrict quota usage to these groups. Leave empty to allow every group.": "Chỉ các yêu cầu trong những nhóm này được dùng hạn mức. Để trống để cho phép mọi nhóm.",
+    "Restrict quota usage to these models. A trailing * matches a prefix. Leave empty to allow every model.": "Chỉ các mô hình này được dùng hạn mức. Dấu * ở cuối nghĩa là khớp tiền tố. Để trống để cho phép mọi mô hình.",
+    "Weekly Quota ({{currency}})": "Hạn mức theo tuần ({{currency}})",
+    "Weekly quota cannot be negative": "Hạn mức theo tuần không được là số âm"
   }
 }

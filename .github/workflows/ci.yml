@@ -73,9 +73,11 @@ jobs:
 
   # The wallet ledger and subscription settlement contracts (same-transaction
   # rollback, idempotent replay, hourly consumption aggregation, refund
-  # idempotency, settlement overflow charged to the wallet, reconciliation) are
-  # verified on real MySQL and PostgreSQL. The model tests skip the dialects
-  # whose DSN is unset, and the SQLite subtests still run in the backend job.
+  # idempotency, settlement overflow charged to the wallet, reconciliation, and
+  # the subscription plan group/model restrictions with hour/day/week/month
+  # quota windows) are verified on real MySQL and PostgreSQL. The model tests
+  # skip the dialects whose DSN is unset, and the SQLite subtests still run in
+  # the backend job.
   backend-real-db:
     name: Backend wallet and subscription settlement on real databases (${{ matrix.db }})
     if: github.event_name == 'push' || github.event.action != 'closed' || github.event.pull_request.merged == true
@@ -140,7 +142,7 @@ jobs:
           touch web/dist/index.html
 
       - name: Test wallet ledger and subscription settlement on ${{ matrix.db }}
-        run: go test ./model/ -run 'TestWallet|TestSubscriptionPreConsumeRefund|TestSubscriptionSettlement|TestCreditGrant' -count=1 -v
+        run: go test ./model/ -run 'TestWallet|TestSubscriptionPreConsumeRefund|TestSubscriptionSettlement|TestCreditGrant|TestSubscriptionLimits' -count=1 -v
 
   backend-databases:
     name: Backend quota schema on MySQL and PostgreSQL

@@ -7857,6 +7857,24 @@
     "Select one reply to continue the conversation": "选择一条回复继续对话",
     "Sending the same message to each selected model. Every reply is billed separately.": "同一条消息将发送给每个已选模型。每个回复单独计费。",
     "Use this reply": "使用此回复",
-    "You can compare up to {{count}} models at once": "一次最多对比 {{count}} 个模型"
+    "You can compare up to {{count}} models at once": "一次最多对比 {{count}} 个模型",
+    "Additional hour, day, week, and month quotas. The subscription only funds a request while every configured window still has enough quota. 0 means unlimited.": "在总额度之外按小时、日、周、月限制用量；只有所有已配置窗口都还有足够额度时才会从该订阅扣费。0 表示不限。",
+    "All groups by default": "默认为全部分组",
+    "All models by default": "默认为全部模型",
+    "Allowed Groups": "允许的分组",
+    "Allowed Models": "允许的模型",
+    "Allowed groups contain an unknown group": "允许的分组中包含未知分组",
+    "Allowed models are invalid": "允许的模型无效",
+    "Daily Quota ({{currency}})": "日额度 ({{currency}})",
+    "Daily quota cannot be negative": "日额度不能为负数",
+    "Hourly Quota ({{currency}})": "小时额度 ({{currency}})",
+    "Hourly quota cannot be negative": "小时额度不能为负数",
+    "Monthly Quota ({{currency}})": "月额度 ({{currency}})",
+    "Monthly quota cannot be negative": "月额度不能为负数",
+    "Quota Windows": "额度窗口",
+    "Restrict quota usage to these groups. Leave empty to allow every group.": "仅这些分组内的请求可消耗该套餐额度；留空表示允许全部分组。",
+    "Restrict quota usage to these models. A trailing * matches a prefix. Leave empty to allow every model.": "仅这些模型的请求可消耗该套餐额度；结尾的 * 表示前缀匹配；留空表示允许全部模型。",
+    "Weekly Quota ({{currency}})": "周额度 ({{currency}})",
+    "Weekly quota cannot be negative": "周额度不能为负数"
   }
 }

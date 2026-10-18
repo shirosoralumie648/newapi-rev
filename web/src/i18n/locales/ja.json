@@ -7857,6 +7857,24 @@
     "Select one reply to continue the conversation": "会話を続ける回答を 1 つ選択してください",
     "Sending the same message to each selected model. Every reply is billed separately.": "同じメッセージが選択した各モデルに送信されます。各回答は個別に課金されます。",
     "Use this reply": "この回答を使用",
-    "You can compare up to {{count}} models at once": "一度に最大 {{count}} 個のモデルを比較できます"
+    "You can compare up to {{count}} models at once": "一度に最大 {{count}} 個のモデルを比較できます",
+    "Additional hour, day, week, and month quotas. The subscription only funds a request while every configured window still has enough quota. 0 means unlimited.": "合計クォータに加えて、時間・日・週・月ごとの上限を設定します。設定したすべてのウィンドウに十分なクォータが残っている場合のみ、このサブスクリプションから差し引かれます。0は無制限を意味します。",
+    "All groups by default": "デフォルトではすべてのグループ",
+    "All models by default": "デフォルトではすべてのモデル",
+    "Allowed Groups": "許可グループ",
+    "Allowed Models": "許可モデル",
+    "Allowed groups contain an unknown group": "許可グループに不明なグループが含まれています",
+    "Allowed models are invalid": "許可モデルが無効です",
+    "Daily Quota ({{currency}})": "日あたりのクォータ ({{currency}})",
+    "Daily quota cannot be negative": "日あたりのクォータを負の値にすることはできません",
+    "Hourly Quota ({{currency}})": "時間あたりのクォータ ({{currency}})",
+    "Hourly quota cannot be negative": "時間あたりのクォータを負の値にすることはできません",
+    "Monthly Quota ({{currency}})": "月あたりのクォータ ({{currency}})",
+    "Monthly quota cannot be negative": "月あたりのクォータを負の値にすることはできません",
+    "Quota Windows": "クォータウィンドウ",
+    "Restrict quota usage to these groups. Leave empty to allow every group.": "このグループのリクエストのみがクォータを消費できます。空欄の場合はすべてのグループを許可します。",
+    "Restrict quota usage to these models. A trailing * matches a prefix. Leave empty to allow every model.": "これらのモデルのみがクォータを消費できます。末尾の * はプレフィックス一致を表します。空欄の場合はすべてのモデルを許可します。",
+    "Weekly Quota ({{currency}})": "週あたりのクォータ ({{currency}})",
+    "Weekly quota cannot be negative": "週あたりのクォータを負の値にすることはできません"
   }
 }

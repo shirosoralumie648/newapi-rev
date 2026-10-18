@@ -35,6 +35,16 @@ const (
 	SubscriptionResetCustom  = "custom"
 )
 
+// Subscription quota window kinds. A plan may cap usage per calendar hour,
+// day, week, and month in addition to its total quota; an exhausted window
+// stops the subscription from funding further requests until the window rolls.
+const (
+	SubscriptionWindowHour  = "hour"
+	SubscriptionWindowDay   = "day"
+	SubscriptionWindowWeek  = "week"
+	SubscriptionWindowMonth = "month"
+)
+
 // SubscriptionSourceRedemption marks a subscription granted by redeeming a
 // redemption code.
 const SubscriptionSourceRedemption = "redemption"
@@ -42,6 +52,17 @@ const SubscriptionSourceRedemption = "redemption"
 var (
 	ErrSubscriptionOrderNotFound      = errors.New("subscription order not found")
 	ErrSubscriptionOrderStatusInvalid = errors.New("subscription order status invalid")
+	// ErrNoActiveSubscription reports that the user has no active subscription
+	// at all; the caller may fall back to the wallet according to the user's
+	// billing preference.
+	ErrNoActiveSubscription = errors.New("no active subscription")
+	// ErrSubscriptionIneligible reports that the user's active subscriptions do
+	// not cover the request's group or model, so none of them may fund it.
+	ErrSubscriptionIneligible = errors.New("no active subscription covers the request group or model")
+	// ErrSubscriptionQuotaInsufficient reports that every eligible active
+	// subscription is out of quota: the total or one of the plan's quota
+	// windows cannot cover the pre-consume amount.
+	ErrSubscriptionQuotaInsufficient = errors.New("subscription quota insufficient")
 )
 
 const (
@@ -184,12 +205,29 @@ type SubscriptionPlan struct {
 	// Downgrade user group on expiry (empty = revert to the group held before purchase)
 	DowngradeGroup string `json:"downgrade_group" gorm:"type:varchar(64);default:''"`
 
+	// Groups allowed to consume this plan's quota (comma-separated stable group
+	// identifiers; empty = every group)
+	AllowedGroups string `json:"allowed_groups" gorm:"type:text"`
+
+	// Models allowed to consume this plan's quota (comma-separated model names;
+	// one trailing * matches a prefix; empty = every model)
+	AllowedModels string `json:"allowed_models" gorm:"type:text"`
+
 	// Total quota (amount in quota units, 0 = unlimited)
 	TotalAmount int64 `json:"total_amount" gorm:"type:bigint;not null;default:0"`
 
 	// Quota reset period for plan
 	QuotaResetPeriod        string `json:"quota_reset_period" gorm:"type:varchar(16);default:'never'"`
 	QuotaResetCustomSeconds int64  `json:"quota_reset_custom_seconds" gorm:"type:bigint;default:0"`
+
+	// Additional calendar-window quotas in quota units (0 = unlimited). The
+	// hour window starts on the hour, the day window at midnight, the week
+	// window on Monday, and the month window on the first day, all in the
+	// server's local time (the same boundaries as quota reset periods).
+	QuotaWindowHour  int64 `json:"quota_window_hour" gorm:"type:bigint;not null;default:0"`
+	QuotaWindowDay   int64 `json:"quota_window_day" gorm:"type:bigint;not null;default:0"`
+	QuotaWindowWeek  int64 `json:"quota_window_week" gorm:"type:bigint;not null;default:0"`
+	QuotaWindowMonth int64 `json:"quota_window_month" gorm:"type:bigint;not null;default:0"`
 
 	CreatedAt int64 `json:"created_at" gorm:"bigint"`
 	UpdatedAt int64 `json:"updated_at" gorm:"bigint"`
@@ -1029,7 +1067,7 @@ func AdminDeleteUserSubscription(userSubscriptionId int) (*common.Message, error
 		if err := tx.Where("id = ?", userSubscriptionId).Delete(&UserSubscription{}).Error; err != nil {
 			return err
 		}
-		return nil
+		return clearSubscriptionWindowUsageTx(tx, userSubscriptionId)
 	})
 	if err != nil {
 		return nil, err
@@ -1048,6 +1086,9 @@ func resetUserSubscriptionTx(tx *gorm.DB, sub *UserSubscription, plan *Subscript
 		return errors.New("invalid reset args")
 	}
 	sub.AmountUsed = 0
+	if err := clearSubscriptionWindowUsageTx(tx, sub.Id); err != nil {
+		return err
+	}
 	if advanceResetTime {
 		nextReset := calcNextResetTime(time.Unix(now, 0), plan, sub.EndTime)
 		sub.NextResetTime = nextReset
@@ -1276,8 +1317,12 @@ type SubscriptionPreConsumeRecord struct {
 	UserSubscriptionId int    `json:"user_subscription_id" gorm:"index"`
 	PreConsumed        int64  `json:"pre_consumed" gorm:"type:bigint;not null;default:0"`
 	Status             string `json:"status" gorm:"type:varchar(32);index"` // consumed/refunded
-	CreatedAt          int64  `json:"created_at" gorm:"bigint"`
-	UpdatedAt          int64  `json:"updated_at" gorm:"bigint;index"`
+	// WindowCharges records which calendar windows a pre-consume charged, as a
+	// JSON array of {window,start,amount}. A refund restores exactly those
+	// windows instead of whatever windows are open at refund time.
+	WindowCharges string `json:"window_charges" gorm:"type:text"`
+	CreatedAt     int64  `json:"created_at" gorm:"bigint"`
+	UpdatedAt     int64  `json:"updated_at" gorm:"bigint;index"`
 }
 
 func (r *SubscriptionPreConsumeRecord) BeforeCreate(tx *gorm.DB) error {
@@ -1289,6 +1334,32 @@ func (r *SubscriptionPreConsumeRecord) BeforeCreate(tx *gorm.DB) error {
 
 func (r *SubscriptionPreConsumeRecord) BeforeUpdate(tx *gorm.DB) error {
 	r.UpdatedAt = common.GetTimestamp()
+	return nil
+}
+
+// SubscriptionWindowUsage tracks one subscription's accumulated usage inside
+// one calendar window (hour/day/week/month). window_start identifies the
+// boundary the row belongs to; a row whose boundary already passed is rolled
+// (used reset) the next time the window is charged.
+type SubscriptionWindowUsage struct {
+	Id             int    `json:"id"`
+	SubscriptionId int    `json:"subscription_id" gorm:"uniqueIndex:idx_subscription_window,priority:1"`
+	Window         string `json:"window" gorm:"type:varchar(16);uniqueIndex:idx_subscription_window,priority:2"`
+	Used           int64  `json:"used" gorm:"type:bigint;not null;default:0"`
+	WindowStart    int64  `json:"window_start" gorm:"type:bigint;not null;default:0"`
+	CreatedAt      int64  `json:"created_at" gorm:"bigint"`
+	UpdatedAt      int64  `json:"updated_at" gorm:"bigint"`
+}
+
+func (u *SubscriptionWindowUsage) BeforeCreate(tx *gorm.DB) error {
+	now := common.GetTimestamp()
+	u.CreatedAt = now
+	u.UpdatedAt = now
+	return nil
+}
+
+func (u *SubscriptionWindowUsage) BeforeUpdate(tx *gorm.DB) error {
+	u.UpdatedAt = common.GetTimestamp()
 	return nil
 }
 
@@ -1325,11 +1396,304 @@ func maybeResetUserSubscriptionWithPlanTx(tx *gorm.DB, sub *UserSubscription, pl
 	sub.AmountUsed = 0
 	sub.LastResetTime = base.Unix()
 	sub.NextResetTime = next
-	return tx.Save(sub).Error
+	if err := tx.Save(sub).Error; err != nil {
+		return err
+	}
+	// A new quota period also restarts every calendar window.
+	return clearSubscriptionWindowUsageTx(tx, sub.Id)
 }
 
-// PreConsumeUserSubscription pre-consumes from any active subscription total quota.
-func PreConsumeUserSubscription(requestId string, userId int, modelName string, quotaType int, amount int64) (*SubscriptionPreConsumeResult, error) {
+// subscriptionWindowLimit is one configured calendar window and its cap.
+type subscriptionWindowLimit struct {
+	Window string
+	Limit  int64
+}
+
+// SubscriptionWindowCharge is one window's contribution to a pre-consume. It
+// is persisted on the pre-consume record so a refund can restore the exact
+// windows that were charged.
+type SubscriptionWindowCharge struct {
+	Window string `json:"window"`
+	Start  int64  `json:"start"`
+	Amount int64  `json:"amount"`
+}
+
+// subscriptionPlanWindowLimits returns the plan's configured window caps in a
+// stable hour→month order. A zero cap means the window is unlimited.
+func subscriptionPlanWindowLimits(plan *SubscriptionPlan) []subscriptionWindowLimit {
+	if plan == nil {
+		return nil
+	}
+	limits := make([]subscriptionWindowLimit, 0, 4)
+	if plan.QuotaWindowHour > 0 {
+		limits = append(limits, subscriptionWindowLimit{Window: SubscriptionWindowHour, Limit: plan.QuotaWindowHour})
+	}
+	if plan.QuotaWindowDay > 0 {
+		limits = append(limits, subscriptionWindowLimit{Window: SubscriptionWindowDay, Limit: plan.QuotaWindowDay})
+	}
+	if plan.QuotaWindowWeek > 0 {
+		limits = append(limits, subscriptionWindowLimit{Window: SubscriptionWindowWeek, Limit: plan.QuotaWindowWeek})
+	}
+	if plan.QuotaWindowMonth > 0 {
+		limits = append(limits, subscriptionWindowLimit{Window: SubscriptionWindowMonth, Limit: plan.QuotaWindowMonth})
+	}
+	return limits
+}
+
+// subscriptionWindowStart returns the start of the calendar window that
+// contains now, in server-local time, matching the boundaries used by
+// calcNextResetTime.
+func subscriptionWindowStart(window string, now int64) (int64, bool) {
+	at := time.Unix(now, 0)
+	switch window {
+	case SubscriptionWindowHour:
+		return time.Date(at.Year(), at.Month(), at.Day(), at.Hour(), 0, 0, 0, at.Location()).Unix(), true
+	case SubscriptionWindowDay:
+		return time.Date(at.Year(), at.Month(), at.Day(), 0, 0, 0, 0, at.Location()).Unix(), true
+	case SubscriptionWindowWeek:
+		weekday := int(at.Weekday()) // Sunday = 0
+		if weekday == 0 {
+			weekday = 7
+		}
+		dayStart := time.Date(at.Year(), at.Month(), at.Day(), 0, 0, 0, 0, at.Location())
+		return dayStart.AddDate(0, 0, -(weekday - 1)).Unix(), true
+	case SubscriptionWindowMonth:
+		return time.Date(at.Year(), at.Month(), 1, 0, 0, 0, 0, at.Location()).Unix(), true
+	default:
+		return 0, false
+	}
+}
+
+// splitSubscriptionPlanList splits a comma-separated plan restriction list,
+// dropping blank entries.
+func splitSubscriptionPlanList(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	items := make([]string, 0, 4)
+	for part := range strings.SplitSeq(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			items = append(items, part)
+		}
+	}
+	return items
+}
+
+// subscriptionPlanAllowsRequest reports whether a plan may fund a request made
+// in group for modelName. Empty restriction lists allow everything; a model
+// entry with a trailing * matches every name with that prefix. A request whose
+// group or model matches no entry is never charged to the subscription.
+func subscriptionPlanAllowsRequest(plan *SubscriptionPlan, group string, modelName string) bool {
+	if plan == nil {
+		return false
+	}
+	if allowed := splitSubscriptionPlanList(plan.AllowedGroups); len(allowed) > 0 {
+		resolved := group_setting.ResolveGroupID(strings.TrimSpace(group))
+		matched := false
+		for _, candidate := range allowed {
+			if group_setting.ResolveGroupID(candidate) == resolved {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	if allowed := splitSubscriptionPlanList(plan.AllowedModels); len(allowed) > 0 {
+		modelName = strings.TrimSpace(modelName)
+		matched := false
+		for _, pattern := range allowed {
+			prefix, wildcard := strings.CutSuffix(pattern, "*")
+			if wildcard {
+				if prefix == "" || strings.HasPrefix(modelName, prefix) {
+					matched = true
+					break
+				}
+				continue
+			}
+			if pattern == modelName {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	return true
+}
+
+// getSubscriptionWindowUsageTx loads the usage row of one window, creating it
+// on first use. The caller must already hold the subscription row lock, which
+// serializes window updates for the same subscription.
+func getSubscriptionWindowUsageTx(tx *gorm.DB, subscriptionId int, window string) (*SubscriptionWindowUsage, error) {
+	if tx == nil || subscriptionId <= 0 {
+		return nil, errors.New("invalid window usage args")
+	}
+	var row SubscriptionWindowUsage
+	err := tx.Where("subscription_id = ? AND window = ?", subscriptionId, window).First(&row).Error
+	if err == nil {
+		return &row, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	row = SubscriptionWindowUsage{SubscriptionId: subscriptionId, Window: window}
+	if err := tx.Create(&row).Error; err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
+// checkSubscriptionWindowsTx rolls every configured window of the plan to the
+// current boundary and reports whether amount fits in all of them. When it
+// fits, it returns the charges to persist after the caller commits the record
+// and the subscription amount. A window that cannot hold the whole amount
+// rejects the pre-consume, matching the total-quota rule (no partial charge).
+func checkSubscriptionWindowsTx(tx *gorm.DB, subscriptionId int, plan *SubscriptionPlan, now int64, amount int64) ([]SubscriptionWindowCharge, bool, error) {
+	limits := subscriptionPlanWindowLimits(plan)
+	if len(limits) == 0 {
+		return nil, true, nil
+	}
+	charges := make([]SubscriptionWindowCharge, 0, len(limits))
+	for _, window := range limits {
+		start, ok := subscriptionWindowStart(window.Window, now)
+		if !ok {
+			return nil, false, fmt.Errorf("unsupported subscription quota window: %s", window.Window)
+		}
+		row, err := getSubscriptionWindowUsageTx(tx, subscriptionId, window.Window)
+		if err != nil {
+			return nil, false, err
+		}
+		if row.WindowStart != start {
+			row.WindowStart = start
+			row.Used = 0
+			if err := tx.Save(row).Error; err != nil {
+				return nil, false, err
+			}
+		}
+		remaining := window.Limit - row.Used
+		if remaining < 0 {
+			remaining = 0
+		}
+		if amount > remaining {
+			return nil, false, nil
+		}
+		charges = append(charges, SubscriptionWindowCharge{Window: window.Window, Start: start, Amount: amount})
+	}
+	return charges, true, nil
+}
+
+// applySubscriptionWindowChargesTx persists a pre-consume's window charges.
+// A charge whose window already rolled is skipped so a restarted window is
+// never credited with usage from the previous period.
+func applySubscriptionWindowChargesTx(tx *gorm.DB, subscriptionId int, charges []SubscriptionWindowCharge) error {
+	for _, charge := range charges {
+		if charge.Amount <= 0 {
+			continue
+		}
+		row, err := getSubscriptionWindowUsageTx(tx, subscriptionId, charge.Window)
+		if err != nil {
+			return err
+		}
+		if row.WindowStart != charge.Start {
+			continue
+		}
+		row.Used += charge.Amount
+		if err := tx.Save(row).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// restoreSubscriptionWindowChargesTx reverses the window charges recorded on a
+// refunded pre-consume record. A window that already rolled keeps its
+// restarted usage untouched, and a used amount never drops below zero.
+func restoreSubscriptionWindowChargesTx(tx *gorm.DB, record *SubscriptionPreConsumeRecord) error {
+	if record == nil || strings.TrimSpace(record.WindowCharges) == "" {
+		return nil
+	}
+	var charges []SubscriptionWindowCharge
+	if err := common.UnmarshalJsonStr(record.WindowCharges, &charges); err != nil {
+		// A corrupt charge snapshot must not block the refund itself: the total
+		// is still refunded, and the window expires with its period anyway.
+		common.SysError(common.LogText("failed to decode subscription window charges for request %s: %s", record.RequestId, err.Error()))
+		return nil
+	}
+	for _, charge := range charges {
+		if charge.Amount <= 0 {
+			continue
+		}
+		row, err := getSubscriptionWindowUsageTx(tx, record.UserSubscriptionId, charge.Window)
+		if err != nil {
+			return err
+		}
+		if row.WindowStart != charge.Start {
+			continue
+		}
+		row.Used -= charge.Amount
+		if row.Used < 0 {
+			row.Used = 0
+		}
+		if err := tx.Save(row).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applySubscriptionWindowDeltaTx applies delta to every configured window of
+// the plan, rolling stale windows first. A positive delta is a committed
+// charge (an admitted reserve or a settlement), so it is added without a
+// capacity check: the window may end up over its cap and simply refuses new
+// pre-consumes until it rolls. A negative delta only reduces and never goes
+// below zero. Rows for unlimited windows are never created.
+func applySubscriptionWindowDeltaTx(tx *gorm.DB, subscriptionId int, plan *SubscriptionPlan, now int64, delta int64) error {
+	if delta == 0 {
+		return nil
+	}
+	for _, window := range subscriptionPlanWindowLimits(plan) {
+		start, ok := subscriptionWindowStart(window.Window, now)
+		if !ok {
+			continue
+		}
+		row, err := getSubscriptionWindowUsageTx(tx, subscriptionId, window.Window)
+		if err != nil {
+			return err
+		}
+		if row.WindowStart != start {
+			row.WindowStart = start
+			row.Used = 0
+		}
+		row.Used += delta
+		if row.Used < 0 {
+			row.Used = 0
+		}
+		if err := tx.Save(row).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// clearSubscriptionWindowUsageTx drops a subscription's window usage when its
+// total usage resets or the subscription is deleted.
+func clearSubscriptionWindowUsageTx(tx *gorm.DB, subscriptionId int) error {
+	if tx == nil || subscriptionId <= 0 {
+		return nil
+	}
+	return tx.Where("subscription_id = ?", subscriptionId).Delete(&SubscriptionWindowUsage{}).Error
+}
+
+// PreConsumeUserSubscription pre-consumes from any active subscription that
+// covers the request. A subscription only funds requests whose group and model
+// match its plan's restrictions (both unset = unrestricted), and the amount
+// must fit the plan total and every configured quota window; otherwise the
+// next eligible subscription is tried.
+func PreConsumeUserSubscription(requestId string, userId int, group string, modelName string, quotaType int, amount int64) (*SubscriptionPreConsumeResult, error) {
 	if userId <= 0 {
 		return nil, errors.New("invalid userId")
 	}
@@ -1370,26 +1734,44 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 			Where("user_id = ? AND status = ? AND end_time > ?", userId, "active", now).
 			Order("end_time asc, id asc").
 			Find(&subs).Error; err != nil {
-			return errors.New("no active subscription")
+			return err
 		}
 		if len(subs) == 0 {
-			return errors.New("no active subscription")
+			return ErrNoActiveSubscription
 		}
+		eligible := false
+		insufficient := false
 		for _, candidate := range subs {
 			sub := candidate
 			plan, err := getSubscriptionPlanByIdTx(tx, sub.PlanId)
 			if err != nil {
 				return err
 			}
+			if !subscriptionPlanAllowsRequest(plan, group, modelName) {
+				continue
+			}
+			eligible = true
 			if err := maybeResetUserSubscriptionWithPlanTx(tx, &sub, plan, now); err != nil {
 				return err
 			}
 			usedBefore := sub.AmountUsed
 			if sub.AmountTotal > 0 {
-				remain := sub.AmountTotal - usedBefore
-				if remain < amount {
+				remaining := sub.AmountTotal - usedBefore
+				if remaining < 0 {
+					remaining = 0
+				}
+				if amount > remaining {
+					insufficient = true
 					continue
 				}
+			}
+			windowCharges, fits, err := checkSubscriptionWindowsTx(tx, sub.Id, plan, now, amount)
+			if err != nil {
+				return err
+			}
+			if !fits {
+				insufficient = true
+				continue
 			}
 			record := &SubscriptionPreConsumeRecord{
 				RequestId:          requestId,
@@ -1397,6 +1779,13 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 				UserSubscriptionId: sub.Id,
 				PreConsumed:        amount,
 				Status:             "consumed",
+			}
+			if len(windowCharges) > 0 {
+				payload, err := common.Marshal(windowCharges)
+				if err != nil {
+					return err
+				}
+				record.WindowCharges = string(payload)
 			}
 			if err := tx.Create(record).Error; err != nil {
 				var dup SubscriptionPreConsumeRecord
@@ -1413,8 +1802,11 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 				}
 				return err
 			}
-			sub.AmountUsed += amount
+			sub.AmountUsed = usedBefore + amount
 			if err := tx.Save(&sub).Error; err != nil {
+				return err
+			}
+			if err := applySubscriptionWindowChargesTx(tx, sub.Id, windowCharges); err != nil {
 				return err
 			}
 			returnValue.UserSubscriptionId = sub.Id
@@ -1424,7 +1816,13 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 			returnValue.AmountUsedAfter = sub.AmountUsed
 			return nil
 		}
-		return fmt.Errorf("subscription quota insufficient, need=%d", amount)
+		if !eligible {
+			return fmt.Errorf("%w: group=%q model=%q", ErrSubscriptionIneligible, group, modelName)
+		}
+		if insufficient {
+			return fmt.Errorf("%w, need=%d", ErrSubscriptionQuotaInsufficient, amount)
+		}
+		return ErrNoActiveSubscription
 	})
 	if err != nil {
 		return nil, err
@@ -1471,6 +1869,11 @@ func RefundSubscriptionPreConsume(requestId string) error {
 		}
 		if record.PreConsumed <= 0 {
 			return nil
+		}
+		// Restore the exact windows the pre-consume charged before reducing the
+		// total, all in the same transaction as the status claim.
+		if err := restoreSubscriptionWindowChargesTx(tx, &record); err != nil {
+			return err
 		}
 		_, err := applyUserSubscriptionUsedDeltaTx(tx, &sub, -record.PreConsumed)
 		return err
@@ -1560,6 +1963,9 @@ func GetSubscriptionPlanInfoByUserSubscriptionId(userSubscriptionId int) (*Subsc
 }
 
 // Update subscription used amount by delta (positive consume more, negative refund).
+// A positive delta must fit both the plan total and every configured quota
+// window, matching the pre-consume admission rule for in-flight reserves; a
+// negative delta rolls the reserve back and never goes below zero.
 func PostConsumeUserSubscriptionDelta(userSubscriptionId int, delta int64) error {
 	if userSubscriptionId <= 0 {
 		return errors.New("invalid userSubscriptionId")
@@ -1574,12 +1980,48 @@ func PostConsumeUserSubscriptionDelta(userSubscriptionId int, delta int64) error
 			First(&sub).Error; err != nil {
 			return err
 		}
-		newUsed := max(sub.AmountUsed+delta, 0)
-		if sub.AmountTotal > 0 && newUsed > sub.AmountTotal {
-			return fmt.Errorf("subscription used exceeds total, used=%d total=%d", newUsed, sub.AmountTotal)
+		var plan *SubscriptionPlan
+		if sub.PlanId > 0 {
+			loaded, err := getSubscriptionPlanByIdTx(tx, sub.PlanId)
+			if err != nil {
+				common.SysError(common.LogText("failed to load subscription plan %d for window accounting: %s", sub.PlanId, err.Error()))
+			} else {
+				plan = loaded
+			}
+		}
+		now := GetDBTimestampTx(tx)
+		if delta > 0 {
+			if sub.AmountTotal > 0 {
+				remaining := sub.AmountTotal - sub.AmountUsed
+				if remaining < 0 {
+					remaining = 0
+				}
+				if delta > remaining {
+					return fmt.Errorf("subscription used exceeds total, used=%d total=%d", sub.AmountUsed+remaining, sub.AmountTotal)
+				}
+			}
+			windowCharges, fits, err := checkSubscriptionWindowsTx(tx, sub.Id, plan, now, delta)
+			if err != nil {
+				return err
+			}
+			if !fits {
+				return fmt.Errorf("%w, need=%d", ErrSubscriptionQuotaInsufficient, delta)
+			}
+			sub.AmountUsed += delta
+			if err := tx.Save(&sub).Error; err != nil {
+				return err
+			}
+			return applySubscriptionWindowChargesTx(tx, sub.Id, windowCharges)
+		}
+		newUsed := sub.AmountUsed + delta
+		if newUsed < 0 {
+			newUsed = 0
 		}
 		sub.AmountUsed = newUsed
-		return tx.Save(&sub).Error
+		if err := tx.Save(&sub).Error; err != nil {
+			return err
+		}
+		return applySubscriptionWindowDeltaTx(tx, sub.Id, plan, now, delta)
 	})
 }
 
@@ -1638,7 +2080,9 @@ type SubscriptionSettlementResult struct {
 // consumption row (capped at the available balance, never below zero). A
 // subscription that disallows wallet overflow keeps its limit and reports the
 // excess as uncovered; so does any part the wallet balance cannot cover.
-// Negative deltas refund the subscription only, capped at zero.
+// Negative deltas refund the subscription only, capped at zero. The part the
+// subscription absorbs also counts toward its plan's hour/day/week/month quota
+// windows, so window caps judge real spend, not only the pre-consume estimate.
 func SettleUserSubscriptionDelta(userSubscriptionId int, delta int64) (*SubscriptionSettlementResult, error) {
 	if userSubscriptionId <= 0 {
 		return nil, errors.New("invalid userSubscriptionId")
@@ -1657,6 +2101,18 @@ func SettleUserSubscriptionDelta(userSubscriptionId int, delta int64) (*Subscrip
 		applied, err := applyUserSubscriptionUsedDeltaTx(tx, &sub, delta)
 		if err != nil {
 			return err
+		}
+		// The applied part also counts toward the plan's calendar windows. A
+		// settlement is a committed charge, so it is recorded even when the
+		// window is already at its cap: the window then refuses further
+		// pre-consumes until it rolls, while the total keeps its cap above.
+		if applied != 0 && sub.PlanId > 0 {
+			plan, planErr := getSubscriptionPlanByIdTx(tx, sub.PlanId)
+			if planErr != nil {
+				common.SysError(common.LogText("failed to load subscription plan %d for window settlement: %s", sub.PlanId, planErr.Error()))
+			} else if err := applySubscriptionWindowDeltaTx(tx, sub.Id, plan, GetDBTimestampTx(tx), applied); err != nil {
+				return err
+			}
 		}
 		result.SubscriptionDelta = applied
 		result.AllowWalletOverflow = sub.AllowWalletOverflow

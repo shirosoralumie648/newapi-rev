@@ -7857,6 +7857,24 @@
     "Select one reply to continue the conversation": "Выберите один ответ, чтобы продолжить диалог",
     "Sending the same message to each selected model. Every reply is billed separately.": "Одно и то же сообщение отправляется каждой выбранной модели. Каждый ответ оплачивается отдельно.",
     "Use this reply": "Использовать этот ответ",
-    "You can compare up to {{count}} models at once": "Можно сравнить до {{count}} моделей одновременно"
+    "You can compare up to {{count}} models at once": "Можно сравнить до {{count}} моделей одновременно",
+    "Additional hour, day, week, and month quotas. The subscription only funds a request while every configured window still has enough quota. 0 means unlimited.": "Дополнительные квоты на час, день, неделю и месяц. Подписка оплачивает запрос только тогда, когда во всех настроенных окнах достаточно квоты. 0 означает без ограничений.",
+    "All groups by default": "По умолчанию все группы",
+    "All models by default": "По умолчанию все модели",
+    "Allowed Groups": "Разрешённые группы",
+    "Allowed Models": "Разрешённые модели",
+    "Allowed groups contain an unknown group": "Среди разрешённых групп есть неизвестная группа",
+    "Allowed models are invalid": "Разрешённые модели указаны неверно",
+    "Daily Quota ({{currency}})": "Квота за день ({{currency}})",
+    "Daily quota cannot be negative": "Квота за день не может быть отрицательной",
+    "Hourly Quota ({{currency}})": "Квота за час ({{currency}})",
+    "Hourly quota cannot be negative": "Квота за час не может быть отрицательной",
+    "Monthly Quota ({{currency}})": "Квота за месяц ({{currency}})",
+    "Monthly quota cannot be negative": "Квота за месяц не может быть отрицательной",
+    "Quota Windows": "Окна квоты",
+    "Restrict quota usage to these groups. Leave empty to allow every group.": "Ограничить использование квоты этими группами. Оставьте пустым, чтобы разрешить все группы.",
+    "Restrict quota usage to these models. A trailing * matches a prefix. Leave empty to allow every model.": "Ограничить использование квоты этими моделями. Завершающий * соответствует префиксу. Оставьте пустым, чтобы разрешить все модели.",
+    "Weekly Quota ({{currency}})": "Квота за неделю ({{currency}})",
+    "Weekly quota cannot be negative": "Квота за неделю не может быть отрицательной"
   }
 }

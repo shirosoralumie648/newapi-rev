@@ -7857,6 +7857,24 @@
     "Select one reply to continue the conversation": "Select one reply to continue the conversation",
     "Sending the same message to each selected model. Every reply is billed separately.": "Sending the same message to each selected model. Every reply is billed separately.",
     "Use this reply": "Use this reply",
-    "You can compare up to {{count}} models at once": "You can compare up to {{count}} models at once"
+    "You can compare up to {{count}} models at once": "You can compare up to {{count}} models at once",
+    "Additional hour, day, week, and month quotas. The subscription only funds a request while every configured window still has enough quota. 0 means unlimited.": "Additional hour, day, week, and month quotas. The subscription only funds a request while every configured window still has enough quota. 0 means unlimited.",
+    "All groups by default": "All groups by default",
+    "All models by default": "All models by default",
+    "Allowed Groups": "Allowed Groups",
+    "Allowed Models": "Allowed Models",
+    "Allowed groups contain an unknown group": "Allowed groups contain an unknown group",
+    "Allowed models are invalid": "Allowed models are invalid",
+    "Daily Quota ({{currency}})": "Daily Quota ({{currency}})",
+    "Daily quota cannot be negative": "Daily quota cannot be negative",
+    "Hourly Quota ({{currency}})": "Hourly Quota ({{currency}})",
+    "Hourly quota cannot be negative": "Hourly quota cannot be negative",
+    "Monthly Quota ({{currency}})": "Monthly Quota ({{currency}})",
+    "Monthly quota cannot be negative": "Monthly quota cannot be negative",
+    "Quota Windows": "Quota Windows",
+    "Restrict quota usage to these groups. Leave empty to allow every group.": "Restrict quota usage to these groups. Leave empty to allow every group.",
+    "Restrict quota usage to these models. A trailing * matches a prefix. Leave empty to allow every model.": "Restrict quota usage to these models. A trailing * matches a prefix. Leave empty to allow every model.",
+    "Weekly Quota ({{currency}})": "Weekly Quota ({{currency}})",
+    "Weekly quota cannot be negative": "Weekly quota cannot be negative"
   }
 }
