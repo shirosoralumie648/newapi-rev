@@ -108,6 +108,84 @@ func (w *WalletFunding) Refund() error {
 }
 
 // ---------------------------------------------------------------------------
+// WorkflowBudgetFunding — 工作流运行预算资金来源实现（BL-03）
+// ---------------------------------------------------------------------------
+
+// WorkflowBudgetFunding bills one workflow step inside the run budget its
+// canvas opened. The step reserves a child allocation of the budget the wallet
+// already paid for and later records its actual cost there, so no per-step
+// wallet movement happens. The run settlement charges the sum of the step
+// allocations and returns the unused part of the cap.
+type WorkflowBudgetFunding struct {
+	userId int
+	// runId is the root budget hold; requestId names this step's child
+	// allocation (the relay request id, which is also what a durable task
+	// row keeps so its poller can settle the same child).
+	runId     string
+	requestId string
+	// reserved is the step's current allocation, in quota.
+	reserved int
+}
+
+func (f *WorkflowBudgetFunding) Source() string { return BillingSourceWorkflowBudget }
+
+func (f *WorkflowBudgetFunding) PreConsume(amount int) error {
+	// The run cap was already reserved from the wallet when the run started, so
+	// the only limit a step has to satisfy is the remaining budget.
+	return f.reserve(amount)
+}
+
+// reserve replaces the step's allocation with the absolute amount.
+func (f *WorkflowBudgetFunding) reserve(amount int) error {
+	if amount < 0 {
+		amount = 0
+	}
+	if amount == f.reserved {
+		return nil
+	}
+	if f.reserved == 0 && amount == 0 {
+		return nil
+	}
+	_, err := model.ReserveWalletBudgetChild(f.runId, f.requestId, f.userId, amount)
+	if err != nil {
+		return err
+	}
+	f.reserved = amount
+	return nil
+}
+
+// ReserveExtra extends the step's allocation by delta, mirroring the wallet
+// reserve path for mid-flight quantity increases.
+func (f *WorkflowBudgetFunding) ReserveExtra(delta int) error {
+	return f.reserve(f.reserved + delta)
+}
+
+// ReleaseExtra shrinks the step's allocation after a failed reserve rollback.
+func (f *WorkflowBudgetFunding) ReleaseExtra(delta int) error {
+	return f.reserve(f.reserved - delta)
+}
+
+// Settle records the step's actual cost (pre-consume plus delta) in the budget.
+func (f *WorkflowBudgetFunding) Settle(delta int) error {
+	actual := f.reserved + delta
+	if actual < 0 {
+		actual = 0
+	}
+	_, err := model.SettleWalletBudgetChild(f.runId, f.requestId, f.userId, actual)
+	return err
+}
+
+// Refund releases the step's allocation: the budget keeps the money, so a
+// failed step leaves the run's spend untouched.
+func (f *WorkflowBudgetFunding) Refund() error {
+	if f.reserved == 0 {
+		return nil
+	}
+	_, err := model.SettleWalletBudgetChild(f.runId, f.requestId, f.userId, 0)
+	return err
+}
+
+// ---------------------------------------------------------------------------
 // SubscriptionFunding — 订阅资金来源实现
 // ---------------------------------------------------------------------------
 

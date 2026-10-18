@@ -82,11 +82,17 @@ export const API_ENDPOINTS = {
   PLAYGROUND_MESSAGE_COSTS: '/api/playground/message-costs',
   PLAYGROUND_ASSETS: '/api/playground/assets',
   PLAYGROUND_TASKS: '/api/playground/tasks',
+  PLAYGROUND_WORKFLOW_ESTIMATE: '/api/playground/workflows/estimate',
+  PLAYGROUND_WORKFLOW_RUNS: '/api/playground/workflows/runs',
 } as const
 
 // The relay answers every request with the request id it recorded, so a
 // finished generation can be associated with its consume log row.
 export const PLAYGROUND_REQUEST_ID_HEADER = 'X-Oneapi-Request-Id'
+// A canvas workflow step carries the run budget it bills inside through this
+// header. The server consumes it before the relay, so it never reaches the
+// provider, and a step without a budget sends no header at all.
+export const PLAYGROUND_WORKFLOW_RUN_HEADER = 'X-Playground-Workflow-Run'
 // The stored generation record mirrors the logs.request_id column: an over-long
 // id can never be looked up, so it is dropped instead of breaking the snapshot.
 export const PLAYGROUND_REQUEST_ID_MAX_LENGTH = 64

@@ -31,6 +31,9 @@ var (
 	// ErrWalletHoldInsufficientQuota rejects a budget reservation the wallet
 	// cannot cover.
 	ErrWalletHoldInsufficientQuota = errors.New("insufficient wallet quota for the hold")
+	// ErrWalletBudgetExceeded rejects a workflow step allocation that would
+	// exceed the run budget its parent hold reserved (BL-03).
+	ErrWalletBudgetExceeded = errors.New("wallet budget exceeded")
 )
 
 const (
@@ -402,77 +405,9 @@ func SettleWalletHold(userId int, requestId string, delta int64) (int64, error) 
 	limit := overdraftLimitForCharge(userId)
 	walletDelta := int64(0)
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		hold, err := lockWalletHoldTx(tx, requestId)
-		if err != nil {
-			return err
-		}
-		now := common.GetTimestamp()
-		charged := int64(0)
-		if hold == nil {
-			// A request admitted before wallet holds existed settles the raw
-			// difference.
-			charged = delta
-		} else {
-			if hold.UserId != userId {
-				return fmt.Errorf("wallet hold %s belongs to user %d", requestId, hold.UserId)
-			}
-			switch hold.Status {
-			case WalletHoldStatusActive:
-				charged = delta
-			case WalletHoldStatusSettled:
-				// The settlement already moved the wallet.
-				return nil
-			default:
-				// The reservation was returned; the whole actual charge is
-				// still outstanding.
-				charged, err = addWalletQuotaChecked(delta, hold.Amount, "wallet hold settle after refund")
-				if err != nil {
-					return err
-				}
-			}
-		}
-		if hold != nil && hold.Status == WalletHoldStatusActive {
-			hold.Status = WalletHoldStatusSettled
-			if err := tx.Save(hold).Error; err != nil {
-				return err
-			}
-			if err := closeWalletHoldChildrenTx(tx, hold.Id, WalletHoldStatusSettled, now); err != nil {
-				return err
-			}
-		}
-		if charged == 0 {
-			return nil
-		}
-		if charged > 0 {
-			applied, _, err := chargeWalletQuotaTx(tx, userId, charged, limit, requestId)
-			if err != nil {
-				return err
-			}
-			walletDelta = applied
-			if applied > 0 {
-				grants, err := lockCreditGrantsTx(tx, userId)
-				if err != nil {
-					return err
-				}
-				if _, _, err := claimCreditGrantsTx(tx, userId, applied, grants, now); err != nil {
-					return err
-				}
-			}
-			return nil
-		}
-		balance, err := lockUserQuotaTx(tx, userId)
-		if err != nil {
-			return err
-		}
-		next, err := addWalletQuotaChecked(balance, -charged, "wallet hold settle")
-		if err != nil {
-			return err
-		}
-		if err := writeLockedWalletQuotaTx(tx, userId, next); err != nil {
-			return err
-		}
-		walletDelta = charged
-		return releaseWalletHoldClaimsTx(tx, hold, -charged)
+		var err error
+		walletDelta, err = settleWalletHoldTx(tx, userId, requestId, delta, limit)
+		return err
 	})
 	if err != nil {
 		return 0, err
@@ -481,6 +416,83 @@ func SettleWalletHold(userId int, requestId string, delta int64) (int64, error) 
 		syncWalletQuotaCache(userId, -walletDelta, "wallet hold settlement")
 	}
 	return walletDelta, nil
+}
+
+// settleWalletHoldTx settles one request's hold inside tx and returns the quota
+// that actually left the wallet (negative when part of the reservation is
+// returned). It keeps the transaction semantics of SettleWalletHold so a
+// workflow run settlement (BL-03) can reuse the exact same movement rules. The
+// caller must apply the returned delta to the quota cache.
+func settleWalletHoldTx(tx *gorm.DB, userId int, requestId string, delta int64, limit int64) (int64, error) {
+	hold, err := lockWalletHoldTx(tx, requestId)
+	if err != nil {
+		return 0, err
+	}
+	now := common.GetTimestamp()
+	charged := int64(0)
+	if hold == nil {
+		// A request admitted before wallet holds existed settles the raw
+		// difference.
+		charged = delta
+	} else {
+		if hold.UserId != userId {
+			return 0, fmt.Errorf("wallet hold %s belongs to user %d", requestId, hold.UserId)
+		}
+		switch hold.Status {
+		case WalletHoldStatusActive:
+			charged = delta
+		case WalletHoldStatusSettled:
+			// The settlement already moved the wallet.
+			return 0, nil
+		default:
+			// The reservation was returned; the whole actual charge is
+			// still outstanding.
+			charged, err = addWalletQuotaChecked(delta, hold.Amount, "wallet hold settle after refund")
+			if err != nil {
+				return 0, err
+			}
+		}
+	}
+	if hold != nil && hold.Status == WalletHoldStatusActive {
+		hold.Status = WalletHoldStatusSettled
+		if err := tx.Save(hold).Error; err != nil {
+			return 0, err
+		}
+		if err := closeWalletHoldChildrenTx(tx, hold.Id, WalletHoldStatusSettled, now); err != nil {
+			return 0, err
+		}
+	}
+	if charged == 0 {
+		return 0, nil
+	}
+	if charged > 0 {
+		applied, _, err := chargeWalletQuotaTx(tx, userId, charged, limit, requestId)
+		if err != nil {
+			return 0, err
+		}
+		if applied > 0 {
+			grants, err := lockCreditGrantsTx(tx, userId)
+			if err != nil {
+				return 0, err
+			}
+			if _, _, err := claimCreditGrantsTx(tx, userId, applied, grants, now); err != nil {
+				return 0, err
+			}
+		}
+		return applied, nil
+	}
+	balance, err := lockUserQuotaTx(tx, userId)
+	if err != nil {
+		return 0, err
+	}
+	next, err := addWalletQuotaChecked(balance, -charged, "wallet hold settle")
+	if err != nil {
+		return 0, err
+	}
+	if err := writeLockedWalletQuotaTx(tx, userId, next); err != nil {
+		return 0, err
+	}
+	return charged, releaseWalletHoldClaimsTx(tx, hold, -charged)
 }
 
 // RefundWalletHold closes an active hold as refunded and returns the whole held
@@ -626,6 +638,11 @@ func CreateWalletBudgetHold(userId int, requestId string, amount int) (*WalletHo
 	if !reserved {
 		return nil, ErrWalletHoldInsufficientQuota
 	}
+	// The cap is already spent money, so the consumption ledger records it at
+	// creation; the run settlement later records the correction between the cap
+	// and the steps' actual cost. Σ non-debt ledger rows therefore always equals
+	// the wallet balance.
+	RecordWalletConsumeDelta(userId, -int64(amount))
 	return GetWalletHoldByRequestId(requestId)
 }
 
@@ -713,6 +730,224 @@ func GetWalletHoldByRequestId(requestId string) (*WalletHold, error) {
 		return nil, err
 	}
 	return &hold, nil
+}
+
+// ReserveWalletBudgetChild allocates one workflow step inside a run budget
+// (BL-03). The amount is absolute: a retried step replaces its previous
+// allocation instead of stacking on it. The sum of the run's active allocations
+// may not exceed the budget cap its parent hold reserved, so a step that would
+// cross the cap is refused before it starts and the caller aborts the remaining
+// nodes.
+func ReserveWalletBudgetChild(parentRequestId string, requestId string, userId int, amount int) (*WalletHold, error) {
+	return writeWalletBudgetChild(parentRequestId, requestId, userId, amount, true)
+}
+
+// SettleWalletBudgetChild records the actual cost of one finished workflow step
+// in its run budget (BL-03). Unlike a reservation, an absolute amount is
+// accepted even when it crosses the remaining cap: the step already ran, and the
+// run settlement bills what it actually cost. Zero releases the step's whole
+// allocation back to the budget.
+func SettleWalletBudgetChild(parentRequestId string, requestId string, userId int, actual int) (*WalletHold, error) {
+	return writeWalletBudgetChild(parentRequestId, requestId, userId, actual, false)
+}
+
+// writeWalletBudgetChild writes the child hold of one step inside its run
+// budget. It locks the parent first (row order: parent, child) and renews the
+// parent's reservation lifetime while the run is active, so a long run is never
+// swept from under a running step.
+func writeWalletBudgetChild(parentRequestId string, requestId string, userId int, amount int, enforceCap bool) (*WalletHold, error) {
+	if strings.TrimSpace(parentRequestId) == "" || strings.TrimSpace(requestId) == "" {
+		return nil, errors.New("parent and child request ids are required")
+	}
+	if amount < 0 {
+		return nil, errors.New("budget allocation cannot be negative")
+	}
+	if err := common.ValidateWalletQuota(amount); err != nil {
+		return nil, err
+	}
+	var child *WalletHold
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		parent, err := lockWalletHoldTx(tx, parentRequestId)
+		if err != nil {
+			return err
+		}
+		if parent == nil {
+			return ErrWalletHoldNotFound
+		}
+		if parent.ParentId != nil {
+			return fmt.Errorf("wallet hold %s is not a root budget hold", parentRequestId)
+		}
+		if parent.UserId != userId {
+			return fmt.Errorf("wallet hold %s belongs to user %d", parentRequestId, parent.UserId)
+		}
+		if parent.Status != WalletHoldStatusActive {
+			return ErrWalletHoldClosed
+		}
+		existing, err := lockWalletHoldTx(tx, requestId)
+		if err != nil {
+			return err
+		}
+		excludeId := 0
+		if existing != nil {
+			if existing.UserId != userId {
+				return fmt.Errorf("wallet hold %s belongs to user %d", requestId, existing.UserId)
+			}
+			if existing.ParentId == nil || *existing.ParentId != parent.Id {
+				return fmt.Errorf("wallet hold %s is not mounted on %s", requestId, parentRequestId)
+			}
+			if existing.Status != WalletHoldStatusActive {
+				return ErrWalletHoldClosed
+			}
+			excludeId = existing.Id
+		}
+		now := common.GetTimestamp()
+		if enforceCap {
+			allocated, err := walletBudgetAllocatedTx(tx, parent.Id, excludeId)
+			if err != nil {
+				return err
+			}
+			if allocated+int64(amount) > parent.Amount {
+				return ErrWalletBudgetExceeded
+			}
+		}
+		renewed := max(parent.ExpiresAt, now+int64(WalletHoldTTLSeconds()))
+		if renewed != parent.ExpiresAt {
+			parent.ExpiresAt = renewed
+			if err := tx.Save(parent).Error; err != nil {
+				return err
+			}
+		}
+		if existing == nil {
+			if amount == 0 {
+				return nil
+			}
+			parentId := parent.Id
+			child = &WalletHold{
+				RequestId: requestId,
+				UserId:    userId,
+				Amount:    int64(amount),
+				Status:    WalletHoldStatusActive,
+				ParentId:  &parentId,
+				ExpiresAt: renewed,
+			}
+			return tx.Create(child).Error
+		}
+		if existing.Amount == int64(amount) {
+			child = existing
+			return nil
+		}
+		existing.Amount = int64(amount)
+		existing.ExpiresAt = max(existing.ExpiresAt, renewed)
+		if err := tx.Save(existing).Error; err != nil {
+			return err
+		}
+		child = existing
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return child, nil
+}
+
+// walletBudgetAllocatedTx sums the active allocations of one run budget, with
+// the child being replaced optionally excluded.
+func walletBudgetAllocatedTx(tx *gorm.DB, parentId int, excludeId int) (int64, error) {
+	var row struct {
+		Total int64
+	}
+	query := tx.Model(&WalletHold{}).
+		Select("COALESCE(SUM(amount), 0) AS total").
+		Where("parent_id = ? AND status = ?", parentId, WalletHoldStatusActive)
+	if excludeId > 0 {
+		query = query.Where("id <> ?", excludeId)
+	}
+	if err := query.Scan(&row).Error; err != nil {
+		return 0, err
+	}
+	return row.Total, nil
+}
+
+// WalletBudgetSummary describes one workflow run budget (BL-03): the cap the
+// run reserved, the sum of its step allocations, and what is left of the cap
+// after settlement. Remaining is negative when a finished step cost more than
+// the cap; that excess is billed by the run settlement.
+type WalletBudgetSummary struct {
+	RunId     string `json:"run_id"`
+	Cap       int64  `json:"cap"`
+	Spent     int64  `json:"spent"`
+	Remaining int64  `json:"remaining"`
+	Status    string `json:"status"`
+}
+
+// SettleWalletBudgetRun closes a workflow run budget and settles it against the
+// wallet in one transaction: the run costs the sum of its step allocations, so
+// the unused part of the cap is returned and a run whose steps cost more than
+// the cap is charged the difference (down to the account's credit line, like
+// every other wallet charge). Replaying a settled run reports the same summary
+// and moves no quota again. A budget that was already refunded or expired (its
+// whole cap went back to the wallet) bills nothing, because the run's outcome is
+// unknown to the recovery sweep.
+func SettleWalletBudgetRun(userId int, runId string) (*WalletBudgetSummary, error) {
+	if strings.TrimSpace(runId) == "" {
+		return nil, errors.New("runId is empty")
+	}
+	limit := overdraftLimitForCharge(userId)
+	summary := &WalletBudgetSummary{RunId: runId}
+	walletDelta := int64(0)
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		parent, err := lockWalletHoldTx(tx, runId)
+		if err != nil {
+			return err
+		}
+		if parent == nil {
+			return ErrWalletHoldNotFound
+		}
+		if parent.ParentId != nil {
+			return fmt.Errorf("wallet hold %s is not a root budget hold", runId)
+		}
+		if parent.UserId != userId {
+			return fmt.Errorf("wallet hold %s belongs to user %d", runId, parent.UserId)
+		}
+		spent, err := walletBudgetSpentTx(tx, parent)
+		if err != nil {
+			return err
+		}
+		summary.Cap = parent.Amount
+		summary.Spent = spent
+		summary.Status = parent.Status
+		summary.Remaining = parent.Amount - spent
+		charged, err := settleWalletHoldTx(tx, userId, runId, spent-parent.Amount, limit)
+		if err != nil {
+			return err
+		}
+		walletDelta = charged
+		if parent.Status == WalletHoldStatusActive {
+			summary.Status = WalletHoldStatusSettled
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if walletDelta != 0 {
+		syncWalletQuotaCache(userId, -walletDelta, "wallet budget settlement")
+		// The consumption ledger follows the money: the cap was recorded at
+		// creation, so only the settlement correction between the cap and the
+		// steps' actual cost is recorded here.
+		RecordWalletConsumeDelta(userId, -walletDelta)
+	}
+	return summary, nil
+}
+
+// walletBudgetSpentTx sums the billed allocations of one run budget. A budget
+// that was refunded or expired returns zero: its whole reservation went back to
+// the wallet, so it bills nothing.
+func walletBudgetSpentTx(tx *gorm.DB, parent *WalletHold) (int64, error) {
+	if parent.Status != WalletHoldStatusActive && parent.Status != WalletHoldStatusSettled {
+		return 0, nil
+	}
+	return walletBudgetAllocatedTx(tx, parent.Id, 0)
 }
 
 // WalletHoldExpiryResult summarizes one recovery sweep.

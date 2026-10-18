@@ -65,6 +65,9 @@ func SetRelayRouter(router *gin.Engine) {
 	playgroundRouter.Use(middleware.RouteTag("relay"))
 	playgroundRouter.Use(middleware.RequestTiming())
 	playgroundRouter.Use(middleware.SystemPerformanceCheck())
+	// The run budget header of a canvas workflow step is consumed before the
+	// relay reads the account context, exactly like the media bridge does.
+	playgroundRouter.Use(middleware.PlaygroundWorkflowRun())
 	playgroundRouter.Use(middleware.UserAuth(), middleware.Distribute())
 	{
 		playgroundRouter.POST("/chat/completions", controller.Playground)

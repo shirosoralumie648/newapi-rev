@@ -34,6 +34,7 @@ import {
   isServerErrorCancelled,
 } from '@/lib/server-error-message'
 
+import { settleCanvasWorkflowRunBudget } from '../api'
 import {
   CANVAS_LINKED_NODE_OFFSET_X,
   CANVAS_WORKFLOW_GENERATION_LABELS,
@@ -59,6 +60,8 @@ import {
   truncateCanvasWorkflowText,
   validateCanvasWorkflow,
 } from '../lib/canvas-workflow'
+import { canvasWorkflowEstimateSteps } from '../lib/canvas-workflow-budget'
+import type { CanvasWorkflowEstimateStepInput } from '../lib/canvas-workflow-budget'
 import {
   CanvasWorkflowImageError,
   readCanvasWorkflowImages,
@@ -78,6 +81,16 @@ import type {
 export type CanvasWorkflowRunPhase = 'idle' | 'running'
 
 type CanvasWorkflowStepOutcome = 'succeeded' | 'failed' | 'canceled'
+
+/** A planned run: the estimate request payload of the steps about to start. */
+export interface CanvasWorkflowRunPlan {
+  steps: CanvasWorkflowEstimateStepInput[]
+}
+
+/** The budget a run bills inside; every step request carries its run id. */
+export interface CanvasWorkflowRunBudgetRef {
+  runId: string
+}
 
 /** The resolved attempt values a step records and a result node repeats. */
 type CanvasWorkflowAttempt = {
@@ -260,6 +273,8 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
   const outputsRef = useRef<Map<string, string>>(new Map())
   const pendingTaskRef = useRef<{ taskId: string; nodeId: string } | null>(null)
   const resumedRef = useRef(false)
+  /** Run budget the current run bills inside; null bills the wallet directly. */
+  const budgetRef = useRef<string | null>(null)
 
   const patchNode = useCallback((id: string, update: CanvasNodeDataUpdate) => {
     updateRef.current(id, update, { record: false })
@@ -483,7 +498,8 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
             messages: [{ role: 'user', content }],
             stream: false,
           },
-          signal
+          signal,
+          budgetRef.current ?? undefined
         )
         const output = (response.choices[0]?.message?.content ?? '').trim()
         if (!output) {
@@ -534,7 +550,8 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
               count: config.imageCount,
               images,
             },
-            signal
+            signal,
+            budgetRef.current ?? undefined
           )
           const previews = results
             .map(
@@ -573,7 +590,8 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
               size: config.size,
               images,
             },
-            signal
+            signal,
+            budgetRef.current ?? undefined
           )
         }
         if (!taskId) {
@@ -695,38 +713,83 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
       } finally {
         pendingTaskRef.current = null
         abortRef.current = null
+        // The run has stopped (finished, failed or left the canvas): its budget
+        // settles on the step allocations recorded so far.
+        const budgetRunId = budgetRef.current
+        budgetRef.current = null
+        if (budgetRunId) settleRunBudget(budgetRunId)
         setActiveNodeId(null)
         setPhase('idle')
       }
     },
-    [markStepFailed, markStepRunning, runModelStep, runTaskStep]
+    [
+      markStepFailed,
+      markStepRunning,
+      runModelStep,
+      runTaskStep,
+      settleRunBudget,
+    ]
+  )
+
+  /**
+   * Validates the board exactly like a run and resolves the steps to execute.
+   * A null answer means the run was refused and `message` says why.
+   */
+  const planRun = useCallback((fromNodeId?: string) => {
+    const nodes = nodesRef.current
+    const edges = edgesRef.current
+    if (!groupRef.current.trim()) {
+      setMessage(CANVAS_WORKFLOW_ERRORS.GROUP_REQUIRED)
+      return null
+    }
+    const validation = validateCanvasWorkflow(nodes, edges)
+    if (validation) {
+      setMessage(validation)
+      return null
+    }
+    const order = orderCanvasWorkflow(nodes, edges)
+    if ('error' in order) {
+      setMessage(order.error)
+      return null
+    }
+    let startIndex = 0
+    if (fromNodeId) {
+      const index = order.steps.indexOf(fromNodeId)
+      if (index >= 0) startIndex = index
+    }
+    return { nodes, edges, steps: order.steps, startIndex }
+  }, [])
+
+  /**
+   * The price-estimate payload of the run a click would start. The board is
+   * validated first, so the estimate is only offered when the same click would
+   * actually run; the workspace asks the server to price it and shows the
+   * total before anything is sent.
+   */
+  const estimateRun = useCallback(
+    (fromNodeId?: string): CanvasWorkflowRunPlan | null => {
+      const plan = planRun(fromNodeId)
+      if (!plan) return null
+      setMessage(null)
+      return {
+        steps: canvasWorkflowEstimateSteps(
+          plan.steps.slice(plan.startIndex),
+          plan.nodes,
+          plan.edges,
+          groupRef.current
+        ),
+      }
+    },
+    [planRun]
   )
 
   const start = useCallback(
-    (fromNodeId?: string) => {
+    (fromNodeId?: string, budget?: CanvasWorkflowRunBudgetRef) => {
       if (phaseRef.current === 'running') return
-      const runNodes = nodesRef.current
-      const runEdges = edgesRef.current
-      if (!groupRef.current.trim()) {
-        setMessage(CANVAS_WORKFLOW_ERRORS.GROUP_REQUIRED)
-        return
-      }
-      const validation = validateCanvasWorkflow(runNodes, runEdges)
-      if (validation) {
-        setMessage(validation)
-        return
-      }
-      const order = orderCanvasWorkflow(runNodes, runEdges)
-      if ('error' in order) {
-        setMessage(order.error)
-        return
-      }
-      let startIndex = 0
-      if (fromNodeId) {
-        const index = order.steps.indexOf(fromNodeId)
-        if (index >= 0) startIndex = index
-      }
+      const plan = planRun(fromNodeId)
+      if (!plan) return
       outputsRef.current = new Map()
+      budgetRef.current = budget?.runId ?? null
       const generation = runIdRef.current + 1
       runIdRef.current = generation
       const controller = new AbortController()
@@ -734,15 +797,15 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
       setMessage(null)
       setPhase('running')
       void executeSteps(
-        runNodes,
-        runEdges,
-        order.steps,
-        startIndex,
+        plan.nodes,
+        plan.edges,
+        plan.steps,
+        plan.startIndex,
         generation,
         controller.signal
       )
     },
-    [executeSteps]
+    [executeSteps, planRun]
   )
 
   /**
