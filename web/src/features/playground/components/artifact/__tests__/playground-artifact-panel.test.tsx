@@ -39,7 +39,14 @@ Object.defineProperty(HTMLElement.prototype, 'getAnimations', {
 
 const SESSION = 'pgs_session'
 const ARTIFACT_PATH = `/api/playground/sessions/${SESSION}/artifacts`
+const SETTINGS_PATH = '/api/playground/settings'
 const onClose = vi.fn()
+
+// The server-side sandbox switch each test renders with. It defaults to the
+// shipped value and is reset in beforeEach.
+let sandboxPreviewEnabled = false
+
+const SETTINGS_QUERY_KEY = ['playground', 7, 'settings']
 
 interface ArtifactFixture {
   content: string
@@ -90,6 +97,15 @@ const fixtures: ArtifactFixture[] = [
     kind: 'code',
     language: 'html',
     title: 'Executable Code',
+  },
+  {
+    // An html artifact is only ever rendered inside the sandboxed iframe, and
+    // only while the server-side switch is enabled.
+    content: '<h1>Landing</h1>',
+    id: 'pga_html',
+    kind: 'html',
+    language: 'html',
+    title: 'Landing Page',
   },
   {
     content: 'Report body',
@@ -177,14 +193,21 @@ function Harness(props: {
 beforeEach(() => {
   localStorage.clear()
   onClose.mockClear()
+  sandboxPreviewEnabled = false
   useAuthStore.getState().auth.setUser({ id: 7, username: 'user', role: 1 })
 
   const results = new Map<string, PlaygroundArtifactResult>(
-    fixtures.map(
-      (fixture) => [fixture.id, makeResult(fixture)] as const
-    )
+    fixtures.map((fixture) => [fixture.id, makeResult(fixture)] as const)
   )
   vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    if (url === SETTINGS_PATH) {
+      return {
+        data: {
+          success: true,
+          data: { sandbox_preview_enabled: sandboxPreviewEnabled },
+        },
+      }
+    }
     if (url === ARTIFACT_PATH) {
       return {
         data: {
@@ -256,7 +279,14 @@ function renderPanel(
       <Harness onSendToCanvas={onSendToCanvas} />
     </QueryClientProvider>
   )
-  return view.container
+  return { client, container: view.container }
+}
+
+/** Waits until the server-side sandbox switch has actually been read. */
+async function waitForSettings(client: QueryClient) {
+  await waitFor(() =>
+    expect(client.getQueryState(SETTINGS_QUERY_KEY)?.status).toBe('success')
+  )
 }
 
 test('switching artifacts with unsaved changes asks before discarding', async () => {
@@ -322,11 +352,13 @@ test('closing the panel without changes does not ask', async () => {
 
 test('markdown artifact preview does not execute raw HTML, handlers or javascript: links', async () => {
   const user = userEvent.setup()
-  const container = renderPanel()
+  const { container } = renderPanel()
   const scope = window as unknown as { __artifactXss?: boolean }
   scope.__artifactXss = undefined
 
-  await user.click(await screen.findByRole('button', { name: /Unsafe Document/ }))
+  await user.click(
+    await screen.findByRole('button', { name: /Unsafe Document/ })
+  )
   await screen.findByRole('textbox', { name: 'Artifact title' })
   await user.click(screen.getByRole('button', { name: 'Preview artifact' }))
 
@@ -346,9 +378,11 @@ test('markdown artifact preview does not execute raw HTML, handlers or javascrip
 
 test('code artifact keeps script and handler markup as inert text', async () => {
   const user = userEvent.setup()
-  const container = renderPanel()
+  const { container } = renderPanel()
 
-  await user.click(await screen.findByRole('button', { name: /Executable Code/ }))
+  await user.click(
+    await screen.findByRole('button', { name: /Executable Code/ })
+  )
   await screen.findByRole('textbox', { name: 'Artifact title' })
   const editor = screen.getByRole('textbox', { name: 'Artifact content' })
   const code = editor.querySelector('.cm-content')?.textContent ?? ''
@@ -423,4 +457,83 @@ test('downloading a plaintext code artifact maps its extension to txt', async ()
   const [download] = downloads
   expect(download.filename).toBe('Plain Snippet.txt')
   await expect(download.blob.text()).resolves.toBe('plain text body')
+})
+
+test('downloading an html artifact uses the html extension', async () => {
+  const user = userEvent.setup()
+  const downloads = captureDownloads()
+  renderPanel()
+
+  await user.click(await screen.findByRole('button', { name: /Landing Page/ }))
+  await screen.findByRole('textbox', { name: 'Artifact title' })
+  await user.click(screen.getByRole('button', { name: 'Download artifact' }))
+
+  expect(downloads).toHaveLength(1)
+  const [download] = downloads
+  expect(download.filename).toBe('Landing Page.html')
+  await expect(download.blob.text()).resolves.toBe('<h1>Landing</h1>')
+})
+
+test('the sandbox switch off keeps an html artifact inert', async () => {
+  const user = userEvent.setup()
+  const { client, container } = renderPanel()
+  await waitForSettings(client)
+
+  await user.click(await screen.findByRole('button', { name: /Landing Page/ }))
+  await screen.findByRole('textbox', { name: 'Artifact title' })
+
+  expect(screen.queryByRole('button', { name: 'Preview artifact' })).toBeNull()
+  expect(
+    screen.getByText('Sandboxed preview is disabled by the administrator.')
+  ).toBeVisible()
+  expect(container.querySelector('iframe')).toBeNull()
+})
+
+test('the sandbox switch on renders an html artifact inside a locked-down iframe', async () => {
+  sandboxPreviewEnabled = true
+  const user = userEvent.setup()
+  const { client, container } = renderPanel()
+  await waitForSettings(client)
+
+  await user.click(await screen.findByRole('button', { name: /Landing Page/ }))
+  await screen.findByRole('textbox', { name: 'Artifact title' })
+  await user.click(screen.getByRole('button', { name: 'Preview artifact' }))
+
+  const frame = await waitFor(() => {
+    const element = container.querySelector('iframe')
+    expect(element).not.toBeNull()
+    return element as HTMLIFrameElement
+  })
+
+  // No same-origin token, no navigation/popup/form permission and no src URL:
+  // the document arrives only through srcDoc on an opaque origin.
+  const sandbox = frame.getAttribute('sandbox') ?? ''
+  expect(sandbox).toBe('allow-scripts')
+  expect(sandbox).not.toContain('allow-same-origin')
+  expect(sandbox).not.toContain('allow-top-navigation')
+  expect(sandbox).not.toContain('allow-popups')
+  expect(sandbox).not.toContain('allow-forms')
+  expect(frame.hasAttribute('src')).toBe(false)
+
+  const srcdoc = frame.getAttribute('srcdoc') ?? ''
+  expect(srcdoc).toContain("default-src 'none'")
+  expect(srcdoc).toContain("connect-src 'none'")
+  expect(srcdoc).toContain('<h1>Landing</h1>')
+})
+
+test('a code artifact stays a code artifact when the sandbox switch is on', async () => {
+  sandboxPreviewEnabled = true
+  const user = userEvent.setup()
+  const { client, container } = renderPanel()
+  await waitForSettings(client)
+
+  await user.click(
+    await screen.findByRole('button', { name: /Executable Code/ })
+  )
+  await screen.findByRole('textbox', { name: 'Artifact title' })
+
+  // The language is html, but the artifact kind is code, so it must never be
+  // routed into the sandbox preview.
+  expect(screen.queryByRole('button', { name: 'Preview artifact' })).toBeNull()
+  expect(container.querySelector('iframe')).toBeNull()
 })

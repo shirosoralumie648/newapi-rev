@@ -24,6 +24,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/playground_setting"
 	"github.com/gin-gonic/gin"
 )
 
@@ -68,6 +69,19 @@ func GetPlaygroundUsage(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, usage)
+}
+
+// GetPlaygroundSettings returns the Playground feature switches the browser
+// needs before it renders anything. The sandbox preview flag is the only
+// artifact-content gate: while it is off the client must not mount the
+// sandboxed iframe, and artifact bodies stay inert text.
+func GetPlaygroundSettings(c *gin.Context) {
+	userID := c.GetInt("id")
+	if userID <= 0 {
+		common.ApiErrorStatus(c, http.StatusUnauthorized, common.NewMessage("Authentication required."))
+		return
+	}
+	common.ApiSuccess(c, gin.H{"sandbox_preview_enabled": playground_setting.IsSandboxPreviewEnabled()})
 }
 
 // GetPlaygroundMessageCosts resolves the caller's own relay requests to their

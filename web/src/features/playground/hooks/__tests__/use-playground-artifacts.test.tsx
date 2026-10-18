@@ -31,6 +31,7 @@ import { usePlaygroundArtifacts } from '../use-playground-artifacts'
 
 const SESSION = 'pgs_session'
 const ARTIFACT_PATH = `/api/playground/sessions/${SESSION}/artifacts`
+const SETTINGS_PATH = '/api/playground/settings'
 
 function artifactResult(
   revision: number,
@@ -63,6 +64,14 @@ function artifactResult(
 
 function mockArtifactServer(result: PlaygroundArtifactResult) {
   return vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    if (url === SETTINGS_PATH) {
+      return {
+        data: {
+          success: true,
+          data: { sandbox_preview_enabled: false },
+        },
+      }
+    }
     if (url === ARTIFACT_PATH) {
       return {
         data: {
@@ -222,6 +231,14 @@ test('a save conflict keeps the local draft and clears after reloading the serve
 
   const rewritten = artifactResult(3, 'Server rewritten')
   get.mockImplementation(async (url) => {
+    if (url === SETTINGS_PATH) {
+      return {
+        data: {
+          success: true,
+          data: { sandbox_preview_enabled: false },
+        },
+      }
+    }
     if (url === ARTIFACT_PATH) {
       return {
         data: {

@@ -40,6 +40,7 @@ import {
   type SavePlaygroundArtifactRequest,
 } from '../artifact-api'
 import { playgroundQueryKeys } from '../lib/query-keys'
+import { usePlaygroundSandboxSettings } from './use-playground-sandbox'
 
 export interface ArtifactDraft {
   kind: PlaygroundArtifactKind
@@ -237,6 +238,11 @@ export function usePlaygroundArtifacts(
   const currentOwner = useAuthStore((auth) => auth.auth.user?.id ?? null)
   const enabled =
     ownerId !== null && ownerId === currentOwner && canonicalSessionId !== null
+  // The server switch is authoritative and defaults to disabled: an unanswered
+  // or failed request must never unlock the sandboxed artifact preview.
+  const sandboxSettingsQuery = usePlaygroundSandboxSettings(ownerId)
+  const sandboxEnabled =
+    sandboxSettingsQuery.data?.sandboxPreviewEnabled ?? false
   const requireSessionId = (): string => {
     if (canonicalSessionId === null) {
       throw new Error('Playground session is not available')
@@ -808,6 +814,7 @@ export function usePlaygroundArtifacts(
     versions: versionsQuery.data ?? [],
     viewedVersion: historicalQuery.data ?? null,
     detail: detailQuery.data ?? null,
+    sandboxEnabled,
     isLoading: listQuery.isLoading || detailQuery.isLoading,
     isSaving:
       listMutation.isPending ||

@@ -793,7 +793,8 @@ func TestPlaygroundArtifactValidationAndUTF8Boundaries(t *testing.T) {
 		{"request id invalid", func(v *model.CreatePlaygroundArtifactInput) { v.RequestID = "bad/id" }, 400},
 		{"request id unicode", func(v *model.CreatePlaygroundArtifactInput) { v.RequestID = "请求" }, 400},
 		{"request id missing", func(v *model.CreatePlaygroundArtifactInput) { v.RequestID = "" }, 400},
-		{"kind invalid", func(v *model.CreatePlaygroundArtifactInput) { v.Kind = "html" }, 400},
+		{"kind invalid", func(v *model.CreatePlaygroundArtifactInput) { v.Kind = "pdf" }, 400},
+		{"kind case sensitive", func(v *model.CreatePlaygroundArtifactInput) { v.Kind = "HTML" }, 400},
 		{"revision missing", func(v *model.CreatePlaygroundArtifactInput) { v.Source.MessageRevision = nil }, 400},
 		{"hash invalid", func(v *model.CreatePlaygroundArtifactInput) { v.Source.ContentHash = "hash" }, 400},
 		{"hash changed", func(v *model.CreatePlaygroundArtifactInput) { v.Source.ContentHash = strings.Repeat("0", 64) }, 409},
@@ -840,6 +841,19 @@ func TestPlaygroundArtifactValidationAndUTF8Boundaries(t *testing.T) {
 	candidate.RequestID = "NANOID_A-z:._-09"
 	different := artifactResult(t, playgroundRequest(t, 7, http.MethodPost, path, candidate, controller.CreatePlaygroundArtifact))
 	assert.NotEqual(t, code.Artifact.ID, different.Artifact.ID)
+	// html and svg are accepted so the sandbox can preview them, and an empty
+	// language records the format for the renderer. All three code-block kinds
+	// may carry the index of the block they were derived from.
+	for _, kind := range []string{"html", "svg"} {
+		previewable := input
+		previewable.RequestID = "kind-" + kind
+		previewable.Kind = kind
+		previewable.Language = ""
+		previewable.Source.CodeBlockIndex = &index
+		preview := artifactResult(t, playgroundRequest(t, 7, http.MethodPost, path, previewable, controller.CreatePlaygroundArtifact))
+		assert.Equal(t, kind, preview.Artifact.Kind)
+		assert.Equal(t, kind, preview.Version.Language)
+	}
 }
 
 func TestPlaygroundArtifactRejectsUnfinishedOrNonAssistantSources(t *testing.T) {
@@ -1594,6 +1608,7 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	attachmentBase := "/api/playground/sessions/" + sessionID + "/attachments"
 	for _, route := range []struct{ method, path string }{
 		{http.MethodGet, "/api/playground/usage"},
+		{http.MethodGet, "/api/playground/settings"},
 		{http.MethodGet, "/api/playground/message-costs?request_ids=route-cost"},
 		{http.MethodGet, "/api/playground/assets?kind=attachment"},
 		{http.MethodPost, "/api/playground/tasks/missing/cancel"},
@@ -1667,6 +1682,12 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	require.Equal(t, 200, usageResponse.Code, usageResponse.Body.String())
 	assert.Contains(t, usageResponse.Body.String(), `"sessions"`)
 	assert.Contains(t, usageResponse.Body.String(), `"tasks"`)
+
+	// The settings endpoint reports the server-side sandbox preview switch and
+	// defaults to disabled until an administrator opts in.
+	settingsResponse := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, "/api/playground/settings", nil)
+	require.Equal(t, 200, settingsResponse.Code, settingsResponse.Body.String())
+	assert.Contains(t, settingsResponse.Body.String(), `"sandbox_preview_enabled":false`)
 
 	// Canvas routes share the same session-only authentication contract.
 	canvasBase := "/api/playground/canvases"

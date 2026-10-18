@@ -85,6 +85,9 @@ const SECURITY_SECTIONS = [
       <PlaygroundQuotaSection
         defaultsJson={settings['playground_setting.defaults']}
         groupOverridesJson={settings['playground_setting.group_overrides']}
+        sandboxPreviewEnabled={
+          settings['playground_setting.sandbox_preview_enabled']
+        }
       />
     ),
   },

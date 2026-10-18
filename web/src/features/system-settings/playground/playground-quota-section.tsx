@@ -8,7 +8,10 @@ import { FormItem } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
-import { SettingsForm } from '../components/settings-form-layout'
+import {
+  SettingsForm,
+  SettingsSwitchField,
+} from '../components/settings-form-layout'
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
@@ -31,11 +34,15 @@ import {
 type PlaygroundQuotaSectionProps = {
   defaultsJson: string
   groupOverridesJson: string
+  sandboxPreviewEnabled: boolean
 }
 
 export function PlaygroundQuotaSection(props: PlaygroundQuotaSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
+  const [sandboxPreviewEnabled, setSandboxPreviewEnabled] = useState(
+    props.sandboxPreviewEnabled
+  )
 
   const baselineDefaults = useMemo(
     () => parsePlaygroundQuotaValues(props.defaultsJson),
@@ -64,7 +71,8 @@ export function PlaygroundQuotaSection(props: PlaygroundQuotaSectionProps) {
     setOverrides(buildPlaygroundQuotaOverrideDrafts(baselineOverrides))
     setDefaultErrors({})
     setOverrideErrors({})
-  }, [baselineDefaults, baselineOverrides])
+    setSandboxPreviewEnabled(props.sandboxPreviewEnabled)
+  }, [baselineDefaults, baselineOverrides, props.sandboxPreviewEnabled])
 
   const handleAddGroup = () => {
     const group = newGroup.trim()
@@ -145,6 +153,12 @@ export function PlaygroundQuotaSection(props: PlaygroundQuotaSectionProps) {
         value: overridesValue,
       })
     }
+    if (sandboxPreviewEnabled !== props.sandboxPreviewEnabled) {
+      requests.push({
+        key: 'playground_setting.sandbox_preview_enabled',
+        value: String(sandboxPreviewEnabled),
+      })
+    }
     if (requests.length === 0) {
       toast.info(t('No changes to save'))
       return
@@ -170,6 +184,17 @@ export function PlaygroundQuotaSection(props: PlaygroundQuotaSectionProps) {
           isSaving={updateOption.isPending}
           onSave={() => void handleSave()}
           saveLabel='Save Playground quotas'
+        />
+
+        <SettingsSwitchField
+          checked={sandboxPreviewEnabled}
+          controlId='playground-sandbox-preview-enabled'
+          description={t(
+            'Render HTML and SVG artifact content in an isolated preview that can never access this site.'
+          )}
+          disabled={updateOption.isPending}
+          label={t('Enable sandboxed artifact preview')}
+          onCheckedChange={setSandboxPreviewEnabled}
         />
 
         <div className='space-y-6'>

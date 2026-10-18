@@ -76,6 +76,7 @@ func SetApiRouter(router *gin.Engine) {
 		playgroundRoute.Use(middleware.DisableCache(), middleware.UserAuth())
 		{
 			playgroundRoute.GET("/usage", controller.GetPlaygroundUsage)
+			playgroundRoute.GET("/settings", controller.GetPlaygroundSettings)
 			playgroundRoute.GET("/message-costs", controller.GetPlaygroundMessageCosts)
 			playgroundRoute.GET("/trash", controller.ListPlaygroundTrash)
 			playgroundRoute.GET("/assets", controller.ListPlaygroundAssets)

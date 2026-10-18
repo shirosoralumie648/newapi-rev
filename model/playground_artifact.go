@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -38,6 +39,9 @@ var (
 	ErrPlaygroundArtifactRequestConflict = errors.New("Playground request ID was already used for a different operation.")
 	playgroundArtifactRequestPattern     = regexp.MustCompile(`^[a-zA-Z0-9_.:-]{1,128}$`)
 	playgroundArtifactLanguagePattern    = regexp.MustCompile(`^[a-z0-9][a-z0-9+#._-]{0,31}$`)
+	// playgroundArtifactKinds are the kinds the Playground stores. html and svg
+	// are the sandbox-previewable kinds; the others stay inert text.
+	playgroundArtifactKinds = []string{"markdown", "code", "html", "svg"}
 )
 
 // DeletedAt is an explicit tombstone, not a GORM soft delete. Deleted rows retain
@@ -157,9 +161,13 @@ func normalizePlaygroundArtifactSnapshot(kind string, title, language *string, c
 	*title = strings.TrimSpace(*title)
 	*language = strings.ToLower(strings.TrimSpace(*language))
 	if *language == "" {
-		*language = "plaintext"
-		if kind == "markdown" {
+		switch kind {
+		case "markdown":
 			*language = "markdown"
+		case "html", "svg":
+			*language = kind
+		default:
+			*language = "plaintext"
 		}
 	}
 	if *title == "" || len(*title) > 800 || !utf8.ValidString(*title) || utf8.RuneCountInString(*title) > 200 ||
@@ -322,10 +330,12 @@ func CreatePlaygroundArtifact(userID int, sessionID string, input CreatePlaygrou
 	source := &input.Source
 	source.ContentHash = strings.ToLower(source.ContentHash)
 	hashBytes, hashErr := hex.DecodeString(source.ContentHash)
-	if !playgroundArtifactRequestPattern.MatchString(input.RequestID) || (input.Kind != "markdown" && input.Kind != "code") ||
+	if !playgroundArtifactRequestPattern.MatchString(input.RequestID) || !slices.Contains(playgroundArtifactKinds, input.Kind) ||
 		source.MessageKey == "" || len(source.MessageKey) > 200 || source.VersionID == "" || len(source.VersionID) > 200 ||
 		source.MessageRevision == nil || *source.MessageRevision < 0 || hashErr != nil || len(hashBytes) != sha256.Size ||
-		(source.CodeBlockIndex != nil && (*source.CodeBlockIndex < 0 || input.Kind != "code")) {
+		// A code block index identifies the code/html/svg block the artifact was
+		// derived from; an answer-wide markdown artifact never carries one.
+		(source.CodeBlockIndex != nil && (*source.CodeBlockIndex < 0 || input.Kind == "markdown")) {
 		return nil, ErrPlaygroundArtifactInvalid
 	}
 	if err := normalizePlaygroundArtifactSnapshot(input.Kind, &input.Title, &input.Language, input.Content, policy.ArtifactContentMaxBytes); err != nil {
