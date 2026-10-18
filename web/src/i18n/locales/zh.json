@@ -7756,6 +7756,9 @@
     "Subscribe to a plan to get more storage.": "订阅套餐即可获得更大的存储空间。",
     "Subscription plans grant the limits of their Upgrade Group, so give a paid group a larger storage quota here.": "订阅套餐授予其「升级用户组」的配额，请在这里为付费用户组配置更大的存储配额。",
     "Upgrade for more storage": "升级获取更大存储",
-    "Users who purchase this plan join {{group}}. These Playground storage limits apply to that group; leave a field empty to inherit the global default.": "购买此套餐的用户会加入 {{group}}。这些 Playground 存储上限适用于该用户组；留空表示继承全局默认值。"
+    "Users who purchase this plan join {{group}}. These Playground storage limits apply to that group; leave a field empty to inherit the global default.": "购买此套餐的用户会加入 {{group}}。这些 Playground 存储上限适用于该用户组；留空表示继承全局默认值。",
+    "Request timing": "请求阶段耗时",
+    "Upstream first byte": "上游首字节",
+    "Retries": "重试次数"
   }
 }

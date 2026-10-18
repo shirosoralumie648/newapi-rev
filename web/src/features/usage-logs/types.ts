@@ -114,6 +114,26 @@ export interface ToolSurchargeItem {
   price: number
 }
 
+/**
+ * The phase breakdown a main relay entry records in its log's `other`. Every
+ * phase the gateway observed is set; phases it never reached are absent, and a
+ * legitimate zero (no retry, a sub-millisecond phase) stays.
+ */
+export interface RequestTimingBreakdown {
+  /** Arrival to log write. */
+  total_ms?: number
+  /** Authentication plus the pre-channel admission behind it. */
+  auth_ms?: number
+  /** Channel selection after admission. */
+  channel_select_ms?: number
+  /** Wait for the first upstream response byte after channel selection. */
+  upstream_ms?: number
+  /** Arrival to the first streamed chunk, or the completed non-stream response. */
+  first_token_ms?: number
+  /** Number of channel retries; zero means the first channel answered. */
+  retries?: number
+}
+
 export interface LogOtherData {
   admin_info?: {
     request_policy?: PolicyEvent[]
@@ -213,6 +233,11 @@ export interface LogOtherData {
   audio_ratio?: number
   audio_completion_ratio?: number
   frt?: number
+  // Server-side phase breakdown of a main relay entry (chat/completions,
+  // responses, messages and the Playground chat entry). Only the phases the
+  // gateway observed are present; rows stored before the field existed have
+  // none.
+  request_timing?: RequestTimingBreakdown
   // Tiered (expression-based) billing fields, set by backend when
   // billing_mode === 'tiered_expr'. expr_b64 is the base64-encoded billing
   // expression; the matched tier and request-rule traces come from the actual

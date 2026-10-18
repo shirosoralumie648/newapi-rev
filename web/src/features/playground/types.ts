@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { RequestTimingBreakdown } from '@/features/usage-logs/types'
+
 // Message types
 export type MessageRole = 'user' | 'assistant' | 'system'
 
@@ -89,6 +91,8 @@ export interface PlaygroundMessageCost {
   totalTokens: number
   modelName: string
   createdAt: number
+  /** Server-side phase breakdown of the request, when the entry recorded one. */
+  timing?: RequestTimingBreakdown
 }
 
 export interface Message {

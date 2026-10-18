@@ -579,6 +579,9 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	if resp == nil {
 		return nil, errors.New("resp is nil")
 	}
+	// The response headers are the upstream's first byte. A retry cannot move
+	// an already-recorded milestone.
+	common2.MarkRequestTiming(c, common2.RequestTimingPhaseUpstreamFirstByte)
 	if common2.DebugEnabled {
 		policy := service.NormalizeHTTPTransportPolicy(info.ChannelSetting)
 		logger.LogDebug(c, "http transport negotiated: host=%s protocol=%s shards=%d policy=%s negotiated=%s",

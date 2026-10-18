@@ -45,6 +45,25 @@ func attachQuotaSaturation(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, o
 		clamp.Op, clamp.Kind, clamp.Original, clamp.Clamped, relayInfo.UserId, relayInfo.GetBillingModelName()))
 }
 
+// appendRequestTiming attaches the request's phase breakdown (auth, channel
+// selection, upstream first byte, first token, total) when the timing
+// middleware started a session for this entry point. Requests outside the
+// observed entries have no session, and their logs stay unchanged.
+func appendRequestTiming(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, other *model.LogOther) {
+	if ctx == nil || other == nil {
+		return
+	}
+	session := common.GetRequestTimingSession(ctx)
+	if session == nil {
+		return
+	}
+	retries := 0
+	if relayInfo != nil {
+		retries = relayInfo.RetryIndex
+	}
+	other.SetPublic("request_timing", session.Snapshot(retries))
+}
+
 func appendRequestPath(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, other *model.LogOther) {
 	if other == nil {
 		return
@@ -129,6 +148,7 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	appendBillingInfo(relayInfo, other)
 	appendParamOverrideInfo(relayInfo, other)
 	appendStreamStatus(relayInfo, other)
+	appendRequestTiming(ctx, relayInfo, other)
 	return other
 }
 

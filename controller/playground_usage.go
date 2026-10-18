@@ -47,6 +47,10 @@ type playgroundMessageCost struct {
 	TotalTokens      int    `json:"total_tokens"`
 	ModelName        string `json:"model_name,omitempty"`
 	CreatedAt        int64  `json:"created_at"`
+	// Timing is the public phase breakdown the request timing middleware wrote
+	// to the same log row. It stays absent for rows stored before the field
+	// existed and for entry points that do not record one.
+	Timing *common.RequestTimingPayload `json:"timing,omitempty"`
 }
 
 // GetPlaygroundUsage returns the caller's unified Playground resource usage.
@@ -114,6 +118,7 @@ func GetPlaygroundMessageCosts(c *gin.Context) {
 			TotalTokens:      entry.PromptTokens + entry.CompletionTokens,
 			ModelName:        entry.ModelName,
 			CreatedAt:        entry.CreatedAt,
+			Timing:           common.ParseRequestTimingPayload(entry.Other),
 		})
 	}
 	// The enabled flag mirrors the runtime consume-log setting: when logging is

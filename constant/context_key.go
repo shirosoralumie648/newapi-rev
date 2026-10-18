@@ -9,6 +9,9 @@ const (
 
 	ContextKeyOriginalModel    ContextKey = "original_model"
 	ContextKeyRequestStartTime ContextKey = "request_start_time"
+	// ContextKeyRequestTiming carries the *common.RequestTimingSession of a
+	// main LLM entry point whose log exposes the request's phase breakdown.
+	ContextKeyRequestTiming ContextKey = "request_timing_session"
 
 	/* token related keys */
 	ContextKeyTokenUnlimited         ContextKey = "token_unlimited_quota"

@@ -1057,4 +1057,11 @@ export const STATIC_I18N_KEYS = [
   'Duration override cannot exceed 10 years',
   'Duration override must be a positive duration',
   'Subscription redeemed with a redemption code, plan: {{plan}}, code ID {{id}}',
+  // Request timing phase labels render through t(label) from
+  // REQUEST_TIMING_PHASES.
+  'Auth',
+  'Channel selection',
+  'Upstream first byte',
+  'First token',
+  'Total',
 ] as const

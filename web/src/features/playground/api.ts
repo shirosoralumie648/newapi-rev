@@ -618,6 +618,15 @@ const playgroundUsageMetricSchema = z.object({
   limit_bytes: z.number().int().nonnegative(),
 })
 
+const playgroundRequestTimingSchema = z.object({
+  total_ms: z.number().optional(),
+  auth_ms: z.number().optional(),
+  channel_select_ms: z.number().optional(),
+  upstream_ms: z.number().optional(),
+  first_token_ms: z.number().optional(),
+  retries: z.number().int().optional(),
+})
+
 const playgroundMessageCostSchema = z.object({
   request_id: z.string().min(1),
   quota: z.number(),
@@ -626,6 +635,7 @@ const playgroundMessageCostSchema = z.object({
   total_tokens: z.number().int().nonnegative(),
   model_name: z.string().optional(),
   created_at: z.number().int().nonnegative(),
+  timing: playgroundRequestTimingSchema.optional(),
 })
 
 const playgroundMessageCostLookupSchema = z.object({
@@ -699,6 +709,7 @@ export async function getPlaygroundMessageCosts(
       totalTokens: item.total_tokens,
       modelName: item.model_name ?? '',
       createdAt: item.created_at * 1000,
+      timing: item.timing,
     })
   }
   return { enabled: data.enabled, costs }

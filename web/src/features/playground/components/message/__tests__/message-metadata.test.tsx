@@ -148,3 +148,64 @@ describe('message usage metadata', () => {
     expect(container).toBeEmptyDOMElement()
   })
 })
+
+describe('message timing metadata', () => {
+  function costWithTiming(
+    timing: NonNullable<PlaygroundMessageCost['timing']>
+  ): PlaygroundMessageCost {
+    return {
+      requestId: 'req-1',
+      quota: 0,
+      promptTokens: 1,
+      completionTokens: 2,
+      totalTokens: 3,
+      modelName: 'test-model',
+      createdAt: 0,
+      timing,
+    }
+  }
+
+  test('reveals the server-measured phase breakdown of the request', async () => {
+    const user = userEvent.setup()
+    renderMetadata({
+      cost: costWithTiming({
+        total_ms: 1320,
+        auth_ms: 24,
+        channel_select_ms: 8,
+        upstream_ms: 411,
+        first_token_ms: 445,
+        retries: 1,
+      }),
+    })
+
+    await user.hover(screen.getByText('First token: 445ms'))
+
+    expect(await screen.findByText('Upstream first byte')).toBeVisible()
+    expect(screen.getByText('411ms')).toBeVisible()
+    expect(screen.getByText('Channel selection')).toBeVisible()
+    expect(screen.getByText('Retries')).toBeVisible()
+  })
+
+  test('falls back to the total when the entry never reported a first token', () => {
+    renderMetadata({ cost: costWithTiming({ total_ms: 1320 }) })
+
+    expect(screen.getByText('Total: 1.32s')).toBeVisible()
+  })
+
+  test('adds no timing entry for a cost row without a breakdown', () => {
+    renderMetadata({
+      cost: {
+        requestId: 'req-1',
+        quota: 0,
+        promptTokens: 1,
+        completionTokens: 2,
+        totalTokens: 3,
+        modelName: 'test-model',
+        createdAt: 0,
+      },
+    })
+
+    expect(screen.queryByText(/First token:/)).toBeNull()
+    expect(screen.queryByText(/Total:/)).toBeNull()
+  })
+})
