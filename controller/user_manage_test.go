@@ -1150,6 +1150,32 @@ func TestReferralAgentAdminEndpoints(t *testing.T) {
 	assert.Contains(t, recorder.Body.String(), `"rate_percent":55`)
 	assert.Contains(t, recorder.Body.String(), `"rate_source":"user"`)
 
+	// A risk-control event stays administrator-only: the caller's own profile
+	// zeroes the anti-abuse buckets and presents the payable total, while the
+	// administrator view keeps the recorded amount.
+	invitee := model.User{Username: "agent-invitee", Password: "password", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "agent-invitee-aff"}
+	require.NoError(t, db.Create(&invitee).Error)
+	now := common.GetTimestamp()
+	require.NoError(t, db.Create(&model.ReferralBinding{InviteeId: invitee.Id, InviterId: inviter.Id, Source: model.ReferralSourceLink, BoundAt: now}).Error)
+	require.NoError(t, db.Create(&model.ReferralCommission{
+		InviterId: inviter.Id, InviteeId: invitee.Id, Source: model.ReferralCommissionSourceTopUp,
+		RefType: model.WalletLedgerRefTopUp, RefId: "agent-blocked-order",
+		BaseQuota: 5000000, RatePercent: "20", RateSource: operation_setting.ReferralRateSourceDefault,
+		CommissionQuota: 1000000, Status: model.ReferralCommissionStatusBlocked,
+		Reason: model.ReferralCommissionReasonDailyCap, CreatedAt: now, UpdatedAt: now,
+	}).Error)
+
+	recorder = invoke(http.MethodGet, "/api/user/self/referral-agent", "", nil, inviter.Id, GetSelfReferralAgent)
+	selfBody := recorder.Body.String()
+	assert.Contains(t, selfBody, `"total_invitees":1`)
+	assert.Contains(t, selfBody, `"blocked_quota":0`, "the caller's own profile never exposes anti-abuse amounts")
+	assert.Contains(t, selfBody, `"review_quota":0`)
+	assert.Contains(t, selfBody, `"rejected_quota":0`)
+	assert.Contains(t, selfBody, `"total_commission_quota":0`)
+
+	recorder = invoke(http.MethodGet, "/api/user/referrals?p=1&page_size=10", "", nil, 9999, GetReferralInvitations)
+	assert.Contains(t, recorder.Body.String(), `"blocked_quota":1000000`, "the administrator view keeps the recorded refused amount")
+
 	// The administrator list carries the account context, the effective rate
 	// and the configured tier catalogue.
 	recorder = invoke(http.MethodGet, "/api/user/referral/agents?p=1&page_size=10", "", nil, 9999, GetReferralAgents)

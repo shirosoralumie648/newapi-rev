@@ -521,10 +521,18 @@ func GetSelfReferralAgent(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	// The anti-abuse states stay administrator-only (RF-07): the caller's own
+	// profile zeroes them and presents the payable total, so it never leaks
+	// the payout decisions of the platform.
+	selfSummary := *summary
+	selfSummary.ReviewQuota = 0
+	selfSummary.BlockedQuota = 0
+	selfSummary.RejectedQuota = 0
+	selfSummary.TotalCommissionQuota = selfSummary.PendingQuota + selfSummary.LockedQuota + selfSummary.SettledQuota + selfSummary.RefundedQuota
 	response := referralAgentSelfResponse{
 		Marked:  agent != nil,
 		Enabled: referralCommissionEnabled(),
-		Summary: *summary,
+		Summary: selfSummary,
 	}
 	if agent != nil {
 		response.TierId = agent.TierId
