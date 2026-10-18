@@ -1045,6 +1045,7 @@ export const STATIC_I18N_KEYS = [
   'Gift',
   'Invite',
   'Promo',
+  'Referral',
   // Canvas workflow run messages: the run reports these keys from constants,
   // so the literal scan cannot see them.
   'The canvas is full; the run could not add a result node.',
@@ -1130,4 +1131,9 @@ export const STATIC_I18N_KEYS = [
   'Microphone access failed.',
   'Transcription failed',
   'No speech was detected.',
+  // API key periodic quota options render through t(option.label) from
+  // API_KEY_PERIOD_RESET_OPTIONS, and the invalid-cycle message is returned
+  // from Go through message_key, so the literal scan cannot see them.
+  'No periodic limit',
+  'Invalid periodic reset cycle',
 ] as const

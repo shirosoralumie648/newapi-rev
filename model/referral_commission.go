@@ -44,8 +44,9 @@ const (
 // events were refused by an anti-abuse rule and rejected events were declined
 // in review. Blocked and rejected events never pay out and never count against
 // a payable cap. The settlement step (RF-04) transitions payable events into
-// locked (confirmed, not yet paid out) and settled (paid out); the statistics
-// panel already buckets by every known state.
+// locked (confirmed, not yet paid out) and settled (paid out); a refund inside
+// the window cancels a pending event before it is ever issued (RF-05). The
+// statistics panel already buckets by every known state.
 const (
 	ReferralCommissionStatusPending  = "pending"
 	ReferralCommissionStatusReview   = "review"
@@ -53,6 +54,15 @@ const (
 	ReferralCommissionStatusRejected = "rejected"
 	ReferralCommissionStatusLocked   = "locked"
 	ReferralCommissionStatusSettled  = "settled"
+)
+
+// Referral commission settlement methods record how a settled commission
+// reached the inviter: as a credit grant in the wallet (the default path) or
+// as cash payable outside the wallet, which requires the explicit
+// administrator switch and the confirmed payment compliance terms.
+const (
+	ReferralCommissionSettlementCredit = "credit"
+	ReferralCommissionSettlementCash   = "cash"
 )
 
 // referralCommissionUnpayableStatuses are the statuses that neither pay out
@@ -64,9 +74,9 @@ var referralCommissionUnpayableStatuses = []string{
 
 // ReferralCommission is one single-level commission event of one paid order:
 // how much the invitee actually paid, which rate applied and how much the
-// inviter earns. The row is an event only — the reference settlement step
-// (RF-04) locks and issues it — so writing one never moves any balance. The
-// unique (ref_type, ref_id) index keys the event by the top-up order or the
+// inviter earns. The row is an event only — the settlement task (RF-04) locks
+// and issues it — so writing one never moves any balance. The unique
+// (ref_type, ref_id) index keys the event by the top-up order or the
 // redemption code, so a replayed payment webhook or a retried redemption
 // cannot commission twice.
 type ReferralCommission struct {
@@ -88,6 +98,17 @@ type ReferralCommission struct {
 	RateSource      string `json:"rate_source" gorm:"type:varchar(16);not null;default:''"`
 	CommissionQuota int64  `json:"commission_quota" gorm:"type:bigint;not null"`
 	Status          string `json:"status" gorm:"type:varchar(16);not null;index"`
+	// LockedAt and SettledAt timestamp the two settlement transitions.
+	// SettlementMethod records the payout form of a settled commission and is
+	// empty (NULL) while the commission waits; GrantId is the credit_grants
+	// row the credit form created (0 while pending, locked, and for cash
+	// payouts). SettlementMethod stays nullable because a column without a
+	// default is the only shape both engines can append to a table that
+	// already holds rows.
+	LockedAt         int64  `json:"locked_at" gorm:"bigint;not null;default:0"`
+	SettledAt        int64  `json:"settled_at" gorm:"bigint;not null;default:0"`
+	SettlementMethod string `json:"settlement_method" gorm:"type:varchar(16)"`
+	GrantId          int    `json:"grant_id" gorm:"not null;default:0"`
 	// Reason carries the anti-abuse decision behind a blocked or review event;
 	// it stays empty for events that were payable directly.
 	Reason    string `json:"reason" gorm:"type:varchar(32);not null;default:''"`
@@ -250,6 +271,209 @@ func referralCommissionQuota(baseQuota int64, ratePercent float64) (int, error) 
 			Mul(decimal.NewFromFloat(ratePercent)).
 			Div(decimal.NewFromInt(100)),
 	)
+}
+
+// ---------------------------------------------------------------------------
+// Settlement (RF-04): pending -> locked -> settled
+// ---------------------------------------------------------------------------
+
+// referralCommissionSettlementBatch caps how many commissions one settlement
+// statement touches, so a large backlog cannot hold a transaction for long.
+const referralCommissionSettlementBatch = 200
+
+// ReferralCommissionSettlementResult summarizes one settlement pass.
+type ReferralCommissionSettlementResult struct {
+	LockedCount   int   `json:"locked_count"`
+	ScannedCount  int   `json:"scanned_count"`
+	SettledCount  int   `json:"settled_count"`
+	FailedCount   int   `json:"failed_count"`
+	SettledQuota  int64 `json:"settled_quota"`
+	CreditedQuota int64 `json:"credited_quota"`
+	CashQuota     int64 `json:"cash_quota"`
+}
+
+// referralCommissionLockWindowSeconds resolves the configured refund window in
+// seconds; the setting clamps the value into its supported range.
+func referralCommissionLockWindowSeconds() int64 {
+	return int64(operation_setting.GetReferralSetting().EffectiveLockWindowDays()) * 86400
+}
+
+// referralCommissionCashSettlementEnabled reports whether locked commissions
+// settle as cash payable instead of wallet credit. Cash requires both the
+// explicit administrator switch and the confirmed payment compliance terms;
+// when the confirmation is withdrawn, the default path (credit grants) resumes
+// so the sweep never stalls on a legal gate.
+func referralCommissionCashSettlementEnabled() bool {
+	return operation_setting.GetReferralSetting().CashSettlementEnabled &&
+		operation_setting.IsPaymentComplianceConfirmed()
+}
+
+// LockDueReferralCommissions moves up to limit pending commissions whose
+// refund window elapsed into the locked state and returns how many it moved.
+// Locking is the cutoff of the refund window: an event still pending can be
+// voided by a refund (RF-05), a locked one is about to be issued. The state
+// change is conditional on the current status, so a concurrent pass or refund
+// cannot double-lock.
+func LockDueReferralCommissions(now int64, limit int) (int, error) {
+	if limit <= 0 {
+		limit = referralCommissionSettlementBatch
+	}
+	var candidates []ReferralCommission
+	if err := DB.Select("id").
+		Where("status = ? AND created_at <= ?", ReferralCommissionStatusPending, now-referralCommissionLockWindowSeconds()).
+		Order("id ASC").
+		Limit(limit).
+		Find(&candidates).Error; err != nil {
+		return 0, err
+	}
+	if len(candidates) == 0 {
+		return 0, nil
+	}
+	ids := make([]int, 0, len(candidates))
+	for i := range candidates {
+		ids = append(ids, candidates[i].Id)
+	}
+	updated := DB.Model(&ReferralCommission{}).
+		Where("id IN ? AND status = ?", ids, ReferralCommissionStatusPending).
+		Updates(map[string]any{
+			"status":     ReferralCommissionStatusLocked,
+			"locked_at":  now,
+			"updated_at": now,
+		})
+	if updated.Error != nil {
+		return 0, updated.Error
+	}
+	return int(updated.RowsAffected), nil
+}
+
+// SettleLockedReferralCommissions issues up to limit locked commissions and
+// marks them settled. One commission is one transaction, so a partially failed
+// pass simply retries the failed ones on the next run. A commission is settled
+// even when the inviter was disabled after the order: the money was earned when
+// the event was recorded, and undoing it is the job of the refund and abuse
+// paths, not of the settlement sweep.
+func SettleLockedReferralCommissions(now int64, limit int) (*ReferralCommissionSettlementResult, error) {
+	if limit <= 0 {
+		limit = referralCommissionSettlementBatch
+	}
+	var candidates []ReferralCommission
+	if err := DB.Where("status = ?", ReferralCommissionStatusLocked).
+		Order("id ASC").
+		Limit(limit).
+		Find(&candidates).Error; err != nil {
+		return nil, err
+	}
+	result := &ReferralCommissionSettlementResult{ScannedCount: len(candidates)}
+	cash := referralCommissionCashSettlementEnabled()
+	for i := range candidates {
+		source := &candidates[i]
+		method := ReferralCommissionSettlementCredit
+		if cash {
+			method = ReferralCommissionSettlementCash
+		}
+		grantId, quota, settled, err := settleReferralCommissionTx(source.Id, method, now)
+		if err != nil {
+			result.FailedCount++
+			common.SysError(common.LogText("failed to settle referral commission %d (inviter %d): %s", source.Id, source.InviterId, err.Error()))
+			continue
+		}
+		if !settled {
+			continue
+		}
+		result.SettledCount++
+		result.SettledQuota += quota
+		if method == ReferralCommissionSettlementCash {
+			result.CashQuota += quota
+			continue
+		}
+		result.CreditedQuota += quota
+		if grantId <= 0 {
+			common.SysError(common.LogText("referral commission %d settled without a credit grant", source.Id))
+			continue
+		}
+		syncCreditUserQuotaCache(source.InviterId, int(quota), "referral commission")
+	}
+	return result, nil
+}
+
+// settleReferralCommissionTx issues one locked commission inside its own
+// transaction. The credit grant, its wallet ledger row and the settled state
+// commit together: a crash between any two of them leaves the commission
+// locked and the next pass settles it again, while the ledger reference
+// (referral_commission, commission id) keeps the retry from issuing a second
+// grant. A commission that is no longer locked is skipped. Cash settlement
+// moves no wallet balance and records the payout form instead, so the
+// administrator can process the payout manually.
+func settleReferralCommissionTx(commissionId int, method string, now int64) (grantId int, quota int64, settled bool, err error) {
+	if commissionId <= 0 {
+		return 0, 0, false, nil
+	}
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		// The commission row is locked before the wallet rows, so two
+		// settlement passes (or a refund path) serialize on the state
+		// transition instead of both issuing.
+		var commission ReferralCommission
+		if err := lockForUpdate(tx).Where("id = ?", commissionId).First(&commission).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+		if commission.Status != ReferralCommissionStatusLocked || commission.CommissionQuota <= 0 {
+			return nil
+		}
+		if method != ReferralCommissionSettlementCash {
+			grant, applied, err := IssueCreditGrantTx(tx, commission.InviterId,
+				operation_setting.CreditGrantSourceReferral, int(commission.CommissionQuota),
+				CreditGrantExpiryFor(operation_setting.CreditGrantSourceReferral, now),
+				WalletLedgerKindSystemGrant, WalletLedgerRefReferralCommission, strconv.Itoa(commission.Id),
+				fmt.Sprintf("referral commission #%d", commission.Id))
+			if err != nil {
+				return err
+			}
+			if !applied {
+				return errors.New("referral commission ledger reference conflict")
+			}
+			grantId = grant.Id
+		}
+		updated := tx.Model(&ReferralCommission{}).
+			Where("id = ? AND status = ?", commission.Id, ReferralCommissionStatusLocked).
+			Updates(map[string]any{
+				"status":            ReferralCommissionStatusSettled,
+				"settled_at":        now,
+				"settlement_method": method,
+				"grant_id":          grantId,
+				"updated_at":        now,
+			})
+		if updated.Error != nil {
+			return updated.Error
+		}
+		if updated.RowsAffected != 1 {
+			return errors.New("referral commission state changed during settlement")
+		}
+		quota = commission.CommissionQuota
+		settled = true
+		return nil
+	})
+	return grantId, quota, settled, err
+}
+
+// ProcessReferralCommissionSettlement runs one settlement pass: it locks every
+// pending commission whose refund window elapsed and then issues the locked
+// ones. The two phases are separate statements, so a failure between them
+// leaves the commission locked — visible to the refund path and settled by the
+// next pass — instead of silently pending.
+func ProcessReferralCommissionSettlement(now int64, limit int) (*ReferralCommissionSettlementResult, error) {
+	locked, err := LockDueReferralCommissions(now, limit)
+	if err != nil {
+		return nil, err
+	}
+	result, err := SettleLockedReferralCommissions(now, limit)
+	if err != nil {
+		return nil, err
+	}
+	result.LockedCount = locked
+	return result, nil
 }
 
 // ErrReferralReviewNotPending reports a review that a concurrent or earlier

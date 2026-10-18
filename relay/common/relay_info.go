@@ -81,13 +81,20 @@ type TokenCountMeta struct {
 }
 
 type RelayInfo struct {
-	TokenId           int
-	TokenKey          string
-	TokenGroup        string
-	UserId            int
-	UsingGroup        string // 使用的分组，当auto跨分组重试时，会变动
-	UserGroup         string // 用户所在分组
-	TokenUnlimited    bool
+	TokenId        int
+	TokenKey       string
+	TokenGroup     string
+	UserId         int
+	UsingGroup     string // 使用的分组，当auto跨分组重试时，会变动
+	UserGroup      string // 用户所在分组
+	TokenUnlimited bool
+	// TokenPeriodLimited marks a token with an enabled periodic budget: its
+	// pre-consume must always reach the database, so trust-based shortcuts and
+	// the Redis balance cache cannot skip the per-window limit.
+	TokenPeriodLimited bool
+	// TokenPeriodReset is the token's reset cycle (day/week/month) when
+	// TokenPeriodLimited is set.
+	TokenPeriodReset  string
 	StartTime         time.Time
 	FirstResponseTime time.Time
 	isFirstResponse   bool
@@ -636,10 +643,12 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 
 		OriginModelName: originModelName,
 
-		TokenId:        common.GetContextKeyInt(c, constant.ContextKeyTokenId),
-		TokenKey:       common.GetContextKeyString(c, constant.ContextKeyTokenKey),
-		TokenUnlimited: common.GetContextKeyBool(c, constant.ContextKeyTokenUnlimited),
-		TokenGroup:     tokenGroup,
+		TokenId:            common.GetContextKeyInt(c, constant.ContextKeyTokenId),
+		TokenKey:           common.GetContextKeyString(c, constant.ContextKeyTokenKey),
+		TokenUnlimited:     common.GetContextKeyBool(c, constant.ContextKeyTokenUnlimited),
+		TokenPeriodLimited: common.GetContextKeyBool(c, constant.ContextKeyTokenPeriodLimited),
+		TokenPeriodReset:   common.GetContextKeyString(c, constant.ContextKeyTokenPeriodReset),
+		TokenGroup:         tokenGroup,
 
 		isFirstResponse: true,
 		RelayMode:       relayconstant.Path2RelayMode(c.Request.URL.Path),

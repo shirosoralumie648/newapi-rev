@@ -31,6 +31,8 @@ type legacyQuotaUser struct {
 type legacyQuotaToken struct {
 	RemainQuota int32 `gorm:"column:remain_quota;type:int;default:0"`
 	UsedQuota   int32 `gorm:"column:used_quota;type:int;default:0"`
+	PeriodQuota int32 `gorm:"column:period_quota;type:int;default:0"`
+	PeriodUsed  int32 `gorm:"column:period_used;type:int;default:0"`
 }
 
 // legacyQuotaSingle downgrades the single quota column of the remaining models.

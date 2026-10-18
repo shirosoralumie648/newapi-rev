@@ -135,6 +135,28 @@ test('a per-source override is saved as one map and can be removed', async () =>
   )
 })
 
+test('a referral validity override survives editing another source', async () => {
+  const user = userEvent.setup()
+  renderSection(0, { checkin: 7, referral: 180 })
+
+  expect(screen.getByDisplayValue('Referral')).toBeVisible()
+  const sourceDays = screen.getByDisplayValue('7')
+  fireEvent.change(sourceDays, { target: { value: '14' } })
+
+  await user.click(
+    screen.getByRole('button', { name: 'Save credit grant validity' })
+  )
+
+  await waitFor(() =>
+    expect(bodyFor('credit_grant_setting.source_expiry_days')).toBeDefined()
+  )
+  expect(
+    JSON.parse(
+      String(bodyFor('credit_grant_setting.source_expiry_days')?.value)
+    )
+  ).toEqual({ checkin: 14, referral: 180 })
+})
+
 test('an out-of-range validity blocks saving and marks the field invalid', async () => {
   renderSection(0)
 

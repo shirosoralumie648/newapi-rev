@@ -287,7 +287,7 @@ var quotaColumnGroups = []struct {
 	columns []string
 }{
 	{model: &User{}, columns: []string{"quota", "used_quota", "request_count", "aff_quota", "aff_history"}},
-	{model: &Token{}, columns: []string{"remain_quota", "used_quota"}},
+	{model: &Token{}, columns: []string{"remain_quota", "used_quota", "period_quota", "period_used"}},
 	{model: &Redemption{}, columns: []string{"quota"}},
 	{model: &QuotaData{}, columns: []string{"quota"}},
 	{model: &Task{}, columns: []string{"quota"}},
@@ -406,6 +406,12 @@ func migrateDB() error {
 	// already holds rows on upgraded installations; add them with a default
 	// first.
 	if err := migratePlaygroundUserUsageCounters(DB); err != nil {
+		return err
+	}
+	// The settlement columns (RF-04) are appended to a commission table that
+	// already holds recorded events on upgraded installations; add them before
+	// AutoMigrate compares the model.
+	if err := migrateReferralCommissionSettlementColumns(DB); err != nil {
 		return err
 	}
 	// Migrate price_amount column from float/double to decimal for existing tables

@@ -102,14 +102,14 @@ func TestTryReserveQuotaWithoutRedis(t *testing.T) {
 	assert.Equal(t, 40, getUserQuotaFromDB(t, user.Id))
 
 	token := createReserveTestToken(t, 80)
-	reserved, err = TryReserveTokenQuota(token.Id, token.Key, 25, false)
+	reserved, err = TryReserveTokenQuota(token.Id, token.Key, 25, false, "")
 	require.NoError(t, err)
 	assert.True(t, reserved)
 	reloaded := getTokenFromDB(t, token.Id)
 	assert.Equal(t, 55, reloaded.RemainQuota)
 	assert.Equal(t, 25, reloaded.UsedQuota)
 
-	reserved, err = TryReserveTokenQuota(token.Id, token.Key, 56, false)
+	reserved, err = TryReserveTokenQuota(token.Id, token.Key, 56, false, "")
 	require.NoError(t, err)
 	assert.False(t, reserved)
 	assert.Equal(t, 55, getTokenFromDB(t, token.Id).RemainQuota)
@@ -135,10 +135,10 @@ func TestRedisBatchReserveNeverFallsBackToStaleDatabaseBalance(t *testing.T) {
 	assert.Equal(t, 2, cachedUser.Quota)
 
 	token := createReserveTestToken(t, 9)
-	reserved, err = TryReserveTokenQuota(token.Id, token.Key, 7, false)
+	reserved, err = TryReserveTokenQuota(token.Id, token.Key, 7, false, "")
 	require.NoError(t, err)
 	assert.True(t, reserved)
-	reserved, err = TryReserveTokenQuota(token.Id, token.Key, 3, false)
+	reserved, err = TryReserveTokenQuota(token.Id, token.Key, 3, false, "")
 	require.NoError(t, err)
 	assert.False(t, reserved)
 	assert.Equal(t, 9, getTokenFromDB(t, token.Id).RemainQuota)
@@ -223,7 +223,7 @@ func TestSynchronousReserveCompensatesCacheWhenPersistenceFails(t *testing.T) {
 	_, err = GetTokenByKey(token.Key, true)
 	require.NoError(t, err)
 	require.NoError(t, DB.Delete(&token).Error)
-	reserved, err = TryReserveTokenQuota(token.Id, token.Key, 7, false)
+	reserved, err = TryReserveTokenQuota(token.Id, token.Key, 7, false, "")
 	assert.False(t, reserved)
 	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
 	cachedToken, cacheErr := cacheGetTokenByKey(token.Key)
@@ -270,6 +270,49 @@ func TestTokenCacheInitPreservesLiveQuotaAndFenceBlocksStaleSnapshot(t *testing.
 	cached, err = cacheGetTokenByKey(token.Key)
 	require.NoError(t, err)
 	assert.Equal(t, 100, cached.RemainQuota)
+}
+
+// TestTokenCacheSchemaAndPeriodBudgetGovernCachedReads 保护两项缓存契约：
+// 旧 schema 的哈希既不能被读取也不能被续期，只等待自然过期后重建；
+// 周期预算令牌始终回源数据库，Redis 预扣不会触碰它的余额。
+func TestTokenCacheSchemaAndPeriodBudgetGovernCachedReads(t *testing.T) {
+	truncateTables(t)
+	resetBatchUpdateTestState(t)
+	server := useUserCacheMiniRedis(t)
+
+	token := createReserveTestToken(t, 100)
+	loaded, err := GetTokenByKey(token.Key, true)
+	require.NoError(t, err)
+	require.NoError(t, server.HSet(getTokenCacheKey(token.Key), "CacheSchema", "1"))
+
+	_, err = cacheGetTokenByKey(token.Key)
+	require.Error(t, err, "a stale hash must not be served")
+	code, err := cacheInitToken(*loaded)
+	require.NoError(t, err)
+	assert.Equal(t, 3, code, "a stale hash must not get its TTL refreshed")
+
+	// 自然过期（这里显式删除）后由下一次读取按当前 schema 重建。
+	require.NoError(t, common.RDB.Del(context.Background(), getTokenCacheKey(token.Key)).Err())
+	reloaded, err := GetTokenByKey(token.Key, false)
+	require.NoError(t, err)
+	assert.Equal(t, 100, reloaded.RemainQuota)
+	cached, err := cacheGetTokenByKey(token.Key)
+	require.NoError(t, err, "the rebuilt hash must serve reads again")
+	assert.Equal(t, 100, cached.RemainQuota)
+
+	periodToken := createReserveTestPeriodToken(t, 100, false, 50, TokenPeriodDaily)
+	_, err = GetTokenByKey(periodToken.Key, true)
+	require.NoError(t, err)
+	_, err = cacheGetTokenByKey(periodToken.Key)
+	require.Error(t, err, "a periodic token must not be served from the cache")
+
+	reserved, err := TryReserveTokenQuota(periodToken.Id, periodToken.Key, 30, false, TokenPeriodDaily)
+	require.NoError(t, err)
+	require.True(t, reserved)
+	assert.Equal(t, 70, getTokenFromDB(t, periodToken.Id).RemainQuota)
+	cachedRemain, err := common.RDB.HGet(context.Background(), getTokenCacheKey(periodToken.Key), "RemainQuota").Result()
+	require.NoError(t, err)
+	assert.Equal(t, "100", cachedRemain, "the cache must not be the reserve path for periodic tokens")
 }
 
 // isolatedAccountingTestDB opens an isolated database for accounting tests
@@ -446,7 +489,7 @@ func TestTokenQuotaUpdatePreservesConcurrentDeductions(t *testing.T) {
 					snapshot := token.RemainQuota
 
 					// A relay deduction commits after the operator's snapshot.
-					reserved, err := TryReserveTokenQuota(token.Id, token.Key, 30, false)
+					reserved, err := TryReserveTokenQuota(token.Id, token.Key, 30, false, "")
 					require.NoError(t, err)
 					require.True(t, reserved)
 					require.Equal(t, 70, getTokenFromDB(t, token.Id).RemainQuota)
@@ -469,6 +512,160 @@ func TestTokenQuotaUpdatePreservesConcurrentDeductions(t *testing.T) {
 					assert.Equal(t, tc.wantRemain, change.After)
 				})
 			}
+		})
+	}
+}
+
+func createReserveTestPeriodToken(t *testing.T, remainQuota int, unlimited bool, periodQuota int, resetPeriod string) Token {
+	t.Helper()
+	token := Token{
+		UserId:            1,
+		Key:               "reserve-period-token-" + common.GetRandomString(8),
+		Name:              "reserve-period-test",
+		Status:            common.TokenStatusEnabled,
+		ExpiredTime:       -1,
+		RemainQuota:       remainQuota,
+		UnlimitedQuota:    unlimited,
+		PeriodQuota:       periodQuota,
+		PeriodResetPeriod: resetPeriod,
+	}
+	require.NoError(t, token.Insert())
+	return token
+}
+
+// TestTokenPeriodQuotaBudgetMatrix 保护周期预算的核心契约：预算与余额同时
+// 生效、窗口过期后惰性重置、结算退还/补扣同步维护本窗口用量、配置更新
+// 确定性地保留或清零窗口。矩阵覆盖 SQLite 与 CI 中的 MySQL/PostgreSQL。
+func TestTokenPeriodQuotaBudgetMatrix(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			isolatedAccountingTestDB(t, dialect)
+			resetBatchUpdateTestState(t)
+
+			windowStart := TokenPeriodWindowStart(TokenPeriodDaily, common.GetTimestamp())
+
+			t.Run("the period budget limits reserves on top of the balance", func(t *testing.T) {
+				token := createReserveTestPeriodToken(t, 1000, false, 100, TokenPeriodDaily)
+
+				reserved, err := TryReserveTokenQuota(token.Id, token.Key, 60, token.UnlimitedQuota, token.PeriodResetPeriod)
+				require.NoError(t, err)
+				require.True(t, reserved)
+				saved := getTokenFromDB(t, token.Id)
+				assert.Equal(t, 940, saved.RemainQuota)
+				assert.Equal(t, 60, saved.UsedQuota)
+				assert.Equal(t, 60, saved.PeriodUsed)
+				assert.Equal(t, windowStart, saved.PeriodWindowStart)
+
+				// The balance alone would admit this reserve; the budget must not.
+				reserved, err = TryReserveTokenQuota(token.Id, token.Key, 50, token.UnlimitedQuota, token.PeriodResetPeriod)
+				require.NoError(t, err)
+				assert.False(t, reserved)
+				saved = getTokenFromDB(t, token.Id)
+				assert.Equal(t, 940, saved.RemainQuota)
+				assert.Equal(t, 60, saved.PeriodUsed)
+			})
+
+			t.Run("an expired window resets lazily on the next reserve", func(t *testing.T) {
+				token := createReserveTestPeriodToken(t, 1000, false, 100, TokenPeriodDaily)
+				require.NoError(t, DB.Model(&Token{}).Where("id = ?", token.Id).Updates(map[string]any{
+					"period_used":         100,
+					"period_window_start": windowStart - 7*86400,
+				}).Error)
+
+				reserved, err := TryReserveTokenQuota(token.Id, token.Key, 40, token.UnlimitedQuota, token.PeriodResetPeriod)
+				require.NoError(t, err)
+				require.True(t, reserved)
+				saved := getTokenFromDB(t, token.Id)
+				assert.Equal(t, 40, saved.PeriodUsed)
+				assert.Equal(t, windowStart, saved.PeriodWindowStart)
+			})
+
+			t.Run("unlimited tokens still enforce the period budget", func(t *testing.T) {
+				token := createReserveTestPeriodToken(t, 0, true, 50, TokenPeriodDaily)
+
+				reserved, err := TryReserveTokenQuota(token.Id, token.Key, 30, token.UnlimitedQuota, token.PeriodResetPeriod)
+				require.NoError(t, err)
+				require.True(t, reserved)
+				reserved, err = TryReserveTokenQuota(token.Id, token.Key, 30, token.UnlimitedQuota, token.PeriodResetPeriod)
+				require.NoError(t, err)
+				assert.False(t, reserved)
+				saved := getTokenFromDB(t, token.Id)
+				assert.Equal(t, -30, saved.RemainQuota)
+				assert.Equal(t, 30, saved.PeriodUsed)
+			})
+
+			t.Run("refunds and top-ups settle against the current period", func(t *testing.T) {
+				token := createReserveTestPeriodToken(t, 1000, false, 100, TokenPeriodDaily)
+				_, err := TryReserveTokenQuota(token.Id, token.Key, 60, false, TokenPeriodDaily)
+				require.NoError(t, err)
+
+				require.NoError(t, IncreaseTokenQuota(token.Id, token.Key, 20))
+				assert.Equal(t, 40, getTokenFromDB(t, token.Id).PeriodUsed)
+
+				require.NoError(t, DecreaseTokenQuota(token.Id, token.Key, 5))
+				assert.Equal(t, 45, getTokenFromDB(t, token.Id).PeriodUsed)
+
+				// A refund never pushes the recorded usage below zero.
+				require.NoError(t, IncreaseTokenQuota(token.Id, token.Key, 100))
+				assert.Zero(t, getTokenFromDB(t, token.Id).PeriodUsed)
+			})
+
+			t.Run("token validation reports the exhausted period budget", func(t *testing.T) {
+				token := createReserveTestPeriodToken(t, 1000, false, 30, TokenPeriodDaily)
+				_, err := TryReserveTokenQuota(token.Id, token.Key, 30, false, TokenPeriodDaily)
+				require.NoError(t, err)
+
+				_, err = ValidateUserToken(token.Key)
+				require.ErrorIs(t, err, ErrTokenPeriodQuotaExhausted)
+
+				// Reads of the next window start fresh without a write, and the
+				// following reserve recharges the window.
+				require.NoError(t, DB.Model(&Token{}).Where("id = ?", token.Id).Update("period_window_start", windowStart-7*86400).Error)
+				validated, err := ValidateUserToken(token.Key)
+				require.NoError(t, err)
+				require.NotNil(t, validated)
+
+				reserved, err := TryReserveTokenQuota(token.Id, token.Key, 10, false, TokenPeriodDaily)
+				require.NoError(t, err)
+				assert.True(t, reserved)
+				assert.Equal(t, 10, getTokenFromDB(t, token.Id).PeriodUsed)
+			})
+
+			t.Run("configuration updates reset or keep the window deterministically", func(t *testing.T) {
+				token := createReserveTestPeriodToken(t, 1000, false, 100, TokenPeriodDaily)
+				_, err := TryReserveTokenQuota(token.Id, token.Key, 60, false, TokenPeriodDaily)
+				require.NoError(t, err)
+
+				// Same cycle: the window and the usage accumulated during it survive
+				// a quota change.
+				token.PeriodQuota = 200
+				_, err = token.UpdateWithQuotaTarget(getTokenFromDB(t, token.Id).RemainQuota)
+				require.NoError(t, err)
+				saved := getTokenFromDB(t, token.Id)
+				assert.Equal(t, 200, saved.PeriodQuota)
+				assert.Equal(t, 60, saved.PeriodUsed)
+				assert.Equal(t, windowStart, saved.PeriodWindowStart)
+
+				// A changed cycle restarts usage inside the new cycle's window.
+				token.PeriodResetPeriod = TokenPeriodMonthly
+				token.PeriodQuota = 100
+				_, err = token.UpdateWithQuotaTarget(getTokenFromDB(t, token.Id).RemainQuota)
+				require.NoError(t, err)
+				saved = getTokenFromDB(t, token.Id)
+				assert.Zero(t, saved.PeriodUsed)
+				assert.Equal(t, TokenPeriodWindowStart(TokenPeriodMonthly, common.GetTimestamp()), saved.PeriodWindowStart)
+
+				// Disabling the budget clears the window state.
+				token.PeriodQuota = 0
+				token.PeriodResetPeriod = ""
+				_, err = token.UpdateWithQuotaTarget(getTokenFromDB(t, token.Id).RemainQuota)
+				require.NoError(t, err)
+				saved = getTokenFromDB(t, token.Id)
+				assert.Zero(t, saved.PeriodQuota)
+				assert.Empty(t, saved.PeriodResetPeriod)
+				assert.Zero(t, saved.PeriodUsed)
+				assert.Zero(t, saved.PeriodWindowStart)
+			})
 		})
 	}
 }

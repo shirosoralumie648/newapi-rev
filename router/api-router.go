@@ -126,6 +126,10 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.DELETE("/sessions/:id/attachments/:attachmentId", controller.DeletePlaygroundAttachment)
 			playgroundRoute.GET("/canvases", controller.ListPlaygroundCanvasProjects)
 			playgroundRoute.POST("/canvases", controller.CreatePlaygroundCanvasProject)
+			// An import restores a canvas archive as a new board of the account.
+			// It is registered next to the collection so the static segment is
+			// matched before the parameterized canvas routes.
+			playgroundRoute.POST("/canvases/import", controller.ImportPlaygroundCanvasArchive)
 			playgroundRoute.GET("/canvases/:canvasId", controller.GetPlaygroundCanvasProject)
 			playgroundRoute.PATCH("/canvases/:canvasId", controller.UpdatePlaygroundCanvasProject)
 			playgroundRoute.DELETE("/canvases/:canvasId", controller.DeletePlaygroundCanvasProject)
@@ -136,6 +140,9 @@ func SetApiRouter(router *gin.Engine) {
 			// canvas document, keeping the replaced state as a snapshot too.
 			playgroundRoute.GET("/canvases/:canvasId/snapshots", controller.ListPlaygroundCanvasSnapshots)
 			playgroundRoute.POST("/canvases/:canvasId/snapshots/:snapshotId/restore", controller.RestorePlaygroundCanvasSnapshot)
+			// The whole board, or the selected nodes, download as an archive
+			// that carries the bytes of every referenced attachment.
+			playgroundRoute.GET("/canvases/:canvasId/export", controller.ExportPlaygroundCanvasArchive)
 			// A canvas owns its own attachment partition, so a file dropped on
 			// the board is uploaded without inventing a conversation for it.
 			playgroundRoute.POST("/canvases/:canvasId/attachments", controller.CreatePlaygroundCanvasAttachment)

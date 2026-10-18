@@ -548,3 +548,79 @@ export interface ReferralAgentUpdateRequest {
   rate_percent?: number
   note?: string
 }
+
+// ============================================================================
+// Referral Anti-Abuse Types
+// ============================================================================
+
+/**
+ * The registration environment of one account, recorded in the same
+ * transaction as the account. A missing signal means the environment was not
+ * observable (for example an administrator-created account).
+ */
+export interface ReferralRegistrationSignal {
+  id: number
+  user_id: number
+  ip: string
+  device_hash: string
+  email_domain: string
+  user_agent: string
+  created_at: number
+}
+
+/** The administrator's anti-abuse mark on one account. */
+export interface ReferralFlag {
+  id: number
+  user_id: number
+  level: string
+  note: string
+  marked_by: number
+  created_at: number
+  updated_at: number
+}
+
+/** One commission-status bucket of an account's commission history. */
+export interface ReferralCommissionStatusCount {
+  status: string
+  count: number
+  quota: number
+}
+
+/** The administrator's anti-abuse view of one account. */
+export interface ReferralProfile {
+  user_id: number
+  signal: ReferralRegistrationSignal | null
+  identity_linked: boolean
+  identity_ref: string
+  flag: ReferralFlag | null
+  invitees: number
+  commissions: ReferralCommissionStatusCount[]
+}
+
+/** The anti-abuse mark levels an administrator can set; clear removes it. */
+export type ReferralFlagLevel = 'watch' | 'frozen' | 'clear'
+
+/** One recorded commission event, as the review queue lists it. */
+export interface ReferralCommissionRecord {
+  id: number
+  inviter_id: number
+  invitee_id: number
+  source: string
+  ref_type: string
+  ref_id: string
+  base_quota: number
+  rate_percent: string
+  commission_quota: number
+  status: string
+  reason: string
+  created_at: number
+  updated_at: number
+}
+
+export interface ReferralReviewPage {
+  items: ReferralCommissionRecord[]
+  total: number
+}
+
+/** Manual decision of one reviewed commission event. */
+export type ReferralReviewDecision = 'approve' | 'reject'

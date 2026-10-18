@@ -77,6 +77,17 @@ type ReferralAgentTier struct {
 	RatePercent float64 `json:"rate_percent"`
 }
 
+// Referral commission lock windows. A recorded commission stays pending for
+// this many days after the paid order (the refund window, RF-05), then it is
+// locked and issued. The supported range keeps the window long enough for a
+// payment to be refunded and short enough that inviters are paid within a
+// month.
+const (
+	ReferralLockWindowDaysMin     = 14
+	ReferralLockWindowDaysMax     = 30
+	ReferralLockWindowDaysDefault = 21
+)
+
 // ReferralInviteLimitMax bounds the configurable per-signal invitation limits
 // (RF-06), so an accidental extra digit cannot silently disable the bound.
 const ReferralInviteLimitMax = 100
@@ -84,8 +95,10 @@ const ReferralInviteLimitMax = 100
 // ReferralSetting configures the single-level referral commission engine: the
 // inviter earns a percentage of every paid order of an invitee inside the
 // configured window. Commissions are recorded as events (RF-03) and issued by
-// a later settlement step (RF-04); cash settlement stays disabled by default
-// and is gated on the payment compliance confirmation.
+// the settlement task (RF-04): an event stays pending for the lock window,
+// then it is locked and settled as a credit grant. Cash settlement stays
+// disabled by default and is gated on the payment compliance confirmation; it
+// records the settled quota as payable instead of crediting the wallet.
 type ReferralSetting struct {
 	// Enabled is the master switch of the engine. It requires the confirmed
 	// payment compliance terms, like the other invitation rewards.
@@ -110,9 +123,16 @@ type ReferralSetting struct {
 	// a paid order (the upstream #5829 dispute); subscription codes never
 	// count because they move no wallet balance.
 	IncludeRedemptionCodes bool `json:"include_redemption_codes"`
-	// CashSettlementEnabled is the payout-form switch of the later settlement
-	// step (RF-04); it is off by default and requires the confirmed payment
-	// compliance terms. This step only records the configured value.
+	// LockWindowDays is the refund window of a recorded commission in days:
+	// the commission stays pending until it elapses, so a refund inside the
+	// window can still cancel it before any credit is issued. The supported
+	// range is 14 to 30 days.
+	LockWindowDays int `json:"lock_window_days"`
+	// CashSettlementEnabled is the payout-form switch of the settlement step
+	// (RF-04); it is off by default and requires the confirmed payment
+	// compliance terms, because paying cash can trigger tax and payment
+	// license duties of the operator. Only an explicit choice settles cash;
+	// the default path issues credit grants.
 	CashSettlementEnabled bool `json:"cash_settlement_enabled"`
 
 	// Anti-abuse limits (RF-06). Every bound is disabled by default (0): an
@@ -141,9 +161,10 @@ type ReferralSetting struct {
 	RequireRealName bool `json:"require_real_name"`
 }
 
-// 默认配置：引擎默认关闭，窗口默认注册后 12 个月。
+// 默认配置：引擎默认关闭，窗口默认注册后 12 个月，退款窗口默认 21 天。
 var referralSetting = ReferralSetting{
-	WindowMonths: ReferralWindowMonthsDefault,
+	WindowMonths:   ReferralWindowMonthsDefault,
+	LockWindowDays: ReferralLockWindowDaysDefault,
 }
 
 func init() {
@@ -203,6 +224,17 @@ func (s *ReferralSetting) AgentTier(tierId string) (ReferralAgentTier, bool) {
 		}
 	}
 	return ReferralAgentTier{}, false
+}
+
+// EffectiveLockWindowDays returns the configured commission lock window in
+// days, clamped into the supported range. A missing or misconfigured value
+// resolves to the closest bound, so a bad option can neither issue a
+// commission before the refund window nor lock it forever.
+func (s *ReferralSetting) EffectiveLockWindowDays() int {
+	if s == nil {
+		return ReferralLockWindowDaysDefault
+	}
+	return min(max(s.LockWindowDays, ReferralLockWindowDaysMin), ReferralLockWindowDaysMax)
 }
 
 // clampReferralCommissionRate rejects a non-finite or negative rate and caps
@@ -303,13 +335,15 @@ func ValidateReferralOption(key, value string) error {
 		if _, err := strconv.ParseBool(value); err != nil {
 			return fmt.Errorf("referral_setting.include_redemption_codes must be a boolean")
 		}
+	case "referral_setting.lock_window_days":
+		return validateReferralLockWindowDays(value)
 	case "referral_setting.cash_settlement_enabled":
 		enabled, err := strconv.ParseBool(value)
 		if err != nil {
 			return fmt.Errorf("referral_setting.cash_settlement_enabled must be a boolean")
 		}
 		if enabled && !IsPaymentComplianceConfirmed() {
-			return fmt.Errorf("referral_setting.cash_settlement_enabled requires the confirmed payment compliance terms")
+			return fmt.Errorf("referral_setting.cash_settlement_enabled requires the confirmed payment compliance terms; the administrator must assess the personal income tax and payment licensing duties of cash commissions")
 		}
 	case "referral_setting.invite_limit_per_ip",
 		"referral_setting.invite_limit_per_device",
@@ -413,6 +447,16 @@ func validateReferralWindowMonths(value string) error {
 	months, err := strconv.Atoi(value)
 	if err != nil || months < ReferralWindowMonthsUnlimited || months > ReferralWindowMonthsMax {
 		return fmt.Errorf("referral_setting.window_months must be -1 or an integer between 0 and %d", ReferralWindowMonthsMax)
+	}
+	return nil
+}
+
+// validateReferralLockWindowDays accepts an integer number of days inside the
+// supported lock window range.
+func validateReferralLockWindowDays(value string) error {
+	days, err := strconv.Atoi(value)
+	if err != nil || days < ReferralLockWindowDaysMin || days > ReferralLockWindowDaysMax {
+		return fmt.Errorf("referral_setting.lock_window_days must be an integer between %d and %d", ReferralLockWindowDaysMin, ReferralLockWindowDaysMax)
 	}
 	return nil
 }

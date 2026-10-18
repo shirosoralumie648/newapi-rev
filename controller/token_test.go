@@ -640,6 +640,116 @@ func TestUpdateTokenQuotaAdjustmentPreservesConcurrentDeductions(t *testing.T) {
 	}
 }
 
+// TestTokenPeriodBudgetAPIContract 保护周期预算的管理端契约：非法周期被拒绝、
+// 客户端不能写窗口状态、更换周期会重置窗口、禁用会清空窗口，且审计记录更改
+// 的配置列。
+func TestTokenPeriodBudgetAPIContract(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	token := seedToken(t, db, 1, "period-token", "period-token-key-01")
+
+	updateBody := func(periodQuota int, resetPeriod string) map[string]any {
+		return map[string]any{
+			"id": token.Id, "name": "period-token", "expired_time": -1,
+			"remain_quota": 100, "unlimited_quota": true,
+			"period_quota": periodQuota, "period_reset_period": resetPeriod,
+			// 窗口状态只能由服务端维护，这里验证请求体不会写入它们。
+			"period_used": 99999, "period_window_start": 123,
+		}
+	}
+	update := func(body map[string]any) (*gin.Context, *httptest.ResponseRecorder) {
+		ctx, recorder := newAuthenticatedContext(t, http.MethodPut, "/api/token/", body, 1)
+		UpdateToken(ctx)
+		return ctx, recorder
+	}
+
+	t.Run("invalid reset cycles are rejected", func(t *testing.T) {
+		_, recorder := update(updateBody(100, "yearly"))
+		response := decodeAPIResponse(t, recorder)
+		assert.False(t, response.Success)
+		assert.Contains(t, recorder.Body.String(), "Invalid periodic reset cycle")
+
+		var saved model.Token
+		require.NoError(t, db.First(&saved, token.Id).Error)
+		assert.Zero(t, saved.PeriodQuota)
+		assert.Empty(t, saved.PeriodResetPeriod)
+	})
+
+	t.Run("update persists the budget and ignores client window state", func(t *testing.T) {
+		ctx, recorder := update(updateBody(100, model.TokenPeriodDaily))
+		response := decodeAPIResponse(t, recorder)
+		require.True(t, response.Success, response.Message)
+
+		var saved model.Token
+		require.NoError(t, db.First(&saved, token.Id).Error)
+		assert.Equal(t, 100, saved.PeriodQuota)
+		assert.Equal(t, model.TokenPeriodDaily, saved.PeriodResetPeriod)
+		assert.Zero(t, saved.PeriodUsed, "client JSON must not write the window usage")
+		assert.Equal(t, model.TokenPeriodWindowStart(model.TokenPeriodDaily, common.GetTimestamp()), saved.PeriodWindowStart)
+
+		params, ok := common.GetContextKeyType[model.AuditFields](ctx, constant.ContextKeyTokenAuditParams)
+		require.True(t, ok)
+		assert.Contains(t, params["changed_fields"], "period_quota")
+		assert.Contains(t, params["changed_fields"], "period_reset_period")
+	})
+
+	t.Run("changing the cycle restarts the window", func(t *testing.T) {
+		require.NoError(t, db.Model(&model.Token{}).Where("id = ?", token.Id).Update("period_used", 40).Error)
+
+		_, recorder := update(updateBody(100, model.TokenPeriodMonthly))
+		response := decodeAPIResponse(t, recorder)
+		require.True(t, response.Success, response.Message)
+
+		var saved model.Token
+		require.NoError(t, db.First(&saved, token.Id).Error)
+		assert.Equal(t, model.TokenPeriodMonthly, saved.PeriodResetPeriod)
+		assert.Zero(t, saved.PeriodUsed, "a changed cycle must not inherit the previous window usage")
+		assert.Equal(t, model.TokenPeriodWindowStart(model.TokenPeriodMonthly, common.GetTimestamp()), saved.PeriodWindowStart)
+	})
+
+	t.Run("disabling the budget clears the window state", func(t *testing.T) {
+		_, recorder := update(updateBody(0, ""))
+		response := decodeAPIResponse(t, recorder)
+		require.True(t, response.Success, response.Message)
+
+		var saved model.Token
+		require.NoError(t, db.First(&saved, token.Id).Error)
+		assert.Zero(t, saved.PeriodQuota)
+		assert.Empty(t, saved.PeriodResetPeriod)
+		assert.Zero(t, saved.PeriodUsed)
+		assert.Zero(t, saved.PeriodWindowStart)
+	})
+}
+
+func TestAddTokenPeriodBudgetContract(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+
+	body := func(resetPeriod string) map[string]any {
+		return map[string]any{
+			"name": "period-add", "expired_time": -1, "remain_quota": 100,
+			"unlimited_quota": false, "period_quota": 50, "period_reset_period": resetPeriod,
+		}
+	}
+
+	add := func(resetPeriod string) (*httptest.ResponseRecorder, tokenAPIResponse) {
+		ctx, recorder := newAuthenticatedContext(t, http.MethodPost, "/api/token/", body(resetPeriod), 1)
+		AddToken(ctx)
+		return recorder, decodeAPIResponse(t, recorder)
+	}
+
+	_, response := add("yearly")
+	assert.False(t, response.Success)
+	assert.Contains(t, response.Message, "Invalid periodic reset cycle")
+
+	recorder, response := add(model.TokenPeriodWeekly)
+	require.True(t, response.Success, recorder.Body.String())
+
+	var saved model.Token
+	require.NoError(t, db.Where("name = ?", "period-add").First(&saved).Error)
+	assert.Equal(t, 50, saved.PeriodQuota)
+	assert.Equal(t, model.TokenPeriodWeekly, saved.PeriodResetPeriod)
+	assert.Zero(t, saved.PeriodUsed)
+}
+
 func TestGetTokenKeyRequiresOwnershipAndReturnsFullKey(t *testing.T) {
 	db := setupTokenControllerTestDB(t)
 	token := seedToken(t, db, 1, "owned-token", "owner1234token5678")
@@ -778,7 +888,7 @@ func TestGetTokenUsageFollowsTheUserQuotaSwitchAndIPWhitelist(t *testing.T) {
 			}
 			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 			require.True(t, response.Code, recorder.Body.String())
-			fields := []string{"expires_at", "model_limits", "model_limits_enabled", "name", "object", "total_available", "total_granted", "total_used", "unlimited_quota"}
+			fields := []string{"expires_at", "model_limits", "model_limits_enabled", "name", "object", "period_quota", "period_reset_period", "period_used", "period_window_start", "total_available", "total_granted", "total_used", "unlimited_quota"}
 			if tc.wantUserQuota {
 				fields = append(fields, "user_quota")
 			}

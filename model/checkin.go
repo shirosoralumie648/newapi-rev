@@ -104,7 +104,7 @@ func userCheckinWithTransaction(checkin *Checkin, userId int, quotaAwarded int) 
 		// checkin 额度桶，按配置的签到额度有效期生效。
 		source := operation_setting.CreditGrantSourceCheckin
 		expiresAt := operation_setting.GetCreditGrantSetting().ExpiryTimestampFor(source, common.GetTimestamp())
-		if _, err := IssueCreditGrantTx(tx, userId, source, quotaAwarded, expiresAt, WalletLedgerKindCheckin, WalletLedgerRefCheckin, strconv.Itoa(checkin.Id), ""); err != nil {
+		if _, _, err := IssueCreditGrantTx(tx, userId, source, quotaAwarded, expiresAt, WalletLedgerKindCheckin, WalletLedgerRefCheckin, strconv.Itoa(checkin.Id), ""); err != nil {
 			return common.NewMessage("Check-in failed: quota update error")
 		}
 

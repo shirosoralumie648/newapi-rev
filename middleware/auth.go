@@ -582,6 +582,10 @@ func TokenAuth() func(c *gin.Context) {
 				common.SysLog(common.LogText("TokenAuth ValidateUserToken database error: %s", err.Error()))
 				abortWithOpenAiMessage(c, http.StatusInternalServerError,
 					common.TranslateMessage(c, i18n.MsgDatabaseError))
+			} else if errors.Is(err, model.ErrTokenPeriodQuotaExhausted) {
+				// 周期预算用尽：不是令牌失效，按限流语义返回 429 等待重置。
+				abortWithOpenAiMessage(c, http.StatusTooManyRequests,
+					common.TranslateMessage(c, i18n.MsgTokenPeriodQuotaExhausted), types.ErrorCodeTokenPeriodQuotaExhausted)
 			} else {
 				abortWithOpenAiMessage(c, http.StatusUnauthorized,
 					common.TranslateMessage(c, i18n.MsgTokenInvalid))
@@ -686,6 +690,11 @@ func SetupContextForToken(c *gin.Context, token *model.Token, parts ...string) e
 	c.Set("token_unlimited_quota", token.UnlimitedQuota)
 	if !token.UnlimitedQuota {
 		c.Set("token_quota", token.RemainQuota)
+	}
+	// 周期预算令牌：预扣必须回源数据库校验窗口预算，不能走信任旁路。
+	if token.HasPeriodQuota() {
+		common.SetContextKey(c, constant.ContextKeyTokenPeriodLimited, true)
+		common.SetContextKey(c, constant.ContextKeyTokenPeriodReset, token.PeriodResetPeriod)
 	}
 	if token.ModelLimitsEnabled {
 		c.Set("token_model_limit_enabled", true)

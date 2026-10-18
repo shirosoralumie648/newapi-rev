@@ -477,12 +477,22 @@ func referralCommissionGate(tx *gorm.DB, inviter *User, inviteeId int, commissio
 		}
 	}
 
-	// Per-signal invitation bounds: invitees whose registrations share one
-	// signal value consume the inviter's allowance while their own commissions
-	// are effective (not blocked or rejected).
+	// Registration-environment recheck and per-signal invitation bounds. The
+	// binding layer already refuses a self-invite; a binding that slipped
+	// through before the environment was recorded is caught here by the shared
+	// device hash. Invitees whose registrations share one signal value then
+	// consume the inviter's allowance while their own commissions are
+	// effective (not blocked or rejected).
+	inviterSignal, err := referralRegistrationSignalWithTx(tx, inviter.Id)
+	if err != nil {
+		return "", "", err
+	}
 	signal, err := referralRegistrationSignalWithTx(tx, inviteeId)
 	if err != nil {
 		return "", "", err
+	}
+	if inviterSignal != nil && signal != nil && inviterSignal.DeviceHash != "" && inviterSignal.DeviceHash == signal.DeviceHash {
+		return ReferralCommissionStatusBlocked, ReferralCommissionReasonSelfInvite, nil
 	}
 	if signal != nil {
 		reason, err := referralSignalLimitReason(tx, inviter.Id, inviteeId, signal)

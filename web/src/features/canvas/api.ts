@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { AxiosResponse } from 'axios'
 import { z } from 'zod'
 
 import { api } from '@/lib/api'
@@ -242,6 +243,109 @@ export async function restoreCanvasSnapshot(
   )
   requireServerSuccess(response.data)
   return mapCanvasProject(response.data.data)
+}
+
+export interface CanvasArchiveDownload {
+  blob: Blob
+  filename: string
+}
+
+/**
+ * Reads the filename the export endpoint suggests. Non-ASCII titles arrive
+ * RFC 5987 encoded, so the extended form wins over the quoted one.
+ */
+function canvasArchiveFilename(disposition: unknown, fallback: string): string {
+  if (typeof disposition !== 'string') return fallback
+  const encoded = /filename\*=utf-8''([^;]+)/i.exec(disposition)
+  if (encoded?.[1]) {
+    try {
+      return decodeURIComponent(encoded[1].trim())
+    } catch {
+      return fallback
+    }
+  }
+  const quoted = /filename="?([^";]+)"?/i.exec(disposition)
+  return quoted?.[1]?.trim() || fallback
+}
+
+/**
+ * Downloads the archive of one canvas. `nodeIds` restricts the archive to the
+ * picked nodes, so a selection carries only the resources those nodes
+ * reference. The answer is a streamed zip built by the server from the
+ * owner-checked attachment rows.
+ */
+export async function exportCanvasArchive(
+  projectId: string,
+  nodeIds?: string[],
+  signal?: AbortSignal
+): Promise<CanvasArchiveDownload> {
+  let response: AxiosResponse<Blob>
+  try {
+    response = await api.get<Blob>(
+      `${CANVAS_ENDPOINT}/${encodeURIComponent(projectId)}/export`,
+      {
+        params: nodeIds?.length ? { nodes: nodeIds.join(',') } : undefined,
+        responseType: 'blob',
+        signal,
+      }
+    )
+  } catch (error) {
+    // A failed download wraps its JSON error body in a Blob; decode it so the
+    // shared error helpers can still read the server message.
+    const failed = (error as { response?: { data?: unknown } }).response
+    if (failed && failed.data instanceof Blob) {
+      try {
+        failed.data = JSON.parse(await failed.data.text())
+      } catch {
+        /* not a JSON error payload; report the original failure */
+      }
+    }
+    throw error
+  }
+  return {
+    blob: response.data,
+    filename: canvasArchiveFilename(
+      response.headers['content-disposition'],
+      'canvas.zip'
+    ),
+  }
+}
+
+export interface CanvasArchiveImportResult {
+  project: CanvasServerProject
+  resourcesImported: number
+  resourcesMissing: number
+  referencesDropped: number
+}
+
+const canvasArchiveImportSchema = z.object({
+  project: canvasProjectSchema,
+  resources_imported: z.number().int().nonnegative(),
+  resources_missing: z.number().int().nonnegative(),
+  references_dropped: z.number().int().nonnegative(),
+})
+
+/**
+ * Restores an exported archive as a new canvas. The server re-uploads the
+ * carried resources into the signed-in account and rewrites the node
+ * references, so the returned project opens like any other; a resource the
+ * archive lost is counted instead of failing the import.
+ */
+export async function importCanvasArchive(
+  file: File,
+  signal?: AbortSignal
+): Promise<CanvasArchiveImportResult> {
+  const form = new FormData()
+  form.append('file', file)
+  const response = await api.post(`${CANVAS_ENDPOINT}/import`, form, { signal })
+  requireServerSuccess(response.data)
+  const data = canvasArchiveImportSchema.parse(response.data.data)
+  return {
+    project: mapCanvasProject(data.project),
+    resourcesImported: data.resources_imported,
+    resourcesMissing: data.resources_missing,
+    referencesDropped: data.references_dropped,
+  }
 }
 
 const workflowEstimateStepSchema = z.object({
