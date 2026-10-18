@@ -18,21 +18,34 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { nanoid } from 'nanoid'
 
-import { uploadCanvasAttachment } from '@/features/playground/api'
 import {
-  PLAYGROUND_ATTACHMENT_ACCEPT,
-  PLAYGROUND_ATTACHMENT_MAX_BYTES,
+  uploadCanvasAttachment,
+  type PlaygroundServerAttachment,
+} from '@/features/playground/api'
+import {
   PLAYGROUND_ATTACHMENT_MAX_COUNT,
+  PLAYGROUND_CANVAS_ATTACHMENT_ACCEPT,
+  playgroundAttachmentMaxBytes,
 } from '@/features/playground/constants'
 import { primePlaygroundAttachment } from '@/features/playground/lib/attachment-store'
-import { PLAYGROUND_ATTACHMENT_ERRORS } from '@/features/playground/lib/attachment-upload'
+import {
+  PLAYGROUND_ATTACHMENT_ERRORS,
+  uploadPlaygroundAttachmentDirect,
+} from '@/features/playground/lib/attachment-upload'
 
 import { CANVAS_DROP_MESSAGES, CANVAS_DROP_NODE_OFFSET_X } from '../constants'
 import type { CanvasAddedNode } from '../hooks/use-canvas-editor'
 
 // The media types an attachment may carry; the server re-validates the same
 // signature-checked whitelist of the conversation upload.
-const CANVAS_DROP_MEDIA_TYPES = new Set(PLAYGROUND_ATTACHMENT_ACCEPT.split(','))
+const CANVAS_DROP_MEDIA_TYPES = new Set(
+  PLAYGROUND_CANVAS_ATTACHMENT_ACCEPT.split(',')
+)
+
+// Small images keep the one-request base64 path: the bytes are already primed
+// for an instant preview. Everything larger, and every extended kind, goes
+// through the reservation flow so the file never travels inside a JSON body.
+const CANVAS_DROP_CLASSIC_MAX_BYTES = 1024 * 1024
 
 /**
  * A rejected drop. The message is the translation key of the problem, so the
@@ -84,7 +97,10 @@ function validateCanvasDropFiles(files: File[]): void {
     if (!CANVAS_DROP_MEDIA_TYPES.has(file.type)) {
       throw new CanvasDropError(CANVAS_DROP_MESSAGES.UNSUPPORTED_TYPE)
     }
-    if (file.size > PLAYGROUND_ATTACHMENT_MAX_BYTES) {
+    if (file.size <= 0) {
+      throw new CanvasDropError(PLAYGROUND_ATTACHMENT_ERRORS.UNREADABLE)
+    }
+    if (file.size > playgroundAttachmentMaxBytes(file.type)) {
       throw new CanvasDropError(PLAYGROUND_ATTACHMENT_ERRORS.TOO_LARGE)
     }
   }
@@ -93,9 +109,10 @@ function validateCanvasDropFiles(files: File[]): void {
 /**
  * Uploads the files dropped on the board into the canvas' own attachment
  * partition and returns one attachment node per file, laid out to the right of
- * the drop point. Each node stores the partition and the attachment id only;
- * the freshly uploaded bytes are primed in the shared cache so the node renders
- * without another round trip.
+ * the drop point. Each node stores the partition, the attachment id and the
+ * declared media type only, so the node renders the right player after a
+ * reload. Small images are primed in the shared cache; larger files and the
+ * extended kinds stream through the reservation flow.
  */
 export async function canvasDropEntries(
   canvasId: string,
@@ -105,14 +122,26 @@ export async function canvasDropEntries(
   validateCanvasDropFiles(files)
   const entries: CanvasAddedNode[] = []
   for (const [index, file] of files.entries()) {
-    const data = await fileBase64(file)
-    const { attachment } = await uploadCanvasAttachment(canvasId, {
-      clientKey: nanoid(),
-      mediaType: file.type,
-      filename: file.name,
-      data,
-    })
-    primePlaygroundAttachment(attachment.id, `data:${file.type};base64,${data}`)
+    let attachment: PlaygroundServerAttachment
+    if (
+      file.type.startsWith('image/') &&
+      file.size <= CANVAS_DROP_CLASSIC_MAX_BYTES
+    ) {
+      const data = await fileBase64(file)
+      const uploaded = await uploadCanvasAttachment(canvasId, {
+        clientKey: nanoid(),
+        mediaType: file.type,
+        filename: file.name,
+        data,
+      })
+      attachment = uploaded.attachment
+      primePlaygroundAttachment(
+        attachment.id,
+        `data:${file.type};base64,${data}`
+      )
+    } else {
+      attachment = await uploadPlaygroundAttachmentDirect({ canvasId }, file)
+    }
     entries.push({
       kind: 'attachment',
       position: {
@@ -121,6 +150,7 @@ export async function canvasDropEntries(
       },
       data: {
         label: attachment.filename,
+        mediaType: attachment.mediaType,
         ref: { sessionId: attachment.sessionId, attachmentId: attachment.id },
       },
     })

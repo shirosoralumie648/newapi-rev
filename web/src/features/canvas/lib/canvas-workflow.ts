@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { playgroundAttachmentKind } from '@/features/playground/constants'
+
 import {
   CANVAS_NODE_KIND_LABELS,
   CANVAS_WORKFLOW_DURATION_MAX_SECONDS,
@@ -123,8 +125,14 @@ export function canvasWorkflowNodeHasText(data: CanvasNodeData): boolean {
 /** Whether a node carries image bytes a step can read as reference input. */
 export function canvasWorkflowNodeHasImage(data: CanvasNodeData): boolean {
   if (data.sourceDeleted === true) return false
-  if (data.kind === 'image' || data.kind === 'attachment') {
+  if (data.kind === 'image') {
     return Boolean(data.ref?.sessionId && data.ref?.attachmentId)
+  }
+  if (data.kind === 'attachment') {
+    return (
+      playgroundAttachmentKind(data.mediaType) === 'image' &&
+      Boolean(data.ref?.sessionId && data.ref?.attachmentId)
+    )
   }
   if (data.kind === 'task-result') {
     return Boolean(data.ref?.taskId)
@@ -451,11 +459,11 @@ export function resolveCanvasWorkflowImageSources(
     const upstream = byID.get(edge.source)
     if (!upstream || upstream.data.sourceDeleted === true) continue
     const reference = upstream.data.ref
-    if (
-      (upstream.data.kind === 'image' || upstream.data.kind === 'attachment') &&
-      reference?.sessionId &&
-      reference.attachmentId
-    ) {
+    const isImageAttachment =
+      upstream.data.kind === 'image' ||
+      (upstream.data.kind === 'attachment' &&
+        playgroundAttachmentKind(upstream.data.mediaType) === 'image')
+    if (isImageAttachment && reference?.sessionId && reference.attachmentId) {
       seen.add(upstream.id)
       sources.push({
         nodeId: upstream.id,

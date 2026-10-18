@@ -20,12 +20,19 @@ import type { FileUIPart } from 'ai'
 import { nanoid } from 'nanoid'
 
 import {
+  beginPlaygroundUpload,
+  cancelPlaygroundUpload,
+  completePlaygroundUpload,
   playgroundAttachmentContentUrl,
+  putPlaygroundUploadContent,
   uploadPlaygroundAttachment,
+  type PlaygroundServerAttachment,
+  type PlaygroundUploadTarget,
 } from '../api'
 import {
   PLAYGROUND_ATTACHMENT_MAX_BYTES,
   PLAYGROUND_ATTACHMENT_MAX_COUNT,
+  playgroundAttachmentMaxBytes,
 } from '../constants'
 import type { MessageAttachment } from '../types'
 import { blobToDataUrl, primePlaygroundAttachment } from './attachment-store'
@@ -83,6 +90,97 @@ export async function uploadPlaygroundAttachments(
     })
   }
   return attachments
+}
+
+/** The partition a direct upload belongs to; exactly one id is named. */
+export interface PlaygroundUploadPartition {
+  sessionId?: string
+  canvasId?: string
+}
+
+/**
+ * Puts the bytes at the presigned location. Nothing of the gateway's
+ * authentication is sent to the object store: the signature in the URL is the
+ * only credential, and the declared content type is part of what it signs.
+ */
+async function putPresignedUpload(
+  target: PlaygroundUploadTarget,
+  file: File,
+  signal?: AbortSignal
+): Promise<void> {
+  if (!target.url) {
+    throw new Error(PLAYGROUND_ATTACHMENT_ERRORS.UPLOAD_FAILED)
+  }
+  const response = await fetch(target.url, {
+    method: 'PUT',
+    headers: { ...target.headers, 'Content-Type': file.type },
+    body: file,
+    signal,
+  })
+  if (!response.ok) {
+    throw new Error(PLAYGROUND_ATTACHMENT_ERRORS.UPLOAD_FAILED)
+  }
+}
+
+/**
+ * Uploads one file through the reservation flow: reserve the quota, move the
+ * bytes (directly when the object store can sign a URL, otherwise through the
+ * relay route), then complete so the server verifies size and magic bytes.
+ *
+ * A presigned PUT the browser cannot perform (an unreachable bucket, a missing
+ * CORS rule) falls back to relaying the same reservation through the gateway.
+ * Any other failure cancels the reservation so the reserved bytes are released
+ * immediately instead of waiting for the cleanup task.
+ */
+export async function uploadPlaygroundAttachmentDirect(
+  partition: PlaygroundUploadPartition,
+  file: File,
+  signal?: AbortSignal
+): Promise<PlaygroundServerAttachment> {
+  if (file.size <= 0 || !file.type) {
+    throw new Error(PLAYGROUND_ATTACHMENT_ERRORS.UNREADABLE)
+  }
+  if (file.size > playgroundAttachmentMaxBytes(file.type)) {
+    throw new Error(PLAYGROUND_ATTACHMENT_ERRORS.TOO_LARGE)
+  }
+  const target = await beginPlaygroundUpload(
+    {
+      clientKey: nanoid(),
+      mediaType: file.type,
+      filename: file.name,
+      byteSize: file.size,
+      sessionId: partition.sessionId,
+      canvasId: partition.canvasId,
+    },
+    signal
+  )
+  if (target.mode === 'completed') {
+    if (!target.attachment) {
+      throw new Error(PLAYGROUND_ATTACHMENT_ERRORS.UPLOAD_FAILED)
+    }
+    return target.attachment
+  }
+  if (!target.id) {
+    throw new Error(PLAYGROUND_ATTACHMENT_ERRORS.UPLOAD_FAILED)
+  }
+  const uploadId = target.id
+  try {
+    if (target.mode === 'presigned') {
+      try {
+        await putPresignedUpload(target, file, signal)
+      } catch (error) {
+        if (signal?.aborted) throw error
+        await putPlaygroundUploadContent(uploadId, file, file.type, signal)
+      }
+    } else {
+      await putPlaygroundUploadContent(uploadId, file, file.type, signal)
+    }
+    const { attachment } = await completePlaygroundUpload(uploadId, signal)
+    return attachment
+  } catch (error) {
+    await cancelPlaygroundUpload(uploadId).catch(() => undefined)
+    throw error
+  }
 }
 
 // Filenames of cached speech by media type; the stored name is display-only,

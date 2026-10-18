@@ -124,7 +124,7 @@ function taskRowReply(taskId: string, status: string, failReason?: string) {
   }
 }
 
-function artifactReply(taskId: string, key: string) {
+function artifactReply(taskId: string, key: string, type = 'video') {
   return {
     data: {
       success: true,
@@ -132,7 +132,7 @@ function artifactReply(taskId: string, key: string) {
         artifacts: [
           {
             key,
-            type: 'video',
+            type,
             content_url: `https://gateway.example.com/v1/tasks/${taskId}/artifacts/${key}/content?access=${'a'.repeat(43)}`,
           },
         ],
@@ -381,6 +381,78 @@ test('a video step waits for the durable row and fills the task result node', as
   expect(result?.data.ref).toEqual({
     taskId: 'task-1',
     taskArtifactKey: 'out-1',
+  })
+})
+
+test('an asynchronous image step waits for the durable row and records the task result', async () => {
+  vi.useFakeTimers()
+  const post = vi.spyOn(api, 'post').mockImplementation(async (url) => {
+    if (url === '/pg/images/generations') {
+      return {
+        data: {
+          success: true,
+          data: {
+            task_id: 'task-2',
+            status: 'submitted',
+            model: 'gpt-image-1',
+          },
+        },
+      }
+    }
+    throw new Error(`Unexpected POST ${url}`)
+  })
+  let taskReads = 0
+  vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    if (url.startsWith('/api/task/self')) {
+      taskReads += 1
+      return taskRowReply('task-2', taskReads === 1 ? 'IN_PROGRESS' : 'SUCCESS')
+    }
+    if (url === '/api/task/task-2/artifacts') {
+      return artifactReply('task-2', 'out-2', 'image')
+    }
+    throw new Error(`Unexpected GET ${url}`)
+  })
+  const chain = {
+    nodes: [
+      graphNode('p1', 'prompt', { text: 'a red fox' }),
+      graphNode('t1', 'task', {
+        workflow: { model: 'gpt-image-1', generation: 'image' },
+      }),
+      graphNode('r1', 'task-result'),
+    ],
+    edges: [
+      { id: 'e1', source: 'p1', target: 't1' },
+      { id: 'e2', source: 't1', target: 'r1' },
+    ],
+  }
+  const hook = renderHook(() => useRunnerHarness(chain.nodes, chain.edges))
+
+  act(() => hook.result.current.runner.run())
+  await flushWorkflowMicrotasks()
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5000)
+    await vi.advanceTimersByTimeAsync(5000)
+  })
+
+  expect(post).toHaveBeenCalledWith(
+    '/pg/images/generations',
+    expect.objectContaining({
+      model: 'gpt-image-1',
+      prompt: 'a red fox',
+      group: 'default',
+    }),
+    expect.anything()
+  )
+  const task = hook.result.current.nodes.find((node) => node.id === 't1')
+  expect(task?.data.workflow).toMatchObject({
+    status: 'succeeded',
+    taskId: 'task-2',
+  })
+  const result = hook.result.current.nodes.find((node) => node.id === 'r1')
+  expect(result?.data.label).toBe('gpt-image-1 · image')
+  expect(result?.data.ref).toEqual({
+    taskId: 'task-2',
+    taskArtifactKey: 'out-2',
   })
 })
 

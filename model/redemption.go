@@ -361,6 +361,13 @@ func Redeem(key string, userId int) (*RedeemResult, error) {
 			if _, err := IssueCreditGrantTx(tx, userId, source, redemption.Quota, expiresAt, WalletLedgerKindRedeem, WalletLedgerRefRedeem, strconv.Itoa(redemption.Id), ""); err != nil {
 				return err
 			}
+			// A redemption code commissions the inviter only when the
+			// administrator turned the switch on (the upstream #5829
+			// dispute); the event is keyed by the code and written in the
+			// same transaction as the credit.
+			if _, err := RecordReferralCommissionTx(tx, userId, ReferralCommissionSourceRedeem, int64(redemption.Quota), WalletLedgerRefRedeem, strconv.Itoa(redemption.Id)); err != nil {
+				return err
+			}
 			result = &RedeemResult{Type: RedemptionTypeQuota, Quota: redemption.Quota}
 		}
 		return nil

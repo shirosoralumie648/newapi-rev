@@ -468,6 +468,7 @@ func migrateDB() error {
 		&PlaygroundArtifact{},
 		&PlaygroundArtifactVersion{},
 		&PlaygroundAttachment{},
+		&PlaygroundUpload{},
 		&PlaygroundUserUsage{},
 		&PlaygroundCanvasProject{},
 		&PlaygroundCanvasSnapshot{},
@@ -481,6 +482,7 @@ func migrateDB() error {
 		&WalletDebt{},
 		&CreditGrant{},
 		&ReferralBinding{},
+		&ReferralCommission{},
 	)
 	if err != nil {
 		return err

@@ -539,8 +539,9 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
       const model = node.data.workflow?.model?.trim() ?? ''
       try {
         const images = await readStepImages(node, signal)
-        if (config.generation !== 'video') {
-          const results = await submitImageGeneration(
+        let taskId = adoptTaskId
+        if (!taskId && config.generation !== 'video') {
+          const outcome = await submitImageGeneration(
             {
               model,
               prompt: input,
@@ -553,34 +554,41 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
             signal,
             budgetRef.current ?? undefined
           )
-          const previews = results
-            .map(
-              (image) =>
-                image.url ??
-                (image.b64Json ? `data:image/png;base64,${image.b64Json}` : '')
+          if (outcome.kind === 'images') {
+            const previews = outcome.images
+              .map(
+                (image) =>
+                  image.url ??
+                  (image.b64Json
+                    ? `data:image/png;base64,${image.b64Json}`
+                    : '')
+              )
+              .filter(Boolean)
+            if (previews.length === 0) {
+              markStepFailed(node.id, CANVAS_WORKFLOW_ERRORS.NO_IMAGE)
+              setMessage(CANVAS_WORKFLOW_ERRORS.NO_IMAGE)
+              return 'failed'
+            }
+            setResults((current) => ({ ...current, [node.id]: previews }))
+            recordStepResult(
+              node,
+              { inputText: input, group, inputImageCount: images.length },
+              { suffix: CANVAS_WORKFLOW_GENERATION_LABELS.image }
             )
-            .filter(Boolean)
-          if (previews.length === 0) {
-            markStepFailed(node.id, CANVAS_WORKFLOW_ERRORS.NO_IMAGE)
-            setMessage(CANVAS_WORKFLOW_ERRORS.NO_IMAGE)
-            return 'failed'
+            markStepSucceeded(node.id, {
+              inputText: input,
+              group,
+              inputImageCount: images.length,
+              resultImageCount: previews.length,
+            })
+            return 'succeeded'
           }
-          setResults((current) => ({ ...current, [node.id]: previews }))
-          recordStepResult(
-            node,
-            { inputText: input, group, inputImageCount: images.length },
-            { suffix: CANVAS_WORKFLOW_GENERATION_LABELS.image }
-          )
-          markStepSucceeded(node.id, {
-            inputText: input,
-            group,
-            inputImageCount: images.length,
-            resultImageCount: previews.length,
-          })
-          return 'succeeded'
+          // A model served by a task plugin answers with a durable task
+          // instead of images; the row and its stored artifacts then settle
+          // the step exactly like a video step.
+          taskId = outcome.taskId
         }
-        let taskId = adoptTaskId
-        if (!taskId) {
+        if (!taskId && config.generation === 'video') {
           taskId = await submitVideoGeneration(
             {
               model,

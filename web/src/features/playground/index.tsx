@@ -521,6 +521,7 @@ function PlaygroundContent(props: {
       const attachments = (version.attachments ?? []).map((attachment) => ({
         id: attachment.id,
         filename: attachment.filename,
+        mediaType: attachment.mediaType,
       }))
       const seeds = buildMessageCanvasSeeds({
         sessionId: canonicalSessionId,
@@ -828,6 +829,7 @@ function PlaygroundContent(props: {
             sessionId: asset.sessionId,
             attachmentId: asset.id,
             filename: asset.title || undefined,
+            mediaType: asset.mediaType,
           })
         )
         return

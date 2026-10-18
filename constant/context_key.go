@@ -98,4 +98,10 @@ const (
 	// canvas step bills against (BL-03). It arrives in a workspace-only header
 	// that the transport consumes, so it never reaches an upstream provider.
 	ContextKeyPlaygroundWorkflowRun ContextKey = "playground_workflow_run"
+
+	// ContextKeyImageTaskAsync marks an image generation request that runs as
+	// a durable task instead of waiting for the images inside the request. The
+	// submission answers with the task id, the task keeps the protocol request
+	// that renders its result, and the polling endpoint serves that result.
+	ContextKeyImageTaskAsync ContextKey = "image_task_async"
 )

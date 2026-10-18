@@ -241,6 +241,9 @@ func validateOptionValue(key string, value string) error {
 	if err := operation_setting.ValidateCreditGrantOption(key, value); err != nil {
 		return err
 	}
+	if err := operation_setting.ValidateReferralOption(key, value); err != nil {
+		return err
+	}
 	if key == operation_setting.ToolPriceOptionKey {
 		return operation_setting.ValidateToolPricesJSON(value)
 	}

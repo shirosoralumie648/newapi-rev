@@ -125,6 +125,11 @@ func SetRelayRouter(router *gin.Engine) {
 		// Responses WebSocket route. Channel selection happens after the first
 		// response.create event; each event runs the ordinary request limiter.
 		relayV1Router.GET("/responses", controller.ResponsesWebSocket)
+		// Asynchronous image generation poll. The submission settled the task
+		// and stored its upstream id, so polling only reads the durable row:
+		// it selects no channel and enforces no model limit. The endpoint is
+		// owner-scoped and renders the images of a finished task.
+		relayV1Router.GET("/images/generations/:task_id", controller.RelayImageGenerationTask)
 	}
 	relayV1Router.Use(middleware.ModelRequestRateLimit())
 	{

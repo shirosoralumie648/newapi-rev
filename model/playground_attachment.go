@@ -33,6 +33,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/service/objectstore"
+	"github.com/QuantumNous/new-api/setting/playground_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"gorm.io/gorm"
 )
@@ -66,22 +67,44 @@ var (
 		"image/jpeg": true,
 		"image/webp": true,
 		"image/gif":  true,
-		// Speech results are cached as conversation attachments, so the
-		// generated audio formats must be storable under their real type.
-		"audio/mpeg": true,
-		"audio/wav":  true,
-		"audio/ogg":  true,
-		"audio/webm": true,
+		// Extended conversation and canvas kinds, including the speech formats
+		// cached as conversation attachments. Every type is verified against
+		// its signature before it is stored, so the allowlist can never be used
+		// to store a renderable type the bytes are not.
+		"video/mp4":       true,
+		"video/webm":      true,
+		"video/quicktime": true,
+		"audio/mpeg":      true,
+		"audio/wav":       true,
+		"audio/ogg":       true,
+		"audio/mp4":       true,
+		"audio/webm":      true,
+		"application/pdf": true,
 	}
 	playgroundAttachmentExtensions = map[string]string{
-		"image/png":  ".png",
-		"image/jpeg": ".jpg",
-		"image/webp": ".webp",
-		"image/gif":  ".gif",
-		"audio/mpeg": ".mp3",
-		"audio/wav":  ".wav",
-		"audio/ogg":  ".ogg",
-		"audio/webm": ".webm",
+		"image/png":       ".png",
+		"image/jpeg":      ".jpg",
+		"image/webp":      ".webp",
+		"image/gif":       ".gif",
+		"video/mp4":       ".mp4",
+		"video/webm":      ".webm",
+		"video/quicktime": ".mov",
+		"audio/mpeg":      ".mp3",
+		"audio/wav":       ".wav",
+		"audio/ogg":       ".ogg",
+		"audio/mp4":       ".m4a",
+		"audio/webm":      ".webm",
+		"application/pdf": ".pdf",
+	}
+	// playgroundAttachmentISOBaseMediaBrands are the ISO base media file format
+	// brands the MP4/MOV family writes. The brand list is what separates a real
+	// media container from a renamed file: the box signature alone would accept
+	// any binary with an `ftyp` marker.
+	playgroundAttachmentISOBaseMediaBrands = map[string]bool{
+		"isom": true, "iso2": true, "iso4": true, "iso5": true, "iso6": true,
+		"mp41": true, "mp42": true, "avc1": true, "mp4v": true, "mmp4": true,
+		"M4V ": true, "M4VH": true, "M4VP": true, "M4A ": true, "M4B ": true,
+		"dash": true, "qt  ": true,
 	}
 )
 
@@ -147,11 +170,13 @@ func IsPlaygroundAttachmentMediaType(mediaType string) bool {
 	return playgroundAttachmentMediaTypes[mediaType]
 }
 
-// ValidatePlaygroundAttachmentInput normalizes user text and rejects payloads
-// whose declared media type does not match their signature, so an upload can
-// never be stored under a renderable type it is not. maxFileBytes is the
-// effective per-file budget from the owner's resource quota policy.
-func ValidatePlaygroundAttachmentInput(input *PlaygroundAttachmentInput, maxFileBytes int64) error {
+// normalizePlaygroundAttachmentText trims the user text of one upload in place
+// and validates the parts that do not depend on size: the client key identifies
+// the request, the declared media type must be on the signature-checked
+// allowlist, and the filename is optional but bounded. Callers resolve the
+// per-file budget of the declared type afterwards, which is why normalization
+// is separate from the size check.
+func normalizePlaygroundAttachmentText(input *PlaygroundAttachmentInput) error {
 	input.ClientKey = strings.TrimSpace(input.ClientKey)
 	input.MediaType = strings.ToLower(strings.TrimSpace(input.MediaType))
 	input.Filename = strings.TrimSpace(input.Filename)
@@ -167,6 +192,18 @@ func ValidatePlaygroundAttachmentInput(input *PlaygroundAttachmentInput, maxFile
 	if utf8.RuneCountInString(input.Filename) > 255 || !utf8.ValidString(input.Filename) || strings.ContainsRune(input.Filename, 0) {
 		return ErrPlaygroundAttachmentInvalid
 	}
+	return nil
+}
+
+// ValidatePlaygroundAttachmentInput normalizes user text and rejects payloads
+// whose declared media type does not match their signature, so an upload can
+// never be stored under a renderable type it is not. maxFileBytes is the
+// effective per-file budget from the owner's resource quota policy, resolved
+// per media type by the caller.
+func ValidatePlaygroundAttachmentInput(input *PlaygroundAttachmentInput, maxFileBytes int64) error {
+	if err := normalizePlaygroundAttachmentText(input); err != nil {
+		return err
+	}
 	if len(input.Data) == 0 || int64(len(input.Data)) > maxFileBytes {
 		return ErrPlaygroundAttachmentLimit
 	}
@@ -174,6 +211,15 @@ func ValidatePlaygroundAttachmentInput(input *PlaygroundAttachmentInput, maxFile
 		return ErrPlaygroundAttachmentInvalid
 	}
 	return nil
+}
+
+// normalizePlaygroundAttachmentPayload applies the text rules and the per-file
+// budget of the already declared media type in one step.
+func normalizePlaygroundAttachmentPayload(input *PlaygroundAttachmentInput, policy playground_setting.PlaygroundQuotaPolicy) error {
+	if err := normalizePlaygroundAttachmentText(input); err != nil {
+		return err
+	}
+	return ValidatePlaygroundAttachmentInput(input, policy.AttachmentMediaMaxFileBytes(input.MediaType))
 }
 
 func playgroundAttachmentMatchesMediaType(mediaType string, data []byte) bool {
@@ -186,6 +232,24 @@ func playgroundAttachmentMatchesMediaType(mediaType string, data []byte) bool {
 		return bytes.HasPrefix(data, []byte("GIF87a")) || bytes.HasPrefix(data, []byte("GIF89a"))
 	case "image/webp":
 		return len(data) >= 12 && bytes.Equal(data[0:4], []byte("RIFF")) && bytes.Equal(data[8:12], []byte("WEBP"))
+	case "video/mp4", "audio/mp4":
+		return playgroundAttachmentMatchesISOBaseMedia(data)
+	case "video/quicktime":
+		// Modern QuickTime files are ISO base media documents too; classic
+		// ones start with a top-level atom instead of an `ftyp` box.
+		if playgroundAttachmentMatchesISOBaseMedia(data) {
+			return true
+		}
+		if len(data) < 8 {
+			return false
+		}
+		atom := data[4:8]
+		return bytes.Equal(atom, []byte("moov")) || bytes.Equal(atom, []byte("mdat")) ||
+			bytes.Equal(atom, []byte("wide")) || bytes.Equal(atom, []byte("free"))
+	case "video/webm", "audio/webm":
+		// The EBML header and WebM doctype shared by WebM containers, audio
+		// and video alike.
+		return playgroundAttachmentMatchesWebM(data)
 	case "audio/mpeg":
 		// An ID3 tag or a bare MPEG audio frame sync.
 		return bytes.HasPrefix(data, []byte("ID3")) ||
@@ -194,11 +258,27 @@ func playgroundAttachmentMatchesMediaType(mediaType string, data []byte) bool {
 		return len(data) >= 12 && bytes.Equal(data[0:4], []byte("RIFF")) && bytes.Equal(data[8:12], []byte("WAVE"))
 	case "audio/ogg":
 		return bytes.HasPrefix(data, []byte("OggS"))
-	case "audio/webm":
-		// The EBML header shared by WebM containers.
-		return len(data) >= 4 && bytes.Equal(data[0:4], []byte{0x1a, 0x45, 0xdf, 0xa3})
+	case "application/pdf":
+		return bytes.HasPrefix(data, []byte("%PDF-"))
 	}
 	return false
+}
+
+// playgroundAttachmentMatchesISOBaseMedia accepts the MP4/MOV container family:
+// the file must start with an `ftyp` box whose brand is a known media brand.
+func playgroundAttachmentMatchesISOBaseMedia(data []byte) bool {
+	return len(data) >= 12 && bytes.Equal(data[4:8], []byte("ftyp")) &&
+		playgroundAttachmentISOBaseMediaBrands[string(data[8:12])]
+}
+
+// playgroundAttachmentMatchesWebM requires the EBML header of a WebM/Matroska
+// document and the WebM doctype, so a Matroska file cannot pass as video/webm.
+func playgroundAttachmentMatchesWebM(data []byte) bool {
+	if !bytes.HasPrefix(data, []byte{0x1a, 0x45, 0xdf, 0xa3}) {
+		return false
+	}
+	limit := min(len(data), 128)
+	return bytes.Contains(data[:limit], []byte("webm"))
 }
 
 func playgroundAttachmentClientKeyHash(clientKey string) string {
@@ -319,7 +399,7 @@ func createPlaygroundAttachment(ctx context.Context, userID int, partitionID str
 	if err != nil {
 		return nil, false, err
 	}
-	if err := ValidatePlaygroundAttachmentInput(&input, policy.AttachmentMaxFileBytes); err != nil {
+	if err := normalizePlaygroundAttachmentPayload(&input, policy); err != nil {
 		return nil, false, err
 	}
 	store := objectstore.DefaultStore()
@@ -374,7 +454,7 @@ func createPlaygroundAttachment(ctx context.Context, userID int, partitionID str
 			return err
 		}
 		size := int64(len(input.Data))
-		if size > policy.AttachmentMaxFileBytes {
+		if size > policy.AttachmentMediaMaxFileBytes(input.MediaType) {
 			return ErrPlaygroundAttachmentLimit
 		}
 		if usage.AttachmentCount >= int64(policy.AttachmentUserMaxCount) {

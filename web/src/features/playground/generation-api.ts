@@ -80,6 +80,11 @@ const imageGenerationSchema = z.object({
   ),
 })
 
+const imageTaskSchema = z.object({
+  success: z.literal(true),
+  data: z.object({ task_id: z.string().min(1) }),
+})
+
 const videoTaskSchema = z.object({
   id: z.string().optional(),
   task_id: z.string().optional(),
@@ -109,6 +114,16 @@ function boundedDurationSeconds(
 }
 
 /**
+ * One image generation either answered with its images inside the response or
+ * became a durable task whose result the task list and its stored artifacts
+ * carry. A model served by a task plugin (a long-running upstream image job)
+ * answers with the task id, so the browser never waits through a proxy timeout.
+ */
+export type PlaygroundImageGenerationOutcome =
+  | { kind: 'images'; images: PlaygroundImageResult[] }
+  | { kind: 'task'; taskId: string }
+
+/**
  * Starts an image generation through the Playground relay route. The body
  * carries the workspace group so the server applies the same group override
  * the chat workspace uses; channel selection, permissions and billing are the
@@ -119,7 +134,7 @@ export async function submitImageGeneration(
   input: PlaygroundImageGenerationInput,
   signal?: AbortSignal,
   workflowRunId?: string
-): Promise<PlaygroundImageResult[]> {
+): Promise<PlaygroundImageGenerationOutcome> {
   const count = boundedImageCount(input.count)
   const images = (input.images ?? []).filter(Boolean)
   const response = await api.post(
@@ -141,14 +156,21 @@ export async function submitImageGeneration(
         : {}),
     }
   )
+  const task = imageTaskSchema.safeParse(response.data)
+  if (task.success) {
+    return { kind: 'task', taskId: task.data.data.task_id }
+  }
   const parsed = imageGenerationSchema.safeParse(response.data)
   if (!parsed.success) {
     throw new Error('Image generation failed')
   }
-  return parsed.data.data.map((item) => ({
-    ...(item.url ? { url: item.url } : {}),
-    ...(item.b64_json ? { b64Json: item.b64_json } : {}),
-  }))
+  return {
+    kind: 'images',
+    images: parsed.data.data.map((item) => ({
+      ...(item.url ? { url: item.url } : {}),
+      ...(item.b64_json ? { b64Json: item.b64_json } : {}),
+    })),
+  }
 }
 
 /**
