@@ -866,7 +866,7 @@ func TestTaskArtifactContentServesStoredResultWithoutProvider(t *testing.T) {
 	assert.Zero(t, atomic.LoadInt32(&providerRequests), "a stored result never asks the provider again")
 
 	// Removing the stored object falls back to the provider proxy.
-	_, err = store.Delete(context.Background(), objectKey)
+	err = store.Delete(context.Background(), objectKey)
 	require.NoError(t, err)
 	fallbackRecorder := httptest.NewRecorder()
 	fallbackContext, _ := gin.CreateTestContext(fallbackRecorder)
