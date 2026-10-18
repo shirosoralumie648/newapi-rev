@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test } from 'vitest'
 
 import {
   DEFAULT_CONTEXT_SETTINGS,
@@ -31,6 +31,10 @@ import type {
   PlaygroundContextSettings,
   PlaygroundContextSummary,
 } from '../../../types'
+import {
+  clearPlaygroundAttachmentCache,
+  primePlaygroundAttachment,
+} from '../../attachment-store'
 import {
   buildContextSummaryRequest,
   estimateMessageTokens,
@@ -68,6 +72,10 @@ function summary(
     ...overrides,
   }
 }
+
+afterEach(() => {
+  clearPlaygroundAttachmentCache()
+})
 
 describe('token estimation', () => {
   test('ascii counts by characters and non-ascii per code point', () => {
@@ -277,6 +285,10 @@ describe('context planning', () => {
   })
 
   test('a text-only model replaces earlier images and reports them', () => {
+    // A send caches the attachment bytes before the plan is built
+    // (ensurePlaygroundMessageAttachments), so the request carries the image
+    // part the policy then has to replace.
+    primePlaygroundAttachment('a1', 'data:image/png;base64,iVBORw0KGgo=')
     const messages: Message[] = [
       {
         key: 'm1',
