@@ -20,6 +20,8 @@ var (
 var (
 	ErrTokenNotProvided = errors.New("token not provided")
 	ErrTokenInvalid     = errors.New("token invalid")
+	// ErrTokenPeriodQuotaExhausted 表示令牌本周期预算已用尽，等待周期重置。
+	ErrTokenPeriodQuotaExhausted = errors.New("token period quota exhausted")
 )
 
 // Redemption errors

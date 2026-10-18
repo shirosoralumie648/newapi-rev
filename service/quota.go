@@ -411,16 +411,20 @@ func PreConsumeTokenQuota(relayInfo *relaycommon.RelayInfo, quota int) error {
 		return nil
 	}
 	// 原子预扣：检查与扣减在同一操作中完成，并发请求不可能同时通过检查后超扣。
-	reserved, err := model.TryReserveTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, quota, relayInfo.TokenUnlimited)
+	// 周期预算令牌总是回源数据库校验本周期窗口的预算。
+	reserved, err := model.TryReserveTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, quota, relayInfo.TokenUnlimited, relayInfo.TokenPeriodReset)
 	if err != nil {
 		return err
 	}
 	if !reserved {
-		remainQuota := 0
 		if token, tokenErr := model.GetTokenByKey(relayInfo.TokenKey, false); tokenErr == nil && token != nil {
-			remainQuota = token.RemainQuota
+			// 周期预算与余额同时生效；任一不足都会拒绝，这里报告实际触发的限制。
+			if used := token.PeriodBudgetUsed(common.GetTimestamp()); token.HasPeriodQuota() && used+quota > token.PeriodQuota {
+				return fmt.Errorf("token periodic quota is not enough, token period quota: %s, current period used: %s, need quota: %s", logger.FormatQuota(token.PeriodQuota), logger.FormatQuota(used), logger.FormatQuota(quota))
+			}
+			return fmt.Errorf("token quota is not enough, token remain quota: %s, need quota: %s", logger.FormatQuota(token.RemainQuota), logger.FormatQuota(quota))
 		}
-		return fmt.Errorf("token quota is not enough, token remain quota: %s, need quota: %s", logger.FormatQuota(remainQuota), logger.FormatQuota(quota))
+		return fmt.Errorf("token quota is not enough, token remain quota: %s, need quota: %s", logger.FormatQuota(0), logger.FormatQuota(quota))
 	}
 	return nil
 }

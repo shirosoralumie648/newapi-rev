@@ -32,6 +32,16 @@ type Token struct {
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
 	// 允许用此令牌查询所属用户的额度；新建令牌默认开启，已有令牌升级后保持关闭
 	AllowUserQuotaQuery bool `json:"allow_user_quota_query"`
+	// 周期预算：PeriodQuota > 0 且 PeriodResetPeriod 非空（day/week/month）时，
+	// 令牌在每个周期内至多消费 PeriodQuota。预算不是钱包余额，只限制该令牌的
+	// 请求，且校验与 remain_quota 同时生效，任意一项不足即拒绝。
+	PeriodQuota       int    `json:"period_quota" gorm:"type:bigint;default:0"`
+	PeriodResetPeriod string `json:"period_reset_period" gorm:"type:varchar(16);default:''"`
+	// 周期窗口内的累计消费与窗口起点；只能由服务端维护，客户端 JSON 不可写。
+	PeriodUsed        int   `json:"period_used" gorm:"type:bigint;default:0"`
+	PeriodWindowStart int64 `json:"period_window_start" gorm:"type:bigint;default:0"`
+	// CacheSchema 标记 Redis 令牌哈希的结构版本，仅用于缓存自检。
+	CacheSchema int `json:"-" gorm:"-:all"`
 }
 
 func (token *Token) GetAutoGroups() ([]string, error) {
@@ -250,6 +260,10 @@ func ValidateUserToken(key string) (token *Token, err error) {
 			}
 			return token, ErrTokenInvalid
 		}
+		// 周期预算与余额同时生效：预算用尽的令牌在重置窗口到来前不可用。
+		if token.PeriodBudgetExhausted(common.GetTimestamp()) {
+			return token, ErrTokenPeriodQuotaExhausted
+		}
 		return token, nil
 	}
 	common.SysLog(common.LogText("ValidateUserToken: failed to get token: %s", err.Error()))
@@ -310,10 +324,12 @@ func (token *Token) Insert() error {
 
 // tokenConfigFields are the metadata columns a token configuration update
 // writes. remain_quota is intentionally absent; quota changes go through
-// UpdateWithQuotaTarget so concurrent relay deductions survive.
+// UpdateWithQuotaTarget so concurrent relay deductions survive. The period
+// window state (period_used / period_window_start) is derived server-side in
+// UpdateWithQuotaTarget and is deliberately not client-writable.
 var tokenConfigFields = []string{"name", "status", "expired_time", "unlimited_quota",
 	"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry", "auto_groups",
-	"allow_user_quota_query"}
+	"allow_user_quota_query", "period_quota", "period_reset_period"}
 
 // Update Make sure your token's fields is completed, because this will update non-zero values
 func (token *Token) Update() (err error) {
@@ -346,14 +362,23 @@ func (token *Token) UpdateWithQuotaTarget(quotaSnapshot int) (*TokenQuotaChange,
 	delta := int64(token.RemainQuota) - int64(quotaSnapshot)
 	var change *TokenQuotaChange
 	committedRemainQuota := quotaSnapshot
+	var committedPeriodUsed int
+	var committedPeriodWindowStart int64
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var committed Token
 		if err := lockForUpdate(tx).Where("id = ? AND user_id = ?", token.Id, token.UserId).First(&committed).Error; err != nil {
 			return err
 		}
 		committedRemainQuota = committed.RemainQuota
+		periodUpdate, periodUsed, periodWindowStart := tokenPeriodConfigUpdate(&committed, token, common.GetTimestamp())
+		committedPeriodUsed, committedPeriodWindowStart = periodUsed, periodWindowStart
 		if err := tx.Model(token).Select(tokenConfigFields).Updates(token).Error; err != nil {
 			return err
+		}
+		if len(periodUpdate) > 0 {
+			if err := tx.Model(&Token{}).Where("id = ?", token.Id).Updates(periodUpdate).Error; err != nil {
+				return err
+			}
 		}
 		if delta == 0 {
 			return nil
@@ -371,6 +396,8 @@ func (token *Token) UpdateWithQuotaTarget(quotaSnapshot int) (*TokenQuotaChange,
 		return nil, err
 	}
 	token.RemainQuota = committedRemainQuota
+	token.PeriodUsed = committedPeriodUsed
+	token.PeriodWindowStart = committedPeriodWindowStart
 	return change, nil
 }
 
@@ -453,10 +480,13 @@ func IncreaseTokenQuota(tokenId int, key string, quota int) (err error) {
 }
 
 func increaseTokenQuota(db *gorm.DB, id int, quota int) (err error) {
+	// quota > 0 时退还令牌额度（同时回退周期用量），quota < 0 时补扣。
+	// 周期用量回退到 0 为止，不产生负用量。
 	err = db.Model(&Token{}).Where("id = ?", id).Updates(
 		map[string]any{
 			"remain_quota":  gorm.Expr("remain_quota + ?", quota),
 			"used_quota":    gorm.Expr("used_quota - ?", quota),
+			"period_used":   gorm.Expr("CASE WHEN period_used - ? < 0 THEN 0 ELSE period_used - ? END", quota, quota),
 			"accessed_time": common.GetTimestamp(),
 		},
 	).Error
@@ -482,14 +512,8 @@ func DecreaseTokenQuota(id int, key string, quota int) (err error) {
 }
 
 func decreaseTokenQuota(id int, quota int) (err error) {
-	err = DB.Model(&Token{}).Where("id = ?", id).Updates(
-		map[string]any{
-			"remain_quota":  gorm.Expr("remain_quota - ?", quota),
-			"used_quota":    gorm.Expr("used_quota + ?", quota),
-			"accessed_time": common.GetTimestamp(),
-		},
-	).Error
-	return err
+	// 与 increaseTokenQuota 共用一条语句，保证补扣同样维护周期用量。
+	return increaseTokenQuota(DB, id, -quota)
 }
 
 // CountUserTokens returns total number of tokens for the given user, used for pagination

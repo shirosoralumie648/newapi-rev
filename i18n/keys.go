@@ -12,6 +12,8 @@ const (
 	MsgTokenInvalid           = "token.invalid"
 	MsgTokenNotProvided       = "token.not_provided"
 	MsgTokenStatusUnavailable = "token.status_unavailable"
+	// MsgTokenPeriodQuotaExhausted 周期预算用尽（等待周期重置），与令牌失效区分。
+	MsgTokenPeriodQuotaExhausted = "token.period_quota_exhausted"
 
 	MsgAuthClientIPUnresolved     = "auth.client_ip_unresolved"
 	MsgAuthTokenIPNotAllowed      = "auth.token_ip_not_allowed"

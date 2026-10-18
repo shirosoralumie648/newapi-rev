@@ -395,6 +395,12 @@ func (s *BillingSession) shouldTrust(c *gin.Context) bool {
 		return false
 	}
 
+	// 周期预算只在预扣时校验：信任旁路会跳过预扣，使整次请求不检查本周期
+	// 预算，因此带周期预算的令牌必须始终预扣。
+	if s.relayInfo.TokenPeriodLimited {
+		return false
+	}
+
 	trustQuota := operation_setting.GetQuotaSetting().TrustQuotaUSD * common.QuotaPerUnit
 	if trustQuota <= 0 || math.IsNaN(trustQuota) || math.IsInf(trustQuota, 0) {
 		return false

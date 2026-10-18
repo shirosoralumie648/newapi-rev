@@ -1131,4 +1131,9 @@ export const STATIC_I18N_KEYS = [
   'Microphone access failed.',
   'Transcription failed',
   'No speech was detected.',
+  // API key periodic quota options render through t(option.label) from
+  // API_KEY_PERIOD_RESET_OPTIONS, and the invalid-cycle message is returned
+  // from Go through message_key, so the literal scan cannot see them.
+  'No periodic limit',
+  'Invalid periodic reset cycle',
 ] as const

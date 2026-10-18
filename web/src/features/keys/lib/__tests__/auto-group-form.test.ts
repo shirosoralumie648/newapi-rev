@@ -52,6 +52,10 @@ const baseApiKey: ApiKey = {
   model_limits: '',
   allow_ips: '',
   allow_user_quota_query: false,
+  period_quota: 0,
+  period_reset_period: '',
+  period_used: 0,
+  period_window_start: 0,
 }
 
 describe('API key Auto group form mapping', () => {
@@ -208,4 +212,88 @@ describe('API key user quota query form mapping', () => {
       )
     }
   )
+})
+
+describe('API key periodic quota form mapping', () => {
+  test('converts the displayed period amount into quota units on submit', () => {
+    const payload = transformFormDataToPayload({
+      ...getApiKeyFormDefaultValues(true),
+      name: 'periodic token',
+      period_reset_period: 'day',
+      period_quota_dollars: 2.5,
+    })
+
+    expect(payload.period_reset_period).toBe('day')
+    expect(payload.period_quota).toBe(1_250_000)
+  })
+
+  test('clears the period budget whenever no reset cycle is selected', () => {
+    const payload = transformFormDataToPayload({
+      ...getApiKeyFormDefaultValues(true),
+      period_quota_dollars: 10,
+    })
+
+    expect(payload.period_reset_period).toBe('')
+    expect(payload.period_quota).toBe(0)
+  })
+
+  test('requires a positive amount once a reset cycle is selected, even with unlimited quota', () => {
+    const invalidAmounts = [undefined, 0, -1]
+
+    for (const period_quota_dollars of invalidAmounts) {
+      const result = getApiKeyFormSchema(t).safeParse({
+        ...getApiKeyFormDefaultValues(true),
+        name: 'periodic token',
+        period_reset_period: 'week',
+        period_quota_dollars,
+      })
+
+      expect(result.success).toBe(false)
+      if (result.success) return
+      expect(result.error.issues[0]?.path).toEqual(['period_quota_dollars'])
+      expect(result.error.issues[0]?.message).toBe(
+        'Periodic quota must be greater than zero'
+      )
+    }
+  })
+
+  test('accepts a period budget together with unlimited quota because the budget is independent', () => {
+    const defaults = getApiKeyFormDefaultValues(true)
+    const result = getApiKeyFormSchema(t).safeParse({
+      ...defaults,
+      name: 'unlimited with budget',
+      period_reset_period: 'month',
+      period_quota_dollars: 5,
+    })
+
+    expect(defaults.unlimited_quota).toBe(true)
+    expect(result.success).toBe(true)
+  })
+
+  test('round-trips a stored period budget into the edit form', () => {
+    const defaults = transformApiKeyToFormDefaults({
+      ...baseApiKey,
+      period_quota: 1_000_000,
+      period_reset_period: 'week',
+      period_used: 250_000,
+    })
+
+    expect(defaults.period_reset_period).toBe('week')
+    expect(defaults.period_quota_dollars).toBe(2)
+
+    const payload = transformFormDataToPayload(defaults)
+    expect(payload.period_reset_period).toBe('week')
+    expect(payload.period_quota).toBe(1_000_000)
+  })
+
+  test('drops an unrecognized stored reset cycle instead of sending it back', () => {
+    const defaults = transformApiKeyToFormDefaults({
+      ...baseApiKey,
+      period_quota: 1_000_000,
+      period_reset_period: 'hourly',
+    })
+
+    expect(defaults.period_reset_period).toBe('')
+    expect(transformFormDataToPayload(defaults).period_quota).toBe(0)
+  })
 })
