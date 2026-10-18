@@ -41,6 +41,14 @@ const (
 	// SystemTaskTypePlaygroundTrashCleanup purges the trashed conversations and
 	// canvases whose recovery window elapsed, releasing their budgets.
 	SystemTaskTypePlaygroundTrashCleanup = "playground_trash_cleanup"
+	// SystemTaskTypePlaygroundStorageSample measures the stored bytes of every
+	// Playground account into today's metered-storage ledger row as a running
+	// peak. It only runs while the optional storage billing tier is enabled.
+	SystemTaskTypePlaygroundStorageSample = "playground_storage_sample"
+	// SystemTaskTypePlaygroundStorageSettle charges finished storage days to
+	// the wallet (uncovered parts become wallet debt) exactly once per day. It
+	// only runs while the optional storage billing tier is enabled.
+	SystemTaskTypePlaygroundStorageSettle = "playground_storage_settle"
 	// SystemTaskTypePlaygroundObjectOutbox retries deleting stored objects
 	// whose owning database row is already gone.
 	SystemTaskTypePlaygroundObjectOutbox = "playground_object_outbox"
