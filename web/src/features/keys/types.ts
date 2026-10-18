@@ -52,6 +52,9 @@ export const apiKeySchema = z.object({
   period_reset_period: z.string().nullish().default(''),
   period_used: z.number().optional().default(0),
   period_window_start: z.number().optional().default(0),
+  // Rate limits: enforced before dispatch; 0 disables them.
+  rpm_limit: z.number().optional().default(0),
+  tpm_limit: z.number().optional().default(0),
 })
 
 export type ApiKey = z.infer<typeof apiKeySchema>
@@ -103,6 +106,8 @@ export interface ApiKeyFormData {
   cross_group_retry: boolean
   period_quota: number
   period_reset_period: string
+  rpm_limit: number
+  tpm_limit: number
 }
 
 export interface TokenAutoGroupsConfig {

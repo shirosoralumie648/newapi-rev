@@ -37,8 +37,8 @@ const tokenCacheFenceSeconds = 10
 // current version are never served nor refreshed, so they expire naturally and
 // the next read rebuilds them from the database. This is what makes a cached
 // token hash trustworthy for enforcement decisions such as whether a periodic
-// budget applies.
-const tokenCacheSchemaVersion = 2
+// budget applies or an admission limit applies.
+const tokenCacheSchemaVersion = 3
 
 // invalidateTokenCacheForMutation is called before a token metadata mutation
 // writes to the database: it raises the fence and drops the cached hash so no
@@ -89,7 +89,8 @@ redis.call('HSET', KEYS[1],
   'AllowIps', ARGV[11], 'Group', ARGV[12], 'CrossGroupRetry', ARGV[13],
   'AutoGroups', ARGV[14], 'RemainQuota', ARGV[15], 'UsedQuota', ARGV[16],
   'AllowUserQuotaQuery', ARGV[17], 'CacheSchema', ARGV[19], 'PeriodQuota', ARGV[20],
-  'PeriodResetPeriod', ARGV[21], 'PeriodUsed', ARGV[22], 'PeriodWindowStart', ARGV[23])
+  'PeriodResetPeriod', ARGV[21], 'PeriodUsed', ARGV[22], 'PeriodWindowStart', ARGV[23],
+  'RPMLimit', ARGV[24], 'TPMLimit', ARGV[25])
 redis.call('EXPIRE', KEYS[1], ARGV[18])
 return 1`
 
@@ -104,6 +105,7 @@ return 1`
 		strconv.FormatBool(token.AllowUserQuotaQuery),
 		tokenCacheTTLSeconds(), tokenCacheSchemaVersion, token.PeriodQuota,
 		token.PeriodResetPeriod, token.PeriodUsed, token.PeriodWindowStart,
+		token.RPMLimit, token.TPMLimit,
 	).Int()
 }
 

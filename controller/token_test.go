@@ -20,6 +20,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -748,6 +749,75 @@ func TestAddTokenPeriodBudgetContract(t *testing.T) {
 	assert.Equal(t, 50, saved.PeriodQuota)
 	assert.Equal(t, model.TokenPeriodWeekly, saved.PeriodResetPeriod)
 	assert.Zero(t, saved.PeriodUsed)
+}
+
+// TestTokenRateLimitAPIContract 保护令牌级准入限制的管理端契约：越界值被拒绝且
+// 不落库，合法值在更新时持久化并写入审计，新建时复制到令牌。
+func TestTokenRateLimitAPIContract(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	token := seedToken(t, db, 1, "rate-limit-token", "rate-limit-token-key")
+
+	updateBody := func(rpmLimit, tpmLimit int) map[string]any {
+		return map[string]any{
+			"id": token.Id, "name": "rate-limit-token", "expired_time": -1,
+			"remain_quota": 100, "unlimited_quota": true,
+			"rpm_limit": rpmLimit, "tpm_limit": tpmLimit,
+		}
+	}
+
+	t.Run("out-of-range limits are rejected", func(t *testing.T) {
+		for name, body := range map[string]map[string]any{
+			"negative rpm":    updateBody(-1, 0),
+			"negative tpm":    updateBody(0, -1),
+			"rpm above bound": updateBody(dto.MaxRateLimitRPM+1, 0),
+			"tpm above bound": updateBody(0, dto.MaxRateLimitTPM+1),
+		} {
+			t.Run(name, func(t *testing.T) {
+				ctx, recorder := newAuthenticatedContext(t, http.MethodPut, "/api/token/", body, 1)
+				UpdateToken(ctx)
+				response := decodeAPIResponse(t, recorder)
+				assert.False(t, response.Success)
+				assert.Contains(t, recorder.Body.String(), "Invalid token rate limits")
+
+				var saved model.Token
+				require.NoError(t, db.First(&saved, token.Id).Error)
+				assert.Zero(t, saved.RPMLimit)
+				assert.Zero(t, saved.TPMLimit)
+			})
+		}
+	})
+
+	t.Run("update persists the limits and audits the change", func(t *testing.T) {
+		ctx, recorder := newAuthenticatedContext(t, http.MethodPut, "/api/token/", updateBody(60, 9000), 1)
+		UpdateToken(ctx)
+		response := decodeAPIResponse(t, recorder)
+		require.True(t, response.Success, response.Message)
+
+		var saved model.Token
+		require.NoError(t, db.First(&saved, token.Id).Error)
+		assert.Equal(t, 60, saved.RPMLimit)
+		assert.Equal(t, 9000, saved.TPMLimit)
+
+		params, ok := common.GetContextKeyType[model.AuditFields](ctx, constant.ContextKeyTokenAuditParams)
+		require.True(t, ok)
+		assert.Contains(t, params["changed_fields"], "rpm_limit")
+		assert.Contains(t, params["changed_fields"], "tpm_limit")
+	})
+
+	t.Run("add copies the limits", func(t *testing.T) {
+		body := map[string]any{
+			"name": "rate-limit-add", "expired_time": -1, "remain_quota": 100,
+			"unlimited_quota": false, "rpm_limit": 30, "tpm_limit": 500,
+		}
+		_, recorder := newAuthenticatedContext(t, http.MethodPost, "/api/token/", body, 1)
+		response := decodeAPIResponse(t, recorder)
+		assert.True(t, response.Success, response.Message)
+
+		var added model.Token
+		require.NoError(t, db.Where("name = ?", "rate-limit-add").First(&added).Error)
+		assert.Equal(t, 30, added.RPMLimit)
+		assert.Equal(t, 500, added.TPMLimit)
+	})
 }
 
 func TestGetTokenKeyRequiresOwnershipAndReturnsFullKey(t *testing.T) {

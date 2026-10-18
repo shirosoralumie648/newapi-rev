@@ -85,6 +85,10 @@ export const MAX_HTTP2_CONNECTION_SHARDS = 8
 // Mirrors the backend bound in relaykit/dto: the per-channel first-token (TTFB)
 // window, in seconds.
 export const MAX_FIRST_TOKEN_TIMEOUT_SECONDS = 3600
+// Mirrors the backend admission limit bounds in relaykit/dto.
+export const MAX_CHANNEL_CONCURRENCY = 100000
+export const MAX_RATE_LIMIT_RPM = 1000000
+export const MAX_RATE_LIMIT_TPM = 1000000000
 
 export function normalizeHttpProtocol(
   value: string | undefined | null
@@ -126,6 +130,19 @@ export function normalizeFirstTokenTimeout(
     return MAX_FIRST_TOKEN_TIMEOUT_SECONDS
   }
   return Math.floor(value)
+}
+
+// normalizeAdmissionLimit keeps a stored channel admission limit inside the
+// range the backend accepts: zero means unlimited, and values above the bound
+// are clamped to it.
+export function normalizeAdmissionLimit(
+  value: number | undefined | null,
+  max: number
+): number {
+  if (value == null || !Number.isFinite(value) || value <= 0) {
+    return 0
+  }
+  return Math.min(Math.floor(value), max)
 }
 
 function parseOptionalJson(value: string | undefined): unknown {
@@ -294,6 +311,14 @@ export const channelFormSchema = z
       .min(0)
       .max(MAX_FIRST_TOKEN_TIMEOUT_SECONDS)
       .optional(),
+    max_concurrency: z
+      .number()
+      .int()
+      .min(0)
+      .max(MAX_CHANNEL_CONCURRENCY)
+      .optional(),
+    rpm_limit: z.number().int().min(0).max(MAX_RATE_LIMIT_RPM).optional(),
+    tpm_limit: z.number().int().min(0).max(MAX_RATE_LIMIT_TPM).optional(),
     pass_through_body_enabled: z.boolean().optional(),
     responses_websocket_enabled: z.boolean().optional(),
     system_prompt: z.string().optional(),
@@ -489,6 +514,9 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   http2_connection_shards: 1,
   tls_insecure_skip_verify: false,
   first_token_timeout: 0,
+  max_concurrency: 0,
+  rpm_limit: 0,
+  tpm_limit: 0,
   pass_through_body_enabled: false,
   responses_websocket_enabled: false,
   system_prompt: '',
@@ -537,6 +565,9 @@ export function transformChannelToFormDefaults(
     http2_connection_shards: 1,
     tls_insecure_skip_verify: false,
     first_token_timeout: 0,
+    max_concurrency: 0,
+    rpm_limit: 0,
+    tpm_limit: 0,
     pass_through_body_enabled: false,
     responses_websocket_enabled: false,
     system_prompt: '',
@@ -561,6 +592,18 @@ export function transformChannelToFormDefaults(
         tls_insecure_skip_verify: parsed.tls_insecure_skip_verify === true,
         first_token_timeout: normalizeFirstTokenTimeout(
           parsed.first_token_timeout
+        ),
+        max_concurrency: normalizeAdmissionLimit(
+          parsed.max_concurrency,
+          MAX_CHANNEL_CONCURRENCY
+        ),
+        rpm_limit: normalizeAdmissionLimit(
+          parsed.rpm_limit,
+          MAX_RATE_LIMIT_RPM
+        ),
+        tpm_limit: normalizeAdmissionLimit(
+          parsed.tpm_limit,
+          MAX_RATE_LIMIT_TPM
         ),
         pass_through_body_enabled: parsed.pass_through_body_enabled || false,
         responses_websocket_enabled:
@@ -732,6 +775,29 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
   )
   if (firstTokenTimeout > 0) {
     settingObj.first_token_timeout = firstTokenTimeout
+  }
+
+  // Omit zero so a channel without admission limits stays unlimited.
+  const maxConcurrency = normalizeAdmissionLimit(
+    formData.max_concurrency,
+    MAX_CHANNEL_CONCURRENCY
+  )
+  if (maxConcurrency > 0) {
+    settingObj.max_concurrency = maxConcurrency
+  }
+  const rpmLimit = normalizeAdmissionLimit(
+    formData.rpm_limit,
+    MAX_RATE_LIMIT_RPM
+  )
+  if (rpmLimit > 0) {
+    settingObj.rpm_limit = rpmLimit
+  }
+  const tpmLimit = normalizeAdmissionLimit(
+    formData.tpm_limit,
+    MAX_RATE_LIMIT_TPM
+  )
+  if (tpmLimit > 0) {
+    settingObj.tpm_limit = tpmLimit
   }
 
   return JSON.stringify(settingObj)

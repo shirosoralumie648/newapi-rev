@@ -25,6 +25,27 @@ import { API_KEY_PERIOD_RESET_OPTIONS, DEFAULT_GROUP } from '../constants'
 import type { ApiKey, ApiKeyFormData } from '../types'
 
 // ============================================================================
+// Admission Limits
+// ============================================================================
+
+// Mirrors the backend admission limit bounds in relaykit/dto.
+export const MAX_API_KEY_RPM = 1000000
+export const MAX_API_KEY_TPM = 1000000000
+
+// normalizeTokenRateLimit keeps a stored API key rate limit inside the range
+// the backend accepts: zero means unlimited, and values above the bound are
+// clamped to it.
+export function normalizeTokenRateLimit(
+  value: number | undefined | null,
+  max: number
+): number {
+  if (value == null || !Number.isFinite(value) || value <= 0) {
+    return 0
+  }
+  return Math.min(Math.floor(value), max)
+}
+
+// ============================================================================
 // Form Schema
 // ============================================================================
 
@@ -48,6 +69,8 @@ export function getApiKeyFormSchema(t: TFunction, maxAutoGroups = 5) {
       auto_groups: z.array(z.string()),
       cross_group_retry: z.boolean().optional(),
       tokenCount: z.number().min(1).optional(),
+      rpm_limit: z.number().int().min(0).max(MAX_API_KEY_RPM).optional(),
+      tpm_limit: z.number().int().min(0).max(MAX_API_KEY_TPM).optional(),
     })
     .superRefine((data, ctx) => {
       if (data.group === 'auto') {
@@ -135,6 +158,8 @@ export const API_KEY_FORM_DEFAULT_VALUES: ApiKeyFormValues = {
   auto_groups: [],
   cross_group_retry: true,
   tokenCount: 1,
+  rpm_limit: 0,
+  tpm_limit: 0,
 }
 
 export function getApiKeyFormDefaultValues(
@@ -183,6 +208,8 @@ export function transformFormDataToPayload(
         ? 0
         : parseQuotaFromDollars(data.period_quota_dollars || 0),
     period_reset_period: data.period_reset_period,
+    rpm_limit: data.rpm_limit ?? 0,
+    tpm_limit: data.tpm_limit ?? 0,
   }
 }
 
@@ -230,5 +257,7 @@ export function transformApiKeyToFormDefaults(
     auto_groups: autoGroups,
     cross_group_retry: !!apiKey.cross_group_retry,
     tokenCount: 1,
+    rpm_limit: normalizeTokenRateLimit(apiKey.rpm_limit, MAX_API_KEY_RPM),
+    tpm_limit: normalizeTokenRateLimit(apiKey.tpm_limit, MAX_API_KEY_TPM),
   }
 }

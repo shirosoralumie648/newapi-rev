@@ -23,6 +23,9 @@ import { apiKeySchema, type ApiKey } from '../../types'
 import {
   getApiKeyFormDefaultValues,
   getApiKeyFormSchema,
+  MAX_API_KEY_RPM,
+  MAX_API_KEY_TPM,
+  normalizeTokenRateLimit,
   transformApiKeyToFormDefaults,
   transformFormDataToPayload,
 } from '../api-key-form'
@@ -56,6 +59,8 @@ const baseApiKey: ApiKey = {
   period_reset_period: '',
   period_used: 0,
   period_window_start: 0,
+  rpm_limit: 0,
+  tpm_limit: 0,
 }
 
 describe('API key Auto group form mapping', () => {
@@ -295,5 +300,74 @@ describe('API key periodic quota form mapping', () => {
 
     expect(defaults.period_reset_period).toBe('')
     expect(transformFormDataToPayload(defaults).period_quota).toBe(0)
+  })
+})
+
+describe('API key rate limit form mapping', () => {
+  test('defaults a new key to unlimited requests and tokens', () => {
+    const defaults = getApiKeyFormDefaultValues(true)
+
+    expect(defaults.rpm_limit).toBe(0)
+    expect(defaults.tpm_limit).toBe(0)
+
+    const payload = transformFormDataToPayload(defaults)
+    expect(payload.rpm_limit).toBe(0)
+    expect(payload.tpm_limit).toBe(0)
+  })
+
+  test('round-trips stored limits into the edit form and payload', () => {
+    const defaults = transformApiKeyToFormDefaults({
+      ...baseApiKey,
+      rpm_limit: 60,
+      tpm_limit: 9000,
+    })
+
+    expect(defaults.rpm_limit).toBe(60)
+    expect(defaults.tpm_limit).toBe(9000)
+
+    const payload = transformFormDataToPayload(defaults)
+    expect(payload.rpm_limit).toBe(60)
+    expect(payload.tpm_limit).toBe(9000)
+  })
+
+  test('normalizes an out-of-range stored limit instead of rejecting the edit form', () => {
+    const defaults = transformApiKeyToFormDefaults({
+      ...baseApiKey,
+      rpm_limit: MAX_API_KEY_RPM + 10,
+      tpm_limit: -1,
+    })
+
+    expect(defaults.rpm_limit).toBe(MAX_API_KEY_RPM)
+    expect(defaults.tpm_limit).toBe(0)
+  })
+
+  test.each([
+    { field: 'rpm_limit', value: MAX_API_KEY_RPM + 1 },
+    { field: 'tpm_limit', value: MAX_API_KEY_TPM + 1 },
+  ])(
+    'rejects a $field above the backend bound before saving',
+    ({ field, value }) => {
+      const result = getApiKeyFormSchema(t).safeParse({
+        ...getApiKeyFormDefaultValues(true),
+        name: 'rate limited token',
+        [field]: value,
+      })
+
+      expect(result.success).toBe(false)
+      if (result.success) return
+      expect(result.error.issues.some((issue) => issue.path[0] === field)).toBe(
+        true
+      )
+    }
+  )
+
+  test('normalizeTokenRateLimit clamps to whole values inside the bound', () => {
+    expect(normalizeTokenRateLimit(undefined, MAX_API_KEY_RPM)).toBe(0)
+    expect(normalizeTokenRateLimit(Number.NaN, MAX_API_KEY_RPM)).toBe(0)
+    expect(normalizeTokenRateLimit(12.9, MAX_API_KEY_RPM)).toBe(12)
+    expect(normalizeTokenRateLimit(-1, MAX_API_KEY_RPM)).toBe(0)
+    expect(normalizeTokenRateLimit(MAX_API_KEY_RPM + 1, MAX_API_KEY_RPM)).toBe(
+      MAX_API_KEY_RPM
+    )
   })
 })

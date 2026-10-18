@@ -93,6 +93,9 @@ export interface ChannelSettings {
   http2_connection_shards?: number
   tls_insecure_skip_verify?: boolean
   first_token_timeout?: number
+  max_concurrency?: number
+  rpm_limit?: number
+  tpm_limit?: number
 }
 
 export interface ChannelOtherSettings {
