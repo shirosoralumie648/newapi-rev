@@ -1010,3 +1010,97 @@ func TestPlaygroundCanvasLargeDocumentExternalization(t *testing.T) {
 		})
 	}
 }
+
+// The canvas trash lifecycle: deleting a board moves it into the same trash as
+// conversations while its document, attachment pins and counter share stay
+// stored, restore returns the same board with its reachable nodes, and the
+// retention sweep releases the document bytes and the pins it held.
+func TestPlaygroundCanvasTrashLifecycle(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			usePlaygroundGroupQuota(t, "default", playground_setting.PlaygroundQuotaPolicy{TrashRetentionDays: 2})
+			session := createPlayground(t, 7, "canvas-trash")
+			sessionID := session["id"].(string)
+			attachment := playgroundUploadAttachment(t, 7, sessionID, "canvas-trash-file", "image/png", playgroundPNGFixture(64))
+			attachmentID := attachment["id"].(string)
+			created := canvasEnvelope(t, playgroundRequest(t, 7, http.MethodPost, "/api/playground/canvases", map[string]any{
+				"client_id": "canvas-trash-board",
+				"title":     "Trash board",
+				"document": canvasDocument([]any{
+					canvasNode("n1", "prompt", 10, 20),
+					canvasRefNode("a1", "attachment", map[string]any{"sessionId": sessionID, "attachmentId": attachmentID}),
+				}, nil),
+			}, controller.CreatePlaygroundCanvasProject).Body.Bytes())
+			canvasID := created["id"].(string)
+			canvasPath := "/api/playground/canvases/" + canvasID
+			countPins := func() int64 {
+				var pins int64
+				require.NoError(t, db.Model(&model.PlaygroundCanvasAsset{}).Where("canvas_id = ?", canvasID).Count(&pins).Error)
+				return pins
+			}
+			require.EqualValues(t, 1, countPins())
+			before := playgroundUsageCounters(t, db, 7)
+			require.EqualValues(t, 1, before.CanvasCount)
+			require.Positive(t, before.CanvasBytes)
+			require.EqualValues(t, 1, before.Sessions)
+
+			// Moving the board to the trash hides it from every active read
+			// while its document, pins and counter share stay stored.
+			assert.Empty(t, playgroundTrashListingFixture(t, 7).Items)
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodDelete, canvasPath, nil, controller.DeletePlaygroundCanvasProject).Code)
+			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 7, http.MethodGet, canvasPath, nil, controller.GetPlaygroundCanvasProject).Code)
+			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 8, http.MethodGet, canvasPath, nil, controller.GetPlaygroundCanvasProject).Code)
+			assert.Contains(t, playgroundRequest(t, 7, http.MethodGet, "/api/playground/canvases", nil, controller.ListPlaygroundCanvasProjects).Body.String(), `"total":0`)
+			assert.EqualValues(t, 1, countPins())
+			assert.Equal(t, playgroundUsageCounterValues(before), playgroundUsageCounterValues(playgroundUsageCounters(t, db, 7)))
+			listing := playgroundTrashListingFixture(t, 7)
+			assert.Equal(t, 2, listing.RetentionDays)
+			require.Len(t, listing.Items, 1)
+			assert.Equal(t, "canvas", listing.Items[0].Kind)
+			assert.Equal(t, canvasID, listing.Items[0].ID)
+			assert.Equal(t, "Trash board", listing.Items[0].Title)
+			assert.Positive(t, listing.Items[0].DeletedAt)
+			assert.Equal(t, listing.Items[0].DeletedAt+2*24*60*60, listing.Items[0].PurgeAt)
+
+			// Restore is trash-only and owner-scoped, and returns the same
+			// board with its reachable nodes, pins and counters intact.
+			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 8, http.MethodPost, canvasPath+"/restore", nil, controller.RestorePlaygroundCanvasProject).Code)
+			restored := playgroundRequest(t, 7, http.MethodPost, canvasPath+"/restore", nil, controller.RestorePlaygroundCanvasProject)
+			require.Equal(t, http.StatusOK, restored.Code, restored.Body.String())
+			restoredCanvas := canvasEnvelope(t, restored.Body.Bytes())
+			assert.Equal(t, canvasID, restoredCanvas["id"])
+			detail := canvasEnvelope(t, playgroundRequest(t, 7, http.MethodGet, canvasPath, nil, controller.GetPlaygroundCanvasProject).Body.Bytes())
+			assert.Empty(t, detail["unavailable_node_ids"])
+			assert.EqualValues(t, 1, countPins())
+			assert.Equal(t, playgroundUsageCounterValues(before), playgroundUsageCounterValues(playgroundUsageCounters(t, db, 7)))
+			assert.Empty(t, playgroundTrashListingFixture(t, 7).Items)
+			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 7, http.MethodPost, canvasPath+"/restore", nil, controller.RestorePlaygroundCanvasProject).Code)
+
+			// A fresh trashing survives a sweep; once the owner's window
+			// elapses the sweep purges the board, releases its pins and returns
+			// the document bytes to the account budget.
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodDelete, canvasPath, nil, controller.DeletePlaygroundCanvasProject).Code)
+			sweep, err := model.PurgeExpiredPlaygroundTrash(100)
+			require.NoError(t, err)
+			assert.Zero(t, sweep.Canvases)
+			require.NoError(t, db.Model(&model.PlaygroundCanvasProject{}).Where("id = ?", canvasID).Update("deleted_at", common.GetTimestamp()-3*24*60*60).Error)
+			sweep, err = model.PurgeExpiredPlaygroundTrash(100)
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, sweep.Canvases)
+			assert.Zero(t, sweep.Sessions)
+			var rows int64
+			require.NoError(t, db.Model(&model.PlaygroundCanvasProject{}).Where("id = ?", canvasID).Count(&rows).Error)
+			assert.Zero(t, rows)
+			assert.Zero(t, countPins())
+			after := playgroundUsageCounters(t, db, 7)
+			assert.Zero(t, after.CanvasCount)
+			assert.Zero(t, after.CanvasBytes)
+			// The conversation behind the pinned attachment is untouched.
+			assert.EqualValues(t, 1, after.Sessions)
+			assert.EqualValues(t, 1, after.AttachmentCount)
+			assert.Empty(t, playgroundTrashListingFixture(t, 7).Items)
+			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 7, http.MethodPost, canvasPath+"/restore", nil, controller.RestorePlaygroundCanvasProject).Code)
+		})
+	}
+}

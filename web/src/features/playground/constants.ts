@@ -76,6 +76,7 @@ export const API_ENDPOINTS = {
   PLAYGROUND_SESSIONS: '/api/playground/sessions',
   PLAYGROUND_CANVASES: '/api/playground/canvases',
   PLAYGROUND_UPLOADS: '/api/playground/uploads',
+  PLAYGROUND_TRASH: '/api/playground/trash',
   PLAYGROUND_PRESETS: '/api/playground/presets',
   PLAYGROUND_SNIPPETS: '/api/playground/snippets',
   PLAYGROUND_USAGE: '/api/playground/usage',

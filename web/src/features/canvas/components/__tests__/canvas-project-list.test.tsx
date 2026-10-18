@@ -89,7 +89,7 @@ test('creates a new canvas from the list header', async () => {
   expect(onCreate).toHaveBeenCalledTimes(1)
 })
 
-test('confirms deletion before removing a canvas', async () => {
+test('confirms before moving a canvas to the trash', async () => {
   const user = userEvent.setup()
   const onDelete = vi.fn()
   render(
@@ -104,7 +104,9 @@ test('confirms deletion before removing a canvas', async () => {
   )
 
   await user.click(screen.getByRole('button', { name: 'Delete Older canvas' }))
-  expect(screen.getByRole('alertdialog')).toBeVisible()
-  await user.click(screen.getByRole('button', { name: 'Delete' }))
+  expect(screen.getByRole('alertdialog')).toHaveTextContent(
+    'Move canvas to trash?'
+  )
+  await user.click(screen.getByRole('button', { name: 'Move to trash' }))
   expect(onDelete).toHaveBeenCalledWith('older')
 })

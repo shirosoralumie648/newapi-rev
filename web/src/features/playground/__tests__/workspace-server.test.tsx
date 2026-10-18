@@ -181,6 +181,76 @@ test('switching accounts unmounts private history instead of reusing the previou
   ).toBeVisible()
 })
 
+test('restoring a conversation from the trash returns it to the conversation list', async () => {
+  const user = userEvent.setup()
+  vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    if (url.endsWith('/sessions')) {
+      return { data: { success: true, data: { items: [], total: 0 } } }
+    }
+    if (url === '/api/playground/trash') {
+      return {
+        data: {
+          success: true,
+          data: {
+            retention_days: 30,
+            items: [
+              {
+                kind: 'session',
+                id: 'pgs_restored',
+                title: 'Restored conversation',
+                deleted_at: 10,
+                purge_at: 20,
+              },
+            ],
+          },
+        },
+      }
+    }
+    if (url.endsWith('/messages')) {
+      return { data: { success: true, data: { revision: 0, messages: [] } } }
+    }
+    return { data: { success: true, data: options(url) } }
+  })
+  const post = vi.spyOn(api, 'post').mockImplementation(async (url) => {
+    if (url === '/api/playground/sessions/pgs_restored/restore') {
+      return {
+        data: {
+          success: true,
+          data: {
+            ...remote,
+            id: 'pgs_restored',
+            title: 'Restored conversation',
+          },
+        },
+      }
+    }
+    // The workspace persists its own empty draft through the same endpoint.
+    return {
+      data: { success: true, data: { ...remote, created: true } },
+    }
+  })
+
+  mount()
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'New session' })).toBeEnabled()
+  )
+  await user.click(screen.getByRole('button', { name: 'Trash' }))
+  await user.click(
+    await screen.findByRole('button', {
+      name: 'Restore Restored conversation',
+    })
+  )
+
+  expect(
+    await screen.findByRole('button', { name: 'Restored conversation' })
+  ).toBeVisible()
+  expect(post).toHaveBeenCalledWith(
+    '/api/playground/sessions/pgs_restored/restore',
+    undefined,
+    expect.objectContaining({ signal: expect.anything() })
+  )
+})
+
 test('on mobile the conversation drawer opens by keyboard and exposes the active server session', async () => {
   const width = Object.getOwnPropertyDescriptor(window, 'innerWidth')
   Object.defineProperty(window, 'innerWidth', {

@@ -22,10 +22,13 @@ import { api } from '@/lib/api'
 
 import {
   applyPlaygroundMessagesDelta,
+  exportPlaygroundSession,
   getPlaygroundMessageCosts,
   getPlaygroundSessions,
+  getPlaygroundTrash,
   getPlaygroundMessages,
   replacePlaygroundMessages,
+  restorePlaygroundSession,
   sendChatCompletion,
   updatePlaygroundSession,
 } from '../api'
@@ -402,4 +405,102 @@ test('a non-streaming completion reports the relay request id header', async () 
   expect(post).toHaveBeenCalledTimes(1)
   expect(result.requestId).toBe('req-9')
   expect(result.response).toEqual({ id: 'chatcmpl-1', choices: [] })
+})
+
+test('a conversation export keeps the server filename, media type and body', async () => {
+  const get = vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        format: 'markdown',
+        filename: 'Saved chat.md',
+        content_type: 'text/markdown; charset=utf-8',
+        content: '# Saved chat\n',
+      },
+    },
+  })
+
+  const exported = await exportPlaygroundSession('pgs_one', 'markdown')
+
+  expect(get).toHaveBeenCalledTimes(1)
+  expect(get.mock.calls[0][0]).toBe('/api/playground/sessions/pgs_one/export')
+  expect(get.mock.calls[0][1]).toEqual({
+    params: { format: 'markdown' },
+    signal: undefined,
+  })
+  expect(exported).toEqual({
+    format: 'markdown',
+    filename: 'Saved chat.md',
+    contentType: 'text/markdown; charset=utf-8',
+    content: '# Saved chat\n',
+  })
+})
+
+test('the trash listing keeps the retention window and maps purge deadlines to milliseconds', async () => {
+  const get = vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        retention_days: 30,
+        items: [
+          {
+            kind: 'session',
+            id: 'pgs_one',
+            title: 'Saved chat',
+            deleted_at: 100,
+            purge_at: 200,
+          },
+          {
+            kind: 'canvas',
+            id: 'pgc_one',
+            title: 'Board',
+            deleted_at: 300,
+            purge_at: 400,
+          },
+        ],
+      },
+    },
+  })
+
+  const listing = await getPlaygroundTrash()
+
+  expect(get).toHaveBeenCalledTimes(1)
+  expect(get.mock.calls[0][0]).toBe('/api/playground/trash')
+  expect(listing).toEqual({
+    retentionDays: 30,
+    items: [
+      {
+        kind: 'session',
+        id: 'pgs_one',
+        title: 'Saved chat',
+        deletedAt: 100000,
+        purgeAt: 200000,
+      },
+      {
+        kind: 'canvas',
+        id: 'pgc_one',
+        title: 'Board',
+        deletedAt: 300000,
+        purgeAt: 400000,
+      },
+    ],
+  })
+})
+
+test('restoring a conversation posts to the restore route and maps the refreshed row', async () => {
+  const post = vi.spyOn(api, 'post').mockResolvedValue({
+    data: { success: true, data: wireSession },
+  })
+
+  const restored = await restorePlaygroundSession('pgs_one')
+
+  expect(post).toHaveBeenCalledTimes(1)
+  expect(post.mock.calls[0][0]).toBe('/api/playground/sessions/pgs_one/restore')
+  expect(restored).toMatchObject({
+    id: 'pgs_one',
+    createdAt: 10000,
+    updatedAt: 20000,
+    revision: 1,
+    messageRevision: 2,
+  })
 })

@@ -118,15 +118,17 @@ export function CanvasProjectList(props: CanvasProjectListProps) {
       </ScrollArea>
 
       <ConfirmDialog
-        confirmText={t('Delete')}
-        desc={t('This canvas and its nodes will be deleted from your account.')}
+        confirmText={t('Move to trash')}
+        desc={t(
+          'The canvas and its nodes move to the trash and can be restored until the retention period ends.'
+        )}
         destructive
         handleConfirm={handleDelete}
         onOpenChange={(open) => {
           if (!open) setProjectToDelete(null)
         }}
         open={projectToDelete !== null}
-        title={t('Delete canvas?')}
+        title={t('Move canvas to trash?')}
       />
     </div>
   )

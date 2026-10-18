@@ -92,10 +92,7 @@ test('previews the focused canvas and jumps to the full editor', async () => {
   vi.mocked(getCanvasProject).mockResolvedValue(secondProject)
 
   render(
-    <PlaygroundCanvasPanel
-      activeProjectId='c2'
-      onOpenProject={onOpenProject}
-    />
+    <PlaygroundCanvasPanel activeProjectId='c2' onOpenProject={onOpenProject} />
   )
 
   expect(await screen.findByText('Second preview')).toBeVisible()
@@ -112,18 +109,11 @@ test('switching the selected canvas reloads its preview', async () => {
     id === 'c1' ? firstProject : secondProject
   )
 
-  render(
-    <PlaygroundCanvasPanel
-      activeProjectId='c2'
-      onOpenProject={vi.fn()}
-    />
-  )
+  render(<PlaygroundCanvasPanel activeProjectId='c2' onOpenProject={vi.fn()} />)
 
   await screen.findByText('Second preview')
   await user.click(screen.getByRole('button', { name: /Board A/ }))
-  await waitFor(() =>
-    expect(screen.getByText('Hello node')).toBeVisible()
-  )
+  await waitFor(() => expect(screen.getByText('Hello node')).toBeVisible())
   expect(vi.mocked(getCanvasProject)).toHaveBeenLastCalledWith('c1')
 })
 
@@ -131,11 +121,37 @@ test('shows an empty state when the account has no canvases', async () => {
   vi.mocked(listCanvasProjects).mockResolvedValue([])
 
   render(
-    <PlaygroundCanvasPanel
-      activeProjectId={null}
-      onOpenProject={vi.fn()}
-    />
+    <PlaygroundCanvasPanel activeProjectId={null} onOpenProject={vi.fn()} />
   )
 
   expect(await screen.findByText('No canvas projects yet')).toBeVisible()
+})
+
+test('a refresh signal re-reads the list after a canvas leaves the trash', async () => {
+  vi.mocked(listCanvasProjects)
+    .mockResolvedValueOnce([first])
+    .mockResolvedValueOnce([first, second])
+  vi.mocked(getCanvasProject).mockResolvedValue(firstProject)
+
+  const { rerender } = render(
+    <PlaygroundCanvasPanel
+      activeProjectId={null}
+      onOpenProject={vi.fn()}
+      refreshSignal={0}
+    />
+  )
+
+  expect(await screen.findByRole('button', { name: /Board A/ })).toBeVisible()
+  expect(screen.queryByRole('button', { name: /Board B/ })).toBeNull()
+
+  rerender(
+    <PlaygroundCanvasPanel
+      activeProjectId={null}
+      onOpenProject={vi.fn()}
+      refreshSignal={1}
+    />
+  )
+
+  expect(await screen.findByRole('button', { name: /Board B/ })).toBeVisible()
+  expect(vi.mocked(listCanvasProjects)).toHaveBeenCalledTimes(2)
 })
