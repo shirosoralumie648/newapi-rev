@@ -29,6 +29,7 @@ export const CREDIT_GRANT_SOURCE_LABELS: Record<string, string> = {
   redeem: 'Redeem',
   promo: 'Promo',
   admin: 'Admin',
+  referral: 'Referral',
 }
 
 /**
@@ -41,6 +42,17 @@ export const CREDIT_GRANT_SOURCES = [
   'redeem',
   'promo',
   'admin',
+] as const
+
+/**
+ * The sources whose validity an administrator can override, in the same
+ * display order. Referral commissions are issued by the settlement sweep
+ * instead of an administrator, so the source is not offered when issuing a
+ * grant by hand, but its validity stays configurable like every other grant.
+ */
+export const CREDIT_GRANT_VALIDITY_SOURCES = [
+  ...CREDIT_GRANT_SOURCES,
+  'referral',
 ] as const
 
 /**

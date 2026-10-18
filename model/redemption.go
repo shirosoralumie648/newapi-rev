@@ -358,7 +358,7 @@ func Redeem(key string, userId int) (*RedeemResult, error) {
 			// 兑换码额度进入 redeem 桶，按配置的兑换码额度有效期生效。
 			source := operation_setting.CreditGrantSourceRedeem
 			expiresAt := operation_setting.GetCreditGrantSetting().ExpiryTimestampFor(source, common.GetTimestamp())
-			if _, err := IssueCreditGrantTx(tx, userId, source, redemption.Quota, expiresAt, WalletLedgerKindRedeem, WalletLedgerRefRedeem, strconv.Itoa(redemption.Id), ""); err != nil {
+			if _, _, err := IssueCreditGrantTx(tx, userId, source, redemption.Quota, expiresAt, WalletLedgerKindRedeem, WalletLedgerRefRedeem, strconv.Itoa(redemption.Id), ""); err != nil {
 				return err
 			}
 			// A redemption code commissions the inviter only when the

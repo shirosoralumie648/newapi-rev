@@ -262,22 +262,24 @@ func grantLedgerMeta(source string, expiresAt int64) string {
 // IssueCreditGrantTx credits amount to the wallet and records the matching
 // claim in one transaction. The ledger reference makes a replay a no-op, so a
 // retried sign-in, redemption or administrator action can never grant the same
-// credit twice.
-func IssueCreditGrantTx(tx *gorm.DB, userId int, source string, amount int, expiresAt int64, ledgerKind string, refType string, refId string, note string) (bool, error) {
+// credit twice. The created grant is returned for the caller's audit trail;
+// a replay reports (nil, false, nil).
+func IssueCreditGrantTx(tx *gorm.DB, userId int, source string, amount int, expiresAt int64, ledgerKind string, refType string, refId string, note string) (*CreditGrant, bool, error) {
 	if amount <= 0 {
-		return false, ErrCreditGrantAmountInvalid
+		return nil, false, ErrCreditGrantAmountInvalid
 	}
 	if !operation_setting.IsCreditGrantSource(source) {
-		return false, fmt.Errorf("%w: %s", ErrCreditGrantSourceInvalid, source)
+		return nil, false, fmt.Errorf("%w: %s", ErrCreditGrantSourceInvalid, source)
 	}
 	applied, err := ApplyWalletLedgerDelta(tx, userId, ledgerKind, int64(amount), refType, refId, grantLedgerMeta(source, expiresAt))
 	if err != nil || !applied {
-		return false, err
+		return nil, false, err
 	}
-	if _, err := createCreditGrantTx(tx, userId, source, int64(amount), expiresAt, note); err != nil {
-		return false, err
+	grant, err := createCreditGrantTx(tx, userId, source, int64(amount), expiresAt, note)
+	if err != nil {
+		return nil, false, err
 	}
-	return true, nil
+	return grant, true, nil
 }
 
 // IssueCreditGrant wraps IssueCreditGrantTx in its own transaction and keeps
@@ -287,7 +289,7 @@ func IssueCreditGrant(userId int, source string, amount int, expiresAt int64, le
 	applied := false
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var applyErr error
-		applied, applyErr = IssueCreditGrantTx(tx, userId, source, amount, expiresAt, ledgerKind, refType, refId, note)
+		_, applied, applyErr = IssueCreditGrantTx(tx, userId, source, amount, expiresAt, ledgerKind, refType, refId, note)
 		return applyErr
 	})
 	if err != nil {

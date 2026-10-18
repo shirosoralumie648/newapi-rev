@@ -47,21 +47,25 @@ func setupReferralCommissionTest(t *testing.T, db *gorm.DB) {
 	previousQuotaPerUnit := common.QuotaPerUnit
 	common.QuotaPerUnit = 500000
 	previous := *operation_setting.GetReferralSetting()
+	previousGrantSetting := *operation_setting.GetCreditGrantSetting()
 	restoreReferralCommissionTestSetting()
 	t.Cleanup(func() {
 		common.QuotaPerUnit = previousQuotaPerUnit
 		*operation_setting.GetReferralSetting() = previous
+		*operation_setting.GetCreditGrantSetting() = previousGrantSetting
 	})
 }
 
 // restoreReferralCommissionTestSetting returns the commission configuration to
 // the scenario baseline: engine on, 10 percent default rate, the default
-// trigger window, no group overrides and redemption codes excluded.
+// trigger window and lock window, no group overrides and redemption codes
+// excluded.
 func restoreReferralCommissionTestSetting() {
 	*operation_setting.GetReferralSetting() = operation_setting.ReferralSetting{
 		Enabled:               true,
 		CommissionRatePercent: 10,
 		WindowMonths:          operation_setting.ReferralWindowMonthsDefault,
+		LockWindowDays:        operation_setting.ReferralLockWindowDaysDefault,
 	}
 }
 
@@ -780,6 +784,26 @@ func TestReferralCommissionOptionValidation(t *testing.T) {
 	require.NoError(t, operation_setting.ValidateReferralOption("referral_setting.include_redemption_codes", "true"))
 	require.Error(t, operation_setting.ValidateReferralOption("referral_setting.include_redemption_codes", "yes"))
 
+	lockWindowCases := []struct {
+		value   string
+		wantErr bool
+	}{
+		{"14", false},
+		{"21", false},
+		{"30", false},
+		{"13", true},
+		{"31", true},
+		{"two weeks", true},
+	}
+	for _, tc := range lockWindowCases {
+		err := operation_setting.ValidateReferralOption("referral_setting.lock_window_days", tc.value)
+		if tc.wantErr {
+			assert.Error(t, err, "lock window %q must be rejected", tc.value)
+		} else {
+			assert.NoError(t, err, "lock window %q must be accepted", tc.value)
+		}
+	}
+
 	inviteLimitCases := []struct {
 		value   string
 		wantErr bool
@@ -846,6 +870,319 @@ func TestReferralCommissionOptionValidation(t *testing.T) {
 	assert.Error(t, operation_setting.ValidateReferralOption("referral_setting.cash_settlement_enabled", "true"), "enabling cash settlement requires the compliance terms")
 	payment.ComplianceConfirmed = previousConfirmed
 	assert.NoError(t, operation_setting.ValidateReferralOption("referral_setting.cash_settlement_enabled", "true"))
+}
+
+// A missing or out-of-range lock window resolves to the closest supported
+// bound, so a bad option can neither issue a commission before the refund
+// window nor lock it forever.
+func TestReferralCommissionLockWindowResolution(t *testing.T) {
+	setting := operation_setting.ReferralSetting{LockWindowDays: 0}
+	assert.Equal(t, operation_setting.ReferralLockWindowDaysMin, setting.EffectiveLockWindowDays())
+	setting.LockWindowDays = 13
+	assert.Equal(t, operation_setting.ReferralLockWindowDaysMin, setting.EffectiveLockWindowDays())
+	setting.LockWindowDays = 22
+	assert.Equal(t, 22, setting.EffectiveLockWindowDays())
+	setting.LockWindowDays = 31
+	assert.Equal(t, operation_setting.ReferralLockWindowDaysMax, setting.EffectiveLockWindowDays())
+}
+
+// loadReferralCommission reads one commission event by id.
+func loadReferralCommission(t *testing.T, id int) ReferralCommission {
+	t.Helper()
+	var commission ReferralCommission
+	require.NoError(t, DB.First(&commission, id).Error)
+	return commission
+}
+
+// A recorded commission waits out the refund window, is locked when it
+// elapsed, and is issued as a referral credit grant through the wallet ledger
+// exactly once.
+func TestReferralCommissionSettlement(t *testing.T) {
+	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
+		setupReferralCommissionTest(t, db)
+
+		t.Run("locks after the refund window and issues one credit grant", func(t *testing.T) {
+			restoreReferralCommissionTestSetting()
+			operation_setting.GetReferralSetting().LockWindowDays = 14
+			inviter := createReferralCommissionTestUser(t, db, "s-a-inviter", "default")
+			invitee := createReferralCommissionTestUser(t, db, "s-a-invitee", "default")
+			bindReferralCommissionTestInviter(t, invitee, inviter.Id)
+			completeReferralCommissionTestTopUp(t, "s-a-order", invitee.Id, 10)
+
+			commissions := loadReferralCommissionsByRef(t, WalletLedgerRefTopUp, "s-a-order")
+			require.Len(t, commissions, 1)
+			commissionId := commissions[0].Id
+			now := common.GetTimestamp()
+
+			// A fresh commission is inside the refund window: nothing is
+			// locked and no balance moves.
+			result, err := ProcessReferralCommissionSettlement(now, 0)
+			require.NoError(t, err)
+			assert.Zero(t, result.LockedCount)
+			assert.Zero(t, result.SettledCount)
+
+			// One second before the cutoff it is still refundable.
+			cutoff := now - 14*86400
+			require.NoError(t, DB.Model(&ReferralCommission{}).Where("id = ?", commissionId).Update("created_at", cutoff+1).Error)
+			locked, err := LockDueReferralCommissions(now, 0)
+			require.NoError(t, err)
+			assert.Zero(t, locked)
+
+			// At the cutoff the refund window elapsed and the commission is
+			// locked, still without moving money.
+			require.NoError(t, DB.Model(&ReferralCommission{}).Where("id = ?", commissionId).Update("created_at", cutoff).Error)
+			locked, err = LockDueReferralCommissions(now, 0)
+			require.NoError(t, err)
+			assert.Equal(t, 1, locked)
+			lockedCommission := loadReferralCommission(t, commissionId)
+			assert.Equal(t, ReferralCommissionStatusLocked, lockedCommission.Status)
+			assert.EqualValues(t, now, lockedCommission.LockedAt)
+			assert.Zero(t, lockedCommission.SettledAt)
+			var beforeSettlement User
+			require.NoError(t, DB.Select("id", "quota").First(&beforeSettlement, inviter.Id).Error)
+			assert.Equal(t, inviter.Quota, beforeSettlement.Quota)
+
+			result, err = SettleLockedReferralCommissions(now, 0)
+			require.NoError(t, err)
+			assert.Equal(t, 1, result.SettledCount)
+			assert.Zero(t, result.FailedCount)
+			assert.EqualValues(t, 500000, result.SettledQuota)
+			assert.EqualValues(t, 500000, result.CreditedQuota)
+			assert.Zero(t, result.CashQuota)
+
+			settled := loadReferralCommission(t, commissionId)
+			assert.Equal(t, ReferralCommissionStatusSettled, settled.Status)
+			assert.Equal(t, ReferralCommissionSettlementCredit, settled.SettlementMethod)
+			assert.EqualValues(t, now, settled.SettledAt)
+			require.NotZero(t, settled.GrantId)
+
+			// The grant carries the referral source, the shipped six month
+			// validity and the commission reference.
+			var grant CreditGrant
+			require.NoError(t, DB.First(&grant, settled.GrantId).Error)
+			assert.Equal(t, inviter.Id, grant.UserId)
+			assert.Equal(t, operation_setting.CreditGrantSourceReferral, grant.Source)
+			assert.EqualValues(t, 500000, grant.Amount)
+			assert.EqualValues(t, 500000, grant.Remaining)
+			assert.EqualValues(t, now+180*86400, grant.ExpiresAt)
+			assert.Contains(t, grant.Note, fmt.Sprintf("#%d", commissionId))
+
+			// The wallet was credited through one ledger row, so the ledger
+			// identity of the inviter still holds.
+			var entry WalletLedgerEntry
+			require.NoError(t, DB.Where("ref_type = ? AND ref_id = ?", WalletLedgerRefReferralCommission, fmt.Sprintf("%d", commissionId)).First(&entry).Error)
+			assert.Equal(t, WalletLedgerKindSystemGrant, entry.Kind)
+			assert.EqualValues(t, 500000, entry.Amount)
+			var credited User
+			require.NoError(t, DB.Select("id", "quota").First(&credited, inviter.Id).Error)
+			assert.Equal(t, inviter.Quota+500000, credited.Quota)
+			reconciliation, err := ReconcileWalletLedgerForUser(inviter.Id)
+			require.NoError(t, err)
+			assert.True(t, reconciliation.Reconciled)
+
+			// Replaying the settlement changes nothing.
+			replayed, err := SettleLockedReferralCommissions(now, 0)
+			require.NoError(t, err)
+			assert.Zero(t, replayed.ScannedCount)
+			var grants int64
+			require.NoError(t, DB.Model(&CreditGrant{}).Where("source = ?", operation_setting.CreditGrantSourceReferral).Count(&grants).Error)
+			assert.EqualValues(t, 1, grants, "one commission must issue exactly one grant")
+		})
+
+		t.Run("honors a never-expiring override of the referral source", func(t *testing.T) {
+			restoreReferralCommissionTestSetting()
+			operation_setting.GetReferralSetting().LockWindowDays = 14
+			grantSetting := operation_setting.GetCreditGrantSetting()
+			previousExpiry := grantSetting.SourceExpiryDays
+			grantSetting.SourceExpiryDays = map[string]int{operation_setting.CreditGrantSourceReferral: 0}
+			t.Cleanup(func() { grantSetting.SourceExpiryDays = previousExpiry })
+
+			inviter := createReferralCommissionTestUser(t, db, "s-d-inviter", "default")
+			invitee := createReferralCommissionTestUser(t, db, "s-d-invitee", "default")
+			bindReferralCommissionTestInviter(t, invitee, inviter.Id)
+			completeReferralCommissionTestTopUp(t, "s-d-order", invitee.Id, 10)
+
+			now := common.GetTimestamp()
+			require.NoError(t, DB.Model(&ReferralCommission{}).
+				Where("ref_type = ? AND ref_id = ?", WalletLedgerRefTopUp, "s-d-order").
+				Update("created_at", now-14*86400).Error)
+			result, err := ProcessReferralCommissionSettlement(now, 0)
+			require.NoError(t, err)
+			require.Equal(t, 1, result.SettledCount)
+
+			commissions := loadReferralCommissionsByRef(t, WalletLedgerRefTopUp, "s-d-order")
+			require.Len(t, commissions, 1)
+			settled := loadReferralCommission(t, commissions[0].Id)
+			var grant CreditGrant
+			require.NoError(t, DB.First(&grant, settled.GrantId).Error)
+			assert.Zero(t, grant.ExpiresAt, "a source override of 0 must never expire the commission")
+		})
+
+		t.Run("cash settlement records payable quota without crediting the wallet", func(t *testing.T) {
+			restoreReferralCommissionTestSetting()
+			setting := operation_setting.GetReferralSetting()
+			setting.LockWindowDays = 14
+			setting.CashSettlementEnabled = true
+			inviter := createReferralCommissionTestUser(t, db, "s-b-inviter", "default")
+			invitee := createReferralCommissionTestUser(t, db, "s-b-invitee", "default")
+			bindReferralCommissionTestInviter(t, invitee, inviter.Id)
+			completeReferralCommissionTestTopUp(t, "s-b-fallback", invitee.Id, 10)
+
+			// Withdrawing the confirmation falls back to the default path:
+			// the recorded commission is credited instead of paid as cash.
+			payment := operation_setting.GetPaymentSetting()
+			previousConfirmed := payment.ComplianceConfirmed
+			payment.ComplianceConfirmed = false
+			now := common.GetTimestamp()
+			require.NoError(t, DB.Model(&ReferralCommission{}).
+				Where("ref_type = ? AND ref_id = ?", WalletLedgerRefTopUp, "s-b-fallback").
+				Update("created_at", now-14*86400).Error)
+			result, err := ProcessReferralCommissionSettlement(now, 0)
+			require.NoError(t, err)
+			require.Equal(t, 1, result.SettledCount)
+			assert.EqualValues(t, 500000, result.CreditedQuota)
+			assert.Zero(t, result.CashQuota)
+			fallbackCommissions := loadReferralCommissionsByRef(t, WalletLedgerRefTopUp, "s-b-fallback")
+			require.Len(t, fallbackCommissions, 1)
+			fallback := loadReferralCommission(t, fallbackCommissions[0].Id)
+			assert.Equal(t, ReferralCommissionSettlementCredit, fallback.SettlementMethod)
+			payment.ComplianceConfirmed = previousConfirmed
+
+			// Confirmed compliance plus the cash switch records the payout
+			// form instead of moving a balance.
+			completeReferralCommissionTestTopUp(t, "s-b-cash", invitee.Id, 10)
+			require.NoError(t, DB.Model(&ReferralCommission{}).
+				Where("ref_type = ? AND ref_id = ?", WalletLedgerRefTopUp, "s-b-cash").
+				Update("created_at", now-14*86400).Error)
+			var creditedBefore User
+			require.NoError(t, DB.Select("id", "quota").First(&creditedBefore, inviter.Id).Error)
+
+			result, err = ProcessReferralCommissionSettlement(now, 0)
+			require.NoError(t, err)
+			require.Equal(t, 1, result.SettledCount)
+			assert.EqualValues(t, 500000, result.SettledQuota)
+			assert.Zero(t, result.CreditedQuota)
+			assert.EqualValues(t, 500000, result.CashQuota)
+
+			cashCommissions := loadReferralCommissionsByRef(t, WalletLedgerRefTopUp, "s-b-cash")
+			require.Len(t, cashCommissions, 1)
+			cash := loadReferralCommission(t, cashCommissions[0].Id)
+			assert.Equal(t, ReferralCommissionStatusSettled, cash.Status)
+			assert.Equal(t, ReferralCommissionSettlementCash, cash.SettlementMethod)
+			assert.Zero(t, cash.GrantId, "a cash payout creates no credit grant")
+			var creditedAfter User
+			require.NoError(t, DB.Select("id", "quota").First(&creditedAfter, inviter.Id).Error)
+			assert.Equal(t, creditedBefore.Quota, creditedAfter.Quota, "cash settlement must not move the wallet")
+			var entries int64
+			require.NoError(t, DB.Model(&WalletLedgerEntry{}).
+				Where("ref_type = ? AND ref_id = ?", WalletLedgerRefReferralCommission, fmt.Sprintf("%d", cash.Id)).
+				Count(&entries).Error)
+			assert.Zero(t, entries, "cash settlement writes no ledger movement")
+		})
+
+		t.Run("settles a commission recorded before the inviter was disabled", func(t *testing.T) {
+			restoreReferralCommissionTestSetting()
+			operation_setting.GetReferralSetting().LockWindowDays = 14
+			inviter := createReferralCommissionTestUser(t, db, "s-c-inviter", "default")
+			invitee := createReferralCommissionTestUser(t, db, "s-c-invitee", "default")
+			bindReferralCommissionTestInviter(t, invitee, inviter.Id)
+			completeReferralCommissionTestTopUp(t, "s-c-order", invitee.Id, 10)
+			require.NoError(t, DB.Model(&User{}).Where("id = ?", inviter.Id).Update("status", common.UserStatusDisabled).Error)
+
+			now := common.GetTimestamp()
+			require.NoError(t, DB.Model(&ReferralCommission{}).
+				Where("ref_type = ? AND ref_id = ?", WalletLedgerRefTopUp, "s-c-order").
+				Update("created_at", now-14*86400).Error)
+			result, err := ProcessReferralCommissionSettlement(now, 0)
+			require.NoError(t, err)
+			assert.Equal(t, 1, result.SettledCount)
+			assert.EqualValues(t, 500000, result.CreditedQuota)
+		})
+	})
+}
+
+// A database written before the settlement columns existed must gain them
+// without losing its recorded events, and the startup migration must be
+// repeatable.
+func TestReferralCommissionSettlementSchemaMigration(t *testing.T) {
+	previousSetting := *operation_setting.GetReferralSetting()
+	t.Cleanup(func() { *operation_setting.GetReferralSetting() = previousSetting })
+
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := accountingTestDB(t, dialect)
+			require.NoError(t, db.Migrator().DropTable(&ReferralCommission{}))
+			t.Cleanup(func() {
+				require.NoError(t, db.Migrator().DropTable(&ReferralCommission{}))
+			})
+			require.NoError(t, db.AutoMigrate(&referralCommissionLegacyRow{}))
+
+			legacy := referralCommissionLegacyRow{
+				InviterId:       501,
+				InviteeId:       502,
+				Source:          ReferralCommissionSourceTopUp,
+				RefType:         WalletLedgerRefTopUp,
+				RefId:           "legacy-order",
+				BaseQuota:       2500000,
+				RatePercent:     "10",
+				CommissionQuota: 250000,
+				Status:          ReferralCommissionStatusPending,
+				CreatedAt:       111,
+				UpdatedAt:       111,
+			}
+			require.NoError(t, db.Create(&legacy).Error)
+
+			require.NoError(t, migrateReferralCommissionSettlementColumns(db))
+			require.NoError(t, db.AutoMigrate(&ReferralCommission{}))
+			// A repeated startup migration and AutoMigrate change nothing.
+			require.NoError(t, migrateReferralCommissionSettlementColumns(db))
+			require.NoError(t, db.AutoMigrate(&ReferralCommission{}))
+
+			for _, column := range []string{"locked_at", "settled_at", "settlement_method", "grant_id"} {
+				assert.True(t, db.Migrator().HasColumn(&ReferralCommission{}, column), "column %s must exist after the migration", column)
+			}
+
+			stored := loadReferralCommission(t, legacy.Id)
+			assert.Equal(t, ReferralCommissionStatusPending, stored.Status)
+			assert.EqualValues(t, 250000, stored.CommissionQuota)
+			assert.Zero(t, stored.LockedAt)
+			assert.Zero(t, stored.SettledAt)
+			assert.Empty(t, stored.SettlementMethod)
+			assert.Zero(t, stored.GrantId)
+
+			// The upgraded row takes part in the settlement: its refund
+			// window elapsed, so the next lock pass claims it.
+			operation_setting.GetReferralSetting().LockWindowDays = 14
+			now := common.GetTimestamp()
+			require.NoError(t, db.Model(&ReferralCommission{}).Where("id = ?", legacy.Id).Update("created_at", now-14*86400).Error)
+			locked, err := LockDueReferralCommissions(now, 0)
+			require.NoError(t, err)
+			assert.Equal(t, 1, locked)
+			assert.Equal(t, ReferralCommissionStatusLocked, loadReferralCommission(t, legacy.Id).Status)
+		})
+	}
+}
+
+// referralCommissionLegacyRow mirrors the commission event table before the
+// settlement columns existed, so the migration test can build that shape on
+// every engine.
+type referralCommissionLegacyRow struct {
+	Id              int    `gorm:"primaryKey;autoIncrement"`
+	InviterId       int    `gorm:"not null;index"`
+	InviteeId       int    `gorm:"not null;index"`
+	Source          string `gorm:"type:varchar(16);not null"`
+	RefType         string `gorm:"type:varchar(32);not null;uniqueIndex:idx_referral_commission_ref,priority:1"`
+	RefId           string `gorm:"type:varchar(96);not null;uniqueIndex:idx_referral_commission_ref,priority:2"`
+	BaseQuota       int64  `gorm:"type:bigint;not null"`
+	RatePercent     string `gorm:"type:varchar(16);not null"`
+	CommissionQuota int64  `gorm:"type:bigint;not null"`
+	Status          string `gorm:"type:varchar(16);not null;index"`
+	CreatedAt       int64  `gorm:"bigint;not null;index"`
+	UpdatedAt       int64  `gorm:"bigint;not null"`
+}
+
+func (referralCommissionLegacyRow) TableName() string {
+	return "referral_commissions"
 }
 
 // The invitation statistics list every invitee of an inviter — those without
