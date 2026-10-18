@@ -37,9 +37,19 @@ import (
 func pdfFixture(t *testing.T, pages []string, encode func(stream string) (dictionaryEntries, storedBytes string)) []byte {
 	t.Helper()
 	streams := make([]string, len(pages))
-	entries := make([]string, len(pages))
 	for index, page := range pages {
-		entries[index], streams[index] = encode(fmt.Sprintf("BT /F1 12 Tf 72 720 Td (%s) Tj ET", page))
+		streams[index] = fmt.Sprintf("BT /F1 12 Tf 72 720 Td (%s) Tj ET", page)
+	}
+	return pdfDocument(t, streams, encode)
+}
+
+// pdfDocument assembles a PDF with one page per content stream. Each stream is
+// stored through encode so a test can exercise the filter it declares.
+func pdfDocument(t *testing.T, streams []string, encode func(stream string) (dictionaryEntries, storedBytes string)) []byte {
+	t.Helper()
+	entries := make([]string, len(streams))
+	for index, stream := range streams {
+		entries[index], streams[index] = encode(stream)
 	}
 	var body strings.Builder
 	body.WriteString("%PDF-1.7\n%\xe2\xe3\xcf\xd3\n")
@@ -64,14 +74,15 @@ func pdfFixture(t *testing.T, pages []string, encode func(stream string) (dictio
 	return []byte(body.String())
 }
 
-// pdfStreamFixture builds a one page PDF with an arbitrary content stream, so a
-// test can print the operators it wants to see read.
+// pdfStreamFixture builds a one page PDF whose content stream is exactly the
+// given bytes, so a test can print the operators it wants to see read.
 func pdfStreamFixture(t *testing.T, stream string) []byte {
 	t.Helper()
-	return pdfFixture(t, []string{stream}, func(stream string) (string, string) { return "", stream })
+	return pdfDocument(t, []string{stream}, func(stream string) (string, string) { return "", stream })
 }
 
-// pdfStreams builds a page per entry with one encoded content stream each.
+// pdfStreams builds a page per entry, each printing the entry as page text with
+// one unfiltered standard text-showing stream.
 func pdfStreams(t *testing.T, streams ...string) []byte {
 	t.Helper()
 	return pdfFixture(t, streams, func(stream string) (string, string) { return "", stream })
