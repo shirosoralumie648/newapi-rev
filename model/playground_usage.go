@@ -75,7 +75,7 @@ func PlaygroundUsageForUser(userID int) (*PlaygroundResourceUsage, error) {
 		},
 	}
 
-	counters, err := playgroundUserUsageCounters(userID)
+	counters, err := readPlaygroundUserUsage(userID)
 	if err != nil {
 		return nil, err
 	}

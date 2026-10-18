@@ -236,10 +236,10 @@ func playgroundUserUsageSnapshot(tx *gorm.DB, userID int) (PlaygroundUserUsage, 
 	return usage, nil
 }
 
-// playgroundUserUsageCounters reads the stored counters of one account. An
+// readPlaygroundUserUsage reads the stored counters of one account. An
 // account that never wrote since the counters were introduced is measured on
 // the fly; the read path never writes.
-func playgroundUserUsageCounters(userID int) (PlaygroundUserUsage, error) {
+func readPlaygroundUserUsage(userID int) (PlaygroundUserUsage, error) {
 	var usage PlaygroundUserUsage
 	err := DB.Where("user_id = ?", userID).First(&usage).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
