@@ -4489,7 +4489,7 @@ func TestPlaygroundStorageBillingSettlement(t *testing.T) {
 			require.Len(t, entries, 1)
 			assert.Equal(t, model.WalletLedgerKindStorageDaily, entries[0].Kind)
 			assert.EqualValues(t, -750_000, entries[0].Amount)
-			assert.Equal("7:"+yesterday, entries[0].RefId)
+			assert.Equal(t, "7:"+yesterday, entries[0].RefId)
 
 			// The settlement is visible as an ordinary consume log.
 			var logs []model.Log

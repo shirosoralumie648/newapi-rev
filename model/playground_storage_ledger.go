@@ -385,7 +385,7 @@ func settlePlaygroundStorageLedgerRow(row *PlaygroundStorageLedger, timestamp in
 	charge, egressQuota, clamp := playgroundStorageChargeQuota(row.PeakBytes, freeBytes, row.EgressBytes, group, billing)
 	result := &playgroundStorageSettlement{
 		BillableBytes: max(row.PeakBytes-freeBytes, 0),
-		EgressQuota:   egressQuota,
+		EgressQuota:   int64(egressQuota),
 		Group:         group,
 		Clamp:         clamp,
 		Charged:       charge > 0,
