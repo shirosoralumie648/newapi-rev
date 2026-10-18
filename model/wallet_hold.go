@@ -802,7 +802,7 @@ func writeWalletBudgetChild(parentRequestId string, requestId string, userId int
 		}
 		now := common.GetTimestamp()
 		if enforceCap {
-			allocated, err := walletBudgetAllocatedTx(tx, parent.Id, excludeId)
+			allocated, err := walletBudgetAllocatedTx(tx, parent.Id, excludeId, WalletHoldStatusActive)
 			if err != nil {
 				return err
 			}
@@ -850,15 +850,15 @@ func writeWalletBudgetChild(parentRequestId string, requestId string, userId int
 	return child, nil
 }
 
-// walletBudgetAllocatedTx sums the active allocations of one run budget, with
-// the child being replaced optionally excluded.
-func walletBudgetAllocatedTx(tx *gorm.DB, parentId int, excludeId int) (int64, error) {
+// walletBudgetAllocatedTx sums the allocations of one run budget in one state,
+// with the child being replaced optionally excluded.
+func walletBudgetAllocatedTx(tx *gorm.DB, parentId int, excludeId int, status string) (int64, error) {
 	var row struct {
 		Total int64
 	}
 	query := tx.Model(&WalletHold{}).
 		Select("COALESCE(SUM(amount), 0) AS total").
-		Where("parent_id = ? AND status = ?", parentId, WalletHoldStatusActive)
+		Where("parent_id = ? AND status = ?", parentId, status)
 	if excludeId > 0 {
 		query = query.Where("id <> ?", excludeId)
 	}
@@ -940,14 +940,19 @@ func SettleWalletBudgetRun(userId int, runId string) (*WalletBudgetSummary, erro
 	return summary, nil
 }
 
-// walletBudgetSpentTx sums the billed allocations of one run budget. A budget
-// that was refunded or expired returns zero: its whole reservation went back to
-// the wallet, so it bills nothing.
+// walletBudgetSpentTx sums the billed allocations of one run budget. An open
+// budget bills its active allocations; a settled budget bills the allocations
+// its settlement closed, so replaying the settlement reports the same summary.
+// A budget that was refunded or expired returns zero: its whole reservation went
+// back to the wallet, so it bills nothing.
 func walletBudgetSpentTx(tx *gorm.DB, parent *WalletHold) (int64, error) {
-	if parent.Status != WalletHoldStatusActive && parent.Status != WalletHoldStatusSettled {
+	billed := WalletHoldStatusActive
+	if parent.Status == WalletHoldStatusSettled {
+		billed = WalletHoldStatusSettled
+	} else if parent.Status != WalletHoldStatusActive {
 		return 0, nil
 	}
-	return walletBudgetAllocatedTx(tx, parent.Id, 0)
+	return walletBudgetAllocatedTx(tx, parent.Id, 0, billed)
 }
 
 // WalletHoldExpiryResult summarizes one recovery sweep.
