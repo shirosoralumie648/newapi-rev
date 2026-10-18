@@ -74,16 +74,25 @@ func writePlaygroundAttachmentError(c *gin.Context, err error) {
 		status, code, message = http.StatusUnprocessableEntity, "PLAYGROUND_ATTACHMENT_LIMIT_EXCEEDED", err.Error()
 	case errors.Is(err, model.ErrPlaygroundAttachmentInvalid):
 		status, code, message = http.StatusBadRequest, "PLAYGROUND_INVALID_REQUEST", err.Error()
+	case errors.Is(err, model.ErrPlaygroundUploadNotFound):
+		status, code, message = http.StatusNotFound, "PLAYGROUND_UPLOAD_NOT_FOUND", err.Error()
+	case errors.Is(err, model.ErrPlaygroundUploadIncomplete):
+		status, code, message = http.StatusUnprocessableEntity, "PLAYGROUND_UPLOAD_INCOMPLETE", err.Error()
+	case errors.Is(err, model.ErrPlaygroundUploadContentMismatch):
+		status, code, message = http.StatusBadRequest, "PLAYGROUND_UPLOAD_CONTENT_MISMATCH", err.Error()
 	}
 	common.ApiErrorStatus(c, status, common.NewMessage(message), gin.H{"code": code})
 }
 
-func decodePlaygroundAttachmentRequest(c *gin.Context, target any) bool {
+// decodePlaygroundJsonRequest reads one bounded JSON request body. maxBytes
+// caps the body, so a request that carries a payload (the classic base64
+// upload) and a request that only carries metadata can share the reader.
+func decodePlaygroundJsonRequest(c *gin.Context, maxBytes int64, target any) bool {
 	if c.GetInt("id") <= 0 {
 		common.ApiErrorStatus(c, http.StatusUnauthorized, common.NewMessage("Authentication required."))
 		return false
 	}
-	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, playgroundAttachmentRequestMaxBytes))
+	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes))
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
@@ -112,7 +121,7 @@ func playgroundDecodeAttachment(attachment *model.PlaygroundAttachment, clientKe
 // payload for either attachment partition (a conversation or a canvas).
 func decodePlaygroundAttachmentUpload(c *gin.Context) (model.PlaygroundAttachmentInput, bool) {
 	var request playgroundAttachmentRequest
-	if !decodePlaygroundAttachmentRequest(c, &request) {
+	if !decodePlaygroundJsonRequest(c, playgroundAttachmentRequestMaxBytes, &request) {
 		return model.PlaygroundAttachmentInput{}, false
 	}
 	data, err := base64.StdEncoding.DecodeString(request.Data)

@@ -21,6 +21,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { ReactFlowProvider } from '@xyflow/react'
 import { expect, test, vi } from 'vitest'
 
+import { useAttachmentPreviewUrl } from '@/features/playground/hooks/use-attachment-preview-url'
 import { getTaskArtifacts } from '@/features/usage-logs/api'
 
 import type { CanvasNodeData } from '../../types'
@@ -28,6 +29,10 @@ import { CanvasFlowNodeView, CanvasGroupNodeView } from '../canvas-node'
 
 vi.mock('@/features/usage-logs/api', () => ({
   getTaskArtifacts: vi.fn(),
+}))
+
+vi.mock('@/features/playground/hooks/use-attachment-preview-url', () => ({
+  useAttachmentPreviewUrl: vi.fn(),
 }))
 
 function nodeProps(data: CanvasNodeData) {
@@ -178,6 +183,59 @@ test('shows the empty state of a media node without a task reference', () => {
   expect(screen.getByText('Empty node')).toBeInTheDocument()
   expect(container.querySelector('video')).toBeNull()
   expect(getTaskArtifacts).not.toHaveBeenCalled()
+})
+
+test('renders an uploaded video attachment with the video player', () => {
+  vi.mocked(useAttachmentPreviewUrl).mockReturnValue('blob:attachment')
+
+  const { container } = renderNode({
+    kind: 'attachment',
+    label: 'clip.mp4',
+    mediaType: 'video/mp4',
+    ref: { sessionId: 'pgc_1', attachmentId: 'pgf_video' },
+  })
+
+  expect(container.querySelector('video')).toHaveAttribute(
+    'src',
+    'blob:attachment'
+  )
+  expect(container.querySelector('img')).toBeNull()
+  expect(screen.getByText('clip.mp4')).toBeInTheDocument()
+  expect(getTaskArtifacts).not.toHaveBeenCalled()
+})
+
+test('renders an uploaded PDF attachment as a file card with an open link', () => {
+  vi.mocked(useAttachmentPreviewUrl).mockReturnValue('blob:attachment')
+
+  const { container } = renderNode({
+    kind: 'attachment',
+    label: 'notes.pdf',
+    mediaType: 'application/pdf',
+    ref: { sessionId: 'pgc_1', attachmentId: 'pgf_pdf' },
+  })
+
+  expect(screen.getByRole('link', { name: 'Open file' })).toHaveAttribute(
+    'href',
+    'blob:attachment'
+  )
+  expect(container.querySelector('img')).toBeNull()
+  expect(container.querySelector('video')).toBeNull()
+  expect(container.querySelector('audio')).toBeNull()
+})
+
+test('keeps rendering an image attachment without a stored media type', () => {
+  vi.mocked(useAttachmentPreviewUrl).mockReturnValue('blob:attachment')
+
+  const { container } = renderNode({
+    kind: 'attachment',
+    label: 'old.png',
+    ref: { sessionId: 'pgc_1', attachmentId: 'pgf_old' },
+  })
+
+  expect(container.querySelector('img')).toHaveAttribute(
+    'src',
+    'blob:attachment'
+  )
 })
 
 test('reports an unavailable media artifact instead of a broken player', async () => {

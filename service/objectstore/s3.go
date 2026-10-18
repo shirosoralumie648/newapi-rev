@@ -20,6 +20,9 @@ import (
 const s3Backend = system_setting.ObjectStoreBackendS3
 
 var _ Store = (*S3)(nil)
+var _ ContentTypePutter = (*S3)(nil)
+var _ PresignPutter = (*S3)(nil)
+var _ MultipartAborter = (*S3)(nil)
 
 // S3 stores objects in an S3-compatible bucket (AWS S3, Cloudflare R2, MinIO,
 // Backblaze B2, or an Alibaba OSS compatible endpoint). Keys stay below the
@@ -173,6 +176,15 @@ func (s *S3) Delete(ctx context.Context, key string) error {
 }
 
 func (s *S3) PresignPut(ctx context.Context, key string, ttl time.Duration) (string, error) {
+	return s.PresignPutWithContentType(ctx, key, "", ttl)
+}
+
+// PresignPutWithContentType signs one direct upload for the declared media
+// type. The content type is part of the signed request when the backend
+// supports it, and the object is stored with it either way; the caller
+// re-verifies the leading bytes after the upload, so the signature never has to
+// be trusted on its own.
+func (s *S3) PresignPutWithContentType(ctx context.Context, key, contentType string, ttl time.Duration) (string, error) {
 	objectKey, err := storageKey(s.prefix, key)
 	if err != nil {
 		return "", err
@@ -181,16 +193,58 @@ func (s *S3) PresignPut(ctx context.Context, key string, ttl time.Duration) (str
 	if err != nil {
 		return "", err
 	}
-	request, err := s.presigner.PresignPutObject(ctx, &awss3.PutObjectInput{
+	input := &awss3.PutObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(objectKey),
-	}, func(options *awss3.PresignOptions) {
+	}
+	if contentType != "" {
+		input.ContentType = aws.String(contentType)
+	}
+	request, err := s.presigner.PresignPutObject(ctx, input, func(options *awss3.PresignOptions) {
 		options.Expires = resolvedTTL
 	})
 	if err != nil {
 		return "", fmt.Errorf("object store: presign put %s: %w", key, err)
 	}
 	return request.URL, nil
+}
+
+// AbortMultipartUploads releases every in-progress multipart upload that
+// targets key, so the parts of an interrupted direct upload do not outlive
+// their reservation. Backends without multipart support do not implement this
+// capability; a bucket that denies the listing answers with an error the caller
+// logs and ignores.
+func (s *S3) AbortMultipartUploads(ctx context.Context, key string) error {
+	objectKey, err := storageKey(s.prefix, key)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	paginator := awss3.NewListMultipartUploadsPaginator(s.client, &awss3.ListMultipartUploadsInput{
+		Bucket: aws.String(s.bucket),
+		Prefix: aws.String(objectKey),
+	})
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return fmt.Errorf("object store: list multipart uploads %s: %w", key, err)
+		}
+		for _, upload := range page.Uploads {
+			if aws.ToString(upload.Key) != objectKey || upload.UploadId == nil {
+				continue
+			}
+			if _, err := s.client.AbortMultipartUpload(ctx, &awss3.AbortMultipartUploadInput{
+				Bucket:   aws.String(s.bucket),
+				Key:      aws.String(objectKey),
+				UploadId: upload.UploadId,
+			}); err != nil && !s3IsNotFound(err) {
+				return fmt.Errorf("object store: abort multipart upload %s: %w", key, err)
+			}
+		}
+	}
+	return nil
 }
 
 func (s *S3) PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error) {
@@ -228,7 +282,7 @@ func s3IsNotFound(err error) bool {
 		return false
 	}
 	switch apiError.ErrorCode() {
-	case "NoSuchKey", "NotFound":
+	case "NoSuchKey", "NotFound", "NoSuchUpload":
 		return true
 	default:
 		return false

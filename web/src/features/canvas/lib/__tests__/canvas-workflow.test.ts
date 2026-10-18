@@ -241,6 +241,11 @@ test('offers only directly connected nodes as mentions', () => {
     label: 'photo.png',
     ref: { sessionId: 'pgs_1', attachmentId: 'att_1' },
   })
+  const pdf = flowNode('a3', 'attachment', {
+    label: 'notes.pdf',
+    mediaType: 'application/pdf',
+    ref: { sessionId: 'pgs_1', attachmentId: 'att_3' },
+  })
   const result = flowNode('r1', 'task-result', {
     label: 'clip',
     ref: { taskId: 'task-1', taskArtifactKey: 'out-1' },
@@ -252,10 +257,11 @@ test('offers only directly connected nodes as mentions', () => {
   })
   const unrelated = flowNode('p2', 'prompt', { text: 'not connected' })
   const step = modelNode('m1', 'gpt-4o')
-  const nodes = [prompt, attachment, result, deleted, unrelated, step]
+  const nodes = [prompt, attachment, pdf, result, deleted, unrelated, step]
   const edges = [
     flowEdge('p1', 'm1'),
     flowEdge('a1', 'm1'),
+    flowEdge('a3', 'm1'),
     flowEdge('r1', 'm1'),
     flowEdge('a2', 'm1'),
     flowEdge('a2', 'm1'),
@@ -265,6 +271,7 @@ test('offers only directly connected nodes as mentions', () => {
   expect(mentions.map((mention) => mention.nodeId)).toEqual([
     'p1',
     'a1',
+    'a3',
     'r1',
     'a2',
   ])
@@ -278,9 +285,11 @@ test('offers only directly connected nodes as mentions', () => {
     hasText: false,
     hasImage: true,
   })
-  expect(mentions[2]).toMatchObject({ hasImage: true })
+  // A PDF attachment is a valid mention but not a source of image bytes.
+  expect(mentions[2]).toMatchObject({ hasImage: false })
+  expect(mentions[3]).toMatchObject({ hasImage: true })
   // A node the read path already flagged as deleted is not offered as input.
-  expect(mentions[3]).toMatchObject({ hasImage: false })
+  expect(mentions[4]).toMatchObject({ hasImage: false })
 })
 
 test('resolves the mention query at the caret only', () => {
@@ -380,16 +389,21 @@ test('collects reference images from connected resources', () => {
     sourceDeleted: true,
     ref: { sessionId: 'pgs_1', attachmentId: 'att_3' },
   })
+  const pdf = flowNode('a3', 'attachment', {
+    mediaType: 'application/pdf',
+    ref: { sessionId: 'pgs_1', attachmentId: 'att_4' },
+  })
   const step = flowNode('t1', 'task', {
     workflow: { model: 'gpt-image-1', generation: 'image' },
   })
-  const nodes = [attachment, image, result, keyed, deleted, step]
+  const nodes = [attachment, image, result, keyed, deleted, pdf, step]
   const edges = [
     flowEdge('a1', 't1'),
     flowEdge('i1', 't1'),
     flowEdge('r1', 't1'),
     flowEdge('r2', 't1'),
     flowEdge('a2', 't1'),
+    flowEdge('a3', 't1'),
     flowEdge('a1', 't1'),
   ]
 

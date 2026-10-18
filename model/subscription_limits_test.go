@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
@@ -8,10 +9,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // seedSubscriptionLimitFixture creates one user, one plan, and one active
-// subscription for the plan-limit and quota-window tests.
+// subscription for the plan-limit and quota-window tests. One test may give the
+// same user several plans, so an existing account is reused.
 func seedSubscriptionLimitFixture(t *testing.T, db *gorm.DB, userId int, planId int, subId int, plan SubscriptionPlan, amountUsed int64) {
 	t.Helper()
 	now := GetDBTimestamp()
@@ -23,7 +26,13 @@ func seedSubscriptionLimitFixture(t *testing.T, db *gorm.DB, userId int, planId 
 	if plan.DurationValue == 0 {
 		plan.DurationValue = 1
 	}
-	require.NoError(t, db.Create(&User{Id: userId, Username: fmt.Sprintf("sub-limit-%d", userId), AffCode: fmt.Sprintf("sub-limit-%d", userId), Status: common.UserStatusEnabled}).Error)
+	var existing User
+	err := db.Where("id = ?", userId).First(&existing).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		require.NoError(t, db.Create(&User{Id: userId, Username: fmt.Sprintf("sub-limit-%d", userId), AffCode: fmt.Sprintf("sub-limit-%d", userId), Status: common.UserStatusEnabled}).Error)
+	} else {
+		require.NoError(t, err)
+	}
 	require.NoError(t, db.Create(&plan).Error)
 	require.NoError(t, db.Create(&UserSubscription{
 		Id: subId, UserId: userId, PlanId: planId, AmountTotal: plan.TotalAmount, AmountUsed: amountUsed,
@@ -31,10 +40,15 @@ func seedSubscriptionLimitFixture(t *testing.T, db *gorm.DB, userId int, planId 
 	}).Error)
 }
 
+// assertSubscriptionWindowUsage reads one window usage row. The window column
+// name is reserved on MySQL and PostgreSQL, so it is compared through a quoted
+// identifier instead of raw SQL.
 func assertSubscriptionWindowUsage(t *testing.T, db *gorm.DB, subId int, window string, want int64) {
 	t.Helper()
 	var row SubscriptionWindowUsage
-	require.NoError(t, db.Where("subscription_id = ? AND window = ?", subId, window).First(&row).Error)
+	require.NoError(t, db.Where("subscription_id = ?", subId).
+		Where(clause.Eq{Column: clause.Column{Name: "window"}, Value: window}).
+		First(&row).Error)
 	assert.EqualValues(t, want, row.Used)
 }
 
@@ -126,7 +140,9 @@ func TestSubscriptionLimitsWindowRollsOverAtBoundary(t *testing.T) {
 		require.NoError(t, err)
 		assertSubscriptionWindowUsage(t, db, 9301, SubscriptionWindowHour, 100)
 		var row SubscriptionWindowUsage
-		require.NoError(t, db.Where("subscription_id = ? AND window = ?", 9301, SubscriptionWindowHour).First(&row).Error)
+		require.NoError(t, db.Where("subscription_id = ?", 9301).
+			Where(clause.Eq{Column: clause.Column{Name: "window"}, Value: SubscriptionWindowHour}).
+			First(&row).Error)
 		assert.GreaterOrEqual(t, row.WindowStart, start, "the stale window must move to the current boundary")
 	})
 }
