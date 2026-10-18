@@ -4346,7 +4346,7 @@ func TestPlaygroundTrashLifecycle(t *testing.T) {
 			assert.Zero(t, rows)
 			require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("session_id = ?", id).Count(&rows).Error)
 			assert.Zero(t, rows)
-			assert.Equal(t, []int64{0, 0, 0, 0, 0, 0, 0, 0, 0}, playgroundUsageCounterValues(playgroundUsageCounters(t, db, 7)))
+			assert.Equal(t, []int64{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, playgroundUsageCounterValues(playgroundUsageCounters(t, db, 7)))
 			assert.Empty(t, playgroundTrashListingFixture(t, 7).Items)
 			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+id+"/export?format=json", nil, controller.ExportPlaygroundSession).Code)
 			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions/"+id+"/restore", nil, controller.RestorePlaygroundSession).Code)
