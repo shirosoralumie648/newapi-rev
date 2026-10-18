@@ -58,6 +58,8 @@ import type {
   WaffoPayMethod,
 } from './types'
 
+export { ReferralProgram } from './referral-program'
+
 interface WalletProps {
   initialShowHistory?: boolean
 }

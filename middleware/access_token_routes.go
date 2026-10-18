@@ -166,6 +166,7 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/user/self/wallet/ledger/export":      accessTokenScopeRule("wallet:read"),
 	"GET /api/user/self/wallet/grants":             accessTokenScopeRule("wallet:read"),
 	"GET /api/user/self/referrals":                 accessTokenScopeRule("wallet:read"),
+	"GET /api/user/self/referral-agent":            accessTokenScopeRule("wallet:read"),
 	"GET /api/user/oauth/bindings":                 accessTokenScopeRule("account_security:read"),
 	"DELETE /api/user/oauth/bindings/:provider_id": accessTokenScopeRule("account_security:write"),
 
@@ -180,6 +181,9 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"POST /api/user/:id/inviter":                       accessTokenScopeRule("user:write"),
 	"GET /api/user/referral/reviews":                   accessTokenScopeRule("user:read"),
 	"POST /api/user/referral/reviews/:id":              accessTokenScopeRule("user:write"),
+	"GET /api/user/referral/agents":                    accessTokenScopeRule("user:read"),
+	"PUT /api/user/:id/referral-agent":                 accessTokenScopeRule("user:write"),
+	"DELETE /api/user/:id/referral-agent":              accessTokenScopeRule("user:write"),
 	"GET /api/user/:id/referral-profile":               accessTokenScopeRule("user:read"),
 	"POST /api/user/:id/referral-flag":                 accessTokenScopeRule("user:write"),
 	"POST /api/user/:id/referral-identity":             accessTokenScopeRule("user:write"),
