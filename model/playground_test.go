@@ -471,7 +471,7 @@ func TestPlaygroundParallelCompareGroups(t *testing.T) {
 			}{
 				{"parallel group on a user message", group(true, "user", []any{version("v1", "model-one", ""), version("v2", "model-two", "")})},
 				{"single-version comparison", group(true, "assistant", []any{version("v1", "model-one", "")})},
-				{"version without a model", group(true, "assistant", []any{version("v1", "model-one", ""), {"id": "v2", "content": "Reply"}})},
+				{"version without a model", group(true, "assistant", []any{version("v1", "model-one", ""), map[string]any{"id": "v2", "content": "Reply"}})},
 				{"unknown version status", group(true, "assistant", []any{version("v1", "model-one", "running"), version("v2", "model-two", "")})},
 				{"oversized model name", group(true, "assistant", []any{version("v1", strings.Repeat("m", 513), ""), version("v2", "model-two", "")})},
 				{"oversized version error code", group(true, "assistant", []any{
