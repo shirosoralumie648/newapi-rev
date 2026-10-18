@@ -1,9 +1,11 @@
 package openai
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -220,6 +222,108 @@ func OaiChatToResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		}
 	}
 
+	return usage, nil
+}
+
+// OaiChatToResponsesBufferedStreamHandler converts a Chat Completions SSE
+// stream into a single Responses object for a non-streaming client that
+// reached a channel which streams regardless of the stream flag.
+func OaiChatToResponsesBufferedStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
+	if resp == nil || resp.Body == nil {
+		return nil, types.NewOpenAIError(fmt.Errorf("invalid response"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+	}
+	defer service.CloseResponseBodyGracefully(resp)
+
+	info.StreamStatus = relaycommon.NewStreamStatus()
+	info.StreamStatus.RequireTerminal()
+
+	state, err := relayconvert.NewResponseStreamState(types.RelayFormatOpenAI, types.RelayFormatOpenAIResponses, relayconvert.ResponseStreamOptions{
+		ID:                 helper.GetResponseID(c),
+		Model:              info.UpstreamModelName,
+		EmitSequenceNumber: true,
+	})
+	if err != nil {
+		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+	}
+
+	var streamErr *types.NewAPIError
+
+	scanner := helper.NewStreamScanner(resp.Body)
+	scanner.Split(bufio.ScanLines)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if len(line) < 6 || line[:5] != "data:" {
+			continue
+		}
+		data := strings.TrimSpace(line[5:])
+		if data == "" {
+			continue
+		}
+		if data == "[DONE]" {
+			break
+		}
+
+		var errorResp dto.OpenAITextResponse
+		if err := common.UnmarshalJsonStr(data, &errorResp); err == nil {
+			if oaiError := errorResp.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
+				streamErr = types.WithOpenAIError(*oaiError, resp.StatusCode)
+				break
+			}
+		}
+
+		var chunk dto.ChatCompletionsStreamResponse
+		if err := common.UnmarshalJsonStr(data, &chunk); err != nil {
+			logger.LogError(c, common.LogText("failed to unmarshal buffered chat stream response: %s", err.Error()))
+			streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+			break
+		}
+		info.ObserveResponseModel(chunk.Model)
+
+		if _, err := service.ConvertStreamResponseChunk(c, info, state, &chunk); err != nil {
+			streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+			break
+		}
+	}
+	if streamErr != nil {
+		return nil, streamErr
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+	}
+
+	usage := state.Usage()
+	if usage == nil || usage.TotalTokens == 0 {
+		usage = service.ResponseText2Usage(c, state.UsageText(), info.UpstreamModelName, info.GetEstimatePromptTokens())
+		state.SetUsage(usage)
+	}
+
+	finalResults, err := service.FinalizeStreamResponse(c, info, state)
+	if err != nil {
+		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+	}
+	var finalResponse *dto.OpenAIResponsesResponse
+	for _, result := range finalResults {
+		event, ok := result.Value.(relayconvert.ChatToResponsesStreamEvent)
+		if !ok {
+			return nil, types.NewOpenAIError(fmt.Errorf("expected OAI responses stream event, got %T", result.Value), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+		}
+		switch event.Type {
+		case "response.completed", "response.done", "response.incomplete":
+			if event.Payload.Response != nil {
+				finalResponse = event.Payload.Response
+			}
+		}
+	}
+	if finalResponse == nil {
+		return nil, types.NewOpenAIError(fmt.Errorf("upstream stream ended without a final response"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+	}
+
+	responseBody, err := common.Marshal(finalResponse)
+	if err != nil {
+		return nil, types.NewOpenAIError(err, types.ErrorCodeJsonMarshalFailed, http.StatusInternalServerError)
+	}
+
+	service.IOCopyBytesGracefully(c, resp, responseBody)
 	return usage, nil
 }
 
