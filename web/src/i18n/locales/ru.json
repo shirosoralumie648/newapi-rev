@@ -5527,6 +5527,8 @@
     "Reference Video": "Эталонное видео",
     "Referral": "Реферальная комиссия",
     "Referral commission is disabled; recorded amounts remain listed.": "Комиссия за приглашения отключена; записанные суммы остаются в списке.",
+    "Referral commission reclaimed because the order payment was reversed: {{quota}}, debt added: {{debt}}": "Платёж по заказу отменён, комиссия за приглашения взыскана: {{quota}}, добавленный долг: {{debt}}",
+    "Referral commission revoked because the order payment was reversed: {{quota}}": "Платёж по заказу отменён, комиссия за приглашения отозвана: {{quota}}",
     "Referral flag updated": "Метка реферала обновлена",
     "Referral identity cleared": "Идентификация реферала очищена",
     "Referral identity updated": "Идентификация реферала обновлена",

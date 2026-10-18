@@ -42,7 +42,9 @@ const referralInvitationExportPageSize = 1000
 
 // referralInvitationStatsFields is the shared payable commission aggregate of
 // one listed invitation: quota amounts, the binding channel and the trigger
-// window are read-only. The user-facing list exposes exactly these states.
+// window are read-only. The user-facing list exposes exactly these states,
+// the reversed terminal state included, because a revoked commission is part
+// of the inviter's own commission history.
 type referralInvitationStatsFields struct {
 	Source           string `json:"source"`
 	BoundAt          int64  `json:"bound_at"`
@@ -50,6 +52,7 @@ type referralInvitationStatsFields struct {
 	PendingQuota     int64  `json:"pending_quota"`
 	LockedQuota      int64  `json:"locked_quota"`
 	SettledQuota     int64  `json:"settled_quota"`
+	RefundedQuota    int64  `json:"refunded_quota"`
 	TotalPaidQuota   int64  `json:"total_paid_quota"`
 	CommissionCount  int64  `json:"commission_count"`
 }
@@ -136,6 +139,7 @@ func GetSelfReferralInvitations(c *gin.Context) {
 				PendingQuota:     invitations[i].PendingQuota,
 				LockedQuota:      invitations[i].LockedQuota,
 				SettledQuota:     invitations[i].SettledQuota,
+				RefundedQuota:    invitations[i].RefundedQuota,
 				TotalPaidQuota:   invitations[i].TotalPaidQuota,
 				CommissionCount:  invitations[i].CommissionCount,
 			},
@@ -193,6 +197,7 @@ func GetReferralInvitations(c *gin.Context) {
 					PendingQuota:     invitations[i].PendingQuota,
 					LockedQuota:      invitations[i].LockedQuota,
 					SettledQuota:     invitations[i].SettledQuota,
+					RefundedQuota:    invitations[i].RefundedQuota,
 					TotalPaidQuota:   invitations[i].TotalPaidQuota,
 					CommissionCount:  invitations[i].CommissionCount,
 				},
@@ -235,7 +240,7 @@ func ExportReferralInvitations(c *gin.Context) {
 		"invitee_id", "username", "email", "display_name", "inviter_id", "inviter_username",
 		"source", "bound_at", "commission_ends_at",
 		"pending_quota", "locked_quota", "settled_quota",
-		"review_quota", "blocked_quota", "rejected_quota",
+		"review_quota", "blocked_quota", "rejected_quota", "refunded_quota",
 		"total_paid_quota", "commission_count",
 	})
 	for written := 0; written < referralInvitationExportMaxRows; {
@@ -267,6 +272,7 @@ func ExportReferralInvitations(c *gin.Context) {
 				strconv.FormatInt(invitation.ReviewQuota, 10),
 				strconv.FormatInt(invitation.BlockedQuota, 10),
 				strconv.FormatInt(invitation.RejectedQuota, 10),
+				strconv.FormatInt(invitation.RefundedQuota, 10),
 				strconv.FormatInt(invitation.TotalPaidQuota, 10),
 				strconv.FormatInt(invitation.CommissionCount, 10),
 			})

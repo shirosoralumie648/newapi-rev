@@ -35,6 +35,7 @@ function makeInvitation(id: number, identifier: string, pendingQuota: number) {
     pending_quota: pendingQuota,
     locked_quota: 0,
     settled_quota: 0,
+    refunded_quota: 0,
     total_paid_quota: 0,
     commission_count: pendingQuota > 0 ? 1 : 0,
   }

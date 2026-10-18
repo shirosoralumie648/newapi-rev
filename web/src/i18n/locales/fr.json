@@ -5527,6 +5527,8 @@
     "Reference Video": "Vidéo de référence",
     "Referral": "Parrainage",
     "Referral commission is disabled; recorded amounts remain listed.": "La commission de parrainage est désactivée ; les montants enregistrés restent affichés.",
+    "Referral commission reclaimed because the order payment was reversed: {{quota}}, debt added: {{debt}}": "Paiement de commande annulé, commission de parrainage récupérée : {{quota}}, dette ajoutée : {{debt}}",
+    "Referral commission revoked because the order payment was reversed: {{quota}}": "Paiement de commande annulé, commission de parrainage révoquée : {{quota}}",
     "Referral flag updated": "Marquage de parrainage mis à jour",
     "Referral identity cleared": "Identité de parrainage effacée",
     "Referral identity updated": "Identité de parrainage mise à jour",

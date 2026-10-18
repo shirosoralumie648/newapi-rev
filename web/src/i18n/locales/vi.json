@@ -5527,6 +5527,8 @@
     "Reference Video": "Video tham chiếu",
     "Referral": "Hoa hồng giới thiệu",
     "Referral commission is disabled; recorded amounts remain listed.": "Hoa hồng giới thiệu đã tắt; các khoản đã ghi vẫn được hiển thị.",
+    "Referral commission reclaimed because the order payment was reversed: {{quota}}, debt added: {{debt}}": "Thanh toán đơn hàng đã bị đảo ngược, hoa hồng giới thiệu đã được thu hồi: {{quota}}, nợ tăng thêm: {{debt}}",
+    "Referral commission revoked because the order payment was reversed: {{quota}}": "Thanh toán đơn hàng đã bị đảo ngược, hoa hồng giới thiệu đã bị vô hiệu hóa: {{quota}}",
     "Referral flag updated": "Đã cập nhật đánh dấu giới thiệu",
     "Referral identity cleared": "Đã xóa danh tính giới thiệu",
     "Referral identity updated": "Đã cập nhật danh tính giới thiệu",

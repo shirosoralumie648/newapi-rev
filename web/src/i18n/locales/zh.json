@@ -5527,6 +5527,8 @@
     "Reference Video": "参照生视频",
     "Referral": "邀请返佣",
     "Referral commission is disabled; recorded amounts remain listed.": "返佣已关闭；已记录的金额仍会列出。",
+    "Referral commission reclaimed because the order payment was reversed: {{quota}}, debt added: {{debt}}": "订单支付已冲正，返佣已收回：{{quota}}，新增欠款：{{debt}}",
+    "Referral commission revoked because the order payment was reversed: {{quota}}": "订单支付已冲正，返佣已撤销：{{quota}}",
     "Referral flag updated": "推荐标记已更新",
     "Referral identity cleared": "推荐身份已清除",
     "Referral identity updated": "推荐身份已更新",

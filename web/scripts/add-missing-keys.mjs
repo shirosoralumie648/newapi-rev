@@ -8,13 +8,48 @@ function stableStringify(obj) {
 }
 
 const newKeys = {
-  en: { 'RF-06 probe': 'RF-06 probe' },
-  zh: { 'RF-06 probe': 'RF-06 探测' },
-  'zh-TW': { 'RF-06 probe': 'RF-06 探測' },
-  fr: { 'RF-06 probe': 'Sonde RF-06' },
-  ja: { 'RF-06 probe': 'RF-06 プローブ' },
-  ru: { 'RF-06 probe': 'Зонд RF-06' },
-  vi: { 'RF-06 probe': 'Thăm dò RF-06' },
+  en: {
+    'Referral commission revoked because the order payment was reversed: {{quota}}':
+      'Referral commission revoked because the order payment was reversed: {{quota}}',
+    'Referral commission reclaimed because the order payment was reversed: {{quota}}, debt added: {{debt}}':
+      'Referral commission reclaimed because the order payment was reversed: {{quota}}, debt added: {{debt}}',
+  },
+  zh: {
+    'Referral commission revoked because the order payment was reversed: {{quota}}':
+      '订单支付已冲正，返佣已撤销：{{quota}}',
+    'Referral commission reclaimed because the order payment was reversed: {{quota}}, debt added: {{debt}}':
+      '订单支付已冲正，返佣已收回：{{quota}}，新增欠款：{{debt}}',
+  },
+  'zh-TW': {
+    'Referral commission revoked because the order payment was reversed: {{quota}}':
+      '訂單付款已沖正，返佣已撤銷：{{quota}}',
+    'Referral commission reclaimed because the order payment was reversed: {{quota}}, debt added: {{debt}}':
+      '訂單付款已沖正，返佣已收回：{{quota}}，新增欠款：{{debt}}',
+  },
+  fr: {
+    'Referral commission revoked because the order payment was reversed: {{quota}}':
+      'Paiement de commande annulé, commission de parrainage révoquée : {{quota}}',
+    'Referral commission reclaimed because the order payment was reversed: {{quota}}, debt added: {{debt}}':
+      'Paiement de commande annulé, commission de parrainage récupérée : {{quota}}, dette ajoutée : {{debt}}',
+  },
+  ja: {
+    'Referral commission revoked because the order payment was reversed: {{quota}}':
+      '注文の支払いが取り消されたため、紹介コミッションが無効になりました：{{quota}}',
+    'Referral commission reclaimed because the order payment was reversed: {{quota}}, debt added: {{debt}}':
+      '注文の支払いが取り消されたため、紹介コミッションを回収しました：{{quota}}、追加された債務：{{debt}}',
+  },
+  ru: {
+    'Referral commission revoked because the order payment was reversed: {{quota}}':
+      'Платёж по заказу отменён, комиссия за приглашения отозвана: {{quota}}',
+    'Referral commission reclaimed because the order payment was reversed: {{quota}}, debt added: {{debt}}':
+      'Платёж по заказу отменён, комиссия за приглашения взыскана: {{quota}}, добавленный долг: {{debt}}',
+  },
+  vi: {
+    'Referral commission revoked because the order payment was reversed: {{quota}}':
+      'Thanh toán đơn hàng đã bị đảo ngược, hoa hồng giới thiệu đã bị vô hiệu hóa: {{quota}}',
+    'Referral commission reclaimed because the order payment was reversed: {{quota}}, debt added: {{debt}}':
+      'Thanh toán đơn hàng đã bị đảo ngược, hoa hồng giới thiệu đã được thu hồi: {{quota}}, nợ tăng thêm: {{debt}}',
+  },
 }
 
 async function main() {
