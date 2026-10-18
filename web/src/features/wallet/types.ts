@@ -483,3 +483,68 @@ export interface ReferralInvitationFilters {
   source?: string
   status?: string
 }
+
+// ============================================================================
+// Referral Agent Types (RF-08)
+// ============================================================================
+
+/** One optional agent tier: stable identifier, display name and commission percent. */
+export interface ReferralAgentTier {
+  id: string
+  name: string
+  rate_percent: number
+}
+
+/**
+ * The administrator's mark on one account. `rate_percent` null inherits the
+ * tier, the group override or the global default; the mark only scales the
+ * account's own commission and never introduces uplines or downlines.
+ */
+export interface ReferralAgent {
+  id: number
+  user_id: number
+  tier_id: string
+  rate_percent: number | null
+  note: string
+  marked_by: number
+  created_at: number
+  updated_at: number
+}
+
+/** The caller's own agent profile (read-only). */
+export interface ReferralAgentProfile {
+  marked: boolean
+  tier_id: string
+  tier_name: string
+  rate_percent: number
+  rate_source: string
+  enabled: boolean
+  summary: ReferralStatsSummary
+}
+
+/** One marked account as listed to administrators. */
+export interface ReferralAgentItem extends ReferralAgent {
+  username: string
+  display_name: string
+  group: string
+  tier_name: string
+  effective_rate_percent: number
+  rate_source: string
+}
+
+/** One page of marked agent accounts with the configured tier catalogue. */
+export type ReferralAgentPage = {
+  items: ReferralAgentItem[]
+  total: number
+  tiers: ReferralAgentTier[]
+}
+
+/**
+ * Replace-semantics mark request: a non-empty `tier_id` must be configured, a
+ * `rate_percent` must be between 0 and 100 and omitted fields clear them.
+ */
+export interface ReferralAgentUpdateRequest {
+  tier_id?: string
+  rate_percent?: number
+  note?: string
+}

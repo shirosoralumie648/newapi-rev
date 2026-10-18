@@ -488,6 +488,7 @@ func migrateDB() error {
 		&ReferralRegistrationSignal{},
 		&ReferralIdentity{},
 		&ReferralFlag{},
+		&ReferralAgent{},
 	)
 	if err != nil {
 		return err

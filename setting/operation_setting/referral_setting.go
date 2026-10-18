@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/config"
@@ -46,6 +47,36 @@ const (
 // rate. 100 percent means the inviter earns the full paid amount.
 const ReferralCommissionRateMaxPercent = 100
 
+// Referral commission rate sources, in resolution order: a single-account
+// override wins over the account's agent tier, the tier wins over the group
+// override and the group override wins over the global default. The source is
+// recorded on every commission event for the audit trail.
+const (
+	ReferralRateSourceUser    = "user"
+	ReferralRateSourceTier    = "tier"
+	ReferralRateSourceGroup   = "group"
+	ReferralRateSourceDefault = "default"
+)
+
+// Bounds of the optional agent program (RF-08): an administrator marks
+// accounts as 推荐官/代理 and attaches one configured tier. The program is
+// strictly single level — a tier only scales the account's own commission and
+// never introduces uplines, downlines or team compensation.
+const (
+	ReferralAgentTierMaxCount     = 50
+	ReferralAgentTierIdMaxLength  = 40
+	ReferralAgentTierNameMaxRunes = 40
+)
+
+// ReferralAgentTier is one optional agent tier: a stable identifier
+// administrators attach to marked accounts, a display name and the commission
+// rate the tier grants.
+type ReferralAgentTier struct {
+	Id          string  `json:"id"`
+	Name        string  `json:"name"`
+	RatePercent float64 `json:"rate_percent"`
+}
+
 // ReferralInviteLimitMax bounds the configurable per-signal invitation limits
 // (RF-06), so an accidental extra digit cannot silently disable the bound.
 const ReferralInviteLimitMax = 100
@@ -64,8 +95,13 @@ type ReferralSetting struct {
 	CommissionRatePercent float64 `json:"commission_rate_percent"`
 	// GroupRateOverrides replaces CommissionRatePercent for one inviter group
 	// (the stable group identifier); a missing group inherits the default. The
-	// per-account override is a later step (RF-08).
+	// per-account override is recorded per account (RF-08).
 	GroupRateOverrides map[string]float64 `json:"group_rate_overrides"`
+	// AgentTiers lists the optional administrator-defined tiers of the agent
+	// program (RF-08); the list is empty by default, so the program stays off
+	// until it is configured. A marked account inherits its tier's rate unless
+	// the account carries its own override.
+	AgentTiers []ReferralAgentTier `json:"agent_tiers"`
 	// WindowMonths bounds which paid orders commission: 0 rewards only the
 	// first order, a positive value the first WindowMonths months after
 	// registration, and -1 every order forever.
@@ -131,6 +167,42 @@ func (s *ReferralSetting) CommissionRatePercentFor(group string) float64 {
 		rate = override
 	}
 	return clampReferralCommissionRate(rate)
+}
+
+// ResolveCommissionRatePercent resolves the effective commission rate of one
+// inviter from the recorded account context. The resolution order is
+// single-account override → agent tier → group override → global default; an
+// unknown or deleted tier falls through to the group configuration, so
+// removing a tier never orphans a marked agent. The second return value names
+// the winning source and is recorded on the commission event.
+func (s *ReferralSetting) ResolveCommissionRatePercent(group string, tierId string, accountOverride *float64) (float64, string) {
+	if s == nil {
+		return 0, ReferralRateSourceDefault
+	}
+	if accountOverride != nil {
+		return clampReferralCommissionRate(*accountOverride), ReferralRateSourceUser
+	}
+	if tier, ok := s.AgentTier(tierId); ok {
+		return clampReferralCommissionRate(tier.RatePercent), ReferralRateSourceTier
+	}
+	if override, ok := s.GroupRateOverrides[group]; ok && group != "" {
+		return clampReferralCommissionRate(override), ReferralRateSourceGroup
+	}
+	return clampReferralCommissionRate(s.CommissionRatePercent), ReferralRateSourceDefault
+}
+
+// AgentTier returns the configured agent tier by identifier; the empty
+// identifier and an unknown tier both report false.
+func (s *ReferralSetting) AgentTier(tierId string) (ReferralAgentTier, bool) {
+	if s == nil || tierId == "" {
+		return ReferralAgentTier{}, false
+	}
+	for _, tier := range s.AgentTiers {
+		if tier.Id == tierId {
+			return tier, true
+		}
+	}
+	return ReferralAgentTier{}, false
 }
 
 // clampReferralCommissionRate rejects a non-finite or negative rate and caps
@@ -223,6 +295,8 @@ func ValidateReferralOption(key, value string) error {
 		return validateReferralCommissionRate(key, value)
 	case "referral_setting.group_rate_overrides":
 		return validateReferralGroupRateOverrides(value)
+	case "referral_setting.agent_tiers":
+		return validateReferralAgentTiers(value)
 	case "referral_setting.window_months":
 		return validateReferralWindowMonths(value)
 	case "referral_setting.include_redemption_codes":
@@ -294,6 +368,41 @@ func validateReferralGroupRateOverrides(value string) error {
 		if math.IsNaN(rate) || math.IsInf(rate, 0) || rate < 0 || rate > ReferralCommissionRateMaxPercent {
 			return fmt.Errorf("referral commission rate of group %s must be a number between 0 and %d", group, ReferralCommissionRateMaxPercent)
 		}
+	}
+	return nil
+}
+
+// validateReferralAgentTiers accepts a JSON array of agent tiers, rejecting
+// duplicate or oversized identifiers, empty or oversized names and
+// out-of-range rates so a broken tier list can never be persisted.
+func validateReferralAgentTiers(value string) error {
+	if value == "" {
+		return nil
+	}
+	tiers := []ReferralAgentTier{}
+	if err := common.UnmarshalJsonStr(value, &tiers); err != nil {
+		return fmt.Errorf("referral_setting.agent_tiers must be a JSON array of agent tiers")
+	}
+	if len(tiers) > ReferralAgentTierMaxCount {
+		return fmt.Errorf("referral_setting.agent_tiers must not contain more than %d tiers", ReferralAgentTierMaxCount)
+	}
+	seen := make(map[string]struct{}, len(tiers))
+	for _, tier := range tiers {
+		id := strings.TrimSpace(tier.Id)
+		name := strings.TrimSpace(tier.Name)
+		if id == "" || len(id) > ReferralAgentTierIdMaxLength {
+			return fmt.Errorf("referral agent tier id must be 1-%d characters", ReferralAgentTierIdMaxLength)
+		}
+		if name == "" || len([]rune(name)) > ReferralAgentTierNameMaxRunes {
+			return fmt.Errorf("referral agent tier name of %s must be 1-%d characters", id, ReferralAgentTierNameMaxRunes)
+		}
+		if math.IsNaN(tier.RatePercent) || math.IsInf(tier.RatePercent, 0) || tier.RatePercent < 0 || tier.RatePercent > ReferralCommissionRateMaxPercent {
+			return fmt.Errorf("referral commission rate of agent tier %s must be a number between 0 and %d", id, ReferralCommissionRateMaxPercent)
+		}
+		if _, ok := seen[id]; ok {
+			return fmt.Errorf("referral agent tier id %s is duplicated", id)
+		}
+		seen[id] = struct{}{}
 	}
 	return nil
 }
