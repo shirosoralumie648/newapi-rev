@@ -19,6 +19,7 @@ import (
 const localBackend = system_setting.ObjectStoreBackendLocal
 
 var _ Store = (*Local)(nil)
+var _ ObjectLister = (*Local)(nil)
 
 // Local stores objects below a single directory. os.Root resolves every
 // operation relative to that directory and rejects symlinks that escape it.
@@ -202,6 +203,61 @@ func (s *Local) Delete(ctx context.Context, key string) error {
 		return localObjectError(key, err)
 	}
 	return nil
+}
+
+// List walks the stored objects below one logical key prefix in lexical order
+// and reports each one through fn. The prefix is optional: an empty prefix
+// lists the whole configured store. Only regular files below the configured
+// directory are reported, and keys are returned in their logical form, without
+// the backend prefix.
+func (s *Local) List(ctx context.Context, prefix string, fn func(ObjectInfo) error) error {
+	if fn == nil {
+		return errors.New("object store: list callback is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	walkRoot := "."
+	logicalPrefix := ""
+	if prefix != "" {
+		objectPrefix, err := storageKey(s.prefix, prefix)
+		if err != nil {
+			return err
+		}
+		walkRoot, logicalPrefix = objectPrefix, prefix+"/"
+	}
+	err := fs.WalkDir(s.root.FS(), walkRoot, func(name string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if entry.IsDir() || !entry.Type().IsRegular() {
+			return nil
+		}
+		logical := name
+		if logicalPrefix != "" {
+			logical = logicalPrefix + strings.TrimPrefix(name, walkRoot+"/")
+		} else if s.prefix != "" {
+			logical = strings.TrimPrefix(name, s.prefix+"/")
+		}
+		info, err := entry.Info()
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				// The object vanished between the directory read and the
+				// stat; it is not stored anymore.
+				return nil
+			}
+			return err
+		}
+		return fn(ObjectInfo{Key: logical, Size: info.Size(), ModTime: info.ModTime()})
+	})
+	if errors.Is(err, fs.ErrNotExist) {
+		// Nothing was ever stored below the prefix.
+		return nil
+	}
+	return err
 }
 
 func (s *Local) PresignPut(ctx context.Context, key string, ttl time.Duration) (string, error) {

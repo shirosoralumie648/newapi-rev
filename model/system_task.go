@@ -41,6 +41,12 @@ const (
 	// SystemTaskTypePlaygroundTrashCleanup purges the trashed conversations and
 	// canvases whose recovery window elapsed, releasing their budgets.
 	SystemTaskTypePlaygroundTrashCleanup = "playground_trash_cleanup"
+	// SystemTaskTypePlaygroundObjectOutbox retries deleting stored objects
+	// whose owning database row is already gone.
+	SystemTaskTypePlaygroundObjectOutbox = "playground_object_outbox"
+	// SystemTaskTypePlaygroundObjectReconcile lists the stored objects below
+	// the Playground key space and removes the ones no database row owns.
+	SystemTaskTypePlaygroundObjectReconcile = "playground_object_reconcile"
 	// SystemTaskTypeWalletReconcile compares every wallet balance with the sum
 	// of its append-only ledger and alerts on deviation without changing balances.
 	SystemTaskTypeWalletReconcile = "wallet_reconcile"

@@ -327,12 +327,15 @@ func ListExpiredPlaygroundTaskArtifacts(expiredBefore int64, batchSize int) ([]P
 // DeletePlaygroundTaskArtifact removes one expired, unpinned artifact row
 // after its object was deleted. The state, expiry, and pin guards are re-read
 // inside the transaction, so a pin created after the expiry listing wins and
-// the row (and its object) survives.
+// the row (and its object) survives. The object key is queued in the same
+// transaction that removes the row, so a crash between the two leaves a
+// replayable deletion instead of a leak.
 func DeletePlaygroundTaskArtifact(recordID int64) (bool, error) {
 	if recordID <= 0 {
 		return false, nil
 	}
 	deleted := false
+	var queued []playgroundQueuedObjectDelete
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var record PlaygroundTaskArtifact
 		err := tx.Where("id = ?", recordID).First(&record).Error
@@ -359,9 +362,17 @@ func DeletePlaygroundTaskArtifact(recordID int64) (bool, error) {
 			return result.Error
 		}
 		deleted = result.RowsAffected == 1
-		return nil
+		if !deleted {
+			return nil
+		}
+		queued, err = enqueuePlaygroundObjectDeletes(tx, []playgroundStoredObject{{ObjectKey: record.ObjectKey}}, playgroundObjectOriginTaskResult)
+		return err
 	})
-	return deleted, err
+	if err != nil {
+		return false, err
+	}
+	drainPlaygroundObjectDeletes(nil, queued)
+	return deleted, nil
 }
 
 func playgroundTaskArtifactPinKey(userID int, taskID, artifactKey string) string {
