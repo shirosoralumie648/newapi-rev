@@ -181,7 +181,7 @@ test('reads the platform totals by source for administrators only', async () => 
   renderCard()
 
   expect(await screen.findByText('Wallet totals')).toBeVisible()
-  expect(screen.getByText(formatQuota(5_000))).toBeVisible()
+  expect(await screen.findByText(formatQuota(5_000))).toBeVisible()
   expect(screen.getByText(formatQuota(2_000))).toBeVisible()
   expect(screen.getByText(formatQuota(3_000))).toBeVisible()
   expect(get).toHaveBeenCalledWith('/api/user/wallet/grants/stats')

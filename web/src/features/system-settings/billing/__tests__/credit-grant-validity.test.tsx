@@ -30,10 +30,14 @@ import { CreditGrantValiditySection } from '../credit-grant-validity-section'
 type OptionBody = { key: string; value: string | number }
 
 function bodyFor(key: string): OptionBody | undefined {
-  return vi
+  const bodies = vi
     .mocked(api.put)
     .mock.calls.map((call) => call[1] as OptionBody)
-    .find((body) => body.key === key)
+  // A key may be saved repeatedly; assertions care about the latest request.
+  for (let index = bodies.length - 1; index >= 0; index -= 1) {
+    if (bodies[index].key === key) return bodies[index]
+  }
+  return undefined
 }
 
 type SectionProps = {
