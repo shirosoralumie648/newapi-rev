@@ -99,7 +99,9 @@ export function usePlaygroundComposerMemory(
       saveComposerDraft(userIdRef.current, previousSessionId, textRef.current)
     }
     navigationIndexRef.current = null
-    const drafts = draftsRef.current ?? loadComposerDrafts(userIdRef.current)
+    // Re-read the drafts after the flush above so a conversation the user
+    // returns to restores the draft that was saved while switching away.
+    const drafts = loadComposerDrafts(userIdRef.current)
     draftsRef.current = drafts
     const draft = nextSessionId ? (drafts.get(nextSessionId) ?? '') : ''
     textRef.current = draft
