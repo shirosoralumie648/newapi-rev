@@ -3382,6 +3382,7 @@
     "Image count {{count}}": "Количество изображений {{count}}",
     "Image Generation": "Генерация изображений",
     "Image generation failed": "Не удалось создать изображение",
+    "Image generation submitted as a task; the result appears in the task list.": "Создание изображения отправлено как задача; результат появится в списке задач.",
     "Image In": "Вход изображения",
     "Image input": "Ввод изображения",
     "Image input price": "Цена входного изображения",

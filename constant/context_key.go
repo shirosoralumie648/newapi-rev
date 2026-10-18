@@ -94,4 +94,10 @@ const (
 	// marker. It only scopes Playground lifecycle policies (result storage
 	// budget, expiry cleanup, cancellation) and never touches billing.
 	ContextKeyPlaygroundOrigin ContextKey = "playground_origin"
+
+	// ContextKeyImageTaskAsync marks an image generation request that runs as
+	// a durable task instead of waiting for the images inside the request. The
+	// submission answers with the task id, the task keeps the protocol request
+	// that renders its result, and the polling endpoint serves that result.
+	ContextKeyImageTaskAsync ContextKey = "image_task_async"
 )

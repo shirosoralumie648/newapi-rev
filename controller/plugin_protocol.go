@@ -42,9 +42,10 @@ type pluginProtocolBridgeDeps struct {
 	admissionTimeout   time.Duration
 	getByTaskId        func(int, string) (*model.Task, bool, error)
 	resolvePlugin      func(constant.TaskPlatform) (*pluginruntime.LoadedPlugin, *pluginruntime.RoutingGeneration, bool)
-	// imagePollInterval, pollTask and downloadImage serve the synchronous
-	// OpenAI Images protocol: an asynchronous upstream image task is polled
-	// inside the request, and b64_json responses download each image URL.
+	// imagePollInterval, pollTask and downloadImage serve the OpenAI Images
+	// protocol: an asynchronous upstream image task is polled while a client
+	// waits inside the request, the polling endpoint refreshes one task on
+	// demand, and b64_json responses download each image URL.
 	imagePollInterval time.Duration
 	pollTask          func(context.Context, *model.Task) error
 	downloadImage     func(url string) (mimeType string, base64Data string, err error)

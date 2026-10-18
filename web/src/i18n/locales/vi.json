@@ -3382,6 +3382,7 @@
     "Image count {{count}}": "Số lượng ảnh {{count}}",
     "Image Generation": "Tạo hình ảnh",
     "Image generation failed": "Tạo hình ảnh thất bại",
+    "Image generation submitted as a task; the result appears in the task list.": "Tạo hình ảnh đã được gửi dưới dạng tác vụ; kết quả sẽ xuất hiện trong danh sách tác vụ.",
     "Image In": "Ảnh vào",
     "Image input": "Đầu vào hình ảnh",
     "Image input price": "Giá đầu vào hình ảnh",

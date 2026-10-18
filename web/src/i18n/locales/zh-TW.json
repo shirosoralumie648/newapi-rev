@@ -3382,6 +3382,7 @@
     "Image count {{count}}": "生成數量 {{count}}",
     "Image Generation": "圖片生成",
     "Image generation failed": "圖片產生失敗",
+    "Image generation submitted as a task; the result appears in the task list.": "圖片生成已作為任務提交，結果將顯示在任務清單中。",
     "Image In": "圖像輸入",
     "Image input": "圖片輸入",
     "Image input price": "圖像輸入價格",
