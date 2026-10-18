@@ -35,6 +35,9 @@ const (
 	// SystemTaskTypePlaygroundUsageReconcile remeasures the Playground resource
 	// counters of every account and repairs the rows that drifted.
 	SystemTaskTypePlaygroundUsageReconcile = "playground_usage_reconcile"
+	// SystemTaskTypePlaygroundTrashCleanup purges the trashed conversations and
+	// canvases whose recovery window elapsed, releasing their budgets.
+	SystemTaskTypePlaygroundTrashCleanup = "playground_trash_cleanup"
 	// SystemTaskTypeWalletReconcile compares every wallet balance with the sum
 	// of its append-only ledger and alerts on deviation without changing balances.
 	SystemTaskTypeWalletReconcile = "wallet_reconcile"
