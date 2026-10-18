@@ -65,7 +65,9 @@ func TestMain(m *testing.M) {
 		&model.PlaygroundTaskArtifactSync{},
 		&model.WalletLedgerEntry{},
 		&model.WalletHold{},
+		&model.WalletHoldGrant{},
 		&model.WalletDebt{},
+		&model.CreditGrant{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
