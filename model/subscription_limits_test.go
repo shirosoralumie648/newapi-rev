@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
@@ -12,7 +13,8 @@ import (
 )
 
 // seedSubscriptionLimitFixture creates one user, one plan, and one active
-// subscription for the plan-limit and quota-window tests.
+// subscription for the plan-limit and quota-window tests. One test may give the
+// same user several plans, so an existing account is reused.
 func seedSubscriptionLimitFixture(t *testing.T, db *gorm.DB, userId int, planId int, subId int, plan SubscriptionPlan, amountUsed int64) {
 	t.Helper()
 	now := GetDBTimestamp()
@@ -24,7 +26,13 @@ func seedSubscriptionLimitFixture(t *testing.T, db *gorm.DB, userId int, planId 
 	if plan.DurationValue == 0 {
 		plan.DurationValue = 1
 	}
-	require.NoError(t, db.Create(&User{Id: userId, Username: fmt.Sprintf("sub-limit-%d", userId), AffCode: fmt.Sprintf("sub-limit-%d", userId), Status: common.UserStatusEnabled}).Error)
+	var existing User
+	err := db.Where("id = ?", userId).First(&existing).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		require.NoError(t, db.Create(&User{Id: userId, Username: fmt.Sprintf("sub-limit-%d", userId), AffCode: fmt.Sprintf("sub-limit-%d", userId), Status: common.UserStatusEnabled}).Error)
+	} else {
+		require.NoError(t, err)
+	}
 	require.NoError(t, db.Create(&plan).Error)
 	require.NoError(t, db.Create(&UserSubscription{
 		Id: subId, UserId: userId, PlanId: planId, AmountTotal: plan.TotalAmount, AmountUsed: amountUsed,
