@@ -189,16 +189,20 @@ func (s *S3) List(ctx context.Context, prefix string, fn func(ObjectInfo) error)
 	if fn == nil {
 		return errors.New("object store: list callback is required")
 	}
-	objectPrefix := ""
+	// The backend lists below the configured prefix plus the requested logical
+	// prefix, while the callback always receives the logical key: only the
+	// configured prefix is trimmed off again, never part of the logical key.
 	logicalPrefix := ""
+	if s.prefix != "" {
+		logicalPrefix = s.prefix + "/"
+	}
+	objectPrefix := logicalPrefix
 	if prefix != "" {
 		objectKey, err := storageKey(s.prefix, prefix)
 		if err != nil {
 			return err
 		}
-		objectPrefix, logicalPrefix = objectKey+"/", prefix+"/"
-	} else if s.prefix != "" {
-		objectPrefix, logicalPrefix = s.prefix+"/", s.prefix+"/"
+		objectPrefix = objectKey + "/"
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -215,15 +219,17 @@ func (s *S3) List(ctx context.Context, prefix string, fn func(ObjectInfo) error)
 		}
 		for _, object := range page.Contents {
 			storageName := aws.ToString(object.Key)
-			logical := storageName
-			if logicalPrefix != "" {
-				trimmed := strings.TrimPrefix(storageName, logicalPrefix)
-				if trimmed == storageName {
-					continue
-				}
-				logical = trimmed
+			// A listing must never surface an object the caller could not
+			// address itself, so anything outside the requested prefix is
+			// skipped even when the backend ignores it.
+			if objectPrefix != "" && !strings.HasPrefix(storageName, objectPrefix) {
+				continue
 			}
-			if err := fn(ObjectInfo{Key: logical, Size: aws.ToInt64(object.Size), ModTime: aws.ToTime(object.LastModified)}); err != nil {
+			if err := fn(ObjectInfo{
+				Key:     strings.TrimPrefix(storageName, logicalPrefix),
+				Size:    aws.ToInt64(object.Size),
+				ModTime: aws.ToTime(object.LastModified),
+			}); err != nil {
 				return err
 			}
 		}
