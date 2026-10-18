@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type { AuthBundle } from '@/stores/auth-store'
 
+import type { ReferralSource } from './lib/referral-attribution'
 import type { LoginResult } from './secure-verification/types'
 
 // ============================================================================
@@ -42,6 +43,7 @@ export interface RegisterPayload {
   email?: string
   verification_code?: string
   aff_code?: string
+  referral_source?: ReferralSource
   turnstile?: string
 }
 
