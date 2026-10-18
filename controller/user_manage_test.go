@@ -69,7 +69,7 @@ func setupManageUserTestDB(t *testing.T) *gorm.DB {
 			}
 		}
 	})
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.CasbinRule{}, &model.AuthzRole{}, &model.AuthFlow{}, &model.TwoFA{}, &model.PasskeyCredential{}, &model.UserAccessToken{}, &model.WalletLedgerEntry{}, &model.CreditGrant{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.CasbinRule{}, &model.AuthzRole{}, &model.AuthFlow{}, &model.TwoFA{}, &model.PasskeyCredential{}, &model.UserAccessToken{}, &model.WalletLedgerEntry{}, &model.CreditGrant{}, &model.ReferralBinding{}))
 	require.NoError(t, logDB.AutoMigrate(&model.Log{}, &model.AuditLog{}))
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -723,4 +723,86 @@ func TestUpdateUserSettingKeepsWhatTheRequestLeavesOut(t *testing.T) {
 			assert.Equal(t, tc.want, user.GetSetting())
 		})
 	}
+}
+
+// TestBindUserInviterAdminContract pins the administrator binding endpoint:
+// relation errors surface as translatable messages, the success response
+// carries the recorded binding, an existing attribution is never replaced, and
+// only the successful call is audited with the target context.
+func TestBindUserInviterAdminContract(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	createQuotaTestOperator(t, db, common.RoleRootUser)
+	invitee := model.User{Username: "bind-invitee", Password: "password", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "bind-invitee-aff"}
+	require.NoError(t, db.Create(&invitee).Error)
+	inviter := model.User{Username: "bind-inviter", Password: "password", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "bind-inviter-aff"}
+	require.NoError(t, db.Create(&inviter).Error)
+	disabled := model.User{Username: "bind-disabled", Password: "password", Role: common.RoleCommonUser, Status: common.UserStatusDisabled, AffCode: "bind-disabled-aff"}
+	require.NoError(t, db.Create(&disabled).Error)
+
+	bind := func(targetID int, body string) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/user/%d/inviter", targetID), strings.NewReader(body))
+		c.Request.Header.Set("Content-Type", "application/json")
+		c.Params = gin.Params{{Key: "id", Value: strconv.Itoa(targetID)}}
+		c.Set("id", 9999)
+		c.Set("role", common.RoleRootUser)
+		c.Set("username", "root-operator")
+		BindUserInviter(c)
+		return recorder
+	}
+
+	for _, tc := range []struct {
+		name, body, message string
+	}{
+		{"invalid parameters", `{"inviter_id":0}`, "Invalid parameters"},
+		{"self invite", fmt.Sprintf(`{"inviter_id":%d}`, invitee.Id), "A user cannot invite themselves"},
+		{"missing inviter", `{"inviter_id":424242}`, "Inviter does not exist"},
+		{"disabled inviter", fmt.Sprintf(`{"inviter_id":%d}`, disabled.Id), "Inviter account is disabled"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := bind(invitee.Id, tc.body)
+			assert.Equal(t, http.StatusOK, recorder.Code)
+			assert.Contains(t, recorder.Body.String(), `"success":false`)
+			assert.Contains(t, recorder.Body.String(), tc.message)
+		})
+	}
+
+	recorder := bind(invitee.Id, fmt.Sprintf(`{"inviter_id":%d}`, inviter.Id))
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	require.Contains(t, recorder.Body.String(), `"success":true`)
+	assert.Contains(t, recorder.Body.String(), "Inviter bound")
+	assert.Contains(t, recorder.Body.String(), fmt.Sprintf(`"inviter_id":%d`, inviter.Id))
+	assert.Contains(t, recorder.Body.String(), `"source":"admin"`)
+
+	binding, err := model.GetReferralBindingForInvitee(invitee.Id)
+	require.NoError(t, err)
+	require.NotNil(t, binding)
+	assert.Equal(t, inviter.Id, binding.InviterId)
+	assert.Equal(t, model.ReferralSourceAdmin, binding.Source)
+	require.NoError(t, db.First(&invitee, invitee.Id).Error)
+	assert.Equal(t, inviter.Id, invitee.InviterId, "the binding must mirror onto users.inviter_id")
+
+	other := model.User{Username: "bind-second-inviter", Password: "password", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "bind-second-aff"}
+	require.NoError(t, db.Create(&other).Error)
+	recorder = bind(invitee.Id, fmt.Sprintf(`{"inviter_id":%d}`, other.Id))
+	assert.Contains(t, recorder.Body.String(), `"success":false`)
+	assert.Contains(t, recorder.Body.String(), "The user already has an inviter")
+	require.NoError(t, db.First(&invitee, invitee.Id).Error)
+	assert.Equal(t, inviter.Id, invitee.InviterId, "an existing attribution is never replaced")
+
+	var audits []model.AuditLog
+	require.NoError(t, model.LOG_DB.Where("action = ?", "user.inviter_bind").Find(&audits).Error)
+	require.Len(t, audits, 1, "only the successful binding is audited")
+	audit := audits[0]
+	assert.Equal(t, 9999, audit.UserId)
+	assert.Equal(t, "root-operator", audit.Username)
+	assert.Equal(t, model.AuditCategoryOperation, audit.Category)
+	assert.True(t, audit.Success)
+	assert.Equal(t, fmt.Sprintf("Bound user %s (ID: %d) to inviter %d", invitee.Username, invitee.Id, inviter.Id), audit.Content)
+	params, err := common.Marshal(audit.Other.Op.Params)
+	require.NoError(t, err)
+	expected, err := common.Marshal(map[string]any{"username": invitee.Username, "id": invitee.Id, "inviter_id": inviter.Id, "source": model.ReferralSourceAdmin, "target_user_id": invitee.Id})
+	require.NoError(t, err)
+	assert.JSONEq(t, string(expected), string(params))
 }
