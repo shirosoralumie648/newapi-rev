@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/group_setting"
@@ -78,6 +79,16 @@ func validateTokenPeriodQuota(c *gin.Context, token *model.Token) bool {
 	maxQuotaValue := maxTokenQuota()
 	if token.PeriodQuota > maxQuotaValue {
 		common.ApiErrorT(c, "Quota value exceeds valid range, maximum is {{max}}", map[string]any{"max": logger.FormatQuota(maxQuotaValue)})
+		return false
+	}
+	return true
+}
+
+// validateTokenRateLimits 校验令牌级准入限制：0 表示不限制，负值或超出上限
+// 时拒绝保存，避免错字造成长期限流或绕过限制。并发数不适用于令牌，按 0 传入。
+func validateTokenRateLimits(c *gin.Context, token *model.Token) bool {
+	if err := dto.ValidateRateLimits(0, token.RPMLimit, token.TPMLimit); err != nil {
+		common.ApiErrorT(c, "Invalid token rate limits: {{error}}", map[string]any{"error": err.Error()})
 		return false
 	}
 	return true
@@ -363,6 +374,9 @@ func AddToken(c *gin.Context) {
 	if !validateTokenPeriodQuota(c, &token) {
 		return
 	}
+	if !validateTokenRateLimits(c, &token) {
+		return
+	}
 	// 检查用户令牌数量是否已达上限
 	maxTokens := operation_setting.GetMaxUserTokens()
 	count, err := model.CountUserTokens(c.GetInt("id"))
@@ -408,6 +422,8 @@ func AddToken(c *gin.Context) {
 		AutoGroups:         token.AutoGroups,
 		PeriodQuota:        token.PeriodQuota,
 		PeriodResetPeriod:  token.PeriodResetPeriod,
+		RPMLimit:           token.RPMLimit,
+		TPMLimit:           token.TPMLimit,
 	}
 	cleanToken.AllowUserQuotaQuery = request.AllowUserQuotaQuery == nil || *request.AllowUserQuotaQuery
 	err = cleanToken.Insert()
@@ -477,6 +493,9 @@ func UpdateToken(c *gin.Context) {
 	if !validateTokenPeriodQuota(c, &token) {
 		return
 	}
+	if !validateTokenRateLimits(c, &token) {
+		return
+	}
 	cleanToken, err := model.GetTokenByIds(token.Id, userId)
 	if err != nil {
 		common.ApiError(c, err)
@@ -515,6 +534,8 @@ func UpdateToken(c *gin.Context) {
 		// 根据提交的配置推导，客户端 JSON 不能直接写入。
 		cleanToken.PeriodQuota = token.PeriodQuota
 		cleanToken.PeriodResetPeriod = token.PeriodResetPeriod
+		cleanToken.RPMLimit = token.RPMLimit
+		cleanToken.TPMLimit = token.TPMLimit
 		// Store the stable identifier: a submitted display name is translated so
 		// the token keeps working after the display name changes again.
 		cleanToken.Group = group_setting.ResolveGroupID(token.Group)
@@ -558,6 +579,8 @@ func UpdateToken(c *gin.Context) {
 			{"auto_groups", previous.AutoGroups != cleanToken.AutoGroups},
 			{"period_quota", previous.PeriodQuota != cleanToken.PeriodQuota},
 			{"period_reset_period", previous.PeriodResetPeriod != cleanToken.PeriodResetPeriod},
+			{"rpm_limit", previous.RPMLimit != cleanToken.RPMLimit},
+			{"tpm_limit", previous.TPMLimit != cleanToken.TPMLimit},
 		} {
 			if field.changed {
 				changedFields = append(changedFields, field.name)

@@ -2,10 +2,17 @@ package service
 
 import (
 	"fmt"
+	"net/http"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/common/admission"
 	"github.com/QuantumNous/new-api/constant"
+	appdto "github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
+	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
+	kittypes "github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -182,4 +189,92 @@ func TestSharedType61IdentityFilterContainsAllCandidateKeys(t *testing.T) {
 	assert.Equal(t, "alpha", filters[0].TaskPluginKey)
 	assert.Equal(t, []string{"alpha", "beta"}, filters[0].TaskPluginKeys)
 	assert.Empty(t, filters[0].TaskPluginChannelTypes)
+}
+
+// TestChannelAdmissionAttemptLifecycle protects the admission lifecycle of one
+// dispatch: a saturated concurrency limit excludes the channel from the rest of
+// the request, a token rejection immediately returns the channel slot reserved
+// for that attempt, and a retry on the same request retires the previous
+// attempt before admitting.
+func TestChannelAdmissionAttemptLifecycle(t *testing.T) {
+	saturated := &model.Channel{Id: 930101, Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled}
+	saturated.SetSetting(kitdto.ChannelSettings{MaxConcurrency: 1})
+
+	first, _ := gin.CreateTestContext(nil)
+	require.True(t, AdmitChannelAttempt(first, saturated, 100).Admitted)
+
+	second, _ := gin.CreateTestContext(nil)
+	rejected := AdmitChannelAttempt(second, saturated, 100)
+	require.False(t, rejected.Admitted)
+	assert.Equal(t, AdmissionScopeChannel, rejected.Scope)
+	assert.Equal(t, admission.RejectConcurrency, rejected.Reason)
+
+	assert.False(t, HasExcludedChannels(second))
+	ExcludeSaturatedChannel(second, saturated.Id)
+	ExcludeSaturatedChannel(second, saturated.Id)
+	assert.True(t, HasExcludedChannels(second))
+	filters := GetChannelConstraints(second).Filters
+	require.Len(t, filters, 1)
+	assert.Equal(t, appdto.FilterExcludeChannels, filters[0].Kind)
+	assert.Equal(t, []int{saturated.Id}, filters[0].ExcludedChannelIDs)
+
+	ReleaseAdmissionAttempt(first)
+	reuser, _ := gin.CreateTestContext(nil)
+	require.True(t, AdmitChannelAttempt(reuser, saturated, 100).Admitted)
+	ReleaseAdmissionAttempt(reuser)
+
+	// A token rejection must return the channel slot reserved for the refused
+	// attempt, so the request can retry another channel immediately.
+	shared := &model.Channel{Id: 930102, Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled}
+	shared.SetSetting(kitdto.ChannelSettings{MaxConcurrency: 2})
+	newTokenContext := func(tokenID int) *gin.Context {
+		ctx, _ := gin.CreateTestContext(nil)
+		if tokenID != 0 {
+			common.SetContextKey(ctx, constant.ContextKeyTokenId, tokenID)
+			common.SetContextKey(ctx, constant.ContextKeyTokenRPMLimit, 1)
+		}
+		return ctx
+	}
+
+	firstTokenAttempt := newTokenContext(930201)
+	require.True(t, AdmitChannelAttempt(firstTokenAttempt, shared, 10).Admitted)
+
+	secondTokenAttempt := newTokenContext(930201)
+	rejected = AdmitChannelAttempt(secondTokenAttempt, shared, 10)
+	require.False(t, rejected.Admitted)
+	assert.Equal(t, AdmissionScopeToken, rejected.Scope)
+	assert.Equal(t, admission.RejectRPM, rejected.Reason)
+
+	// Without the release the third attempt would reach the concurrency limit.
+	thirdContext, _ := gin.CreateTestContext(nil)
+	common.SetContextKey(thirdContext, constant.ContextKeyTokenId, 930202)
+	require.True(t, AdmitChannelAttempt(thirdContext, shared, 10).Admitted)
+
+	ReleaseAdmissionAttempt(firstTokenAttempt)
+	ReleaseAdmissionAttempt(thirdContext)
+
+	// A retry on the same request context retires the previous attempt first.
+	retryContext, _ := gin.CreateTestContext(nil)
+	require.True(t, AdmitChannelAttempt(retryContext, saturated, 100).Admitted)
+	assert.True(t, AdmitChannelAttempt(retryContext, saturated, 100).Admitted, "a retry must retire the previous attempt before admitting")
+	ReleaseAdmissionAttempt(retryContext)
+}
+
+// TestChannelAdmissionErrorContracts pins the client-visible contract of the
+// admission errors: HTTP 429 and a stable code for both exhausted capacity and
+// token rate limits.
+func TestChannelAdmissionErrorContracts(t *testing.T) {
+	c, _ := gin.CreateTestContext(nil)
+	common.SetContextKey(c, constant.ContextKeyUsingGroup, "vip")
+
+	capacityError := ChannelCapacityExhaustedError(c, "gpt-4")
+	assert.Equal(t, http.StatusTooManyRequests, capacityError.StatusCode)
+	assert.Equal(t, kittypes.ErrorCodeChannelCapacityExhausted, capacityError.Code)
+	assert.Equal(t, "vip", capacityError.Params["Group"])
+	assert.Equal(t, "gpt-4", capacityError.Params["Model"])
+
+	tokenError := TokenRateLimitExceededError()
+	assert.Equal(t, http.StatusTooManyRequests, tokenError.StatusCode)
+	assert.Equal(t, kittypes.ErrorCodeTokenRateLimitExceeded, tokenError.Code)
+	assert.Empty(t, tokenError.Params)
 }

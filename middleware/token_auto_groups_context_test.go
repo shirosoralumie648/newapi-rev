@@ -46,3 +46,22 @@ func TestSetupContextForTokenMalformedAutoGroupsFailsClosed(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, []string{}, value)
 }
+
+func TestSetupContextForTokenCarriesAdmissionLimits(t *testing.T) {
+	ctx := newTokenAutoGroupsContext()
+	token := &model.Token{Id: 1, UserId: 2, RPMLimit: 12, TPMLimit: 34}
+
+	require.NoError(t, SetupContextForToken(ctx, token))
+	assert.Equal(t, 12, common.GetContextKeyInt(ctx, constant.ContextKeyTokenRPMLimit))
+	assert.Equal(t, 34, common.GetContextKeyInt(ctx, constant.ContextKeyTokenTPMLimit))
+}
+
+func TestSetupContextForTokenOmitsUnlimitedAdmissionLimits(t *testing.T) {
+	ctx := newTokenAutoGroupsContext()
+
+	require.NoError(t, SetupContextForToken(ctx, &model.Token{Id: 1, UserId: 2}))
+	_, rpmSet := common.GetContextKey(ctx, constant.ContextKeyTokenRPMLimit)
+	_, tpmSet := common.GetContextKey(ctx, constant.ContextKeyTokenTPMLimit)
+	assert.False(t, rpmSet)
+	assert.False(t, tpmSet)
+}

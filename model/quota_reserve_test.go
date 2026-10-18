@@ -238,8 +238,11 @@ func TestTokenCacheInitPreservesLiveQuotaAndFenceBlocksStaleSnapshot(t *testing.
 	server := useUserCacheMiniRedis(t)
 
 	token := createReserveTestToken(t, 100)
+	require.NoError(t, DB.Model(&Token{}).Where("id = ?", token.Id).
+		Updates(map[string]any{"rpm_limit": 45, "tpm_limit": 900}).Error)
 	loaded, err := GetTokenByKey(token.Key, true)
 	require.NoError(t, err)
+	require.Equal(t, 45, loaded.RPMLimit)
 	stale := *loaded
 
 	result, err := cacheApplyTokenQuotaDelta(token.Id, token.Key, -70)
@@ -253,6 +256,9 @@ func TestTokenCacheInitPreservesLiveQuotaAndFenceBlocksStaleSnapshot(t *testing.
 	cached, err := cacheGetTokenByKey(token.Key)
 	require.NoError(t, err)
 	assert.Equal(t, 30, cached.RemainQuota)
+	// 缓存哈希必须携带准入限制，令牌级 RPM/TPM 才能从缓存读取。
+	assert.Equal(t, 45, cached.RPMLimit)
+	assert.Equal(t, 900, cached.TPMLimit)
 
 	// 变更期间：fence 删除缓存并拦截并发读者手中的过期快照。
 	require.NoError(t, invalidateTokenCacheForMutation(token.Key))
@@ -500,11 +506,15 @@ func TestTokenQuotaUpdatePreservesConcurrentDeductions(t *testing.T) {
 
 					token.RemainQuota = tc.target
 					token.Name = "renamed-" + dialect
+					token.RPMLimit = 120
+					token.TPMLimit = 340
 					change, err := token.UpdateWithQuotaTarget(snapshot)
 					require.NoError(t, err)
 
 					saved := getTokenFromDB(t, token.Id)
 					assert.Equal(t, "renamed-"+dialect, saved.Name)
+					assert.Equal(t, 120, saved.RPMLimit, "the admission limits must survive a quota target update")
+					assert.Equal(t, 340, saved.TPMLimit)
 					assert.Equal(t, 30, saved.UsedQuota, "the concurrent deduction must stay recorded as usage")
 					assert.Equal(t, tc.wantRemain, saved.RemainQuota)
 					if !tc.wantQuotaChange {

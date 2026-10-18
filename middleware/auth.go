@@ -696,6 +696,12 @@ func SetupContextForToken(c *gin.Context, token *model.Token, parts ...string) e
 		common.SetContextKey(c, constant.ContextKeyTokenPeriodLimited, true)
 		common.SetContextKey(c, constant.ContextKeyTokenPeriodReset, token.PeriodResetPeriod)
 	}
+	if token.RPMLimit > 0 {
+		common.SetContextKey(c, constant.ContextKeyTokenRPMLimit, token.RPMLimit)
+	}
+	if token.TPMLimit > 0 {
+		common.SetContextKey(c, constant.ContextKeyTokenTPMLimit, token.TPMLimit)
+	}
 	if token.ModelLimitsEnabled {
 		c.Set("token_model_limit_enabled", true)
 		c.Set("token_model_limit", token.GetModelLimitsMap())

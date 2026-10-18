@@ -1182,6 +1182,9 @@ export const STATIC_I18N_KEYS = [
   // from Go through message_key, so the literal scan cannot see them.
   'No periodic limit',
   'Invalid periodic reset cycle',
+  // The token admission limit message is returned from Go through
+  // common.ApiErrorT, so the literal scan cannot see it.
+  'Invalid token rate limits: {{error}}',
   // Canvas image tool titles and problem messages render through t(key) from
   // CANVAS_IMAGE_TOOL_TITLES / CANVAS_IMAGE_TOOL_MESSAGES, so the literal scan
   // cannot see them.

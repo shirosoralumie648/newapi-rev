@@ -96,6 +96,9 @@ import {
   getApiKeyFormSchema,
   type ApiKeyFormValues,
   getApiKeyFormDefaultValues,
+  MAX_API_KEY_RPM,
+  MAX_API_KEY_TPM,
+  normalizeTokenRateLimit,
   transformFormDataToPayload,
   transformApiKeyToFormDefaults,
 } from '../lib'
@@ -813,6 +816,72 @@ export function ApiKeysMutateDrawer({
                           </FormControl>
                           <FormDescription>
                             {t('Limit which models can be used with this key')}
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name='rpm_limit'
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{t('Requests per minute')}</FormLabel>
+                          <FormControl>
+                            <Input
+                              type='number'
+                              min={0}
+                              max={MAX_API_KEY_RPM}
+                              placeholder='0'
+                              value={field.value ?? 0}
+                              onChange={(event) =>
+                                field.onChange(
+                                  normalizeTokenRateLimit(
+                                    Number(event.target.value),
+                                    MAX_API_KEY_RPM
+                                  )
+                                )
+                              }
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            {t(
+                              'Maximum requests this API key can send per minute, counted right before dispatch; 0 means unlimited.'
+                            )}
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name='tpm_limit'
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{t('Tokens per minute')}</FormLabel>
+                          <FormControl>
+                            <Input
+                              type='number'
+                              min={0}
+                              max={MAX_API_KEY_TPM}
+                              placeholder='0'
+                              value={field.value ?? 0}
+                              onChange={(event) =>
+                                field.onChange(
+                                  normalizeTokenRateLimit(
+                                    Number(event.target.value),
+                                    MAX_API_KEY_TPM
+                                  )
+                                )
+                              }
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            {t(
+                              'Maximum estimated tokens this API key can use per minute, corrected by actual usage after each response; 0 means unlimited.'
+                            )}
                           </FormDescription>
                           <FormMessage />
                         </FormItem>

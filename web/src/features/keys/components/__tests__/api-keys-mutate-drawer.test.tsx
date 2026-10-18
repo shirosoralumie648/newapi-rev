@@ -156,6 +156,8 @@ function getControlByLabel(labelText: 'Name' | 'Quantity'): HTMLInputElement
 function getControlByLabel(labelText: 'Group'): HTMLButtonElement
 function getControlByLabel(labelText: 'Periodic quota'): HTMLButtonElement
 function getControlByLabel(labelText: 'Auto group order'): HTMLElement
+function getControlByLabel(labelText: 'Requests per minute'): HTMLInputElement
+function getControlByLabel(labelText: 'Tokens per minute'): HTMLInputElement
 function getControlByLabel(labelText: string): HTMLElement {
   const label = [...document.querySelectorAll<HTMLLabelElement>('label')].find(
     (candidate) => candidate.textContent?.trim() === labelText
@@ -343,5 +345,23 @@ describe('API keys mutate drawer periodic quota', () => {
     await waitFor(() => expect(createdPayloads).toHaveLength(1))
     expect(createdPayloads[0]?.period_reset_period).toBe('day')
     expect(createdPayloads[0]?.period_quota).toBe(1_250_000)
+  })
+})
+
+describe('API keys mutate drawer rate limits', () => {
+  test('sends the configured per-minute limits for a new key', async () => {
+    const createdPayloads: Array<Record<string, unknown>> = []
+    installApiFixtures(createdPayloads)
+    await renderCreateDrawer()
+
+    changeInput(getControlByLabel('Name'), 'rate-limited')
+    fireEvent.click(findButton('Advanced Settings', true))
+    changeInput(getControlByLabel('Requests per minute'), '60')
+    changeInput(getControlByLabel('Tokens per minute'), '9000')
+
+    fireEvent.click(findButton('Save changes', true))
+    await waitFor(() => expect(createdPayloads).toHaveLength(1))
+    expect(createdPayloads[0]?.rpm_limit).toBe(60)
+    expect(createdPayloads[0]?.tpm_limit).toBe(9000)
   })
 })

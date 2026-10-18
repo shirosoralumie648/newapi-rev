@@ -79,6 +79,67 @@ func TestChannelValidateSettingsFirstTokenTimeout(t *testing.T) {
 	}
 }
 
+func TestChannelValidateSettingsAdmissionLimits(t *testing.T) {
+	tests := []struct {
+		name    string
+		setting dto.ChannelSettings
+		wantErr string
+	}{
+		{
+			name:    "unlimited defaults are valid",
+			setting: dto.ChannelSettings{},
+		},
+		{
+			name:    "configured bounds are valid",
+			setting: dto.ChannelSettings{MaxConcurrency: dto.MaxChannelConcurrency, RPMLimit: dto.MaxRateLimitRPM, TPMLimit: dto.MaxRateLimitTPM},
+		},
+		{
+			name:    "negative concurrency is rejected",
+			setting: dto.ChannelSettings{MaxConcurrency: -1},
+			wantErr: "max_concurrency",
+		},
+		{
+			name:    "concurrency above the bound is rejected",
+			setting: dto.ChannelSettings{MaxConcurrency: dto.MaxChannelConcurrency + 1},
+			wantErr: "max_concurrency",
+		},
+		{
+			name:    "negative rpm is rejected",
+			setting: dto.ChannelSettings{RPMLimit: -1},
+			wantErr: "rpm_limit",
+		},
+		{
+			name:    "rpm above the bound is rejected",
+			setting: dto.ChannelSettings{RPMLimit: dto.MaxRateLimitRPM + 1},
+			wantErr: "rpm_limit",
+		},
+		{
+			name:    "negative tpm is rejected",
+			setting: dto.ChannelSettings{TPMLimit: -1},
+			wantErr: "tpm_limit",
+		},
+		{
+			name:    "tpm above the bound is rejected",
+			setting: dto.ChannelSettings{TPMLimit: dto.MaxRateLimitTPM + 1},
+			wantErr: "tpm_limit",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			channel := &Channel{}
+			channel.SetSetting(tt.setting)
+			err := channel.ValidateSettings()
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
 func TestAdvancedCustomChannelRequiresModelListRouteOnlyWhenUpdateChecksEnabled(t *testing.T) {
 	inferenceRoute := dto.AdvancedCustomRoute{
 		IncomingPath: "/v1/chat/completions",

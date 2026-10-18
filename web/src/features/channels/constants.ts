@@ -498,6 +498,12 @@ export const FIELD_DESCRIPTIONS = {
   OPENAI_ORG: 'OpenAI Organization ID (optional)',
   FIRST_TOKEN_TIMEOUT:
     'Seconds to wait for the first streamed data chunk after the upstream responds. When it elapses without any data, the request switches to another channel; 0 uses the global STREAMING_FIRST_TOKEN_TIMEOUT default and streams that already sent data never switch.',
+  MAX_CONCURRENCY:
+    'Maximum upstream requests this channel serves at the same time. Requests beyond the limit skip this channel; 0 means unlimited.',
+  RPM_LIMIT:
+    'Maximum upstream requests this channel serves per minute, counted right before dispatch; 0 means unlimited.',
+  TPM_LIMIT:
+    'Maximum estimated tokens this channel serves per minute. The reservation is corrected by actual usage after each response; 0 means unlimited.',
 } as const
 
 // ============================================================================
