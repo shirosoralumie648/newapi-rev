@@ -79,7 +79,13 @@ export async function readCanvasWorkflowImage(
     const entry = await loadPlaygroundAttachment(
       playgroundAttachmentContentUrl(source.sessionId, source.attachmentId),
       source.attachmentId
-    )
+    ).catch(() => {
+      // The bytes are read from the owner-scoped content endpoint, so a failed
+      // read is a local reference-image problem, not a server answer.
+      throw new CanvasWorkflowImageError(
+        CANVAS_WORKFLOW_MESSAGES.IMAGE_UNAVAILABLE
+      )
+    })
     const dataUrl = entry.dataUrl
     if (!dataUrl) {
       throw new CanvasWorkflowImageError(

@@ -472,6 +472,13 @@ test('a task left running on load settles from its durable row', async () => {
 
 test('links a result node to a step that had none', async () => {
   vi.spyOn(api, 'post').mockImplementation(async (url) => {
+    if (url === '/pg/chat/completions') {
+      return {
+        data: {
+          choices: [{ message: { role: 'assistant', content: 'fox prompt' } }],
+        },
+      }
+    }
     if (url === '/pg/images/generations') {
       return {
         data: {

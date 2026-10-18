@@ -87,6 +87,10 @@ export function CanvasNodeInspector(props: CanvasNodeInspectorProps) {
   const snapshot = node.data.snapshot
   const reference = node.data.ref
   const sourceTarget = canvasNodeSourceTarget(reference)
+  // The result panel renders the task reference rows of a result node, so the
+  // generic reference list skips them while it is shown.
+  const resultFieldsShown =
+    isCanvasWorkflowResult(node.data.kind) && Boolean(props.onRetry)
   const editable =
     node.data.kind === 'text' ||
     node.data.kind === 'prompt' ||
@@ -128,7 +132,7 @@ export function CanvasNodeInspector(props: CanvasNodeInspectorProps) {
         />
       ) : null}
 
-      {isCanvasWorkflowResult(node.data.kind) && props.onRetry ? (
+      {resultFieldsShown && props.onRetry ? (
         <CanvasNodeResultFields
           disabled={props.disabled}
           node={node}
@@ -193,13 +197,13 @@ export function CanvasNodeInspector(props: CanvasNodeInspectorProps) {
               <dd className='font-mono break-all'>{reference.artifactId}</dd>
             </div>
           ) : null}
-          {reference.taskId ? (
+          {reference.taskId && !resultFieldsShown ? (
             <div className='flex justify-between gap-2'>
               <dt className='text-muted-foreground'>{t('Task ID')}</dt>
               <dd className='font-mono break-all'>{reference.taskId}</dd>
             </div>
           ) : null}
-          {reference.taskArtifactKey ? (
+          {reference.taskArtifactKey && !resultFieldsShown ? (
             <div className='flex justify-between gap-2'>
               <dt className='text-muted-foreground'>{t('Artifact')}</dt>
               <dd className='font-mono break-all'>

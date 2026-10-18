@@ -25,6 +25,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/group_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -192,6 +195,65 @@ func TestPlaygroundAttachmentStorageSchemaMigration(t *testing.T) {
 			require.NotNil(t, stored.Data)
 			assert.Equal(t, payload, string(*stored.Data))
 			assert.Equal(t, system_setting.ObjectStoreBackendDB, stored.StorageBackend)
+		})
+	}
+}
+
+// Stored group references that still used an editable display name are
+// rewritten to the stable identifier, so a rename made before this release
+// cannot leave a token, a user or a subscription bound to a dead name. The
+// migration leaves unknown aliases untouched and repeating it changes nothing.
+func TestStableGroupReferenceMigration(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundMigrationDB(t, dialect)
+			previousType := common.MainDatabaseType()
+			common.SetMainDatabaseType(common.DatabaseType(dialect))
+			initCol()
+			originalNames := group_setting.GroupDisplayNames2JSONString()
+			originalRatios := ratio_setting.GroupRatio2JSONString()
+			require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1,"vip":1}`))
+			require.NoError(t, group_setting.UpdateGroupDisplayNamesByJSONString(`{"vip":"VIP 会员","unknown-group":"Ghost"}`))
+			t.Cleanup(func() {
+				common.SetMainDatabaseType(previousType)
+				initCol()
+				require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(originalRatios))
+				require.NoError(t, group_setting.UpdateGroupDisplayNamesByJSONString(originalNames))
+				require.NoError(t, db.Migrator().DropTable(&Token{}, &User{}, &SubscriptionPlan{}, &UserSubscription{}))
+			})
+			require.NoError(t, db.AutoMigrate(&User{}, &Token{}, &SubscriptionPlan{}, &UserSubscription{}))
+			require.NoError(t, db.Create(&User{Id: 1, Username: "group-migrate", AffCode: "group-migrate", Group: "VIP 会员", Status: common.UserStatusEnabled}).Error)
+			require.NoError(t, db.Create(&Token{UserId: 1, Key: "migrate-key-1", Name: "migrate", Group: "VIP 会员", AutoGroups: `["VIP 会员","default"]`, CreatedTime: 1, AccessedTime: 1}).Error)
+			require.NoError(t, db.Create(&Token{UserId: 1, Key: "migrate-key-2", Name: "ghost", Group: "Ghost", CreatedTime: 1, AccessedTime: 1}).Error)
+			require.NoError(t, db.Create(&SubscriptionPlan{Title: "Plan", UpgradeGroup: "VIP 会员", DowngradeGroup: "default"}).Error)
+			require.NoError(t, db.Create(&UserSubscription{UserId: 1, PlanId: 1, Status: "expired", UpgradeGroup: "VIP 会员", DowngradeGroup: "VIP 会员", PrevUserGroup: "VIP 会员"}).Error)
+
+			require.NoError(t, migrateStableGroupReferences(db))
+			require.NoError(t, migrateStableGroupReferences(db))
+
+			var user User
+			require.NoError(t, db.First(&user, 1).Error)
+			assert.Equal(t, "vip", user.Group)
+
+			var tokens []Token
+			require.NoError(t, db.Order("id").Find(&tokens).Error)
+			require.Len(t, tokens, 2)
+			assert.Equal(t, "vip", tokens[0].Group)
+			assert.JSONEq(t, `["vip","default"]`, tokens[0].AutoGroups)
+			// The alias points at a group that does not exist, so the reference
+			// is preserved instead of being rewritten to a dead identifier.
+			assert.Equal(t, "Ghost", tokens[1].Group)
+
+			var plan SubscriptionPlan
+			require.NoError(t, db.First(&plan, 1).Error)
+			assert.Equal(t, "vip", plan.UpgradeGroup)
+			assert.Equal(t, "default", plan.DowngradeGroup)
+
+			var subscription UserSubscription
+			require.NoError(t, db.First(&subscription, 1).Error)
+			assert.Equal(t, "vip", subscription.UpgradeGroup)
+			assert.Equal(t, "vip", subscription.DowngradeGroup)
+			assert.Equal(t, "vip", subscription.PrevUserGroup)
 		})
 	}
 }

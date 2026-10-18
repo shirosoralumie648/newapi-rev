@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/group_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -69,4 +70,29 @@ func TestGetRequestAutoGroupsDoesNotFallBackAfterPermissionChange(t *testing.T) 
 	groups := GetRequestAutoGroups(ctx, "default")
 
 	assert.Empty(t, groups)
+}
+
+// A reference may still use an editable display name: token groups, Auto
+// snapshots and Playground requests written before a rename must resolve to the
+// stable identifier so permission checks and channel selection both use it.
+func TestGroupReferencesResolveStableIdentifiers(t *testing.T) {
+	configureRequestAutoGroupsTest(t)
+	originalNames := group_setting.GroupDisplayNames2JSONString()
+	require.NoError(t, group_setting.UpdateGroupDisplayNamesByJSONString(`{"vip":"VIP 会员"}`))
+	t.Cleanup(func() {
+		require.NoError(t, group_setting.UpdateGroupDisplayNamesByJSONString(originalNames))
+	})
+
+	assert.True(t, GroupInUserUsableGroups("default", "VIP 会员"))
+	assert.True(t, IsUserSelectableGroup("default", "VIP 会员"))
+	assert.False(t, IsUserSelectableGroup("default", "missing"))
+
+	ctx := newRequestAutoGroupsContext()
+	common.SetContextKey(ctx, constant.ContextKeyTokenAutoGroups, []string{"vip", " VIP 会员 ", "missing"})
+	// The resolved value is what channel selection and billing consume, so the
+	// duplicate alias collapses and unknown entries are filtered out.
+	assert.Equal(t, []string{"vip"}, GetRequestAutoGroups(ctx, "default"))
+
+	globalCtx := newRequestAutoGroupsContext()
+	assert.Equal(t, []string{"vip", "default", "svip"}, GetRequestAutoGroups(globalCtx, "default"))
 }

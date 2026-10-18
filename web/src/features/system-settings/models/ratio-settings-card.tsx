@@ -114,6 +114,22 @@ function createJsonStringField(
   })
 }
 
+// Group display names must be unique and non-empty: the backend resolves a
+// display name back to its stable identifier, so an ambiguous map is invalid.
+function isGroupDisplayNameMap(parsed: unknown): boolean {
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return false
+  }
+  const names = new Set<string>()
+  for (const value of Object.values(parsed)) {
+    if (typeof value !== 'string' || value.trim() === '') return false
+    const name = value.trim()
+    if (names.has(name)) return false
+    names.add(name)
+  }
+  return true
+}
+
 const createModelSchema = (t: Translate) =>
   z.object({
     ModelPrice: createJsonStringField(t),
@@ -135,6 +151,11 @@ const createGroupSchema = (t: Translate) =>
     GroupRatio: createJsonStringField(t),
     TopupGroupRatio: createJsonStringField(t),
     UserUsableGroups: createJsonStringField(t),
+    GroupDisplayNames: createJsonStringField(t, {
+      predicate: isGroupDisplayNameMap,
+      predicateMessage:
+        'Expected a JSON object mapping group identifiers to unique display names',
+    }),
     GroupGroupRatio: createJsonStringField(t),
     AutoGroups: createJsonStringField(t, {
       predicate: (parsed) =>
@@ -174,6 +195,9 @@ export function RatioSettingsCard({
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
   const [confirmOpen, setConfirmOpen] = useState(false)
+  // Bumped after a successful group save; the visual editor locks identifiers
+  // as soon as they are saved so a rename can never invalidate stored tokens.
+  const [savedGroupsRevision, setSavedGroupsRevision] = useState(0)
 
   const pricingQuery = useModelPricing()
   const savePricing = useSaveModelPricing()
@@ -245,6 +269,7 @@ export function RatioSettingsCard({
     GroupRatio: normalizeJsonString(groupDefaults.GroupRatio),
     TopupGroupRatio: normalizeJsonString(groupDefaults.TopupGroupRatio),
     UserUsableGroups: normalizeJsonString(groupDefaults.UserUsableGroups),
+    GroupDisplayNames: normalizeJsonString(groupDefaults.GroupDisplayNames),
     GroupGroupRatio: normalizeJsonString(groupDefaults.GroupGroupRatio),
     AutoGroups: normalizeJsonString(groupDefaults.AutoGroups),
     MaxTokenAutoGroups: groupDefaults.MaxTokenAutoGroups,
@@ -285,6 +310,7 @@ export function RatioSettingsCard({
       GroupRatio: formatJsonForTextarea(groupDefaults.GroupRatio),
       TopupGroupRatio: formatJsonForTextarea(groupDefaults.TopupGroupRatio),
       UserUsableGroups: formatJsonForTextarea(groupDefaults.UserUsableGroups),
+      GroupDisplayNames: formatJsonForTextarea(groupDefaults.GroupDisplayNames),
       GroupGroupRatio: formatJsonForTextarea(groupDefaults.GroupGroupRatio),
       AutoGroups: formatJsonForTextarea(groupDefaults.AutoGroups),
       GroupSpecialUsableGroup: formatJsonForTextarea(
@@ -335,6 +361,7 @@ export function RatioSettingsCard({
       GroupRatio: normalizeJsonString(groupDefaults.GroupRatio),
       TopupGroupRatio: normalizeJsonString(groupDefaults.TopupGroupRatio),
       UserUsableGroups: normalizeJsonString(groupDefaults.UserUsableGroups),
+      GroupDisplayNames: normalizeJsonString(groupDefaults.GroupDisplayNames),
       GroupGroupRatio: normalizeJsonString(groupDefaults.GroupGroupRatio),
       AutoGroups: normalizeJsonString(groupDefaults.AutoGroups),
       MaxTokenAutoGroups: groupDefaults.MaxTokenAutoGroups,
@@ -349,6 +376,7 @@ export function RatioSettingsCard({
       GroupRatio: formatJsonForTextarea(groupDefaults.GroupRatio),
       TopupGroupRatio: formatJsonForTextarea(groupDefaults.TopupGroupRatio),
       UserUsableGroups: formatJsonForTextarea(groupDefaults.UserUsableGroups),
+      GroupDisplayNames: formatJsonForTextarea(groupDefaults.GroupDisplayNames),
       GroupGroupRatio: formatJsonForTextarea(groupDefaults.GroupGroupRatio),
       AutoGroups: formatJsonForTextarea(groupDefaults.AutoGroups),
       GroupSpecialUsableGroup: formatJsonForTextarea(
@@ -413,6 +441,7 @@ export function RatioSettingsCard({
         GroupRatio: normalizeJsonString(values.GroupRatio),
         TopupGroupRatio: normalizeJsonString(values.TopupGroupRatio),
         UserUsableGroups: normalizeJsonString(values.UserUsableGroups),
+        GroupDisplayNames: normalizeJsonString(values.GroupDisplayNames),
         GroupGroupRatio: normalizeJsonString(values.GroupGroupRatio),
         AutoGroups: normalizeJsonString(values.AutoGroups),
         MaxTokenAutoGroups: values.MaxTokenAutoGroups,
@@ -440,6 +469,7 @@ export function RatioSettingsCard({
       }
 
       groupNormalizedDefaults.current = normalized
+      setSavedGroupsRevision((revision) => revision + 1)
     },
     [updateOption]
   )
@@ -514,6 +544,7 @@ export function RatioSettingsCard({
           form={groupForm}
           onSave={saveGroupRatios}
           isSaving={updateOption.isPending}
+          savedRevision={savedGroupsRevision}
         />
       )
     }

@@ -7713,6 +7713,16 @@
     "A connected reference image could not be read.": "接続済みの参照画像を読み込めませんでした。",
     "A connected reference image is larger than the 8 MiB limit.": "接続済みの参照画像が 8 MiB の上限を超えています。",
     "First Token Timeout": "初回トークンのタイムアウト",
-    "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch.": "上流の応答後に最初のストリーミングデータを受信するまで待つ秒数。時間内にデータが届かない場合は別のチャネルに切り替わります。0 はグローバル既定値を使用します。すでにデータを送信したストリームは切り替わりません。"
+    "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch.": "上流の応答後に最初のストリーミングデータを受信するまで待つ秒数。時間内にデータが届かない場合は別のチャネルに切り替わります。0 はグローバル既定値を使用します。すでにデータを送信したストリームは切り替わりません。",
+    "Same as identifier": "識別子と同じ",
+    "A row without an identifier is not saved until it has one.": "識別子がない行は、入力されるまで保存されません。",
+    "Group display names must be unique: {{names}}": "グループの表示名は一意である必要があります: {{names}}",
+    "A display name must not repeat another group identifier: {{names}}": "表示名を他のグループの識別子と同じにすることはできません: {{names}}",
+    "Group display names": "グループの表示名",
+    "Search groups by identifier, display name or description": "識別子、表示名、説明でグループを検索",
+    "Expected a JSON object mapping group identifiers to unique display names": "グループ識別子と一意の表示名を対応付けた JSON オブジェクトが必要です",
+    "Each group has a stable identifier and an editable display name. The identifier is stored on tokens, subscription plans and quotas and cannot be changed after saving; the display name is what users see.": "各グループには不変の識別子と編集可能な表示名があります。識別子はトークン、サブスクリプションプラン、クォータに保存され、保存後は変更できません。表示名はユーザーに表示される名前です。",
+    "JSON map of group identifier → display name shown in the console. A group without an entry keeps its identifier as the display name.": "グループ識別子 → 表示名の JSON マップ（コンソール表示用）。未設定のグループは識別子を表示名として使用します。",
+    "Every stored reference uses the group identifier. The identifier is fixed once the group is saved and only the display name can change, so renaming a group never invalidates existing API keys or subscriptions.": "保存される参照はすべてグループ識別子を使用します。グループの保存後は識別子が固定され、変更できるのは表示名だけなので、名前を変更しても既存の API キーやサブスクリプションが無効になることはありません。"
   }
 }

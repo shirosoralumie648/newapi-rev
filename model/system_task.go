@@ -32,6 +32,9 @@ const (
 	// finished Playground tasks into the object store, enforcing the account
 	// result budget and marking unpinnable results as expired.
 	SystemTaskTypePlaygroundTaskArtifactStore = "playground_task_artifact_store"
+	// SystemTaskTypePlaygroundUsageReconcile remeasures the Playground resource
+	// counters of every account and repairs the rows that drifted.
+	SystemTaskTypePlaygroundUsageReconcile = "playground_usage_reconcile"
 	// SystemTaskTypeWalletReconcile compares every wallet balance with the sum
 	// of its append-only ledger and alerts on deviation without changing balances.
 	SystemTaskTypeWalletReconcile = "wallet_reconcile"

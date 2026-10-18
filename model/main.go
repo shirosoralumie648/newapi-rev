@@ -455,6 +455,7 @@ func migrateDB() error {
 		&PlaygroundArtifact{},
 		&PlaygroundArtifactVersion{},
 		&PlaygroundAttachment{},
+		&PlaygroundUserUsage{},
 		&PlaygroundCanvasProject{},
 		&PlaygroundCanvasAsset{},
 		&PlaygroundTaskArtifact{},
@@ -497,6 +498,12 @@ func migrateDB() error {
 		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
 			return err
 		}
+	}
+	// Stable group identifiers: references that still use an editable display
+	// name are rewritten to the identifier. This is a no-op unless a display
+	// name is configured, and repeating it changes nothing.
+	if err := migrateStableGroupReferences(DB); err != nil {
+		return err
 	}
 	return nil
 }

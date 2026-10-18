@@ -85,10 +85,10 @@ func (WalletLedgerEntry) TableName() string {
 	return "wallet_ledger"
 }
 
-// isWalletLedgerDuplicateError reports whether err is the database rejecting a
-// duplicate (ref_type, ref_id) claim. GORM error translation is disabled in
-// this project, so the driver error is probed directly.
-func isWalletLedgerDuplicateError(err error) bool {
+// isDuplicateKeyError reports whether err is the database rejecting a row on a
+// unique constraint. GORM error translation is disabled in this project, so
+// the driver error is probed directly.
+func isDuplicateKeyError(err error) bool {
 	if err == nil {
 		return false
 	}
@@ -131,7 +131,7 @@ func AppendWalletLedgerTx(tx *gorm.DB, entry *WalletLedgerEntry) (applied bool, 
 	}
 
 	if err := tx.Create(entry).Error; err != nil {
-		if isWalletLedgerDuplicateError(err) {
+		if isDuplicateKeyError(err) {
 			// A concurrent transaction claimed the same reference first; the
 			// caller treats this as a replay and performs no balance change.
 			return false, nil
@@ -376,7 +376,7 @@ func EnsureWalletLedgerOpeningBalances() (int, error) {
 			// A concurrent/previous partial seed may have claimed some rows;
 			// insert individually so the rest still receive a baseline.
 			for _, entry := range batch {
-				if insertErr := DB.Create(entry).Error; insertErr != nil && !isWalletLedgerDuplicateError(insertErr) {
+				if insertErr := DB.Create(entry).Error; insertErr != nil && !isDuplicateKeyError(insertErr) {
 					return insertErr
 				}
 			}

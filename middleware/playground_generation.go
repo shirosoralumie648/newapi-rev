@@ -27,6 +27,7 @@ import (
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/group_setting"
 
 	"github.com/gin-gonic/gin"
 )
@@ -51,11 +52,14 @@ func PlaygroundRelayBridge(canonicalPath string) gin.HandlerFunc {
 			request := &dto.PlayGroundRequest{}
 			if err := common.UnmarshalBodyReusable(c, request); err == nil && request.Group != "" {
 				usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
-				if !service.GroupInUserUsableGroups(usingGroup, request.Group) && request.Group != usingGroup {
+				// A submitted display name is resolved to the stable identifier
+				// before it reaches channel selection and billing.
+				group := group_setting.ResolveGroupID(request.Group)
+				if !service.GroupInUserUsableGroups(usingGroup, group) && group != usingGroup {
 					abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorGroupAccessDenied))
 					return
 				}
-				common.SetContextKey(c, constant.ContextKeyUsingGroup, request.Group)
+				common.SetContextKey(c, constant.ContextKeyUsingGroup, group)
 			}
 		}
 		c.Request.URL.Path = canonicalPath

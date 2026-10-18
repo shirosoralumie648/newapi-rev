@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
+	"github.com/QuantumNous/new-api/setting/group_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
@@ -619,8 +620,12 @@ func TokenAuth() func(c *gin.Context) {
 
 		userCache.WriteContext(c)
 
-		userGroup := userCache.Group
-		tokenGroup := token.Group
+		// The account group may predate a display-name change; resolve it to the
+		// stable identifier so billing and channel selection use the real group.
+		userGroup := group_setting.ResolveGroupID(userCache.Group)
+		// A stored group reference may predate a display-name change; resolve it
+		// to the stable identifier without rewriting the row.
+		tokenGroup := group_setting.ResolveGroupID(token.Group)
 		if tokenGroup != "" {
 			// check common.UserUsableGroups[userGroup]
 			if _, ok := service.GetUserUsableGroups(userGroup)[tokenGroup]; !ok {
