@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
+import { FileText } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -25,10 +26,12 @@ import { Dialog } from '@/components/dialog'
 import { ErrorState } from '@/components/error-state'
 import { LoadingState } from '@/components/loading-state'
 import { Markdown } from '@/components/ui/markdown'
+import { TaskArtifactMedia } from '@/features/usage-logs/components/task-artifacts'
 import { getServerMessage } from '@/lib/server-error-message'
 
 import { getPlaygroundArtifact } from '../../artifact-api'
 import type { PlaygroundAssetItem } from '../../asset-api'
+import { playgroundAttachmentKind } from '../../constants'
 import { useAttachmentPreviewUrl } from '../../hooks'
 import { playgroundQueryKeys } from '../../lib/query-keys'
 
@@ -74,19 +77,51 @@ export function PlaygroundAssetPreviewDialog(
 
   const artifact = artifactQuery.data?.artifact
   const version = artifactQuery.data?.version
+  const isAudio = (asset?.mediaType ?? '').startsWith('audio/')
   let body: ReactNode = null
   if (isAttachment) {
-    body = previewUrl ? (
-      <img
-        alt={asset.title || t('Attachment')}
-        className='max-h-[60vh] w-full rounded-md object-contain'
-        src={previewUrl}
-      />
-    ) : (
-      <p className='text-muted-foreground p-6 text-center text-sm'>
-        {t('Preview unavailable')}
-      </p>
-    )
+    const attachmentKind = playgroundAttachmentKind(asset.mediaType)
+    if (!previewUrl) {
+      body = (
+        <p className='text-muted-foreground p-6 text-center text-sm'>
+          {t('Preview unavailable')}
+        </p>
+      )
+    } else if (attachmentKind === 'file') {
+      body = (
+        <div className='flex flex-col items-center gap-3 p-6'>
+          <FileText
+            aria-hidden='true'
+            className='text-muted-foreground size-10'
+          />
+          <a
+            className='text-sm font-medium underline-offset-4 hover:underline'
+            href={previewUrl}
+            target='_blank'
+            rel='noreferrer'
+          >
+            {t('Open file')}
+          </a>
+        </div>
+      )
+    } else if (isAudio) {
+      body = (
+        <audio
+          aria-label={asset.title || t('Attachment')}
+          className='w-full'
+          controls
+          src={previewUrl}
+        />
+      )
+    } else {
+      body = (
+        <TaskArtifactMedia
+          artifact={{ key: asset.id, type: attachmentKind }}
+          mediaUrl={previewUrl}
+          onError={() => undefined}
+        />
+      )
+    }
   } else if (artifactSessionId !== null) {
     if (artifactQuery.isPending) {
       body = <LoadingState className='min-h-40' />

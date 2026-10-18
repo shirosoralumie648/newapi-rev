@@ -71,6 +71,12 @@ export interface MessageVersion {
   /** Stable server error code of a failed parallel version, when any. */
   errorCode?: string | null
   attachments?: MessageAttachment[]
+  /**
+   * Cached read-aloud audio of this version, stored as an owned conversation
+   * attachment. Only the reference belongs to the message; the bytes stay in
+   * the attachment store and survive because the snapshot references them.
+   */
+  speech?: MessageAttachment
   toolCalls?: MessageToolCall[]
   /**
    * Relay request id of the generation that produced this version. It only

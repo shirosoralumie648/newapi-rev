@@ -42,10 +42,14 @@ import (
 // back any drift by writing the measured values without touching, deleting or
 // moving a single resource.
 type PlaygroundUserUsage struct {
-	UserID          int   `json:"user_id" gorm:"primaryKey"`
-	Sessions        int64 `json:"sessions" gorm:"not null"`
-	Presets         int64 `json:"presets" gorm:"not null"`
-	Snippets        int64 `json:"snippets" gorm:"not null"`
+	UserID   int   `json:"user_id" gorm:"primaryKey"`
+	Sessions int64 `json:"sessions" gorm:"not null"`
+	Presets  int64 `json:"presets" gorm:"not null"`
+	// Snippets counts the account's stored prompt snippets. The column was
+	// appended to a counter table that already holds rows, so it carries the
+	// same DEFAULT 0 as the canvas snapshot counters: a NOT NULL column can
+	// only be added to a non-empty table when it has one.
+	Snippets        int64 `json:"snippets" gorm:"not null;default:0"`
 	AttachmentCount int64 `json:"attachment_count" gorm:"not null"`
 	// AttachmentBytes counts every stored attachment byte, database-backed
 	// legacy rows included, because that is the budget AttachmentUserMaxBytes
@@ -53,11 +57,17 @@ type PlaygroundUserUsage struct {
 	AttachmentBytes int64 `json:"attachment_bytes" gorm:"not null"`
 	// ObjectBytes counts the attachment bytes that live in the object store,
 	// the durable footprint later storage accounting builds on.
-	ObjectBytes   int64 `json:"object_bytes" gorm:"not null"`
-	ArtifactCount int64 `json:"artifact_count" gorm:"not null"`
-	ArtifactBytes int64 `json:"artifact_bytes" gorm:"not null"`
-	CanvasCount   int64 `json:"canvas_count" gorm:"not null"`
-	CanvasBytes   int64 `json:"canvas_bytes" gorm:"not null"`
+	ObjectBytes int64 `json:"object_bytes" gorm:"not null"`
+	// AttachmentPendingCount and AttachmentPendingBytes count the in-flight
+	// presigned upload reservations: bytes no attachment row owns yet, but
+	// which the account's budgets already reserve, so concurrent uploads can
+	// never overrun the limits the committed counters enforce.
+	AttachmentPendingCount int64 `json:"attachment_pending_count" gorm:"not null;default:0"`
+	AttachmentPendingBytes int64 `json:"attachment_pending_bytes" gorm:"not null;default:0"`
+	ArtifactCount          int64 `json:"artifact_count" gorm:"not null"`
+	ArtifactBytes          int64 `json:"artifact_bytes" gorm:"not null"`
+	CanvasCount            int64 `json:"canvas_count" gorm:"not null"`
+	CanvasBytes            int64 `json:"canvas_bytes" gorm:"not null"`
 	// CanvasSnapshotCount and CanvasSnapshotBytes count the gzip canvas
 	// history objects of the account. They are separate from CanvasBytes so
 	// the board budgets and the history budget never trade one for the other,
@@ -78,34 +88,38 @@ func (PlaygroundUserUsage) TableName() string {
 // playgroundUserUsageCounters is the comparable snapshot of one counter row
 // without identity and timestamps.
 type playgroundUserUsageCounters struct {
-	Sessions            int64
-	Presets             int64
-	Snippets            int64
-	AttachmentCount     int64
-	AttachmentBytes     int64
-	ObjectBytes         int64
-	ArtifactCount       int64
-	ArtifactBytes       int64
-	CanvasCount         int64
-	CanvasBytes         int64
-	CanvasSnapshotCount int64
-	CanvasSnapshotBytes int64
+	Sessions               int64
+	Presets                int64
+	Snippets               int64
+	AttachmentCount        int64
+	AttachmentBytes        int64
+	ObjectBytes            int64
+	AttachmentPendingCount int64
+	AttachmentPendingBytes int64
+	ArtifactCount          int64
+	ArtifactBytes          int64
+	CanvasCount            int64
+	CanvasBytes            int64
+	CanvasSnapshotCount    int64
+	CanvasSnapshotBytes    int64
 }
 
 func (usage *PlaygroundUserUsage) counters() playgroundUserUsageCounters {
 	return playgroundUserUsageCounters{
-		Sessions:            usage.Sessions,
-		Presets:             usage.Presets,
-		Snippets:            usage.Snippets,
-		AttachmentCount:     usage.AttachmentCount,
-		AttachmentBytes:     usage.AttachmentBytes,
-		ObjectBytes:         usage.ObjectBytes,
-		ArtifactCount:       usage.ArtifactCount,
-		ArtifactBytes:       usage.ArtifactBytes,
-		CanvasCount:         usage.CanvasCount,
-		CanvasBytes:         usage.CanvasBytes,
-		CanvasSnapshotCount: usage.CanvasSnapshotCount,
-		CanvasSnapshotBytes: usage.CanvasSnapshotBytes,
+		Sessions:               usage.Sessions,
+		Presets:                usage.Presets,
+		Snippets:               usage.Snippets,
+		AttachmentCount:        usage.AttachmentCount,
+		AttachmentBytes:        usage.AttachmentBytes,
+		ObjectBytes:            usage.ObjectBytes,
+		AttachmentPendingCount: usage.AttachmentPendingCount,
+		AttachmentPendingBytes: usage.AttachmentPendingBytes,
+		ArtifactCount:          usage.ArtifactCount,
+		ArtifactBytes:          usage.ArtifactBytes,
+		CanvasCount:            usage.CanvasCount,
+		CanvasBytes:            usage.CanvasBytes,
+		CanvasSnapshotCount:    usage.CanvasSnapshotCount,
+		CanvasSnapshotBytes:    usage.CanvasSnapshotBytes,
 	}
 }
 
@@ -117,6 +131,8 @@ func (usage *PlaygroundUserUsage) load(counters playgroundUserUsageCounters) {
 	usage.AttachmentCount = counters.AttachmentCount
 	usage.AttachmentBytes = counters.AttachmentBytes
 	usage.ObjectBytes = counters.ObjectBytes
+	usage.AttachmentPendingCount = counters.AttachmentPendingCount
+	usage.AttachmentPendingBytes = counters.AttachmentPendingBytes
 	usage.ArtifactCount = counters.ArtifactCount
 	usage.ArtifactBytes = counters.ArtifactBytes
 	usage.CanvasCount = counters.CanvasCount
@@ -129,18 +145,20 @@ func (usage *PlaygroundUserUsage) load(counters playgroundUserUsageCounters) {
 // A decrease is clamped at zero, so a replay or an unexpected double delete can
 // never push a counter below zero.
 type playgroundUserUsageDelta struct {
-	Sessions            int64
-	Presets             int64
-	Snippets            int64
-	AttachmentCount     int64
-	AttachmentBytes     int64
-	ObjectBytes         int64
-	ArtifactCount       int64
-	ArtifactBytes       int64
-	CanvasCount         int64
-	CanvasBytes         int64
-	CanvasSnapshotCount int64
-	CanvasSnapshotBytes int64
+	Sessions               int64
+	Presets                int64
+	Snippets               int64
+	AttachmentCount        int64
+	AttachmentBytes        int64
+	ObjectBytes            int64
+	AttachmentPendingCount int64
+	AttachmentPendingBytes int64
+	ArtifactCount          int64
+	ArtifactBytes          int64
+	CanvasCount            int64
+	CanvasBytes            int64
+	CanvasSnapshotCount    int64
+	CanvasSnapshotBytes    int64
 }
 
 func (usage *PlaygroundUserUsage) apply(delta playgroundUserUsageDelta) {
@@ -150,6 +168,8 @@ func (usage *PlaygroundUserUsage) apply(delta playgroundUserUsageDelta) {
 	usage.AttachmentCount = max(0, usage.AttachmentCount+delta.AttachmentCount)
 	usage.AttachmentBytes = max(0, usage.AttachmentBytes+delta.AttachmentBytes)
 	usage.ObjectBytes = max(0, usage.ObjectBytes+delta.ObjectBytes)
+	usage.AttachmentPendingCount = max(0, usage.AttachmentPendingCount+delta.AttachmentPendingCount)
+	usage.AttachmentPendingBytes = max(0, usage.AttachmentPendingBytes+delta.AttachmentPendingBytes)
 	usage.ArtifactCount = max(0, usage.ArtifactCount+delta.ArtifactCount)
 	usage.ArtifactBytes = max(0, usage.ArtifactBytes+delta.ArtifactBytes)
 	usage.CanvasCount = max(0, usage.CanvasCount+delta.CanvasCount)
@@ -198,19 +218,21 @@ func lockPlaygroundUserUsage(tx *gorm.DB, userID int) (*PlaygroundUserUsage, err
 func savePlaygroundUserUsage(tx *gorm.DB, usage *PlaygroundUserUsage) error {
 	usage.UpdatedAt = common.GetTimestamp()
 	return tx.Model(&PlaygroundUserUsage{}).Where("user_id = ?", usage.UserID).Updates(map[string]any{
-		"sessions":              usage.Sessions,
-		"presets":               usage.Presets,
-		"snippets":              usage.Snippets,
-		"attachment_count":      usage.AttachmentCount,
-		"attachment_bytes":      usage.AttachmentBytes,
-		"object_bytes":          usage.ObjectBytes,
-		"artifact_count":        usage.ArtifactCount,
-		"artifact_bytes":        usage.ArtifactBytes,
-		"canvas_count":          usage.CanvasCount,
-		"canvas_bytes":          usage.CanvasBytes,
-		"canvas_snapshot_count": usage.CanvasSnapshotCount,
-		"canvas_snapshot_bytes": usage.CanvasSnapshotBytes,
-		"updated_at":            usage.UpdatedAt,
+		"sessions":                 usage.Sessions,
+		"presets":                  usage.Presets,
+		"snippets":                 usage.Snippets,
+		"attachment_count":         usage.AttachmentCount,
+		"attachment_bytes":         usage.AttachmentBytes,
+		"object_bytes":             usage.ObjectBytes,
+		"attachment_pending_count": usage.AttachmentPendingCount,
+		"attachment_pending_bytes": usage.AttachmentPendingBytes,
+		"artifact_count":           usage.ArtifactCount,
+		"artifact_bytes":           usage.ArtifactBytes,
+		"canvas_count":             usage.CanvasCount,
+		"canvas_bytes":             usage.CanvasBytes,
+		"canvas_snapshot_count":    usage.CanvasSnapshotCount,
+		"canvas_snapshot_bytes":    usage.CanvasSnapshotBytes,
+		"updated_at":               usage.UpdatedAt,
 	}).Error
 }
 
@@ -239,6 +261,17 @@ func playgroundUserUsageSnapshot(tx *gorm.DB, userID int) (PlaygroundUserUsage, 
 		return usage, err
 	}
 	usage.AttachmentCount, usage.AttachmentBytes, usage.ObjectBytes = attachments.Used, attachments.UsedBytes, attachments.ObjectBytes
+	// Pending reservations are measured from their own rows: a reservation is
+	// quota held, never data, so it is counted separately from the attachments.
+	var pending struct {
+		Used      int64
+		UsedBytes int64
+	}
+	if err := tx.Model(&PlaygroundUpload{}).Where("user_id = ?", userID).
+		Select("COUNT(*) AS used, COALESCE(SUM(byte_size), 0) AS used_bytes").Scan(&pending).Error; err != nil {
+		return usage, err
+	}
+	usage.AttachmentPendingCount, usage.AttachmentPendingBytes = pending.Used, pending.UsedBytes
 	// Only live artifacts count: a tombstoned artifact has had its versions
 	// removed, so it no longer occupies the account budget.
 	if err := tx.Model(&PlaygroundArtifact{}).Where("user_id = ? AND deleted_at = 0", userID).Count(&usage.ArtifactCount).Error; err != nil {
@@ -311,7 +344,7 @@ type PlaygroundUsageReconciliation struct {
 // them.
 func playgroundUsageOwnerIDs(db *gorm.DB) ([]int, error) {
 	seen := map[int]bool{}
-	for _, resource := range []any{&PlaygroundSession{}, &PlaygroundPreset{}, &PlaygroundSnippet{}, &PlaygroundAttachment{}, &PlaygroundArtifact{}, &PlaygroundCanvasProject{}, &PlaygroundCanvasSnapshot{}} {
+	for _, resource := range []any{&PlaygroundSession{}, &PlaygroundPreset{}, &PlaygroundSnippet{}, &PlaygroundAttachment{}, &PlaygroundUpload{}, &PlaygroundArtifact{}, &PlaygroundCanvasProject{}, &PlaygroundCanvasSnapshot{}} {
 		ids := make([]int, 0)
 		if err := db.Model(resource).Distinct("user_id").Pluck("user_id", &ids).Error; err != nil {
 			return nil, err

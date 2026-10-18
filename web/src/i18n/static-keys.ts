@@ -34,6 +34,9 @@ export const STATIC_I18N_KEYS = [
   'Playground attachment storage limit exceeded.',
   'Playground attachment is still referenced by a conversation message.',
   'Playground attachment request ID was already used for different content.',
+  'Playground upload not found.',
+  'The uploaded file is missing or has the wrong size.',
+  'The uploaded file does not match the declared media type.',
   'Too many attachments. Remove some before sending.',
   'Attachment is too large.',
   'Attachment data could not be read.',
@@ -989,6 +992,9 @@ export const STATIC_I18N_KEYS = [
   'Message snapshot bytes per conversation',
   'Attachments per message',
   'Attachment file size limit',
+  'Video size limit',
+  'Audio size limit',
+  'Document size limit',
   'Attachments per user',
   'Attachment storage per user',
   'Active artifacts per conversation',
@@ -1047,9 +1053,9 @@ export const STATIC_I18N_KEYS = [
   'A connected reference image is larger than the 8 MiB limit.',
   // Canvas editing feedback: a drop and a paste report these keys from
   // constants, so the literal scan cannot see them.
-  'Only image attachments can be added to the canvas.',
-  'Add at most {{count}} images at a time.',
-  'The image could not be added to the canvas.',
+  'Only images, videos, audio and PDF files can be added to the canvas.',
+  'Add at most {{count}} files at a time.',
+  'The file could not be added to the canvas.',
   'The canvas is full; the selection could not be pasted.',
   // Canvas node kind and generation labels render through t(label) from
   // CANVAS_NODE_KIND_LABELS / CANVAS_WORKFLOW_GENERATION_LABELS.
@@ -1105,4 +1111,13 @@ export const STATIC_I18N_KEYS = [
   // trash entries are the CH-04 additions.
   'Trash',
   'Trash retention in days',
+  // Read-aloud and dictation messages render from PLAYGROUND_SPEECH_ERRORS and
+  // PLAYGROUND_DICTATION_ERRORS, and the message action label from
+  // MESSAGE_ACTION_LABELS, so the literal scan cannot see them.
+  'Read aloud',
+  'Unable to save the audio to the conversation.',
+  'Audio recording is not supported in this browser.',
+  'Microphone access failed.',
+  'Transcription failed',
+  'No speech was detected.',
 ] as const

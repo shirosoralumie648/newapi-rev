@@ -99,7 +99,9 @@ export function usePlaygroundComposerMemory(
       saveComposerDraft(userIdRef.current, previousSessionId, textRef.current)
     }
     navigationIndexRef.current = null
-    const drafts = draftsRef.current ?? loadComposerDrafts(userIdRef.current)
+    // Re-read the drafts after the flush above so a conversation the user
+    // returns to restores the draft that was saved while switching away.
+    const drafts = loadComposerDrafts(userIdRef.current)
     draftsRef.current = drafts
     const draft = nextSessionId ? (drafts.get(nextSessionId) ?? '') : ''
     textRef.current = draft
@@ -121,7 +123,7 @@ export function usePlaygroundComposerMemory(
     []
   )
 
-  const scheduleDraftSave = useCallback((value: string) => {
+  const scheduleDraftSave = useCallback(() => {
     const sessionIdValue = activeSessionRef.current
     if (!sessionIdValue) return
     if (saveTimerRef.current !== null) {
@@ -138,7 +140,7 @@ export function usePlaygroundComposerMemory(
       navigationIndexRef.current = null
       textRef.current = value
       setText(value)
-      scheduleDraftSave(value)
+      scheduleDraftSave()
     },
     [scheduleDraftSave]
   )
@@ -163,7 +165,7 @@ export function usePlaygroundComposerMemory(
       navigationIndexRef.current = index
       textRef.current = value
       setText(value)
-      scheduleDraftSave(value)
+      scheduleDraftSave()
     },
     [scheduleDraftSave]
   )
@@ -199,7 +201,7 @@ export function usePlaygroundComposerMemory(
           const restored = stagedTextRef.current
           textRef.current = restored
           setText(restored)
-          scheduleDraftSave(restored)
+          scheduleDraftSave()
           return
         }
         recallHistoryEntry(navigation - 1)

@@ -65,6 +65,9 @@ func SetRelayRouter(router *gin.Engine) {
 	playgroundRouter.Use(middleware.RouteTag("relay"))
 	playgroundRouter.Use(middleware.RequestTiming())
 	playgroundRouter.Use(middleware.SystemPerformanceCheck())
+	// The run budget header of a canvas workflow step is consumed before the
+	// relay reads the account context, exactly like the media bridge does.
+	playgroundRouter.Use(middleware.PlaygroundWorkflowRun())
 	playgroundRouter.Use(middleware.UserAuth(), middleware.Distribute())
 	{
 		playgroundRouter.POST("/chat/completions", controller.Playground)
@@ -104,6 +107,14 @@ func SetRelayRouter(router *gin.Engine) {
 			middleware.Distribute(),
 			controller.PlaygroundAudioSpeech,
 		)
+		// Dictation is multipart, so its group override arrives in the
+		// X-Playground-Group header; the bridge consumes it before the relay
+		// pipeline sees the canonical request.
+		playgroundMediaRouter.POST("/audio/transcriptions",
+			middleware.PlaygroundRelayBridge("/v1/audio/transcriptions"),
+			middleware.Distribute(),
+			controller.PlaygroundAudioTranscription,
+		)
 	}
 	relayV1Router := router.Group("/v1")
 	relayV1Router.Use(middleware.RouteTag("relay"))
@@ -114,6 +125,11 @@ func SetRelayRouter(router *gin.Engine) {
 		// Responses WebSocket route. Channel selection happens after the first
 		// response.create event; each event runs the ordinary request limiter.
 		relayV1Router.GET("/responses", controller.ResponsesWebSocket)
+		// Asynchronous image generation poll. The submission settled the task
+		// and stored its upstream id, so polling only reads the durable row:
+		// it selects no channel and enforces no model limit. The endpoint is
+		// owner-scoped and renders the images of a finished task.
+		relayV1Router.GET("/images/generations/:task_id", controller.RelayImageGenerationTask)
 	}
 	relayV1Router.Use(middleware.ModelRequestRateLimit())
 	{

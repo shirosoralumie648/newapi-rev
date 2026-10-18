@@ -310,14 +310,14 @@ func isolatedAccountingTestDB(t *testing.T, dialect string) *gorm.DB {
 	common.SetDatabaseTypes(common.DatabaseType(dialect), previousLog)
 	DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&User{}, &Token{}, &Channel{}, &CreditGrant{}))
+		require.NoError(t, db.Migrator().DropTable(&User{}, &Token{}, &Channel{}, &CreditGrant{}, &ReferralBinding{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
 		DB = previous
 		common.SetDatabaseTypes(previousMain, previousLog)
 	})
-	require.NoError(t, db.AutoMigrate(&User{}, &Token{}, &Channel{}, &CreditGrant{}))
+	require.NoError(t, db.AutoMigrate(&User{}, &Token{}, &Channel{}, &CreditGrant{}, &ReferralBinding{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {

@@ -146,7 +146,7 @@ function LegacyAudioPreview(props: { taskId: string }) {
  * bytes fetched through the owner-scoped artifact content URL.
  */
 export function TaskArtifactMedia(props: {
-  artifact: TaskArtifact
+  artifact: Pick<TaskArtifact, 'type' | 'key'>
   mediaUrl: string
   onError: () => void
 }) {

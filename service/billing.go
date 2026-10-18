@@ -14,6 +14,11 @@ import (
 const (
 	BillingSourceWallet       = "wallet"
 	BillingSourceSubscription = "subscription"
+	// BillingSourceWorkflowBudget marks a Playground canvas step that bills
+	// inside the run budget of its workflow (BL-03). The run reserved the cap
+	// from the wallet when it started; a step only allocates inside that
+	// reservation and never moves money itself.
+	BillingSourceWorkflowBudget = "workflow_budget"
 )
 
 // PreConsumeBilling 根据用户计费偏好创建 BillingSession 并执行预扣费。

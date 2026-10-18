@@ -25,6 +25,7 @@ import {
   API_ENDPOINTS,
   PLAYGROUND_IMAGE_MAX_COUNT,
   PLAYGROUND_VIDEO_MAX_DURATION_SECONDS,
+  PLAYGROUND_WORKFLOW_RUN_HEADER,
 } from './constants'
 
 /** One image the relay returned, either as a URL or as inline Base64. */
@@ -62,6 +63,14 @@ export interface PlaygroundAudioSpeechInput {
   voice: string
 }
 
+export interface PlaygroundAudioTranscriptionInput {
+  model: string
+  group: string
+  /** Recorded clip; the relay forwards it to the transcription model as-is. */
+  file: Blob
+  filename: string
+}
+
 const imageGenerationSchema = z.object({
   data: z.array(
     z.object({
@@ -69,6 +78,11 @@ const imageGenerationSchema = z.object({
       b64_json: z.string().optional(),
     })
   ),
+})
+
+const imageTaskSchema = z.object({
+  success: z.literal(true),
+  data: z.object({ task_id: z.string().min(1) }),
 })
 
 const videoTaskSchema = z.object({
@@ -100,15 +114,27 @@ function boundedDurationSeconds(
 }
 
 /**
+ * One image generation either answered with its images inside the response or
+ * became a durable task whose result the task list and its stored artifacts
+ * carry. A model served by a task plugin (a long-running upstream image job)
+ * answers with the task id, so the browser never waits through a proxy timeout.
+ */
+export type PlaygroundImageGenerationOutcome =
+  | { kind: 'images'; images: PlaygroundImageResult[] }
+  | { kind: 'task'; taskId: string }
+
+/**
  * Starts an image generation through the Playground relay route. The body
  * carries the workspace group so the server applies the same group override
  * the chat workspace uses; channel selection, permissions and billing are the
- * ordinary relay pipeline, never a browser-held API key.
+ * ordinary relay pipeline, never a browser-held API key. `workflowRunId` marks
+ * a canvas workflow step that must bill inside its run budget.
  */
 export async function submitImageGeneration(
   input: PlaygroundImageGenerationInput,
-  signal?: AbortSignal
-): Promise<PlaygroundImageResult[]> {
+  signal?: AbortSignal,
+  workflowRunId?: string
+): Promise<PlaygroundImageGenerationOutcome> {
   const count = boundedImageCount(input.count)
   const images = (input.images ?? []).filter(Boolean)
   const response = await api.post(
@@ -122,26 +148,42 @@ export async function submitImageGeneration(
       ...(count ? { n: count } : {}),
       ...(images.length > 0 ? { images } : {}),
     },
-    { signal, skipErrorHandler: true }
+    {
+      signal,
+      skipErrorHandler: true,
+      ...(workflowRunId
+        ? { headers: { [PLAYGROUND_WORKFLOW_RUN_HEADER]: workflowRunId } }
+        : {}),
+    }
   )
+  const task = imageTaskSchema.safeParse(response.data)
+  if (task.success) {
+    return { kind: 'task', taskId: task.data.data.task_id }
+  }
   const parsed = imageGenerationSchema.safeParse(response.data)
   if (!parsed.success) {
     throw new Error('Image generation failed')
   }
-  return parsed.data.data.map((item) => ({
-    ...(item.url ? { url: item.url } : {}),
-    ...(item.b64_json ? { b64Json: item.b64_json } : {}),
-  }))
+  return {
+    kind: 'images',
+    images: parsed.data.data.map((item) => ({
+      ...(item.url ? { url: item.url } : {}),
+      ...(item.b64_json ? { b64Json: item.b64_json } : {}),
+    })),
+  }
 }
 
 /**
  * Submits a video generation task and returns its public task id when the
  * response carries one. An empty id is not a failure: the task list polls the
  * account's durable task rows, which is the authoritative status source.
+ * `workflowRunId` marks a canvas workflow step that must bill inside its run
+ * budget.
  */
 export async function submitVideoGeneration(
   input: PlaygroundVideoGenerationInput,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  workflowRunId?: string
 ): Promise<string> {
   const duration = boundedDurationSeconds(input.duration)
   const images = (input.images ?? []).filter(Boolean)
@@ -155,7 +197,13 @@ export async function submitVideoGeneration(
       ...(input.size ? { size: input.size } : {}),
       ...(images.length > 0 ? { images } : {}),
     },
-    { signal, skipErrorHandler: true }
+    {
+      signal,
+      skipErrorHandler: true,
+      ...(workflowRunId
+        ? { headers: { [PLAYGROUND_WORKFLOW_RUN_HEADER]: workflowRunId } }
+        : {}),
+    }
   )
   const parsed = videoTaskSchema.safeParse(response.data)
   if (!parsed.success) return ''
@@ -220,4 +268,33 @@ export async function submitAudioSpeech(
     { signal, responseType: 'blob', skipErrorHandler: true }
   )
   return response.data as Blob
+}
+
+const audioTranscriptionSchema = z.object({
+  text: z.string(),
+})
+
+/**
+ * Transcribes one recorded clip through the Playground transcription bridge.
+ * The request is multipart, so the workspace group travels in the
+ * X-Playground-Group header: the server consumes and validates it before the
+ * canonical relay request, and it never reaches the upstream provider.
+ */
+export async function submitAudioTranscription(
+  input: PlaygroundAudioTranscriptionInput,
+  signal?: AbortSignal
+): Promise<string> {
+  const form = new FormData()
+  form.append('model', input.model)
+  form.append('file', input.file, input.filename)
+  const response = await api.post(API_ENDPOINTS.AUDIO_TRANSCRIPTIONS, form, {
+    signal,
+    skipErrorHandler: true,
+    headers: { 'X-Playground-Group': input.group },
+  })
+  const parsed = audioTranscriptionSchema.safeParse(response.data)
+  if (!parsed.success) {
+    throw new Error('Transcription failed')
+  }
+  return parsed.data.text
 }

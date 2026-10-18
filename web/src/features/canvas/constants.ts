@@ -87,9 +87,10 @@ export const CANVAS_GROUP_MAX_DEPTH = 8
 // drop point. The server re-validates the same bounds.
 export const CANVAS_DROP_NODE_OFFSET_X = 300
 export const CANVAS_DROP_MESSAGES = {
-  UNSUPPORTED_TYPE: 'Only image attachments can be added to the canvas.',
-  TOO_MANY: 'Add at most {{count}} images at a time.',
-  UPLOAD_FAILED: 'The image could not be added to the canvas.',
+  UNSUPPORTED_TYPE:
+    'Only images, videos, audio and PDF files can be added to the canvas.',
+  TOO_MANY: 'Add at most {{count}} files at a time.',
+  UPLOAD_FAILED: 'The file could not be added to the canvas.',
 } as const
 
 export const CANVAS_EDIT_MESSAGES = {

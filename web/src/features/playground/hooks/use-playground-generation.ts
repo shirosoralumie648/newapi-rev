@@ -30,9 +30,11 @@ import {
   cancelPlaygroundTask,
   setPlaygroundTaskArtifactPin,
   submitAudioSpeech,
+  submitAudioTranscription,
   submitImageGeneration,
   submitVideoGeneration,
   type PlaygroundAudioSpeechInput,
+  type PlaygroundAudioTranscriptionInput,
   type PlaygroundImageGenerationInput,
   type PlaygroundVideoGenerationInput,
 } from '../generation-api'
@@ -154,4 +156,17 @@ export function usePlaygroundGeneration() {
   })
 
   return { image, video, audio }
+}
+
+/**
+ * Dictation: one recorded clip transcribed through the /pg transcription
+ * bridge. The relay bills the request like any other call; the returned text
+ * is inserted into the composer.
+ */
+export function usePlaygroundTranscription() {
+  return useMutation({
+    mutationFn: (input: PlaygroundAudioTranscriptionInput) =>
+      submitAudioTranscription(input),
+    meta: { errorToast: false },
+  })
 }

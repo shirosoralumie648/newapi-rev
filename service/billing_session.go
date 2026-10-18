@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math"
 	"net/http"
-	"strings"
 	"sync"
 
 	"github.com/QuantumNous/new-api/common"
@@ -261,7 +260,6 @@ func (s *BillingSession) preConsume(c *gin.Context, quota int) *types.NewAPIErro
 			}
 			s.tokenConsumed = 0
 		}
-		// TODO: model 层应定义哨兵错误（如 ErrNoActiveSubscription），用 errors.Is 替代字符串匹配
 		if errors.Is(err, ErrInsufficientWalletQuota) {
 			userQuota, quotaErr := model.GetUserQuota(s.relayInfo.UserId, false)
 			if quotaErr != nil {
@@ -272,9 +270,13 @@ func (s *BillingSession) preConsume(c *gin.Context, quota int) *types.NewAPIErro
 				types.ErrorCodeInsufficientUserQuota, http.StatusForbidden,
 				types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
 		}
-		errMsg := err.Error()
-		if strings.Contains(errMsg, "no active subscription") || strings.Contains(errMsg, "subscription quota insufficient") {
-			return types.NewErrorWithStatusCode(errors.New(i18n.T(c, i18n.MsgQuotaSubscriptionInsufficient, map[string]any{"Error": errMsg})), types.ErrorCodeInsufficientUserQuota, http.StatusForbidden, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+		if errors.Is(err, model.ErrNoActiveSubscription) ||
+			errors.Is(err, model.ErrSubscriptionIneligible) ||
+			errors.Is(err, model.ErrSubscriptionQuotaInsufficient) {
+			return types.NewErrorWithStatusCode(errors.New(i18n.T(c, i18n.MsgQuotaSubscriptionInsufficient, map[string]any{"Error": err.Error()})), types.ErrorCodeInsufficientUserQuota, http.StatusForbidden, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+		}
+		if s.funding.Source() == BillingSourceWorkflowBudget {
+			return s.workflowBudgetError(err)
 		}
 		return types.NewError(err, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
 	}
@@ -313,6 +315,15 @@ func (s *BillingSession) reserveFunding(delta int, requireAvailableQuota bool) e
 		funding.consumed += int(applied)
 		model.RecordWalletConsumeDelta(funding.userId, -applied)
 		return nil
+	case *WorkflowBudgetFunding:
+		// A step of a workflow run allocates inside the cap the run already
+		// reserved from the wallet: no balance check and no wallet movement,
+		// only the remaining budget limits the request. Crossing it aborts the
+		// step with the stable budget error code.
+		if err := funding.ReserveExtra(delta); err != nil {
+			return s.workflowBudgetError(err)
+		}
+		return nil
 	case *SubscriptionFunding:
 		if err := model.PostConsumeUserSubscriptionDelta(funding.subscriptionId, int64(delta)); err != nil {
 			return types.NewErrorWithStatusCode(
@@ -337,11 +348,34 @@ func (s *BillingSession) rollbackFundingReserve(delta int) {
 		} else {
 			funding.consumed -= delta
 		}
+	case *WorkflowBudgetFunding:
+		if err := funding.ReleaseExtra(delta); err != nil {
+			common.SysLog(common.LogText("error rolling back workflow budget reserve: %s", err.Error()))
+		}
 	case *SubscriptionFunding:
 		if err := model.PostConsumeUserSubscriptionDelta(funding.subscriptionId, -int64(delta)); err != nil {
 			common.SysLog(common.LogText("error rolling back subscription funding reserve: %s", err.Error()))
 		}
 	}
+}
+
+// workflowBudgetError maps a refused workflow step allocation to the stable
+// relay error code the workspace uses to stop the remaining nodes of a run. The
+// run was already settled, refunded or expired in every hold error case, so the
+// step can never be billed outside its budget.
+func (s *BillingSession) workflowBudgetError(err error) *types.NewAPIError {
+	if errors.Is(err, model.ErrWalletBudgetExceeded) ||
+		errors.Is(err, model.ErrWalletHoldClosed) ||
+		errors.Is(err, model.ErrWalletHoldNotFound) {
+		return types.NewErrorWithStatusCode(
+			errors.New(i18n.Translate(s.lang, i18n.MsgQuotaWorkflowBudgetExceeded)),
+			types.ErrorCodeWorkflowBudgetExceeded,
+			http.StatusForbidden,
+			types.ErrOptionWithSkipRetry(),
+			types.ErrOptionWithNoRecordErrorLog(),
+		)
+	}
+	return types.NewError(err, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
 }
 
 func (s *BillingSession) reserveToken(delta int) error {
@@ -435,6 +469,27 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 			types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
 	}
 
+	// 工作流运行预算：画布单次运行创建预算 hold 时已从钱包整段预扣上限，每一步
+	// 必须在预算内分配子额度，不再读取计费偏好，也不再单独检查余额（BL-03）。
+	if relayInfo.PlaygroundWorkflowRunId != "" {
+		if userQuota, err := model.GetUserQuota(relayInfo.UserId, false); err == nil {
+			relayInfo.UserQuota = userQuota
+		}
+		session := &BillingSession{
+			relayInfo: relayInfo,
+			funding: &WorkflowBudgetFunding{
+				userId:    relayInfo.UserId,
+				runId:     relayInfo.PlaygroundWorkflowRunId,
+				requestId: relayInfo.RequestId,
+			},
+			lang: i18n.StatedLang(c),
+		}
+		if apiErr := session.preConsume(c, preConsumedQuota); apiErr != nil {
+			return nil, apiErr
+		}
+		return session, nil
+	}
+
 	pref := common.NormalizeBillingPreference(relayInfo.UserSetting.BillingPreference)
 	// 用户组的透支上限即钱包可用的信用额度：余额可以低于 0，但不得低于它。
 	overdraft := model.OverdraftLimitQuotaForGroup(relayInfo.UserGroup)
@@ -481,6 +536,7 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 			funding: &SubscriptionFunding{
 				requestId: relayInfo.RequestId,
 				userId:    relayInfo.UserId,
+				group:     relayInfo.UsingGroup,
 				modelName: relayInfo.GetBillingModelName(),
 				amount:    subConsume,
 			},

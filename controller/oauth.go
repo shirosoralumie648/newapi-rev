@@ -511,10 +511,17 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 	user.Role = common.RoleCommonUser
 	user.Status = common.UserStatusEnabled
 
-	// Handle affiliate code
-	inviterId := 0
-	if affiliateCode != "" {
-		inviterId, _ = model.GetUserIdByAffCode(affiliateCode)
+	// Handle affiliate code: the relation is recorded with the account in the
+	// same transaction (#5766), and an unknown or disabled inviter is dropped
+	// instead of blocking the OAuth registration.
+	attribution := model.ReferralAttribution{}
+	if inviteCode := strings.TrimSpace(affiliateCode); inviteCode != "" {
+		inviterId, lookupErr := model.LookupReferralInviter(inviteCode)
+		if lookupErr != nil {
+			common.SysLog(common.LogText("[OAuth] Ignored invitation code during registration: %s", lookupErr.Error()))
+		} else if inviterId != 0 {
+			attribution = model.ReferralAttribution{InviterId: inviterId, Source: model.ReferralSourceOAuth}
+		}
 	}
 
 	// Use transaction to ensure user creation and OAuth binding are atomic
@@ -522,7 +529,7 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 		// Custom provider: create user and binding in a transaction
 		err := model.DB.Transaction(func(tx *gorm.DB) error {
 			// Create user
-			if err := user.InsertWithTx(tx, inviterId); err != nil {
+			if err := user.InsertWithTx(tx, attribution); err != nil {
 				return err
 			}
 
@@ -543,12 +550,12 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 		}
 
 		// Perform post-transaction tasks (logs, sidebar config, inviter rewards)
-		user.FinalizeOAuthUserCreation(inviterId)
+		user.FinishInsert()
 	} else {
 		// Built-in provider: create user and update provider ID in a transaction
 		err := model.DB.Transaction(func(tx *gorm.DB) error {
 			// Create user
-			if err := user.InsertWithTx(tx, inviterId); err != nil {
+			if err := user.InsertWithTx(tx, attribution); err != nil {
 				return err
 			}
 
@@ -572,7 +579,7 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 		}
 
 		// Perform post-transaction tasks
-		user.FinalizeOAuthUserCreation(inviterId)
+		user.FinishInsert()
 	}
 
 	return user, nil, nil

@@ -1558,6 +1558,16 @@ func setProtocolRequestBackground(c *gin.Context, background bool) {
 	}
 }
 
+func setImageProtocolAsyncFlag(c *gin.Context, async bool) {
+	request := c.MustGet(pluginruntime.ContextKeyProtocolRequest).(pluginruntime.ProtocolRequestContext)
+	if body, ok := request.Body.(map[string]any); ok {
+		if value, ok := body["value"].(map[string]any); ok {
+			value["async"] = async
+		}
+	}
+	c.Set(pluginruntime.ContextKeyProtocolRequest, request)
+}
+
 func compilePluginProtocolRetrieveEndpoint(t *testing.T, key, source string, options pluginruntime.Options) pluginruntime.PinnedEndpoint {
 	t.Helper()
 	pinned := compilePluginProtocolTestEndpointWithOptions(t, key, source, options)
@@ -1866,4 +1876,222 @@ func TestServeTaskPluginImageProtocolDisconnectDuringSubmissionKeepsDurableSettl
 	assert.Zero(t, polls, "an immediate result is never polled")
 	assert.False(t, c.Writer.Written())
 	assert.Empty(t, recorder.Body.String())
+}
+
+// The asynchronous image mode answers with the durable task id instead of
+// waiting for the images. The submission stays the synchronous one, so its
+// billing and task row are unchanged; only the wait and the rendering move to
+// the polling endpoint. The host-level `async` flag is removed from the
+// protocol request the host exposes to hooks, so the value kept for the
+// polling render carries the client fields alone.
+func TestServeTaskPluginImageProtocolAsyncAnswersWithTaskID(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		playground bool
+		status     model.TaskStatus
+		wantStatus string
+	}{
+		{"body flag", false, model.TaskStatusSubmitted, "submitted"},
+		{"playground route", true, model.TaskStatusInProgress, "in_progress"},
+		{"terminal result", false, model.TaskStatusSuccess, "succeeded"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pinned := imageProtocolTestEndpoint(t)
+			c, recorder := newImageProtocolTestContext("")
+			if tc.playground {
+				common.SetContextKey(c, constant.ContextKeyPlaygroundOrigin, true)
+			} else {
+				request := c.MustGet(pluginruntime.ContextKeyProtocolRequest).(pluginruntime.ProtocolRequestContext)
+				request.BodyText = []byte(`{"model":"image-model","prompt":"a cat","async":true}`)
+				c.Set(pluginruntime.ContextKeyProtocolRequest, request)
+				setImageProtocolAsyncFlag(c, true)
+			}
+			deps := pluginProtocolTestDeps()
+			polls := 0
+			deps.pollTask = func(context.Context, *model.Task) error {
+				polls++
+				return nil
+			}
+			deps.submit = func(_ *gin.Context, info *relaycommon.RelayInfo) (*taskSubmissionOutcome, *dto.TaskError) {
+				outcome := imageProtocolTestOutcome(info, tc.status, "https://cdn.example/1.png")
+				outcome.Task.Properties.OriginModelName = "image-model"
+				return outcome, nil
+			}
+			serveTaskPluginImageProtocol(c, pinned, deps)
+			require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
+			var response map[string]any
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+			assert.Equal(t, true, response["success"])
+			data := response["data"].(map[string]any)
+			assert.Equal(t, "task_image", data["task_id"])
+			assert.Equal(t, tc.wantStatus, data["status"])
+			assert.Equal(t, float64(1_710_000_000), data["created_at"])
+			assert.Equal(t, "image-model", data["model"])
+			assert.Zero(t, polls, "the asynchronous mode never waits inside the request")
+			assert.True(t, common.GetContextKeyBool(c, constant.ContextKeyImageTaskAsync))
+			stored := c.MustGet(pluginruntime.ContextKeyProtocolRequest).(pluginruntime.ProtocolRequestContext)
+			value := stored.Body.(map[string]any)["value"].(map[string]any)
+			assert.NotContains(t, value, "async")
+			assert.NotContains(t, string(stored.BodyText), "async")
+		})
+	}
+}
+
+// An asynchronous image task is retrieved after the response, so an immediate
+// terminal result keeps its upstream snapshot and the protocol request that
+// renders it. The synchronous rule that discards inline results does not
+// apply, and the submission still settles before the response.
+func TestServeTaskPluginImageProtocolAsyncKeepsTerminalResultForPolling(t *testing.T) {
+	events := make([]string, 0, 3)
+	database := setupTaskSubmissionDatabase(t, true, &events)
+	previousLogConsumeEnabled := common.LogConsumeEnabled
+	common.LogConsumeEnabled = false
+	t.Cleanup(func() { common.LogConsumeEnabled = previousLogConsumeEnabled })
+
+	pinned := imageProtocolTestEndpoint(t)
+	c, recorder := newImageProtocolTestContext("")
+	c.Set(pluginruntime.ContextKeyPinnedEndpoint, pinned)
+	setImageProtocolAsyncFlag(c, true)
+	billing := &taskSubmissionTestBilling{events: &events}
+	deps := pluginProtocolTestDeps()
+	deps.submit = func(c *gin.Context, info *relaycommon.RelayInfo) (*taskSubmissionOutcome, *dto.TaskError) {
+		info.Billing = billing
+		info.TaskRelayInfo.PublicTaskID = "task_image_async"
+		info.TaskRelayInfo.LockedChannel = &model.Channel{Id: 1, Type: constant.ChannelTypeTaskPlugin, Name: "image-bridge"}
+		info.ChannelMeta = &relaycommon.ChannelMeta{ChannelId: 1, ChannelType: constant.ChannelTypeTaskPlugin}
+		return executeTaskSubmissionWith(c, info, func(*gin.Context, *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
+			return &relay.TaskSubmitResult{
+				UpstreamTaskID: "task_image_async",
+				Platform:       constant.TaskPlatform(pinned.Plugin.Meta.Key),
+				Quota:          7,
+				TaskData:       []byte(`{"images":["https://cdn.example/1.png"]}`),
+				Immediate:      &relaycommon.TaskInfo{Status: model.TaskStatusSuccess, Progress: "100%"},
+			}, nil
+		})
+	}
+
+	serveTaskPluginImageProtocol(c, pinned, deps)
+
+	require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
+	assert.Equal(t, []string{"reserve", "insert", "settle"}, events)
+	var persisted model.Task
+	require.NoError(t, database.Where("task_id = ?", "task_image_async").First(&persisted).Error)
+	assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), persisted.Status)
+	assert.False(t, persisted.PrivateData.ResultDiscarded, "an asynchronous image result is always retrievable")
+	assert.NotEmpty(t, persisted.PrivateData.AsyncImageRequest, "the poll endpoint keeps the request that renders the result")
+	assert.Contains(t, string(persisted.PrivateData.AsyncImageRequest), "image-model")
+	var response map[string]any
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	data := response["data"].(map[string]any)
+	assert.Equal(t, "succeeded", data["status"])
+}
+
+func newImageTaskPollContext(taskID string) (*gin.Context, *httptest.ResponseRecorder) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/images/generations/"+taskID, nil)
+	c.Params = gin.Params{{Key: "task_id", Value: taskID}}
+	common.SetContextKey(c, constant.ContextKeyUserId, 71)
+	common.SetContextKey(c, constant.ContextKeyTokenId, 81)
+	return c, recorder
+}
+
+// The asynchronous Images API is polled by task id. The endpoint is
+// owner-scoped, serves only tasks of the Images endpoint, refreshes an
+// unfinished task at most once per poll interval, and renders a finished task
+// with the submitting plugin like the synchronous response does.
+func TestRelayImageGenerationTaskServesTaskState(t *testing.T) {
+	newTask := func(mutate func(*model.Task)) *model.Task {
+		task := &model.Task{
+			TaskID:    "task_image",
+			Platform:  constant.TaskPlatform("image-bridge"),
+			UserId:    71,
+			ChannelId: 3,
+			Status:    model.TaskStatusInProgress,
+			Progress:  "50%",
+			CreatedAt: 1_710_000_000,
+			UpdatedAt: 1_700_000_000,
+		}
+		task.Properties.OriginModelName = "image-model"
+		task.PrivateData.Execution = &model.TaskExecutionSnapshot{RequestPath: "/v1/images/generations"}
+		task.PrivateData.AsyncImageRequest = []byte(`{"body":{"kind":"json","value":{"model":"image-model","response_format":"b64_json"}}}`)
+		if mutate != nil {
+			mutate(task)
+		}
+		return task
+	}
+	succeededTask := func() *model.Task {
+		return newTask(func(task *model.Task) {
+			task.Status = model.TaskStatusSuccess
+			task.Progress = "100%"
+			task.FinishTime = 1_710_000_060
+			task.SetData(map[string]any{"images": []string{"https://cdn.example/1.png"}})
+		})
+	}
+
+	for _, tc := range []struct {
+		name        string
+		task        *model.Task
+		exists      bool
+		noPlugin    bool
+		wantStatus  int
+		wantState   string
+		wantPolls   int
+		wantImages  []any
+		wantMessage string
+	}{
+		{name: "unfinished task polls on demand", task: newTask(nil), exists: true, wantStatus: http.StatusOK, wantState: "in_progress", wantPolls: 1},
+		{name: "recently polled task is not polled again", task: newTask(func(task *model.Task) { task.UpdatedAt = common.GetTimestamp() }), exists: true, wantStatus: http.StatusOK, wantState: "in_progress", wantPolls: 0},
+		{name: "failure reports the task reason", task: newTask(func(task *model.Task) {
+			task.Status = model.TaskStatusFailure
+			task.FailReason = "DataInspectionFailed"
+			task.FinishTime = 1_710_000_060
+		}), exists: true, wantStatus: http.StatusOK, wantState: "failed", wantMessage: "DataInspectionFailed"},
+		{name: "success renders the plugin images", task: succeededTask(), exists: true, wantStatus: http.StatusOK, wantState: "succeeded", wantImages: []any{map[string]any{"url": "https://cdn.example/1.png", "b64_json": "QUFB"}}},
+		{name: "task of another endpoint is hidden", task: newTask(func(task *model.Task) { task.PrivateData.Execution.RequestPath = "/v1/videos" }), exists: true, wantStatus: http.StatusNotFound},
+		{name: "discarded result is hidden", task: newTask(func(task *model.Task) { task.PrivateData.ResultDiscarded = true }), exists: true, wantStatus: http.StatusNotFound},
+		{name: "unknown task", exists: false, wantStatus: http.StatusNotFound},
+		{name: "unavailable plugin", task: succeededTask(), exists: true, noPlugin: true, wantStatus: http.StatusServiceUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pinned := imageProtocolTestEndpoint(t)
+			deps := pluginProtocolRetrieveDeps(pinned, tc.task, tc.exists, nil)
+			polls := 0
+			deps.pollTask = func(context.Context, *model.Task) error {
+				polls++
+				return nil
+			}
+			deps.downloadImage = func(string) (string, string, error) {
+				return "image/png", "QUFB", nil
+			}
+			if tc.noPlugin {
+				deps.resolvePlugin = func(constant.TaskPlatform) (*pluginruntime.LoadedPlugin, *pluginruntime.RoutingGeneration, bool) {
+					return nil, nil, false
+				}
+			}
+			c, recorder := newImageTaskPollContext("task_image")
+			relayImageGenerationTask(c, deps)
+			require.Equal(t, tc.wantStatus, recorder.Code, recorder.Body.String())
+			assert.Equal(t, tc.wantPolls, polls)
+			if tc.wantStatus != http.StatusOK {
+				return
+			}
+			var response map[string]any
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+			assert.Equal(t, true, response["success"])
+			data := response["data"].(map[string]any)
+			assert.Equal(t, "task_image", data["task_id"])
+			assert.Equal(t, tc.wantState, data["status"])
+			assert.Equal(t, "image-model", data["model"])
+			assert.Equal(t, float64(1_710_000_000), data["created_at"])
+			if tc.wantMessage != "" {
+				errorBody := data["error"].(map[string]any)
+				assert.Equal(t, "image_generation_failed", errorBody["code"])
+				assert.Contains(t, errorBody["message"], tc.wantMessage)
+			}
+			if tc.wantImages != nil {
+				assert.Equal(t, tc.wantImages, data["images"])
+			}
+		})
+	}
 }

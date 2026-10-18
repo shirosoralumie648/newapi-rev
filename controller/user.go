@@ -223,12 +223,16 @@ func Register(c *gin.Context) {
 		common.ApiErrorT(c, "Password registration has been disabled by administrator, please use third-party account verification")
 		return
 	}
-	var user model.User
-	err := common.DecodeJson(c.Request.Body, &user)
+	var request struct {
+		model.User
+		ReferralSource string `json:"referral_source"`
+	}
+	err := common.DecodeJson(c.Request.Body, &request)
 	if err != nil {
 		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
+	user := request.User
 	user.Username = strings.TrimSpace(user.Username)
 	user.Email = model.NormalizeEmail(user.Email)
 	if user.Username == "" {
@@ -271,19 +275,33 @@ func Register(c *gin.Context) {
 		common.ApiErrorT(c, "Username already exists or has been deleted")
 		return
 	}
-	affCode := user.AffCode // this code is the inviter's code, not the user's own code
-	inviterId, _ := model.GetUserIdByAffCode(affCode)
+	// The invitation code is the inviter's code, not the user's own. A stale or
+	// disabled inviter is dropped by the model layer (no relation, no reward)
+	// instead of blocking registration; the console hint separates the
+	// invitation link from a hand-entered code.
+	attribution := model.ReferralAttribution{}
+	if affCode := strings.TrimSpace(user.AffCode); affCode != "" {
+		inviterId, lookupErr := model.LookupReferralInviter(affCode)
+		if lookupErr != nil {
+			common.SysLog(common.LogText("ignored invitation code at registration: %s", lookupErr.Error()))
+		} else if inviterId != 0 {
+			source := model.ReferralSourceCode
+			if strings.TrimSpace(request.ReferralSource) == model.ReferralSourceLink {
+				source = model.ReferralSourceLink
+			}
+			attribution = model.ReferralAttribution{InviterId: inviterId, Source: source}
+		}
+	}
 	cleanUser := model.User{
 		Username:    user.Username,
 		Password:    user.Password,
 		DisplayName: user.Username,
-		InviterId:   inviterId,
 		Role:        common.RoleCommonUser, // 明确设置角色为普通用户
 	}
 	if common.EmailVerificationEnabled {
 		cleanUser.Email = user.Email
 	}
-	if err := cleanUser.Insert(inviterId); err != nil {
+	if err := cleanUser.Insert(attribution); err != nil {
 		if errors.Is(err, model.ErrEmailAlreadyTaken) {
 			common.ApiErrorT(c, "Email address is already in use")
 			return
@@ -1038,7 +1056,7 @@ func CreateUser(c *gin.Context) {
 	}
 	authzTouched := false
 	if err := model.DB.Transaction(func(tx *gorm.DB) error {
-		if err := cleanUser.InsertWithTx(tx, 0); err != nil {
+		if err := cleanUser.InsertWithTx(tx, model.ReferralAttribution{}); err != nil {
 			return err
 		}
 		touched, err := updateAdminPermissionsForUserInTx(c, tx, cleanUser.Id, cleanUser.Role, user.AdminPermissions)
@@ -1054,7 +1072,7 @@ func CreateUser(c *gin.Context) {
 			return
 		}
 	}
-	cleanUser.FinishInsert(0)
+	cleanUser.FinishInsert()
 
 	auditParams["username"] = cleanUser.Username
 	recordManageAuditFor(c, cleanUser.Id, "user.create", auditParams)
@@ -1063,6 +1081,48 @@ func CreateUser(c *gin.Context) {
 		"message": "",
 	})
 	return
+}
+
+type bindInviterRequest struct {
+	InviterId int `json:"inviter_id"`
+}
+
+// BindUserInviter binds an existing account to an inviter on behalf of an
+// administrator. It is the only manual binding path: the account must not have
+// an inviter yet, and users cannot rebind themselves through any endpoint.
+func BindUserInviter(c *gin.Context) {
+	user, ok := requireManagedUser(c)
+	if !ok {
+		return
+	}
+	var req bindInviterRequest
+	if err := common.DecodeJson(c.Request.Body, &req); err != nil || req.InviterId <= 0 {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	binding, err := model.BindReferralInviterByAdmin(user.Id, req.InviterId)
+	if err != nil {
+		switch {
+		case errors.Is(err, model.ErrReferralSelfInvite):
+			common.ApiErrorT(c, "A user cannot invite themselves")
+		case errors.Is(err, model.ErrReferralInviterNotFound):
+			common.ApiErrorT(c, "Inviter does not exist")
+		case errors.Is(err, model.ErrReferralInviterDisabled):
+			common.ApiErrorT(c, "Inviter account is disabled")
+		case errors.Is(err, model.ErrReferralAlreadyBound):
+			common.ApiErrorT(c, "The user already has an inviter")
+		default:
+			common.ApiError(c, err)
+		}
+		return
+	}
+	recordManageAuditFor(c, user.Id, "user.inviter_bind", map[string]any{
+		"username":   user.Username,
+		"id":         user.Id,
+		"inviter_id": req.InviterId,
+		"source":     binding.Source,
+	})
+	common.ApiSuccessT(c, "Inviter bound", gin.H{"binding": binding})
 }
 
 func updateAdminPermissionsForUserInTx(c *gin.Context, tx *gorm.DB, userID int, userRole int, permissions map[string]map[string]bool) (bool, error) {

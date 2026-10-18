@@ -119,6 +119,9 @@ export type CanvasNodeData = {
   snapshot?: CanvasMessageSnapshot
   ref?: CanvasNodeRef
   label?: string
+  // Declared media type of an `attachment` node. Older boards were image-only
+  // and carry no value, which keeps rendering as an image.
+  mediaType?: string
   // Workflow configuration and last-run state of a `model`/`task` step and the
   // filled-in state of a `task-result` node.
   workflow?: CanvasNodeWorkflowState

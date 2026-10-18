@@ -197,6 +197,15 @@ func PlaygroundAudioSpeech(c *gin.Context) {
 	playgroundGenerationHandler(c, func(c *gin.Context) { Relay(c, types.RelayFormatOpenAIAudio) })
 }
 
+// PlaygroundAudioTranscription serves speech-to-text dictation from the
+// workspace through the canonical /v1/audio/transcriptions pipeline. The
+// request is multipart, so the group override was consumed from the
+// X-Playground-Group header by middleware.PlaygroundRelayBridge before
+// distribution; transcription is synchronous and billed like a direct call.
+func PlaygroundAudioTranscription(c *gin.Context) {
+	playgroundGenerationHandler(c, func(c *gin.Context) { Relay(c, types.RelayFormatOpenAIAudio) })
+}
+
 // PlaygroundTaskCancel cancels one unfinished workspace generation task with a
 // status CAS and refunds the quota reserved at submission. Only tasks created
 // from the Playground workspace are visible here; a direct API task id returns

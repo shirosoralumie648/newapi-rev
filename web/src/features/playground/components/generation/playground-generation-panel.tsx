@@ -22,10 +22,7 @@ import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from '@/components/ui/native-select'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
 import type { CanvasSendSeed } from '@/features/canvas/lib/canvas-send'
 import { handleServerError } from '@/lib/handle-server-error'
@@ -76,9 +73,12 @@ export function PlaygroundGenerationPanel(
   const [model, setModel] = useState('')
   const [prompt, setPrompt] = useState('')
   const [size, setSize] = useState<string>(PLAYGROUND_IMAGE_SIZES[0])
-  const [duration, setDuration] = useState<number>(PLAYGROUND_VIDEO_DURATIONS[0])
+  const [duration, setDuration] = useState<number>(
+    PLAYGROUND_VIDEO_DURATIONS[0]
+  )
   const [voice, setVoice] = useState<string>(PLAYGROUND_AUDIO_VOICES[0])
   const [images, setImages] = useState<PlaygroundImageResult[]>([])
+  const [imageTaskSubmitted, setImageTaskSubmitted] = useState(false)
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const generation = usePlaygroundGeneration()
@@ -106,13 +106,14 @@ export function PlaygroundGenerationPanel(
     setIsSubmitting(true)
     try {
       if (kind === 'image') {
-        const results = await generation.image.mutateAsync({
+        const outcome = await generation.image.mutateAsync({
           model: model.trim(),
           prompt: trimmedPrompt,
           group: props.group,
           size,
         })
-        setImages(results)
+        setImages(outcome.kind === 'images' ? outcome.images : [])
+        setImageTaskSubmitted(outcome.kind === 'task')
         setAudioUrl(null)
       } else if (kind === 'video') {
         await generation.video.mutateAsync({
@@ -122,6 +123,7 @@ export function PlaygroundGenerationPanel(
           duration,
         })
         setImages([])
+        setImageTaskSubmitted(false)
         setAudioUrl(null)
       } else {
         const blob = await generation.audio.mutateAsync({
@@ -131,6 +133,7 @@ export function PlaygroundGenerationPanel(
           voice,
         })
         setImages([])
+        setImageTaskSubmitted(false)
         setAudioUrl(URL.createObjectURL(blob))
       }
     } catch (error) {
@@ -268,6 +271,14 @@ export function PlaygroundGenerationPanel(
           {isSubmitting ? t('Generating...') : t('Generate')}
         </Button>
       </section>
+
+      {imageTaskSubmitted ? (
+        <p className='text-muted-foreground text-sm' role='status'>
+          {t(
+            'Image generation submitted as a task; the result appears in the task list.'
+          )}
+        </p>
+      ) : null}
 
       {images.length > 0 ? (
         <section aria-label={t('Generated media')} className='grid gap-2'>

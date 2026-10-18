@@ -76,6 +76,11 @@ func SetApiRouter(router *gin.Engine) {
 		playgroundRoute.Use(middleware.DisableCache(), middleware.UserAuth())
 		{
 			playgroundRoute.GET("/usage", controller.GetPlaygroundUsage)
+			// One canvas workflow run may open a budget cap and settle it when
+			// the run stops (BL-03).
+			playgroundRoute.POST("/workflows/estimate", controller.PlaygroundWorkflowEstimate)
+			playgroundRoute.POST("/workflows/runs", controller.PlaygroundWorkflowRunCreate)
+			playgroundRoute.POST("/workflows/runs/:runId/settle", controller.PlaygroundWorkflowRunSettle)
 			playgroundRoute.GET("/settings", controller.GetPlaygroundSettings)
 			playgroundRoute.GET("/message-costs", controller.GetPlaygroundMessageCosts)
 			playgroundRoute.GET("/trash", controller.ListPlaygroundTrash)
@@ -134,6 +139,15 @@ func SetApiRouter(router *gin.Engine) {
 			// A canvas owns its own attachment partition, so a file dropped on
 			// the board is uploaded without inventing a conversation for it.
 			playgroundRoute.POST("/canvases/:canvasId/attachments", controller.CreatePlaygroundCanvasAttachment)
+			// Large files and the extended kinds (video, audio, PDF) upload in
+			// two steps: a reservation returns a presigned PUT when the object
+			// store can sign one (otherwise the content route relays the bytes),
+			// and completing it verifies the stored object and stores the
+			// attachment. Both partitions share these routes.
+			playgroundRoute.POST("/uploads", controller.CreatePlaygroundUpload)
+			playgroundRoute.PUT("/uploads/:uploadId/content", controller.PutPlaygroundUploadContent)
+			playgroundRoute.POST("/uploads/:uploadId/complete", controller.CompletePlaygroundUpload)
+			playgroundRoute.DELETE("/uploads/:uploadId", controller.DeletePlaygroundUpload)
 		}
 
 		userRoute := apiRouter.Group("/user")
@@ -228,6 +242,7 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.GET("/:id/oauth/bindings", controller.GetUserOAuthBindingsByAdmin)
 				adminRoute.DELETE("/:id/oauth/bindings/:provider_id", controller.UnbindCustomOAuthByAdmin)
 				adminRoute.DELETE("/:id/bindings/:binding_type", controller.AdminClearUserBinding)
+				adminRoute.POST("/:id/inviter", middleware.CriticalRateLimit(), controller.BindUserInviter)
 				adminRoute.GET("/:id", controller.GetUser)
 				adminRoute.POST("/", controller.CreateUser)
 				adminRoute.POST("/manage", controller.ManageUser)

@@ -22,6 +22,7 @@ import { api } from '@/lib/api'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
 import { canvasDocumentSchema } from './lib/canvas-document'
+import type { CanvasWorkflowEstimateStepInput } from './lib/canvas-workflow-budget'
 import type {
   CanvasProjectSummary,
   CanvasServerProject,
@@ -29,6 +30,9 @@ import type {
 } from './types'
 
 const CANVAS_ENDPOINT = '/api/playground/canvases'
+// One workflow run may open a budget cap before its steps start and settle it
+// when they stop (BL-03).
+const WORKFLOW_ENDPOINT = '/api/playground/workflows'
 
 const canvasProjectSummarySchema = z.object({
   id: z.string().min(1),
@@ -238,4 +242,141 @@ export async function restoreCanvasSnapshot(
   )
   requireServerSuccess(response.data)
   return mapCanvasProject(response.data.data)
+}
+
+const workflowEstimateStepSchema = z.object({
+  node_id: z.string(),
+  quota: z.number().int().nonnegative(),
+  available: z.boolean(),
+  approximate: z.boolean(),
+})
+
+const workflowEstimateSchema = z.object({
+  steps: z.array(workflowEstimateStepSchema),
+  total_quota: z.number().int().nonnegative(),
+  available: z.boolean(),
+})
+
+const workflowRunSchema = z.object({
+  run_id: z.string().min(1),
+  cap: z.number().int().nonnegative(),
+  spent: z.number().int(),
+  remaining: z.number().int(),
+  status: z.string().optional(),
+})
+
+/** One priced step of a planned run. */
+export interface CanvasWorkflowEstimateStep {
+  nodeId: string
+  /** Pre-charge quota of the step; an unavailable step carries zero. */
+  quota: number
+  /** False when the server could not price the step (no configured price). */
+  available: boolean
+  /** True for a task step whose adaptor ratios only apply at submission. */
+  approximate: boolean
+}
+
+export interface CanvasWorkflowRunEstimate {
+  steps: CanvasWorkflowEstimateStep[]
+  totalQuota: number
+  /** False when at least one step could not be priced. */
+  available: boolean
+}
+
+/** One workflow run budget: cap, what the steps spent and what is left. */
+export interface CanvasWorkflowRunBudget {
+  runId: string
+  cap: number
+  spent: number
+  remaining: number
+  status: string
+}
+
+function mapWorkflowRun(
+  value: z.infer<typeof workflowRunSchema>
+): CanvasWorkflowRunBudget {
+  return {
+    runId: value.run_id,
+    cap: value.cap,
+    spent: value.spent,
+    remaining: value.remaining,
+    status: value.status ?? '',
+  }
+}
+
+/**
+ * Prices the steps of a planned workflow run. The endpoint mirrors the
+ * pre-charge of the real relay paths, so the returned sum is what starting the
+ * run reserves; a step it cannot price is reported as unavailable instead of
+ * failing the whole estimate.
+ */
+export async function estimateCanvasWorkflowRun(
+  group: string,
+  steps: CanvasWorkflowEstimateStepInput[],
+  signal?: AbortSignal
+): Promise<CanvasWorkflowRunEstimate> {
+  const response = await api.post(
+    `${WORKFLOW_ENDPOINT}/estimate`,
+    {
+      group,
+      steps: steps.map((step) => ({
+        node_id: step.nodeId,
+        kind: step.kind,
+        model: step.model,
+        tokens: step.tokens,
+        group: step.group,
+        ...(step.count ? { count: step.count } : {}),
+        ...(step.size ? { size: step.size } : {}),
+        ...(step.quality ? { quality: step.quality } : {}),
+      })),
+    },
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  const data = workflowEstimateSchema.parse(response.data.data)
+  return {
+    steps: data.steps.map((step) => ({
+      nodeId: step.node_id,
+      quota: step.quota,
+      available: step.available,
+      approximate: step.approximate,
+    })),
+    totalQuota: data.total_quota,
+    available: data.available,
+  }
+}
+
+/**
+ * Opens one run budget: the cap is reserved from the wallet, and every step of
+ * the run then allocates inside it. Settling returns what the steps did not
+ * spend.
+ */
+export async function createCanvasWorkflowRunBudget(
+  cap: number,
+  signal?: AbortSignal
+): Promise<CanvasWorkflowRunBudget> {
+  const response = await api.post(
+    `${WORKFLOW_ENDPOINT}/runs`,
+    { cap },
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  return mapWorkflowRun(workflowRunSchema.parse(response.data.data))
+}
+
+/**
+ * Settles the budget of a stopped run and returns the summary. The call is
+ * idempotent, so a retry after a lost response reports the recorded outcome.
+ */
+export async function settleCanvasWorkflowRunBudget(
+  runId: string,
+  signal?: AbortSignal
+): Promise<CanvasWorkflowRunBudget> {
+  const response = await api.post(
+    `${WORKFLOW_ENDPOINT}/runs/${encodeURIComponent(runId)}/settle`,
+    {},
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  return mapWorkflowRun(workflowRunSchema.parse(response.data.data))
 }

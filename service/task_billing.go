@@ -112,10 +112,42 @@ func taskIsSubscription(task *model.Task) bool {
 	return task.PrivateData.BillingSource == BillingSourceSubscription && task.PrivateData.SubscriptionId > 0
 }
 
+// taskIsWorkflowBudget 判断任务是否属于画布工作流的一次运行（BL-03）：预扣时
+// 已在运行预算内分配子额度，任务完成/退款时改写该子额度，运行结束时统一结算。
+func taskIsWorkflowBudget(task *model.Task) bool {
+	return task.PrivateData.BillingSource == BillingSourceWorkflowBudget && task.PrivateData.WorkflowRunId != ""
+}
+
+// workflowBudgetChildRequestId 返回任务预扣时使用的子 hold 请求 ID：即提交任务
+// 的 relay 请求 ID，由 TaskExecutionSnapshot 持久化。
+func workflowBudgetChildRequestId(task *model.Task) string {
+	if task.PrivateData.Execution == nil {
+		return ""
+	}
+	return task.PrivateData.Execution.RequestID
+}
+
 // taskAdjustFunding 调整任务的资金来源（钱包或订阅），delta > 0 表示扣费，delta < 0 表示退还。
 // 订阅结算超额时按套餐 AllowWalletOverflow 把超出剩余额度的部分转扣钱包（同事务写钱包账本）。
 func taskAdjustFunding(ctx context.Context, task *model.Task, delta int) error {
 	if delta == 0 {
+		return nil
+	}
+	if taskIsWorkflowBudget(task) {
+		requestId := workflowBudgetChildRequestId(task)
+		if requestId == "" {
+			logger.LogWarn(ctx, common.LogText("workflow budget task %s has no step request id; the run budget keeps its allocation", task.TaskID))
+			return nil
+		}
+		// 运行中的 task 按现有结算语义处理：实际费用 = 预扣额度 + 差额，写入
+		// 运行预算的子分配；退款（差额使实际为 0）只是把额度还给预算，不回流钱包。
+		actual := task.Quota + delta
+		if actual < 0 {
+			actual = 0
+		}
+		if _, err := model.SettleWalletBudgetChild(task.PrivateData.WorkflowRunId, requestId, task.UserId, actual); err != nil {
+			return err
+		}
 		return nil
 	}
 	if taskIsSubscription(task) {
@@ -284,7 +316,9 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 
 	// 1. 退还资金来源（钱包或订阅）
 	// 钱包退款以 task_id 为账本引用，重复退款调用是幂等的。
-	if taskIsSubscription(task) {
+	// 工作流预算任务只释放运行预算内的子分配（BL-03）：额度留在预算里，运行
+	// 结算时按各节点实际费用统一与钱包结算。
+	if taskIsSubscription(task) || taskIsWorkflowBudget(task) {
 		if err := taskAdjustFunding(ctx, task, -quota); err != nil {
 			logger.LogWarn(ctx, common.LogText("failed to refund the funding source, task %s: %s", task.TaskID, err.Error()))
 			return false
@@ -355,7 +389,7 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 		logger.LogError(ctx, common.LogText("failed to adjust funding for the difference, task %s: %s", task.TaskID, err.Error()))
 		return
 	}
-	if !taskIsSubscription(task) {
+	if !taskIsSubscription(task) && !taskIsWorkflowBudget(task) {
 		model.RecordWalletConsumeDelta(task.UserId, -int64(quotaDelta))
 	}
 

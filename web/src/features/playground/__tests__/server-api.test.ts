@@ -227,6 +227,46 @@ test('message snapshots derive attachment urls from stored references', async ()
   ])
 })
 
+test('message snapshots derive the cached speech url from its reference', async () => {
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        revision: 4,
+        messages: [
+          {
+            client_key: 'm',
+            payload: {
+              key: 'm',
+              from: 'assistant',
+              versions: [
+                {
+                  id: 'v',
+                  content: 'read me',
+                  speech: {
+                    id: 'pgf_speech',
+                    media_type: 'audio/mpeg',
+                    filename: 'speech.mp3',
+                    byte_size: 128,
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    },
+  })
+  const snapshot = await getPlaygroundMessages('pgs_one')
+  expect(snapshot.messages[0].versions[0].speech).toEqual({
+    id: 'pgf_speech',
+    url: '/api/playground/sessions/pgs_one/attachments/pgf_speech/content',
+    mediaType: 'audio/mpeg',
+    filename: 'speech.mp3',
+    byteSize: 128,
+  })
+})
+
 test('an incremental delta is written through PATCH with only the changed rows', async () => {
   const patch = vi.spyOn(api, 'patch').mockResolvedValue({
     data: {

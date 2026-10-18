@@ -26,6 +26,7 @@ import {
   DEFAULT_CONFIG,
   DEFAULT_PARAMETER_ENABLED,
   PLAYGROUND_REQUEST_ID_HEADER,
+  PLAYGROUND_WORKFLOW_RUN_HEADER,
 } from './constants'
 import {
   normalizeContextSettings,
@@ -74,14 +75,22 @@ function readRequestIdHeader(headers: unknown): string | undefined {
 
 /**
  * Send chat completion request (non-streaming)
+ *
+ * `workflowRunId` is the budget of a canvas workflow run the request belongs
+ * to; it travels in a header the relay consumes, so a step bills inside the
+ * run budget instead of the wallet directly.
  */
 export async function sendChatCompletion(
   payload: ChatCompletionRequest,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  workflowRunId?: string
 ): Promise<ChatCompletionResult> {
   const res = await api.post(API_ENDPOINTS.CHAT_COMPLETIONS, payload, {
     signal,
     skipErrorHandler: true,
+    ...(workflowRunId
+      ? { headers: { [PLAYGROUND_WORKFLOW_RUN_HEADER]: workflowRunId } }
+      : {}),
   } as Record<string, unknown>)
   return {
     response: res.data as ChatCompletionResponse,
@@ -295,8 +304,27 @@ function mapServerAttachment(value: unknown): PlaygroundServerAttachment {
   }
 }
 
+// One stored attachment/reference keeps the owned metadata; the client adds the
+// content URL of the owning conversation, which is the only field the server
+// derives on read.
+function normalizeServerMessageAttachment(
+  attachment: unknown,
+  sessionId: string
+): unknown {
+  const stored = serverMessageAttachmentSchema.safeParse(attachment)
+  if (!stored.success) return attachment
+  return {
+    id: stored.data.id,
+    url: playgroundAttachmentContentUrl(sessionId, stored.data.id),
+    mediaType: stored.data.media_type,
+    filename: stored.data.filename,
+    byteSize: stored.data.byte_size,
+  }
+}
+
 // The stored message snapshot keeps attachment references only; display and
-// request fields are derived from the owned attachment rows on read.
+// request fields are derived from the owned attachment rows on read. A cached
+// read-aloud reference (`speech`) is resolved the same way.
 function normalizeServerMessagePayload(
   payload: unknown,
   sessionId: string
@@ -308,22 +336,24 @@ function normalizeServerMessagePayload(
     ...(payload as Record<string, unknown>),
     versions: versions.map((version) => {
       if (!version || typeof version !== 'object') return version
-      const attachments = (version as { attachments?: unknown }).attachments
-      if (!Array.isArray(attachments) || attachments.length === 0)
-        return version
+      const record = version as Record<string, unknown>
+      const attachments = Array.isArray(record.attachments)
+        ? record.attachments
+        : null
+      const speech = record.speech ?? null
+      if (!attachments?.length && !speech) return version
       return {
-        ...(version as Record<string, unknown>),
-        attachments: attachments.map((attachment) => {
-          const stored = serverMessageAttachmentSchema.safeParse(attachment)
-          if (!stored.success) return attachment
-          return {
-            id: stored.data.id,
-            url: playgroundAttachmentContentUrl(sessionId, stored.data.id),
-            mediaType: stored.data.media_type,
-            filename: stored.data.filename,
-            byteSize: stored.data.byte_size,
-          }
-        }),
+        ...record,
+        ...(attachments?.length
+          ? {
+              attachments: attachments.map((attachment) =>
+                normalizeServerMessageAttachment(attachment, sessionId)
+              ),
+            }
+          : {}),
+        ...(speech
+          ? { speech: normalizeServerMessageAttachment(speech, sessionId) }
+          : {}),
       }
     }),
   }
@@ -671,6 +701,125 @@ export function uploadCanvasAttachment(
     input,
     signal
   )
+}
+
+// One reservation answers with the mode the client must use for the bytes:
+// a presigned URL, the relay route of this gateway, or the attachment a
+// previous attempt with the same client key already produced.
+const serverUploadSchema = z.object({
+  id: z.string().optional(),
+  mode: z.enum(['presigned', 'relay', 'completed']),
+  url: z.string().optional(),
+  headers: z.record(z.string(), z.string()).optional(),
+  expires_at: z.number().int().optional(),
+  attachment: serverAttachmentSchema.optional(),
+})
+
+export type PlaygroundUploadMode = 'presigned' | 'relay' | 'completed'
+
+export interface PlaygroundUploadTarget {
+  /** Reservation id; absent when the client key already completed. */
+  id?: string
+  mode: PlaygroundUploadMode
+  url?: string
+  headers?: Record<string, string>
+  attachment?: PlaygroundServerAttachment
+}
+
+export interface PlaygroundUploadInput {
+  clientKey: string
+  mediaType: string
+  filename?: string
+  byteSize: number
+  /** Exactly one partition id is named per request. */
+  sessionId?: string
+  canvasId?: string
+}
+
+/**
+ * Reserves the account budget for one file before its bytes move. The server
+ * locks the partition and the usage counters in one transaction, so the quota
+ * answer is final before the client starts a possibly long transfer.
+ */
+export async function beginPlaygroundUpload(
+  input: PlaygroundUploadInput,
+  signal?: AbortSignal
+): Promise<PlaygroundUploadTarget> {
+  const response = await api.post(
+    API_ENDPOINTS.PLAYGROUND_UPLOADS,
+    {
+      client_key: input.clientKey,
+      media_type: input.mediaType,
+      filename: input.filename ?? '',
+      byte_size: input.byteSize,
+      session_id: input.sessionId,
+      canvas_id: input.canvasId,
+    },
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  const upload = serverUploadSchema.parse(response.data.data)
+  return {
+    id: upload.id,
+    mode: upload.mode,
+    url: upload.url,
+    headers: upload.headers,
+    attachment: upload.attachment
+      ? mapServerAttachment(upload.attachment)
+      : undefined,
+  }
+}
+
+/**
+ * Relays the bytes of a reservation through the gateway. Used when the object
+ * store cannot sign a URL, and as the fallback when a presigned PUT is refused
+ * by the browser (for example because the bucket lacks the required CORS rule).
+ */
+export async function putPlaygroundUploadContent(
+  uploadId: string,
+  body: Blob,
+  mediaType: string,
+  signal?: AbortSignal
+): Promise<void> {
+  const response = await api.put(
+    `${API_ENDPOINTS.PLAYGROUND_UPLOADS}/${encodeURIComponent(uploadId)}/content`,
+    body,
+    { headers: { 'Content-Type': mediaType }, signal }
+  )
+  requireServerSuccess(response.data)
+}
+
+/**
+ * Asks the server to verify the written object (size plus leading magic bytes)
+ * and turn the reservation into an attachment. A failed verification deletes
+ * the object and releases the reservation server-side.
+ */
+export async function completePlaygroundUpload(
+  uploadId: string,
+  signal?: AbortSignal
+): Promise<{ attachment: PlaygroundServerAttachment; created: boolean }> {
+  const response = await api.post(
+    `${API_ENDPOINTS.PLAYGROUND_UPLOADS}/${encodeURIComponent(uploadId)}/complete`,
+    {},
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  return {
+    attachment: mapServerAttachment(response.data.data),
+    created: response.data.data.created === true,
+  }
+}
+
+/** Cancels a reservation; releasing an already deleted one is a no-op here. */
+export async function cancelPlaygroundUpload(
+  uploadId: string,
+  signal?: AbortSignal
+): Promise<void> {
+  const response = await api.delete(
+    `${API_ENDPOINTS.PLAYGROUND_UPLOADS}/${encodeURIComponent(uploadId)}`,
+    { signal }
+  )
+  requireServerSuccess(response.data)
 }
 
 export async function deletePlaygroundAttachment(

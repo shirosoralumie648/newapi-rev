@@ -630,12 +630,14 @@ func executeTaskSubmissionWith(
 	}
 
 	stage = "insert"
+	asyncImageTask := common.GetContextKeyBool(c, constant.ContextKeyImageTaskAsync)
 	task := model.InitTask(result.Platform, relayInfo)
 	task.PrivateData.Execution = service.TaskExecutionSnapshotFromContext(c)
 	task.PrivateData.PlaygroundOrigin = common.GetContextKeyBool(c, constant.ContextKeyPlaygroundOrigin)
 	task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
 	task.PrivateData.BillingSource = relayInfo.BillingSource
 	task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
+	task.PrivateData.WorkflowRunId = relayInfo.PlaygroundWorkflowRunId
 	task.PrivateData.TokenId = relayInfo.TokenId
 	task.PrivateData.NodeName = common.NodeName
 	task.PrivateData.BillingContext = &model.TaskBillingContext{
@@ -653,6 +655,23 @@ func executeTaskSubmissionWith(
 		task.PrivateData.PluginState = result.PluginState
 	}
 	task.Action = relayInfo.Action
+	if asyncImageTask {
+		// The images of an asynchronous image task are fetched after this
+		// response, so the poll endpoint keeps the protocol request that
+		// renders them. The value is shared with the submitting hooks and
+		// marshaled here, before the row exists, so no later update can
+		// overwrite either side.
+		if value, exists := c.Get(pluginruntime.ContextKeyProtocolRequest); exists {
+			if request, ok := value.(pluginruntime.ProtocolRequestContext); ok {
+				snapshot, marshalErr := common.Marshal(request.JSValue())
+				if marshalErr != nil {
+					common.SysError(common.LogText("encode async image protocol request failed: %s", marshalErr.Error()))
+				} else {
+					task.PrivateData.AsyncImageRequest = snapshot
+				}
+			}
+		}
+	}
 	if immediate := result.Immediate; immediate != nil {
 		task.Status = model.TaskStatus(immediate.Status)
 		task.Progress = immediate.Progress
@@ -673,14 +692,15 @@ func executeTaskSubmissionWith(
 	// once, the upstream snapshot is never persisted, and the task is not
 	// retrievable afterwards. An asynchronous result on such a route keeps its
 	// snapshot because polling and retrieval need it. The OpenAI Images
-	// protocol delivers its images inline in the same HTTP response, so its
-	// immediate results follow the same rule; an asynchronous image task is
-	// expected there and is polled inside the request.
+	// protocol delivers its synchronous images inline in the same HTTP
+	// response, so its immediate results follow the same rule; an image task
+	// submitted for the asynchronous mode is always retrievable, because the
+	// polling endpoint answers with the images it never sent inline.
 	var insertOmits []string
 	immediateTerminal := result.Immediate != nil && (result.Immediate.Status == model.TaskStatusSuccess || result.Immediate.Status == model.TaskStatusFailure)
 	if pinnedValue, exists := c.Get(pluginruntime.ContextKeyPinnedRoute); exists {
 		pinned, ok := pinnedValue.(pluginruntime.PinnedRoute)
-		if ok && pinned.Route.RetainResult != nil && !*pinned.Route.RetainResult {
+		if ok && pinned.Route.RetainResult != nil && !*pinned.Route.RetainResult && !asyncImageTask {
 			if immediateTerminal {
 				task.PrivateData.ResultDiscarded = true
 				insertOmits = append(insertOmits, "data")
@@ -689,7 +709,7 @@ func executeTaskSubmissionWith(
 			}
 		}
 	}
-	if pinnedValue, exists := c.Get(pluginruntime.ContextKeyPinnedEndpoint); exists && immediateTerminal {
+	if pinnedValue, exists := c.Get(pluginruntime.ContextKeyPinnedEndpoint); exists && immediateTerminal && !asyncImageTask {
 		if pinned, ok := pinnedValue.(pluginruntime.PinnedEndpoint); ok && pinned.Protocol == pluginruntime.ProtocolOpenAIImage {
 			task.PrivateData.ResultDiscarded = true
 			insertOmits = append(insertOmits, "data")

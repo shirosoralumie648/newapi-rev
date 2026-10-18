@@ -115,14 +115,14 @@ func playgroundTestDB(t *testing.T, dialect string) *gorm.DB {
 	common.SetDatabaseTypes(common.DatabaseType(dialect), previousLog)
 	model.DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundUserUsage{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMessage{}, &model.PlaygroundSession{}, &model.Task{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundUserUsage{}, &model.PlaygroundUpload{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMessage{}, &model.PlaygroundSession{}, &model.Task{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
 		model.DB = previous
 		common.SetDatabaseTypes(previousMain, previousLog)
 	})
-	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.Task{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUpload{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.Task{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -167,6 +167,9 @@ func playgroundRequest(t *testing.T, user int, method, path string, body any, ha
 		}
 		if parts[3] == "tasks" {
 			c.Params = append(c.Params, gin.Param{Key: "taskId", Value: parts[4]})
+		}
+		if parts[3] == "uploads" {
+			c.Params = append(c.Params, gin.Param{Key: "uploadId", Value: parts[4]})
 		}
 	}
 	if len(parts) > 6 {
@@ -1036,6 +1039,37 @@ func playgroundPNGFixture(size int) []byte {
 	return data
 }
 
+// playgroundExtendedMediaFixtures returns one minimal sample per extended
+// media type. Every sample carries the signature the server verifies, so the
+// upload tests exercise the real sniffing rules instead of bypassing them.
+func playgroundExtendedMediaFixtures() map[string][]byte {
+	isoBaseMedia := func(brand string) []byte {
+		return append([]byte{0x00, 0x00, 0x00, 0x18, 'f', 't', 'y', 'p'}, brand...)
+	}
+	webm := []byte{0x1a, 0x45, 0xdf, 0xa3, 0x01, 0x00, 0x00, 0x00}
+	webm = append(webm, []byte("docTypewebm")...)
+	return map[string][]byte{
+		"video/mp4":       isoBaseMedia("mp42"),
+		"video/quicktime": isoBaseMedia("qt  "),
+		"video/webm":      webm,
+		"audio/mpeg":      append([]byte("ID3\x04\x00\x00\x00\x00\x00\x00"), []byte("audio")...),
+		"audio/wav":       append([]byte("RIFF\x24\x00\x00\x00WAVEfmt "), []byte("audio")...),
+		"audio/ogg":       append([]byte("OggS\x00\x02\x00\x00\x00\x00"), []byte("audio")...),
+		"audio/mp4":       isoBaseMedia("M4A "),
+		"application/pdf": []byte("%PDF-1.7\n%\xe2\xe3\xcf\xd3\n"),
+	}
+}
+
+// playgroundMP3Fixture builds an ID3-tagged payload the audio validator
+// accepts as audio/mpeg.
+func playgroundMP3Fixture(size int) []byte {
+	data := []byte("ID3")
+	for len(data) < size {
+		data = append(data, byte(len(data)%251))
+	}
+	return data
+}
+
 // usePlaygroundQuotaDefaults overrides the global resource budget for one test
 // and restores it afterwards. The policy is the single source of the limits, so
 // tests no longer reach into package variables.
@@ -1076,6 +1110,52 @@ func playgroundUploadAttachment(t *testing.T, user int, sessionID, clientKey, me
 	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &envelope))
 	require.True(t, envelope.Success, response.Body.String())
 	return envelope.Data
+}
+
+// presigningUploadStore delegates every backend operation to a real store and
+// adds the optional capabilities of an S3-style backend: a content-typed
+// presigned PUT and a multipart abort that records the keys it aborted.
+type presigningUploadStore struct {
+	objectstore.Store
+	location string
+	aborted  []string
+}
+
+func (store *presigningUploadStore) PresignPutWithContentType(context.Context, string, string, time.Duration) (string, error) {
+	return store.location, nil
+}
+
+func (store *presigningUploadStore) AbortMultipartUploads(_ context.Context, key string) error {
+	store.aborted = append(store.aborted, key)
+	return nil
+}
+
+// playgroundUploadResponseData decodes one upload endpoint response and asserts
+// its status, so every step of the flow reads exactly like the client would.
+func playgroundUploadResponseData(t *testing.T, response *httptest.ResponseRecorder, status int) map[string]any {
+	t.Helper()
+	require.Equal(t, status, response.Code, response.Body.String())
+	var envelope struct {
+		Success bool
+		Data    map[string]any
+	}
+	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &envelope))
+	require.True(t, envelope.Success, response.Body.String())
+	return envelope.Data
+}
+
+// playgroundReserveUpload posts one reservation and returns its response data.
+func playgroundReserveUpload(t *testing.T, user int, body map[string]any, status int) map[string]any {
+	t.Helper()
+	return playgroundUploadResponseData(t, playgroundRequest(t, user, http.MethodPost, "/api/playground/uploads", body, controller.CreatePlaygroundUpload), status)
+}
+
+// playgroundUploadErrorCode asserts one failed upload response and its stable
+// error code, which is what the client branches on.
+func playgroundUploadErrorCode(t *testing.T, response *httptest.ResponseRecorder, status int, code string) {
+	t.Helper()
+	require.Equal(t, status, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), code)
 }
 
 func TestPlaygroundAttachmentPersistenceMatrix(t *testing.T) {
@@ -1171,6 +1251,7 @@ func TestPlaygroundAttachmentValidationLimits(t *testing.T) {
 	playgroundTestDB(t, "sqlite")
 	usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
 		policy.AttachmentMaxFileBytes, policy.AttachmentUserMaxBytes = 4096, 8192
+		policy.AttachmentVideoMaxFileBytes, policy.AttachmentAudioMaxFileBytes, policy.AttachmentDocumentMaxFileBytes = 4096, 4096, 4096
 	})
 	session := createPlayground(t, 7, "attachment-limits")
 	id := session["id"].(string)
@@ -1189,11 +1270,330 @@ func TestPlaygroundAttachmentValidationLimits(t *testing.T) {
 	reject("invalid base64", map[string]any{"client_key": "c", "media_type": "image/png", "data": "not-base64!!"}, http.StatusBadRequest)
 	reject("empty client key", map[string]any{"client_key": " ", "media_type": "image/png", "data": encoded}, http.StatusBadRequest)
 	reject("oversized attachment", map[string]any{"client_key": "d", "media_type": "image/png", "data": base64.StdEncoding.EncodeToString(playgroundPNGFixture(4097))}, http.StatusUnprocessableEntity)
+	reject("audio bytes under an image type", map[string]any{"client_key": "e", "media_type": "image/png", "data": base64.StdEncoding.EncodeToString(playgroundMP3Fixture(64))}, http.StatusBadRequest)
+	reject("unsupported audio type", map[string]any{"client_key": "f", "media_type": "audio/flac", "data": base64.StdEncoding.EncodeToString(playgroundMP3Fixture(64))}, http.StatusBadRequest)
 
 	// The per-account budget counts every stored byte, including replays of one file.
 	playgroundUploadAttachment(t, 7, id, "budget-a", "image/png", playgroundPNGFixture(4096))
 	playgroundUploadAttachment(t, 7, id, "budget-b", "image/png", playgroundPNGFixture(4096))
 	reject("per-user byte budget", map[string]any{"client_key": "budget-c", "media_type": "image/png", "data": base64.StdEncoding.EncodeToString(playgroundPNGFixture(64))}, http.StatusUnprocessableEntity)
+
+	// The extended kinds are accepted by the classic path as well, each with
+	// its own signature check and per-kind size budget.
+	fixtures := playgroundExtendedMediaFixtures()
+	extendedSession := createPlayground(t, 8, "attachment-limits-extended")
+	extendedPath := "/api/playground/sessions/" + extendedSession["id"].(string) + "/attachments"
+	for mediaType, data := range fixtures {
+		response := playgroundRequest(t, 8, http.MethodPost, extendedPath, map[string]any{
+			"client_key": "extended-" + mediaType, "media_type": mediaType, "filename": "sample",
+			"data": base64.StdEncoding.EncodeToString(data),
+		}, controller.CreatePlaygroundAttachment)
+		require.Equal(t, http.StatusOK, response.Code, mediaType+": "+response.Body.String())
+	}
+	// Bytes that only claim an extended type are rejected: the signature, not
+	// the declared text, decides what may be stored.
+	mismatched := playgroundRequest(t, 8, http.MethodPost, extendedPath, map[string]any{
+		"client_key": "extended-mismatch", "media_type": "video/mp4",
+		"data": base64.StdEncoding.EncodeToString(fixtures["video/webm"]),
+	}, controller.CreatePlaygroundAttachment)
+	assert.Equal(t, http.StatusBadRequest, mismatched.Code, mismatched.Body.String())
+	// An extended kind above its own per-file budget is rejected even while the
+	// account budget still has room.
+	oversizedVideo := playgroundRequest(t, 8, http.MethodPost, extendedPath, map[string]any{
+		"client_key": "extended-oversized", "media_type": "video/mp4",
+		"data": base64.StdEncoding.EncodeToString(append(append([]byte{}, fixtures["video/mp4"]...), make([]byte, 4200)...)),
+	}, controller.CreatePlaygroundAttachment)
+	assert.Equal(t, http.StatusUnprocessableEntity, oversizedVideo.Code, oversizedVideo.Body.String())
+}
+
+// The presigned upload flow reserves the account budgets before a byte moves,
+// verifies the stored object server-side, and releases everything it reserved
+// when an upload fails, is canceled or expires.
+func TestPlaygroundUploadFlow(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			const fileBytes = 4096
+			usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+				policy.AttachmentMaxFileBytes, policy.AttachmentUserMaxBytes = fileBytes, 4*fileBytes
+				policy.AttachmentVideoMaxFileBytes, policy.AttachmentAudioMaxFileBytes, policy.AttachmentDocumentMaxFileBytes = fileBytes, fileBytes, fileBytes
+			})
+			session := createPlayground(t, 7, "uploads")
+			sessionID := session["id"].(string)
+			pdf := playgroundExtendedMediaFixtures()["application/pdf"]
+			objectStore := objectstore.DefaultStore()
+			require.NotNil(t, objectStore)
+			uploadPath := func(uploadID string) string { return "/api/playground/uploads/" + uploadID }
+
+			// A reservation answers with the relay mode on the local backend
+			// (which cannot sign a direct upload), records the object key the
+			// completing attachment will own, and holds the account budgets
+			// before any byte exists.
+			request := map[string]any{
+				"client_key": "upload-relay", "media_type": "application/pdf", "filename": "notes.pdf",
+				"byte_size": len(pdf), "session_id": sessionID,
+			}
+			reserved := playgroundReserveUpload(t, 7, request, http.StatusOK)
+			assert.Equal(t, "relay", reserved["mode"])
+			uploadID, _ := reserved["id"].(string)
+			require.True(t, strings.HasPrefix(uploadID, "pgu_"), uploadID)
+			var reservation model.PlaygroundUpload
+			require.NoError(t, db.Where("id = ?", uploadID).First(&reservation).Error)
+			assert.Equal(t, model.PlaygroundUploadPartitionSession, reservation.Partition)
+			assert.Equal(t, sessionID, reservation.SessionID)
+			assert.Equal(t, "application/pdf", reservation.MediaType)
+			assert.True(t, strings.HasPrefix(reservation.ObjectKey, "pg/7/attachment/"), reservation.ObjectKey)
+			var pending model.PlaygroundUserUsage
+			require.NoError(t, db.Where("user_id = ?", 7).First(&pending).Error)
+			assert.EqualValues(t, 1, pending.AttachmentPendingCount)
+			assert.EqualValues(t, len(pdf), pending.AttachmentPendingBytes)
+			assert.Zero(t, pending.AttachmentCount)
+
+			// The same client key replays the reservation instead of reserving
+			// the budgets twice; different content under it is a conflict.
+			replayed := playgroundReserveUpload(t, 7, request, http.StatusOK)
+			assert.Equal(t, uploadID, replayed["id"])
+			var replayedPending model.PlaygroundUserUsage
+			require.NoError(t, db.Where("user_id = ?", 7).First(&replayedPending).Error)
+			assert.EqualValues(t, 1, replayedPending.AttachmentPendingCount)
+			playgroundUploadErrorCode(t, playgroundRequest(t, 7, http.MethodPost, "/api/playground/uploads", map[string]any{
+				"client_key": "upload-relay", "media_type": "application/pdf", "filename": "notes.pdf",
+				"byte_size": len(pdf) + 1, "session_id": sessionID,
+			}, controller.CreatePlaygroundUpload), http.StatusConflict, "PLAYGROUND_ATTACHMENT_REQUEST_CONFLICT")
+
+			// The gateway relay stores the declared bytes under the reserved key.
+			relayed := playgroundUploadResponseData(t, playgroundRequest(t, 7, http.MethodPut, uploadPath(uploadID)+"/content", pdf, controller.PutPlaygroundUploadContent), http.StatusOK)
+			assert.EqualValues(t, len(pdf), relayed["byte_size"])
+			head, headErr := objectStore.Head(context.Background(), reservation.ObjectKey)
+			require.NoError(t, headErr)
+			assert.EqualValues(t, len(pdf), head.Size)
+
+			// Completing verifies size and signature, stores the attachment and
+			// releases the reservation in one transaction.
+			completed := playgroundUploadResponseData(t, playgroundRequest(t, 7, http.MethodPost, uploadPath(uploadID)+"/complete", nil, controller.CompletePlaygroundUpload), http.StatusOK)
+			attachmentID, _ := completed["id"].(string)
+			require.True(t, strings.HasPrefix(attachmentID, "pgf_"), attachmentID)
+			assert.Equal(t, true, completed["created"])
+			assert.Equal(t, "application/pdf", completed["media_type"])
+			assert.EqualValues(t, len(pdf), completed["byte_size"])
+			var gone model.PlaygroundUpload
+			assert.ErrorIs(t, db.Where("id = ?", uploadID).First(&gone).Error, gorm.ErrRecordNotFound)
+			var settled model.PlaygroundUserUsage
+			require.NoError(t, db.Where("user_id = ?", 7).First(&settled).Error)
+			assert.Zero(t, settled.AttachmentPendingCount)
+			assert.Zero(t, settled.AttachmentPendingBytes)
+			assert.EqualValues(t, 1, settled.AttachmentCount)
+			assert.EqualValues(t, len(pdf), settled.AttachmentBytes)
+			assert.EqualValues(t, len(pdf), settled.ObjectBytes)
+
+			// The attachment serves its stored bytes through the content route.
+			content := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+sessionID+"/attachments/"+attachmentID+"/content", nil, controller.GetPlaygroundAttachmentContent)
+			require.Equal(t, http.StatusOK, content.Code, content.Body.String())
+			assert.Equal(t, pdf, content.Body.Bytes())
+			assert.Equal(t, "application/pdf", content.Header().Get("Content-Type"))
+
+			// A client key that already finished answers with the attachment, so
+			// a retry after a lost response never uploads the same file twice.
+			finished := playgroundReserveUpload(t, 7, request, http.StatusOK)
+			assert.Equal(t, "completed", finished["mode"])
+			finishedAttachment, _ := finished["attachment"].(map[string]any)
+			require.NotNil(t, finishedAttachment)
+			assert.Equal(t, attachmentID, finishedAttachment["id"])
+
+			// A relayed body that is not the declared size is dropped while the
+			// reservation stays retryable; completing without the bytes then
+			// fails and releases the reservation.
+			shortID := playgroundReserveUpload(t, 7, map[string]any{
+				"client_key": "upload-short", "media_type": "application/pdf", "filename": "short.pdf",
+				"byte_size": len(pdf), "session_id": sessionID,
+			}, http.StatusOK)["id"].(string)
+			playgroundUploadErrorCode(t, playgroundRequest(t, 7, http.MethodPut, uploadPath(shortID)+"/content", pdf[:len(pdf)-4], controller.PutPlaygroundUploadContent), http.StatusUnprocessableEntity, "PLAYGROUND_UPLOAD_INCOMPLETE")
+			var retryable model.PlaygroundUpload
+			require.NoError(t, db.Where("id = ?", shortID).First(&retryable).Error)
+			playgroundUploadErrorCode(t, playgroundRequest(t, 7, http.MethodPost, uploadPath(shortID)+"/complete", nil, controller.CompletePlaygroundUpload), http.StatusUnprocessableEntity, "PLAYGROUND_UPLOAD_INCOMPLETE")
+			assert.ErrorIs(t, db.Where("id = ?", shortID).First(&retryable).Error, gorm.ErrRecordNotFound)
+
+			// An object the gateway never relayed is verified all the same: a
+			// stored size that does not match the reservation deletes the object
+			// together with the reservation.
+			mismatchID := playgroundReserveUpload(t, 7, map[string]any{
+				"client_key": "upload-size-mismatch", "media_type": "application/pdf", "filename": "big.pdf",
+				"byte_size": len(pdf) + 8, "session_id": sessionID,
+			}, http.StatusOK)["id"].(string)
+			var mismatchRow model.PlaygroundUpload
+			require.NoError(t, db.Where("id = ?", mismatchID).First(&mismatchRow).Error)
+			_, writeErr := objectStore.Put(context.Background(), mismatchRow.ObjectKey, bytes.NewReader(pdf))
+			require.NoError(t, writeErr)
+			playgroundUploadErrorCode(t, playgroundRequest(t, 7, http.MethodPost, uploadPath(mismatchID)+"/complete", nil, controller.CompletePlaygroundUpload), http.StatusUnprocessableEntity, "PLAYGROUND_UPLOAD_INCOMPLETE")
+			_, mismatchHeadErr := objectStore.Head(context.Background(), mismatchRow.ObjectKey)
+			assert.ErrorIs(t, mismatchHeadErr, objectstore.ErrObjectNotFound)
+			assert.ErrorIs(t, db.Where("id = ?", mismatchID).First(&mismatchRow).Error, gorm.ErrRecordNotFound)
+
+			// Bytes that are not the declared media type are rejected: a PDF can
+			// never be stored as an image.
+			fakeID := playgroundReserveUpload(t, 7, map[string]any{
+				"client_key": "upload-type-mismatch", "media_type": "image/png", "filename": "fake.png",
+				"byte_size": len(pdf), "session_id": sessionID,
+			}, http.StatusOK)["id"].(string)
+			var fakeRow model.PlaygroundUpload
+			require.NoError(t, db.Where("id = ?", fakeID).First(&fakeRow).Error)
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodPut, uploadPath(fakeID)+"/content", pdf, controller.PutPlaygroundUploadContent).Code)
+			playgroundUploadErrorCode(t, playgroundRequest(t, 7, http.MethodPost, uploadPath(fakeID)+"/complete", nil, controller.CompletePlaygroundUpload), http.StatusBadRequest, "PLAYGROUND_UPLOAD_CONTENT_MISMATCH")
+			_, fakeHeadErr := objectStore.Head(context.Background(), fakeRow.ObjectKey)
+			assert.ErrorIs(t, fakeHeadErr, objectstore.ErrObjectNotFound)
+			assert.ErrorIs(t, db.Where("id = ?", fakeID).First(&fakeRow).Error, gorm.ErrRecordNotFound)
+
+			// Canceling releases the reservation together with the bytes already
+			// written, and a second cancel answers like a missing upload.
+			cancelID := playgroundReserveUpload(t, 7, map[string]any{
+				"client_key": "upload-cancel", "media_type": "application/pdf", "filename": "cancel.pdf",
+				"byte_size": len(pdf), "session_id": sessionID,
+			}, http.StatusOK)["id"].(string)
+			var cancelRow model.PlaygroundUpload
+			require.NoError(t, db.Where("id = ?", cancelID).First(&cancelRow).Error)
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodPut, uploadPath(cancelID)+"/content", pdf, controller.PutPlaygroundUploadContent).Code)
+			canceled := playgroundUploadResponseData(t, playgroundRequest(t, 7, http.MethodDelete, uploadPath(cancelID), nil, controller.DeletePlaygroundUpload), http.StatusOK)
+			assert.Equal(t, cancelID, canceled["id"])
+			_, cancelHeadErr := objectStore.Head(context.Background(), cancelRow.ObjectKey)
+			assert.ErrorIs(t, cancelHeadErr, objectstore.ErrObjectNotFound)
+			assert.ErrorIs(t, db.Where("id = ?", cancelID).First(&cancelRow).Error, gorm.ErrRecordNotFound)
+			playgroundUploadErrorCode(t, playgroundRequest(t, 7, http.MethodDelete, uploadPath(cancelID), nil, controller.DeletePlaygroundUpload), http.StatusNotFound, "PLAYGROUND_UPLOAD_NOT_FOUND")
+
+			// Another account never sees, completes, relays to or cancels an
+			// owned reservation, and the reservation survives those attempts.
+			foreignID := playgroundReserveUpload(t, 7, map[string]any{
+				"client_key": "upload-foreign", "media_type": "application/pdf", "filename": "foreign.pdf",
+				"byte_size": len(pdf), "session_id": sessionID,
+			}, http.StatusOK)["id"].(string)
+			playgroundUploadErrorCode(t, playgroundRequest(t, 8, http.MethodPost, uploadPath(foreignID)+"/complete", nil, controller.CompletePlaygroundUpload), http.StatusNotFound, "PLAYGROUND_UPLOAD_NOT_FOUND")
+			playgroundUploadErrorCode(t, playgroundRequest(t, 8, http.MethodPut, uploadPath(foreignID)+"/content", pdf, controller.PutPlaygroundUploadContent), http.StatusNotFound, "PLAYGROUND_UPLOAD_NOT_FOUND")
+			playgroundUploadErrorCode(t, playgroundRequest(t, 8, http.MethodDelete, uploadPath(foreignID), nil, controller.DeletePlaygroundUpload), http.StatusNotFound, "PLAYGROUND_UPLOAD_NOT_FOUND")
+			var untouched model.PlaygroundUpload
+			require.NoError(t, db.Where("id = ?", foreignID).First(&untouched).Error)
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodDelete, uploadPath(foreignID), nil, controller.DeletePlaygroundUpload).Code)
+
+			// A reservation names exactly one partition, and the partition must
+			// exist for the account before any budget can be reserved for it.
+			for _, body := range []map[string]any{
+				{"client_key": "upload-no-partition", "media_type": "application/pdf", "byte_size": len(pdf)},
+				{
+					"client_key": "upload-two-partitions", "media_type": "application/pdf", "byte_size": len(pdf),
+					"session_id": sessionID, "canvas_id": "pgc_missing",
+				},
+			} {
+				playgroundUploadErrorCode(t, playgroundRequest(t, 7, http.MethodPost, "/api/playground/uploads", body, controller.CreatePlaygroundUpload), http.StatusBadRequest, "PLAYGROUND_INVALID_REQUEST")
+			}
+			playgroundUploadErrorCode(t, playgroundRequest(t, 7, http.MethodPost, "/api/playground/uploads", map[string]any{
+				"client_key": "upload-missing-session", "media_type": "application/pdf", "byte_size": len(pdf),
+				"session_id": "pgs_missing",
+			}, controller.CreatePlaygroundUpload), http.StatusNotFound, "PLAYGROUND_NOT_FOUND")
+
+			// A canvas reservation locks the project row and files the eventual
+			// attachment under the canvas partition.
+			canvas := createCanvasProject(t, 7, "upload-canvas")
+			canvasID, _ := canvas["id"].(string)
+			require.NotEmpty(t, canvasID)
+			clip := playgroundExtendedMediaFixtures()["video/mp4"]
+			canvasUploadID := playgroundReserveUpload(t, 7, map[string]any{
+				"client_key": "upload-canvas", "media_type": "video/mp4", "filename": "clip.mp4",
+				"byte_size": len(clip), "canvas_id": canvasID,
+			}, http.StatusOK)["id"].(string)
+			var canvasRow model.PlaygroundUpload
+			require.NoError(t, db.Where("id = ?", canvasUploadID).First(&canvasRow).Error)
+			assert.Equal(t, model.PlaygroundUploadPartitionCanvas, canvasRow.Partition)
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodPut, uploadPath(canvasUploadID)+"/content", clip, controller.PutPlaygroundUploadContent).Code)
+			canvasCompleted := playgroundUploadResponseData(t, playgroundRequest(t, 7, http.MethodPost, uploadPath(canvasUploadID)+"/complete", nil, controller.CompletePlaygroundUpload), http.StatusOK)
+			assert.Equal(t, canvasID, canvasCompleted["session_id"])
+			assert.Equal(t, "video/mp4", canvasCompleted["media_type"])
+			canvasContent := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+canvasID+"/attachments/"+canvasCompleted["id"].(string)+"/content", nil, controller.GetPlaygroundAttachmentContent)
+			require.Equal(t, http.StatusOK, canvasContent.Code, canvasContent.Body.String())
+			assert.Equal(t, clip, canvasContent.Body.Bytes())
+
+			// Pending reservations count against the account byte budget: only
+			// as many 4096-byte uploads fit as the remaining budget allows, and
+			// the next reservation is rejected before any byte moves.
+			limit := playground_setting.GetPlaygroundSetting().Defaults.AttachmentUserMaxBytes
+			var settledBytes model.PlaygroundUserUsage
+			require.NoError(t, db.Where("user_id = ?", 7).First(&settledBytes).Error)
+			require.Zero(t, settledBytes.AttachmentPendingBytes)
+			fitting := int((limit - settledBytes.AttachmentBytes) / fileBytes)
+			require.Positive(t, fitting)
+			held := make([]string, 0, fitting)
+			for index := range fitting {
+				held = append(held, playgroundReserveUpload(t, 7, map[string]any{
+					"client_key": fmt.Sprintf("upload-budget-%d", index), "media_type": "application/pdf",
+					"filename": "budget.pdf", "byte_size": fileBytes, "session_id": sessionID,
+				}, http.StatusOK)["id"].(string))
+			}
+			playgroundUploadErrorCode(t, playgroundRequest(t, 7, http.MethodPost, "/api/playground/uploads", map[string]any{
+				"client_key": "upload-budget-over", "media_type": "application/pdf",
+				"filename": "budget.pdf", "byte_size": fileBytes, "session_id": sessionID,
+			}, controller.CreatePlaygroundUpload), http.StatusUnprocessableEntity, "PLAYGROUND_ATTACHMENT_LIMIT_EXCEEDED")
+			for _, heldID := range held {
+				require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodDelete, uploadPath(heldID), nil, controller.DeletePlaygroundUpload).Code)
+			}
+
+			// An abandoned reservation is released by the scheduled cleanup
+			// together with the bytes the client already wrote, and its quota
+			// returns to the account.
+			expiringID := playgroundReserveUpload(t, 7, map[string]any{
+				"client_key": "upload-expiring", "media_type": "application/pdf", "filename": "stale.pdf",
+				"byte_size": len(pdf), "session_id": sessionID,
+			}, http.StatusOK)["id"].(string)
+			var expiringRow model.PlaygroundUpload
+			require.NoError(t, db.Where("id = ?", expiringID).First(&expiringRow).Error)
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodPut, uploadPath(expiringID)+"/content", pdf, controller.PutPlaygroundUploadContent).Code)
+			require.NoError(t, db.Model(&model.PlaygroundUpload{}).Where("id = ?", expiringID).
+				UpdateColumn("expires_at", common.GetTimestamp()-1).Error)
+			released, err := model.DeleteExpiredPlaygroundUploads(common.GetTimestamp(), 10)
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, released)
+			var expired model.PlaygroundUpload
+			assert.ErrorIs(t, db.Where("id = ?", expiringID).First(&expired).Error, gorm.ErrRecordNotFound)
+			_, expiredHeadErr := objectStore.Head(context.Background(), expiringRow.ObjectKey)
+			assert.ErrorIs(t, expiredHeadErr, objectstore.ErrObjectNotFound)
+			var afterCleanup model.PlaygroundUserUsage
+			require.NoError(t, db.Where("user_id = ?", 7).First(&afterCleanup).Error)
+			assert.Zero(t, afterCleanup.AttachmentPendingCount)
+			assert.Zero(t, afterCleanup.AttachmentPendingBytes)
+
+			// A backend that can sign a direct upload answers with the presigned
+			// mode; the client writes straight to the object store and the
+			// completion still verifies the stored bytes server-side.
+			direct := &presigningUploadStore{Store: objectStore, location: "https://objects.example.test/uploads/signed?signature=test"}
+			objectstore.SetDefaultStore(direct, 5*time.Minute)
+			t.Cleanup(func() { objectstore.SetDefaultStore(objectStore, time.Minute) })
+			presigned := playgroundReserveUpload(t, 7, map[string]any{
+				"client_key": "upload-presigned", "media_type": "video/mp4", "filename": "clip.mp4",
+				"byte_size": len(clip), "session_id": sessionID,
+			}, http.StatusOK)
+			assert.Equal(t, "presigned", presigned["mode"])
+			assert.Equal(t, direct.location, presigned["url"])
+			headers, _ := presigned["headers"].(map[string]any)
+			require.NotNil(t, headers)
+			assert.Equal(t, "video/mp4", headers["Content-Type"])
+			presignedID := presigned["id"].(string)
+			var presignedRow model.PlaygroundUpload
+			require.NoError(t, db.Where("id = ?", presignedID).First(&presignedRow).Error)
+			_, directErr := objectStore.Put(context.Background(), presignedRow.ObjectKey, bytes.NewReader(clip))
+			require.NoError(t, directErr)
+			presignedCompleted := playgroundUploadResponseData(t, playgroundRequest(t, 7, http.MethodPost, uploadPath(presignedID)+"/complete", nil, controller.CompletePlaygroundUpload), http.StatusOK)
+			assert.Equal(t, "video/mp4", presignedCompleted["media_type"])
+
+			// Releasing a reservation aborts any in-progress multipart upload
+			// that still targets its key.
+			abortedBefore := len(direct.aborted)
+			multipartID := playgroundReserveUpload(t, 7, map[string]any{
+				"client_key": "upload-multipart", "media_type": "video/mp4", "filename": "clip.mp4",
+				"byte_size": len(clip), "session_id": sessionID,
+			}, http.StatusOK)["id"].(string)
+			var multipartRow model.PlaygroundUpload
+			require.NoError(t, db.Where("id = ?", multipartID).First(&multipartRow).Error)
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodDelete, uploadPath(multipartID), nil, controller.DeletePlaygroundUpload).Code)
+			require.Greater(t, len(direct.aborted), abortedBefore)
+			assert.Contains(t, direct.aborted[abortedBefore:], multipartRow.ObjectKey)
+		})
+	}
 }
 
 func TestPlaygroundAttachmentMessageReferences(t *testing.T) {
@@ -1276,6 +1676,67 @@ func TestPlaygroundAttachmentMessageReferences(t *testing.T) {
 	var stored int64
 	require.NoError(t, db.Model(&model.PlaygroundMessage{}).Where("session_id = ?", id).Count(&stored).Error)
 	assert.Zero(t, stored)
+}
+
+// Playground message speech references are the cached read-aloud audio of a
+// user or assistant reply. They follow the attachment reference contract: only
+// an owned id is accepted, the stored metadata always comes from the row, and
+// a lingering reference keeps the audio bytes alive.
+func TestPlaygroundMessageSpeechReferences(t *testing.T) {
+	db := playgroundTestDB(t, "sqlite")
+	session := createPlayground(t, 7, "speech-references")
+	id := session["id"].(string)
+	path := "/api/playground/sessions/" + id + "/messages"
+	speech := playgroundUploadAttachment(t, 7, id, "speech-a", "audio/mpeg", playgroundMP3Fixture(64))
+	speechID := speech["id"].(string)
+
+	message := func(key, from string, version map[string]any) map[string]any {
+		return map[string]any{"client_key": key, "payload": map[string]any{"key": key, "from": from, "versions": []any{version}}}
+	}
+
+	// An assistant reply keeps its cached read-aloud audio; the stored
+	// reference carries the owned metadata, not the client's claims.
+	response := playgroundRequest(t, 7, http.MethodPut, path, map[string]any{
+		"revision": 0,
+		"messages": []any{message("a1", "assistant", map[string]any{
+			"id": "a1-v1", "content": "Read this aloud",
+			"speech": map[string]any{"id": speechID, "media_type": "text/plain", "filename": "spoofed.mp3"},
+		})},
+	}, controller.ReplacePlaygroundMessages)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), speechID)
+	assert.Contains(t, response.Body.String(), `"media_type":"audio/mpeg"`)
+	assert.NotContains(t, response.Body.String(), "spoofed.mp3")
+
+	// The cached audio is a real reference: the attachment cannot be deleted.
+	inUse := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+id+"/attachments/"+speechID, nil, controller.DeletePlaygroundAttachment)
+	assert.Equal(t, http.StatusConflict, inUse.Code, inUse.Body.String())
+
+	// A system message can never carry speech, and an unowned id is rejected
+	// without replacing the stored history.
+	systemRejected := playgroundRequest(t, 7, http.MethodPut, path, map[string]any{
+		"revision": 1,
+		"messages": []any{message("s1", "system", map[string]any{"id": "s1-v1", "content": "Read this aloud", "speech": map[string]any{"id": speechID}})},
+	}, controller.ReplacePlaygroundMessages)
+	assert.Equal(t, http.StatusBadRequest, systemRejected.Code)
+	unknownRejected := playgroundRequest(t, 7, http.MethodPut, path, map[string]any{
+		"revision": 1,
+		"messages": []any{message("a2", "assistant", map[string]any{"id": "a2-v1", "content": "Read this aloud", "speech": map[string]any{"id": "pgf_missing"}})},
+	}, controller.ReplacePlaygroundMessages)
+	assert.Equal(t, http.StatusBadRequest, unknownRejected.Code)
+
+	// Dropping the reference releases the audio for deletion.
+	released := playgroundRequest(t, 7, http.MethodPut, path, map[string]any{
+		"revision": 1,
+		"messages": []any{message("a1", "assistant", map[string]any{"id": "a1-v1", "content": "Read this aloud"})},
+	}, controller.ReplacePlaygroundMessages)
+	require.Equal(t, http.StatusOK, released.Code, released.Body.String())
+	deleted := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+id+"/attachments/"+speechID, nil, controller.DeletePlaygroundAttachment)
+	assert.Equal(t, http.StatusOK, deleted.Code, deleted.Body.String())
+
+	var stored int64
+	require.NoError(t, db.Model(&model.PlaygroundMessage{}).Where("session_id = ?", id).Count(&stored).Error)
+	assert.EqualValues(t, 1, stored)
 }
 
 func TestPlaygroundAttachmentOrphanCleanup(t *testing.T) {
@@ -1678,6 +2139,10 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodGet, attachmentBase}, {http.MethodPost, attachmentBase},
 		{http.MethodGet, attachmentBase + "/missing"}, {http.MethodGet, attachmentBase + "/missing/content"},
 		{http.MethodDelete, attachmentBase + "/missing"},
+		{http.MethodPost, "/api/playground/uploads"},
+		{http.MethodPut, "/api/playground/uploads/missing/content"},
+		{http.MethodPost, "/api/playground/uploads/missing/complete"},
+		{http.MethodDelete, "/api/playground/uploads/missing"},
 	} {
 		response := playgroundAuthenticatedRequest(t, engine, "", route.method, route.path, input)
 		assert.Equal(t, 401, response.Code, response.Body.String())
@@ -2634,6 +3099,7 @@ func playgroundUsageCounterValues(usage model.PlaygroundUserUsage) []int64 {
 	return []int64{
 		usage.Sessions, usage.Presets,
 		usage.AttachmentCount, usage.AttachmentBytes, usage.ObjectBytes,
+		usage.AttachmentPendingCount, usage.AttachmentPendingBytes,
 		usage.ArtifactCount, usage.ArtifactBytes,
 		usage.CanvasCount, usage.CanvasBytes,
 	}

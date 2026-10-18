@@ -45,6 +45,7 @@ import { registerFormSchema } from '@/features/auth/constants'
 import { useAuthRedirect } from '@/features/auth/hooks/use-auth-redirect'
 import { useEmailVerification } from '@/features/auth/hooks/use-email-verification'
 import { useTurnstile } from '@/features/auth/hooks/use-turnstile'
+import { referralAttribution } from '@/features/auth/lib/referral-attribution'
 import {
   getAffiliateCode,
   saveAffiliateCode,
@@ -63,6 +64,7 @@ export function SignUpForm({
   const [isLoading, setIsLoading] = useState(false)
   const [verificationCode, setVerificationCode] = useState('')
   const [agreedToLegal, setAgreedToLegal] = useState(false)
+  const [linkInviteCode, setLinkInviteCode] = useState('')
   const [wechatCode, setWeChatCode] = useState('')
   const [isWeChatDialogOpen, setIsWeChatDialogOpen] = useState(false)
   const [isWeChatSubmitting, setIsWeChatSubmitting] = useState(false)
@@ -95,6 +97,7 @@ export function SignUpForm({
       email: '',
       password: '',
       confirmPassword: '',
+      inviteCode: '',
     },
   })
 
@@ -137,7 +140,12 @@ export function SignUpForm({
     if (aff) {
       saveAffiliateCode(aff)
     }
-  }, [])
+    const inviteCode = aff || getAffiliateCode().trim()
+    if (inviteCode) {
+      setLinkInviteCode(inviteCode)
+      form.setValue('inviteCode', inviteCode)
+    }
+  }, [form])
 
   async function onSubmit(data: z.infer<typeof registerFormSchema>) {
     if (requiresLegalConsent && !agreedToLegal) {
@@ -159,6 +167,11 @@ export function SignUpForm({
 
     if (!validateTurnstile()) return
 
+    const attribution = referralAttribution(
+      data.inviteCode ?? '',
+      linkInviteCode
+    )
+
     setIsLoading(true)
     try {
       const res = await register({
@@ -166,7 +179,8 @@ export function SignUpForm({
         password: data.password,
         email: data.email || undefined,
         verification_code: verificationCode || undefined,
-        aff_code: getAffiliateCode(),
+        aff_code: attribution.affCode,
+        referral_source: attribution.referralSource,
         turnstile: turnstileToken,
       })
 
@@ -293,6 +307,21 @@ export function SignUpForm({
               <FormLabel>{t('Confirm password')}</FormLabel>
               <FormControl>
                 <PasswordInput placeholder={t('Confirm password')} {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        {/* Invitation Code Field */}
+        <FormField
+          control={form.control}
+          name='inviteCode'
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t('Invitation Code (optional)')}</FormLabel>
+              <FormControl>
+                <Input placeholder={t('Enter invitation code')} {...field} />
               </FormControl>
               <FormMessage />
             </FormItem>
