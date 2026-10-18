@@ -659,6 +659,19 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
     ]
   )
 
+  /**
+   * Settles the budget of a stopped run: the server bills the step allocations
+   * the run recorded and returns the unspent cap to the wallet. The call is
+   * idempotent, so a retried settlement reports the recorded outcome, and a
+   * failure is shown because an unsettled budget only returns its cap when the
+   * reservation expires.
+   */
+  const settleRunBudget = useCallback((runId: string) => {
+    settleCanvasWorkflowRunBudget(runId).catch((error: unknown) => {
+      setMessage(workflowServerErrorText(error))
+    })
+  }, [])
+
   const executeSteps = useCallback(
     async (
       runNodes: CanvasFlowNode[],
@@ -949,6 +962,8 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
     activeNodeId,
     message,
     results,
+    /** The priced step payload of a run a click would start. */
+    estimate: estimateRun,
     run: start,
     retry,
     cancel,
