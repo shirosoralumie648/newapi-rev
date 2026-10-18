@@ -69,7 +69,7 @@ func setupManageUserTestDB(t *testing.T) *gorm.DB {
 			}
 		}
 	})
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.CasbinRule{}, &model.AuthzRole{}, &model.AuthFlow{}, &model.TwoFA{}, &model.PasskeyCredential{}, &model.UserAccessToken{}, &model.WalletLedgerEntry{}, &model.CreditGrant{}, &model.ReferralBinding{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.CasbinRule{}, &model.AuthzRole{}, &model.AuthFlow{}, &model.TwoFA{}, &model.PasskeyCredential{}, &model.UserAccessToken{}, &model.WalletLedgerEntry{}, &model.CreditGrant{}, &model.ReferralBinding{}, &model.ReferralCommission{}, &model.ReferralRegistrationSignal{}, &model.ReferralIdentity{}, &model.ReferralFlag{}))
 	require.NoError(t, logDB.AutoMigrate(&model.Log{}, &model.AuditLog{}))
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -805,4 +805,146 @@ func TestBindUserInviterAdminContract(t *testing.T) {
 	expected, err := common.Marshal(map[string]any{"username": invitee.Username, "id": invitee.Id, "inviter_id": inviter.Id, "source": model.ReferralSourceAdmin, "target_user_id": invitee.Id})
 	require.NoError(t, err)
 	assert.JSONEq(t, string(expected), string(params))
+}
+
+// TestReferralAntiAbuseAdminEndpoints pins the RF-06 administrator surface:
+// the anti-abuse mark, the hashed real-name identity, the profile view, the
+// manual review queue and its exactly-once decisions, each audited with the
+// target context and without secrets.
+func TestReferralAntiAbuseAdminEndpoints(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	createQuotaTestOperator(t, db, common.RoleRootUser)
+	inviter := model.User{Username: "abuse-inviter", Password: "password", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "abuse-inviter-aff"}
+	require.NoError(t, db.Create(&inviter).Error)
+	invitee := model.User{Username: "abuse-invitee", Password: "password", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "abuse-invitee-aff"}
+	require.NoError(t, db.Create(&invitee).Error)
+
+	invoke := func(method, path, body string, params gin.Params, handler gin.HandlerFunc) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(method, path, strings.NewReader(body))
+		c.Request.Header.Set("Content-Type", "application/json")
+		c.Params = params
+		c.Set("id", 9999)
+		c.Set("role", common.RoleRootUser)
+		c.Set("username", "root-operator")
+		handler(c)
+		return recorder
+	}
+	userParams := func(id int) gin.Params {
+		return gin.Params{{Key: "id", Value: strconv.Itoa(id)}}
+	}
+
+	recorder := invoke(http.MethodPost, fmt.Sprintf("/api/user/%d/referral-flag", invitee.Id), `{"level":"frozen","note":"signup farm"}`, userParams(invitee.Id), SetUserReferralFlag)
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), `"success":true`)
+	assert.Contains(t, recorder.Body.String(), "Referral flag updated")
+	flag, err := model.GetReferralFlag(invitee.Id)
+	require.NoError(t, err)
+	require.NotNil(t, flag)
+	assert.Equal(t, model.ReferralFlagLevelFrozen, flag.Level)
+	assert.Equal(t, "signup farm", flag.Note)
+
+	recorder = invoke(http.MethodPost, fmt.Sprintf("/api/user/%d/referral-flag", invitee.Id), `{"level":"ban"}`, userParams(invitee.Id), SetUserReferralFlag)
+	assert.Contains(t, recorder.Body.String(), `"success":false`)
+	recorder = invoke(http.MethodPost, fmt.Sprintf("/api/user/%d/referral-flag", invitee.Id), `{"level":"clear"}`, userParams(invitee.Id), SetUserReferralFlag)
+	assert.Contains(t, recorder.Body.String(), `"success":true`)
+	flag, err = model.GetReferralFlag(invitee.Id)
+	require.NoError(t, err)
+	assert.Nil(t, flag)
+
+	recorder = invoke(http.MethodPost, fmt.Sprintf("/api/user/%d/referral-identity", inviter.Id), `{"identity":"ID CARD 42"}`, userParams(inviter.Id), SetUserReferralIdentity)
+	assert.Contains(t, recorder.Body.String(), `"success":true`)
+	assert.Contains(t, recorder.Body.String(), "Referral identity updated")
+	identity, err := model.GetReferralIdentity(inviter.Id)
+	require.NoError(t, err)
+	require.NotNil(t, identity)
+	identityHash, err := model.HashReferralIdentity("idcard42")
+	require.NoError(t, err)
+	assert.Equal(t, identityHash, identity.IdentityHash, "the stored hash must come from the normalized value")
+	assert.NotContains(t, recorder.Body.String(), identityHash, "the full hash never leaves the server")
+	assert.Contains(t, recorder.Body.String(), `"identity_ref":"`+identityHash[:8]+`"`)
+
+	require.NoError(t, db.Create(&model.ReferralRegistrationSignal{
+		UserId: invitee.Id, Ip: "203.0.113.77", EmailDomain: "example.com", CreatedAt: time.Now().Unix(),
+	}).Error)
+	require.NoError(t, db.Create(&model.ReferralBinding{
+		InviteeId: invitee.Id, InviterId: inviter.Id, Source: model.ReferralSourceCode, BoundAt: time.Now().Unix(),
+	}).Error)
+	recorder = invoke(http.MethodGet, fmt.Sprintf("/api/user/%d/referral-profile", inviter.Id), "", userParams(inviter.Id), GetUserReferralProfile)
+	assert.Contains(t, recorder.Body.String(), `"success":true`)
+	assert.Contains(t, recorder.Body.String(), `"invitees":1`)
+	recorder = invoke(http.MethodGet, fmt.Sprintf("/api/user/%d/referral-profile", invitee.Id), "", userParams(invitee.Id), GetUserReferralProfile)
+	assert.Contains(t, recorder.Body.String(), `"ip":"203.0.113.77"`)
+
+	recorder = invoke(http.MethodDelete, fmt.Sprintf("/api/user/%d/referral-identity", inviter.Id), "", userParams(inviter.Id), ClearUserReferralIdentity)
+	assert.Contains(t, recorder.Body.String(), `"success":true`)
+	assert.Contains(t, recorder.Body.String(), "Referral identity cleared")
+	identity, err = model.GetReferralIdentity(inviter.Id)
+	require.NoError(t, err)
+	assert.Nil(t, identity)
+
+	now := time.Now().Unix()
+	review := model.ReferralCommission{
+		InviterId: inviter.Id, InviteeId: invitee.Id, Source: model.ReferralCommissionSourceTopUp,
+		RefType: model.WalletLedgerRefTopUp, RefId: "contract-review-1",
+		BaseQuota: 5000000, RatePercent: "10", CommissionQuota: 500000,
+		Status: model.ReferralCommissionStatusReview, Reason: model.ReferralCommissionReasonReviewThreshold,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	require.NoError(t, db.Create(&review).Error)
+	rejected := review
+	rejected.Id = 0
+	rejected.RefId = "contract-review-2"
+	require.NoError(t, db.Create(&rejected).Error)
+
+	recorder = invoke(http.MethodGet, "/api/user/referral/reviews?p=1&page_size=10", "", nil, ListReferralCommissionReviews)
+	assert.Contains(t, recorder.Body.String(), `"total":2`)
+	assert.Contains(t, recorder.Body.String(), fmt.Sprintf(`"id":%d`, review.Id))
+
+	recorder = invoke(http.MethodPost, fmt.Sprintf("/api/user/referral/reviews/%d", review.Id), `{"decision":"approve"}`, userParams(review.Id), ReviewReferralCommission)
+	assert.Contains(t, recorder.Body.String(), `"success":true`)
+	assert.Contains(t, recorder.Body.String(), "Referral review updated")
+	var reloaded model.ReferralCommission
+	require.NoError(t, db.First(&reloaded, review.Id).Error)
+	assert.Equal(t, model.ReferralCommissionStatusPending, reloaded.Status)
+
+	recorder = invoke(http.MethodPost, fmt.Sprintf("/api/user/referral/reviews/%d", review.Id), `{"decision":"reject"}`, userParams(review.Id), ReviewReferralCommission)
+	assert.Contains(t, recorder.Body.String(), `"success":false`)
+	assert.Contains(t, recorder.Body.String(), "The referral review is no longer pending")
+	require.NoError(t, db.First(&reloaded, review.Id).Error)
+	assert.Equal(t, model.ReferralCommissionStatusPending, reloaded.Status, "a decided review keeps its decision")
+
+	recorder = invoke(http.MethodPost, fmt.Sprintf("/api/user/referral/reviews/%d", rejected.Id), `{"decision":"reject"}`, userParams(rejected.Id), ReviewReferralCommission)
+	assert.Contains(t, recorder.Body.String(), `"success":true`)
+	require.NoError(t, db.First(&reloaded, rejected.Id).Error)
+	assert.Equal(t, model.ReferralCommissionStatusRejected, reloaded.Status)
+
+	for _, expected := range []struct {
+		action  string
+		content string
+	}{
+		{"user.referral_flag", "Updated the referral flag of user " + invitee.Username + " to frozen"},
+		{"user.referral_identity", "Recorded the referral identity of user " + inviter.Username},
+		{"user.referral_identity_clear", "Cleared the referral identity of user " + inviter.Username},
+	} {
+		var audits []model.AuditLog
+		require.NoError(t, model.LOG_DB.Where("action = ?", expected.action).Find(&audits).Error)
+		require.Len(t, audits, 1, "%s must be audited exactly once", expected.action)
+		assert.Equal(t, expected.content, audits[0].Content)
+		assert.Equal(t, 9999, audits[0].UserId)
+		assert.Equal(t, "root-operator", audits[0].Username)
+	}
+	var identityAudits []model.AuditLog
+	require.NoError(t, model.LOG_DB.Where("action = ?", "user.referral_identity").Find(&identityAudits).Error)
+	identityParams, err := common.Marshal(identityAudits[0].Other.Op.Params)
+	require.NoError(t, err)
+	assert.NotContains(t, string(identityParams), "ID CARD 42")
+	assert.NotContains(t, string(identityParams), identityHash)
+
+	var reviewAudits []model.AuditLog
+	require.NoError(t, model.LOG_DB.Where("action = ?", "user.referral_review").Order("id").Find(&reviewAudits).Error)
+	require.Len(t, reviewAudits, 2)
+	assert.Equal(t, fmt.Sprintf("Decided referral commission review #%d as approve", review.Id), reviewAudits[0].Content)
+	assert.Equal(t, fmt.Sprintf("Decided referral commission review #%d as reject", rejected.Id), reviewAudits[1].Content)
 }

@@ -826,9 +826,10 @@ func (user *User) Insert(attribution ReferralAttribution) error {
 			if err := createUserWithAffCode(tx, user); err != nil {
 				return err
 			}
-			// The invitation relation is recorded in the same transaction as the
-			// account, so a referral reward can never exist without a binding.
-			if err := bindReferralAttribution(tx, user, attribution); err != nil {
+			// The invitation relation and the registration environment are
+			// recorded in the same transaction as the account, so a referral
+			// reward can never exist without a binding.
+			if err := recordReferralRegistrationWithTx(tx, user, attribution); err != nil {
 				return err
 			}
 			// The sign-up bonus is the wallet's opening balance: it is recorded
@@ -912,7 +913,7 @@ func (user *User) InsertWithTx(tx *gorm.DB, attribution ReferralAttribution) err
 		if err := createUserWithAffCode(tx, user); err != nil {
 			return err
 		}
-		if err := bindReferralAttribution(tx, user, attribution); err != nil {
+		if err := recordReferralRegistrationWithTx(tx, user, attribution); err != nil {
 			return err
 		}
 		return insertSignupOpeningBalance(tx, user)
