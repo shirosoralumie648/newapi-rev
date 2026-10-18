@@ -33,7 +33,11 @@ import {
   uploadPlaygroundAttachmentDirect,
 } from '@/features/playground/lib/attachment-upload'
 
-import { CANVAS_DROP_MESSAGES, CANVAS_DROP_NODE_OFFSET_X } from '../constants'
+import {
+  CANVAS_ATTACHMENT_INLINE_MAX_BYTES,
+  CANVAS_DROP_MESSAGES,
+  CANVAS_DROP_NODE_OFFSET_X,
+} from '../constants'
 import type { CanvasAddedNode } from '../hooks/use-canvas-editor'
 
 // The media types an attachment may carry; the server re-validates the same
@@ -41,11 +45,6 @@ import type { CanvasAddedNode } from '../hooks/use-canvas-editor'
 const CANVAS_DROP_MEDIA_TYPES = new Set(
   PLAYGROUND_CANVAS_ATTACHMENT_ACCEPT.split(',')
 )
-
-// Small images keep the one-request base64 path: the bytes are already primed
-// for an instant preview. Everything larger, and every extended kind, goes
-// through the reservation flow so the file never travels inside a JSON body.
-const CANVAS_DROP_CLASSIC_MAX_BYTES = 1024 * 1024
 
 /**
  * A rejected drop. The message is the translation key of the problem, so the
@@ -125,7 +124,7 @@ export async function canvasDropEntries(
     let attachment: PlaygroundServerAttachment
     if (
       file.type.startsWith('image/') &&
-      file.size <= CANVAS_DROP_CLASSIC_MAX_BYTES
+      file.size <= CANVAS_ATTACHMENT_INLINE_MAX_BYTES
     ) {
       const data = await fileBase64(file)
       const uploaded = await uploadCanvasAttachment(canvasId, {

@@ -308,6 +308,20 @@ func playgroundAttachmentObjectBytes(attachment *PlaygroundAttachment) int64 {
 	return attachment.ByteSize
 }
 
+// playgroundAttachmentObjects names the stored objects of attachments whose
+// rows are about to go; database-backed rows contribute none.
+func playgroundAttachmentObjects(attachments []PlaygroundAttachment) []playgroundStoredObject {
+	objects := make([]playgroundStoredObject, 0, len(attachments))
+	for index := range attachments {
+		attachment := &attachments[index]
+		if attachment.ObjectKey == "" || attachment.StoredInDatabase() {
+			continue
+		}
+		objects = append(objects, playgroundStoredObject{ObjectKey: attachment.ObjectKey})
+	}
+	return objects
+}
+
 func findPlaygroundAttachmentByClientKey(userID int, clientKeyHash string) (*PlaygroundAttachment, error) {
 	var attachment PlaygroundAttachment
 	if err := DB.Where("user_id = ? AND client_key_hash = ?", userID, clientKeyHash).First(&attachment).Error; err != nil {
@@ -322,25 +336,27 @@ func playgroundAttachmentMatchesRequest(attachment *PlaygroundAttachment, sessio
 }
 
 // deletePlaygroundAttachmentObject removes stored bytes after their row is
-// gone. Failure is logged, never returned: the database is the authority, and
-// a leftover object is reconciled by later maintenance instead of failing a
-// request whose database state already committed.
-func deletePlaygroundAttachmentObject(store objectstore.Store, attachment *PlaygroundAttachment) {
+// gone. The error is returned to the delete-outbox caller, which keeps its
+// queued entry for the retry worker; the logged failure remains the operator's
+// breadcrumb.
+func deletePlaygroundAttachmentObject(store objectstore.Store, attachment *PlaygroundAttachment) error {
 	if attachment == nil || attachment.ObjectKey == "" || attachment.StoredInDatabase() {
-		return
+		return nil
 	}
 	if store == nil {
 		store = objectstore.DefaultStore()
 	}
 	if store == nil {
 		common.SysError(common.LogText("failed to delete Playground attachment object %s: object store is not configured", attachment.ObjectKey))
-		return
+		return ErrPlaygroundPayloadStorage
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), playgroundAttachmentObjectTimeout)
 	defer cancel()
 	if err := store.Delete(ctx, attachment.ObjectKey); err != nil && !errors.Is(err, objectstore.ErrObjectNotFound) {
 		common.SysError(common.LogText("failed to delete Playground attachment object %s: %s", attachment.ObjectKey, err.Error()))
+		return err
 	}
+	return nil
 }
 
 // readPlaygroundAttachmentObject reads one stored object back and verifies its
@@ -619,7 +635,7 @@ func ListPlaygroundAttachments(userID int, sessionID string, offset, limit int) 
 }
 
 func DeletePlaygroundAttachment(userID int, sessionID, id string) error {
-	var removed PlaygroundAttachment
+	var queued []playgroundQueuedObjectDelete
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		if _, err := lockPlaygroundSession(tx, userID, sessionID); err != nil {
 			return err
@@ -649,6 +665,10 @@ func DeletePlaygroundAttachment(userID int, sessionID, id string) error {
 		if err := tx.Where("id = ? AND user_id = ?", id, userID).Delete(&PlaygroundAttachment{}).Error; err != nil {
 			return err
 		}
+		queued, err = enqueuePlaygroundObjectDeletes(tx, playgroundAttachmentObjects([]PlaygroundAttachment{attachment}), playgroundObjectOriginAttachment)
+		if err != nil {
+			return err
+		}
 		usage.apply(playgroundUserUsageDelta{
 			AttachmentCount: -1,
 			AttachmentBytes: -attachment.ByteSize,
@@ -657,13 +677,12 @@ func DeletePlaygroundAttachment(userID int, sessionID, id string) error {
 		if err := savePlaygroundUserUsage(tx, usage); err != nil {
 			return err
 		}
-		removed = attachment
 		return nil
 	})
 	if err != nil {
 		return err
 	}
-	deletePlaygroundAttachmentObject(nil, &removed)
+	drainPlaygroundObjectDeletes(nil, queued)
 	return nil
 }
 
@@ -724,6 +743,7 @@ func DeleteOrphanedPlaygroundAttachments(updatedBefore int64, batchSize int) (in
 		for index := range rows {
 			row := &rows[index]
 			deleted := false
+			var queued []playgroundQueuedObjectDelete
 			err := DB.Transaction(func(tx *gorm.DB) error {
 				usage, err := lockPlaygroundUserUsage(tx, row.UserID)
 				if err != nil {
@@ -738,6 +758,10 @@ func DeleteOrphanedPlaygroundAttachments(updatedBefore int64, batchSize int) (in
 					// The row was referenced or pinned after the batch read, so
 					// it no longer matches and must keep its bytes.
 					return nil
+				}
+				queued, err = enqueuePlaygroundObjectDeletes(tx, playgroundAttachmentObjects([]PlaygroundAttachment{*row}), playgroundObjectOriginAttachment)
+				if err != nil {
+					return err
 				}
 				usage.apply(playgroundUserUsageDelta{
 					AttachmentCount: -1,
@@ -757,7 +781,7 @@ func DeleteOrphanedPlaygroundAttachments(updatedBefore int64, batchSize int) (in
 				continue
 			}
 			total++
-			deletePlaygroundAttachmentObject(nil, row)
+			drainPlaygroundObjectDeletes(nil, queued)
 		}
 		if len(rows) < batchSize {
 			return total, nil
@@ -921,6 +945,7 @@ func restorePlaygroundAttachmentRow(store objectstore.Store, attachment *Playgro
 	if err != nil {
 		return err
 	}
+	var queued []playgroundQueuedObjectDelete
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		usage, err := lockPlaygroundUserUsage(tx, attachment.UserID)
 		if err != nil {
@@ -939,6 +964,10 @@ func restorePlaygroundAttachmentRow(store objectstore.Store, attachment *Playgro
 		if updated.RowsAffected != 1 {
 			return errors.New("attachment was restored or deleted concurrently")
 		}
+		queued, err = enqueuePlaygroundObjectDeletes(tx, []playgroundStoredObject{{ObjectKey: attachment.ObjectKey}}, playgroundObjectOriginAttachment)
+		if err != nil {
+			return err
+		}
 		usage.apply(playgroundUserUsageDelta{ObjectBytes: -attachment.ByteSize})
 		return savePlaygroundUserUsage(tx, usage)
 	})
@@ -947,6 +976,6 @@ func restorePlaygroundAttachmentRow(store objectstore.Store, attachment *Playgro
 	}
 	// The row is database-backed again; drop the object with the backend/key
 	// captured before the row changed.
-	deletePlaygroundAttachmentObject(store, &PlaygroundAttachment{StorageBackend: attachment.StorageBackend, ObjectKey: attachment.ObjectKey})
+	drainPlaygroundObjectDeletes(store, queued)
 	return nil
 }

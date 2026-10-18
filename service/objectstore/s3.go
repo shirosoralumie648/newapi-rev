@@ -23,6 +23,7 @@ var _ Store = (*S3)(nil)
 var _ ContentTypePutter = (*S3)(nil)
 var _ PresignPutter = (*S3)(nil)
 var _ MultipartAborter = (*S3)(nil)
+var _ ObjectLister = (*S3)(nil)
 
 // S3 stores objects in an S3-compatible bucket (AWS S3, Cloudflare R2, MinIO,
 // Backblaze B2, or an Alibaba OSS compatible endpoint). Keys stay below the
@@ -177,6 +178,57 @@ func (s *S3) Delete(ctx context.Context, key string) error {
 
 func (s *S3) PresignPut(ctx context.Context, key string, ttl time.Duration) (string, error) {
 	return s.PresignPutWithContentType(ctx, key, "", ttl)
+}
+
+// List pages through the objects below one logical key prefix and reports each
+// one through fn. The prefix is optional: an empty prefix lists the whole
+// configured prefix. Objects whose backend key does not sit below the
+// configured prefix are never surfaced, so the caller only sees logical keys it
+// could address itself.
+func (s *S3) List(ctx context.Context, prefix string, fn func(ObjectInfo) error) error {
+	if fn == nil {
+		return errors.New("object store: list callback is required")
+	}
+	objectPrefix := ""
+	logicalPrefix := ""
+	if prefix != "" {
+		objectKey, err := storageKey(s.prefix, prefix)
+		if err != nil {
+			return err
+		}
+		objectPrefix, logicalPrefix = objectKey+"/", prefix+"/"
+	} else if s.prefix != "" {
+		objectPrefix, logicalPrefix = s.prefix+"/", s.prefix+"/"
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	input := &awss3.ListObjectsV2Input{Bucket: aws.String(s.bucket)}
+	if objectPrefix != "" {
+		input.Prefix = aws.String(objectPrefix)
+	}
+	paginator := awss3.NewListObjectsV2Paginator(s.client, input)
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return fmt.Errorf("object store: list %s: %w", prefix, err)
+		}
+		for _, object := range page.Contents {
+			storageName := aws.ToString(object.Key)
+			logical := storageName
+			if logicalPrefix != "" {
+				trimmed := strings.TrimPrefix(storageName, logicalPrefix)
+				if trimmed == storageName {
+					continue
+				}
+				logical = trimmed
+			}
+			if err := fn(ObjectInfo{Key: logical, Size: aws.ToInt64(object.Size), ModTime: aws.ToTime(object.LastModified)}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // PresignPutWithContentType signs one direct upload for the declared media

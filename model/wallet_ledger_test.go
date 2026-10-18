@@ -63,7 +63,7 @@ func accountingTestDB(t *testing.T, dialect string) *gorm.DB {
 	DB = db
 	LOG_DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&WalletLedgerEntry{}, &WalletHold{}, &WalletHoldGrant{}, &WalletDebt{}, &CreditGrant{}, &SubscriptionWindowUsage{}, &SubscriptionPreConsumeRecord{}, &UserSubscription{}, &SubscriptionPlan{}, &SubscriptionOrder{}, &TopUp{}, &User{}))
+		require.NoError(t, db.Migrator().DropTable(&WalletLedgerEntry{}, &WalletHold{}, &WalletHoldGrant{}, &WalletDebt{}, &CreditGrant{}, &SubscriptionWindowUsage{}, &SubscriptionPreConsumeRecord{}, &UserSubscription{}, &SubscriptionPlan{}, &SubscriptionOrder{}, &TopUp{}, &ReferralCommission{}, &User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
@@ -76,8 +76,8 @@ func accountingTestDB(t *testing.T, dialect string) *gorm.DB {
 
 	// A fresh migration and a repeated migration both succeed, so the new
 	// tables are created idempotently on every engine.
-	require.NoError(t, db.AutoMigrate(&User{}, &WalletLedgerEntry{}, &WalletHold{}, &WalletHoldGrant{}, &WalletDebt{}, &CreditGrant{}, &SubscriptionPlan{}, &UserSubscription{}, &SubscriptionWindowUsage{}, &SubscriptionPreConsumeRecord{}, &SubscriptionOrder{}, &TopUp{}))
-	require.NoError(t, db.AutoMigrate(&User{}, &WalletLedgerEntry{}, &WalletHold{}, &WalletHoldGrant{}, &WalletDebt{}, &CreditGrant{}, &SubscriptionPlan{}, &UserSubscription{}, &SubscriptionWindowUsage{}, &SubscriptionPreConsumeRecord{}, &SubscriptionOrder{}, &TopUp{}))
+	require.NoError(t, db.AutoMigrate(&User{}, &WalletLedgerEntry{}, &WalletHold{}, &WalletHoldGrant{}, &WalletDebt{}, &CreditGrant{}, &SubscriptionPlan{}, &UserSubscription{}, &SubscriptionWindowUsage{}, &SubscriptionPreConsumeRecord{}, &SubscriptionOrder{}, &TopUp{}, &ReferralCommission{}))
+	require.NoError(t, db.AutoMigrate(&User{}, &WalletLedgerEntry{}, &WalletHold{}, &WalletHoldGrant{}, &WalletDebt{}, &CreditGrant{}, &SubscriptionPlan{}, &UserSubscription{}, &SubscriptionWindowUsage{}, &SubscriptionPreConsumeRecord{}, &SubscriptionOrder{}, &TopUp{}, &ReferralCommission{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {

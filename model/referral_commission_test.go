@@ -1301,7 +1301,259 @@ func TestReferralCommissionSettlement(t *testing.T) {
 	})
 }
 
-// A database written before the settlement columns existed must gain them
+// A refund or chargeback of the paid order revokes the commission the order
+// recorded in the same transaction: an event that was still waiting is moved
+// to the terminal refunded state without any wallet movement, an already
+// issued credit commission is taken back from the inviter's wallet down to
+// zero with the remainder booked as wallet debt (WL-06), a refused event keeps
+// its decision, and a replayed notification reverses nothing twice.
+func TestReferralCommissionReversal(t *testing.T) {
+	forEachAccountingDialect(t, func(t *testing.T, db *gorm.DB) {
+		setupReferralCommissionTest(t, db)
+
+		t.Run("revokes an event still inside the refund window", func(t *testing.T) {
+			restoreReferralCommissionTestSetting()
+			inviter := createReferralCommissionTestUser(t, db, "r-a-inviter", "default")
+			invitee := createReferralCommissionTestUser(t, db, "r-a-invitee", "default")
+			bindReferralCommissionTestInviter(t, invitee, inviter.Id)
+			completeReferralCommissionTestTopUp(t, "r-a-order", invitee.Id, 10)
+
+			commissions := loadReferralCommissionsByRef(t, WalletLedgerRefTopUp, "r-a-order")
+			require.Len(t, commissions, 1)
+			require.Equal(t, ReferralCommissionStatusPending, commissions[0].Status)
+			commissionId := commissions[0].Id
+
+			require.NoError(t, ReverseTopUpPayment("r-a-order", false))
+			order := GetTopUpByTradeNo("r-a-order")
+			require.NotNil(t, order)
+			assert.Equal(t, common.TopUpStatusRefunded, order.Status)
+
+			reversed := loadReferralCommission(t, commissionId)
+			assert.Equal(t, ReferralCommissionStatusRefunded, reversed.Status)
+			assert.NotZero(t, reversed.ReversedAt)
+
+			// Revoking an unissued event moves no money: no grant was ever
+			// created and no chargeback row was written.
+			var stored User
+			require.NoError(t, db.Select("id", "quota").First(&stored, inviter.Id).Error)
+			assert.Equal(t, inviter.Quota, stored.Quota)
+			var grants int64
+			require.NoError(t, db.Model(&CreditGrant{}).Where("user_id = ?", inviter.Id).Count(&grants).Error)
+			assert.Zero(t, grants)
+			var chargebacks int64
+			require.NoError(t, db.Model(&WalletLedgerEntry{}).
+				Where("user_id = ? AND kind = ? AND ref_type = ? AND ref_id = ?",
+					inviter.Id, WalletLedgerKindChargeback, WalletLedgerRefReferralCommissionReversal, fmt.Sprintf("%d", commissionId)).
+				Count(&chargebacks).Error)
+			assert.Zero(t, chargebacks)
+
+			// A replayed refund webhook reverses nothing twice.
+			require.NoError(t, ReverseTopUpPayment("r-a-order", false))
+			replayed := loadReferralCommission(t, commissionId)
+			assert.Equal(t, ReferralCommissionStatusRefunded, replayed.Status)
+			assert.EqualValues(t, reversed.ReversedAt, replayed.ReversedAt)
+		})
+
+		t.Run("revokes a locked event without clawing back quota", func(t *testing.T) {
+			restoreReferralCommissionTestSetting()
+			operation_setting.GetReferralSetting().LockWindowDays = 14
+			inviter := createReferralCommissionTestUser(t, db, "r-b-inviter", "default")
+			invitee := createReferralCommissionTestUser(t, db, "r-b-invitee", "default")
+			bindReferralCommissionTestInviter(t, invitee, inviter.Id)
+			completeReferralCommissionTestTopUp(t, "r-b-order", invitee.Id, 10)
+
+			now := common.GetTimestamp()
+			require.NoError(t, DB.Model(&ReferralCommission{}).
+				Where("ref_id = ?", "r-b-order").Update("created_at", now-14*86400).Error)
+			locked, err := LockDueReferralCommissions(now, 0)
+			require.NoError(t, err)
+			require.Equal(t, 1, locked)
+
+			commissions := loadReferralCommissionsByRef(t, WalletLedgerRefTopUp, "r-b-order")
+			require.Len(t, commissions, 1)
+			require.Equal(t, ReferralCommissionStatusLocked, commissions[0].Status)
+
+			// The dispute classification reverses the locked event the same
+			// way a refund does.
+			require.NoError(t, ReverseTopUpPayment("r-b-order", true))
+			assert.Equal(t, common.TopUpStatusDisputed, GetTopUpByTradeNo("r-b-order").Status)
+
+			reversed := loadReferralCommission(t, commissions[0].Id)
+			assert.Equal(t, ReferralCommissionStatusRefunded, reversed.Status)
+			assert.EqualValues(t, now, reversed.LockedAt, "the lock timestamp stays for the audit trail")
+			assert.NotZero(t, reversed.ReversedAt)
+			assert.Zero(t, reversed.SettledAt)
+			var stored User
+			require.NoError(t, db.Select("id", "quota").First(&stored, inviter.Id).Error)
+			assert.Equal(t, inviter.Quota, stored.Quota, "an unissued commission is worth no wallet movement")
+		})
+
+		t.Run("reclaims a settled credit commission and books the remainder as debt", func(t *testing.T) {
+			restoreReferralCommissionTestSetting()
+			operation_setting.GetReferralSetting().LockWindowDays = 14
+			inviter := createReferralCommissionTestUser(t, db, "r-c-inviter", "default")
+			invitee := createReferralCommissionTestUser(t, db, "r-c-invitee", "default")
+			bindReferralCommissionTestInviter(t, invitee, inviter.Id)
+			completeReferralCommissionTestTopUp(t, "r-c-order", invitee.Id, 10)
+
+			now := common.GetTimestamp()
+			require.NoError(t, DB.Model(&ReferralCommission{}).
+				Where("ref_id = ?", "r-c-order").Update("created_at", now-14*86400).Error)
+			result, err := ProcessReferralCommissionSettlement(now, 0)
+			require.NoError(t, err)
+			require.Equal(t, 1, result.SettledCount)
+
+			commissions := loadReferralCommissionsByRef(t, WalletLedgerRefTopUp, "r-c-order")
+			require.Len(t, commissions, 1)
+			commissionId := commissions[0].Id
+			settled := loadReferralCommission(t, commissionId)
+			require.Equal(t, ReferralCommissionStatusSettled, settled.Status)
+			require.Equal(t, ReferralCommissionSettlementCredit, settled.SettlementMethod)
+
+			// The inviter spends most of the issued commission before the
+			// payment is refunded: the wallet covers the clawback only in
+			// part.
+			applied, err := ApplyWalletLedgerDelta(DB, inviter.Id, WalletLedgerKindConsumeHourly, -400000, WalletLedgerRefConsumeHourly, "r-c-consume", "")
+			require.NoError(t, err)
+			require.True(t, applied)
+
+			require.NoError(t, ReverseTopUpPayment("r-c-order", false))
+
+			reversed := loadReferralCommission(t, commissionId)
+			assert.Equal(t, ReferralCommissionStatusRefunded, reversed.Status)
+			assert.EqualValues(t, now, reversed.SettledAt, "the settlement record stays for the audit trail")
+			assert.NotZero(t, reversed.ReversedAt)
+
+			var stored User
+			require.NoError(t, db.Select("id", "quota").First(&stored, inviter.Id).Error)
+			assert.Zero(t, stored.Quota, "the clawback draws the wallet down to zero, never below")
+			assert.EqualValues(t, 399000, readWalletDebt(t, db, inviter.Id).Amount, "the spent part becomes wallet debt")
+
+			// The wallet movement is one chargeback row and the clawback is
+			// attributed to the referral grant.
+			var entry WalletLedgerEntry
+			require.NoError(t, db.Where("ref_type = ? AND ref_id = ?",
+				WalletLedgerRefReferralCommissionReversal, fmt.Sprintf("%d", commissionId)).First(&entry).Error)
+			assert.Equal(t, WalletLedgerKindChargeback, entry.Kind)
+			assert.EqualValues(t, -101000, entry.Amount)
+			var grant CreditGrant
+			require.NoError(t, db.First(&grant, settled.GrantId).Error)
+			assert.EqualValues(t, 399000, grant.Remaining, "the clawback is attributed to the referral grant")
+			reconciliation, err := ReconcileWalletLedgerForUser(inviter.Id)
+			require.NoError(t, err)
+			assert.True(t, reconciliation.Reconciled)
+
+			// The payment webhook replay cannot take the commission back
+			// twice: the balance, the debt and the one chargeback row hold.
+			require.NoError(t, ReverseTopUpPayment("r-c-order", false))
+			stored = User{}
+			require.NoError(t, db.Select("id", "quota").First(&stored, inviter.Id).Error)
+			assert.Zero(t, stored.Quota)
+			assert.EqualValues(t, 399000, readWalletDebt(t, db, inviter.Id).Amount)
+			var chargebacks int64
+			require.NoError(t, db.Model(&WalletLedgerEntry{}).
+				Where("ref_type = ? AND ref_id = ?", WalletLedgerRefReferralCommissionReversal, fmt.Sprintf("%d", commissionId)).
+				Count(&chargebacks).Error)
+			assert.EqualValues(t, 1, chargebacks)
+		})
+
+		t.Run("frees the first-paid-order window after the refund", func(t *testing.T) {
+			restoreReferralCommissionTestSetting()
+			operation_setting.GetReferralSetting().WindowMonths = operation_setting.ReferralWindowMonthsFirstTopUp
+			inviter := createReferralCommissionTestUser(t, db, "r-d-inviter", "default")
+			invitee := createReferralCommissionTestUser(t, db, "r-d-invitee", "default")
+			bindReferralCommissionTestInviter(t, invitee, inviter.Id)
+
+			completeReferralCommissionTestTopUp(t, "r-d-order-1", invitee.Id, 10)
+			require.NoError(t, ReverseTopUpPayment("r-d-order-1", false))
+
+			// The reversed event no longer counts as the first paid order, so
+			// the next paid order still earns a commission.
+			completeReferralCommissionTestTopUp(t, "r-d-order-2", invitee.Id, 4)
+			commissions := loadReferralCommissionsByRef(t, WalletLedgerRefTopUp, "r-d-order-2")
+			require.Len(t, commissions, 1)
+			assert.Equal(t, ReferralCommissionStatusPending, commissions[0].Status)
+			assert.EqualValues(t, 200000, commissions[0].CommissionQuota)
+		})
+
+		t.Run("reverses the commission on an administrator refund", func(t *testing.T) {
+			restoreReferralCommissionTestSetting()
+			inviter := createReferralCommissionTestUser(t, db, "r-e-inviter", "default")
+			invitee := createReferralCommissionTestUser(t, db, "r-e-invitee", "default")
+			bindReferralCommissionTestInviter(t, invitee, inviter.Id)
+			completeReferralCommissionTestTopUp(t, "r-e-order", invitee.Id, 10)
+
+			commissions := loadReferralCommissionsByRef(t, WalletLedgerRefTopUp, "r-e-order")
+			require.Len(t, commissions, 1)
+			require.NoError(t, RefundUnusedTopUpBalance("r-e-order", "127.0.0.1"))
+
+			reversed := loadReferralCommission(t, commissions[0].Id)
+			assert.Equal(t, ReferralCommissionStatusRefunded, reversed.Status)
+			assert.NotZero(t, reversed.ReversedAt)
+			var stored User
+			require.NoError(t, db.Select("id", "quota").First(&stored, inviter.Id).Error)
+			assert.Equal(t, inviter.Quota, stored.Quota)
+		})
+
+		t.Run("keeps a refused event refused", func(t *testing.T) {
+			restoreReferralCommissionTestSetting()
+			inviter := createReferralCommissionTestUser(t, db, "r-f-inviter", "default")
+			invitee := createReferralCommissionTestUser(t, db, "r-f-invitee", "default")
+			bindReferralCommissionTestInviter(t, invitee, inviter.Id)
+			setReferralCommissionTestIdentity(t, inviter.Id, "RF-05-ID-0001")
+			setReferralCommissionTestIdentity(t, invitee.Id, "RF-05-ID-0001")
+
+			completeReferralCommissionTestTopUp(t, "r-f-order", invitee.Id, 10)
+			commissions := loadReferralCommissionsByRef(t, WalletLedgerRefTopUp, "r-f-order")
+			require.Len(t, commissions, 1)
+			require.Equal(t, ReferralCommissionStatusBlocked, commissions[0].Status)
+
+			require.NoError(t, ReverseTopUpPayment("r-f-order", false))
+			kept := loadReferralCommission(t, commissions[0].Id)
+			assert.Equal(t, ReferralCommissionStatusBlocked, kept.Status, "a refused event never joins the payable pipeline")
+			assert.Zero(t, kept.ReversedAt)
+		})
+
+		t.Run("voids a settled cash commission without a wallet chargeback", func(t *testing.T) {
+			restoreReferralCommissionTestSetting()
+			setting := operation_setting.GetReferralSetting()
+			setting.LockWindowDays = 14
+			setting.CashSettlementEnabled = true
+			inviter := createReferralCommissionTestUser(t, db, "r-g-inviter", "default")
+			invitee := createReferralCommissionTestUser(t, db, "r-g-invitee", "default")
+			bindReferralCommissionTestInviter(t, invitee, inviter.Id)
+			completeReferralCommissionTestTopUp(t, "r-g-order", invitee.Id, 10)
+
+			now := common.GetTimestamp()
+			require.NoError(t, DB.Model(&ReferralCommission{}).
+				Where("ref_id = ?", "r-g-order").Update("created_at", now-14*86400).Error)
+			result, err := ProcessReferralCommissionSettlement(now, 0)
+			require.NoError(t, err)
+			require.Equal(t, 1, result.SettledCount)
+
+			commissions := loadReferralCommissionsByRef(t, WalletLedgerRefTopUp, "r-g-order")
+			require.Len(t, commissions, 1)
+			require.Equal(t, ReferralCommissionSettlementCash, loadReferralCommission(t, commissions[0].Id).SettlementMethod)
+
+			// The cash payout never entered the wallet, so the reversal only
+			// voids the recorded event.
+			require.NoError(t, ReverseTopUpPayment("r-g-order", false))
+			reversed := loadReferralCommission(t, commissions[0].Id)
+			assert.Equal(t, ReferralCommissionStatusRefunded, reversed.Status)
+			assert.NotZero(t, reversed.ReversedAt)
+			var stored User
+			require.NoError(t, db.Select("id", "quota").First(&stored, inviter.Id).Error)
+			assert.Equal(t, inviter.Quota, stored.Quota)
+			var chargebacks int64
+			require.NoError(t, db.Model(&WalletLedgerEntry{}).
+				Where("ref_type = ? AND ref_id = ?", WalletLedgerRefReferralCommissionReversal, fmt.Sprintf("%d", commissions[0].Id)).
+				Count(&chargebacks).Error)
+			assert.Zero(t, chargebacks)
+		})
+	})
+}
+
+// A database written before the extension columns existed must gain them
 // without losing its recorded events, and the startup migration must be
 // repeatable.
 func TestReferralCommissionSettlementSchemaMigration(t *testing.T) {
@@ -1332,13 +1584,13 @@ func TestReferralCommissionSettlementSchemaMigration(t *testing.T) {
 			}
 			require.NoError(t, db.Create(&legacy).Error)
 
-			require.NoError(t, migrateReferralCommissionSettlementColumns(db))
+			require.NoError(t, migrateReferralCommissionExtensionColumns(db))
 			require.NoError(t, db.AutoMigrate(&ReferralCommission{}))
 			// A repeated startup migration and AutoMigrate change nothing.
-			require.NoError(t, migrateReferralCommissionSettlementColumns(db))
+			require.NoError(t, migrateReferralCommissionExtensionColumns(db))
 			require.NoError(t, db.AutoMigrate(&ReferralCommission{}))
 
-			for _, column := range []string{"locked_at", "settled_at", "settlement_method", "grant_id"} {
+			for _, column := range []string{"locked_at", "settled_at", "settlement_method", "grant_id", "reversed_at"} {
 				assert.True(t, db.Migrator().HasColumn(&ReferralCommission{}, column), "column %s must exist after the migration", column)
 			}
 
@@ -1349,6 +1601,7 @@ func TestReferralCommissionSettlementSchemaMigration(t *testing.T) {
 			assert.Zero(t, stored.SettledAt)
 			assert.Empty(t, stored.SettlementMethod)
 			assert.Zero(t, stored.GrantId)
+			assert.Zero(t, stored.ReversedAt)
 
 			// The upgraded row takes part in the settlement: its refund
 			// window elapsed, so the next lock pass claims it.
@@ -1364,7 +1617,7 @@ func TestReferralCommissionSettlementSchemaMigration(t *testing.T) {
 }
 
 // referralCommissionLegacyRow mirrors the commission event table before the
-// settlement columns existed, so the migration test can build that shape on
+// extension columns existed, so the migration test can build that shape on
 // every engine.
 type referralCommissionLegacyRow struct {
 	Id              int    `gorm:"primaryKey;autoIncrement"`
@@ -1419,7 +1672,8 @@ func TestReferralInvitationStats(t *testing.T) {
 		// Three paid orders record three pending events; two of them move to
 		// their later states the way the settlement step (RF-04) will. Three
 		// further orders cover the recorded states that never join the payable
-		// pipeline: one waits for a manual decision, two were refused.
+		// pipeline: one waits for a manual decision, two were refused; a
+		// seventh order records an event reversed by a refund (RF-05).
 		completeReferralCommissionTestTopUp(t, "s-a-order-1", paidInvitee.Id, 10)
 		completeReferralCommissionTestTopUp(t, "s-a-order-2", paidInvitee.Id, 4)
 		completeReferralCommissionTestTopUp(t, "s-a-order-3", paidInvitee.Id, 2)
@@ -1428,9 +1682,11 @@ func TestReferralInvitationStats(t *testing.T) {
 		completeReferralCommissionTestTopUp(t, "s-a-order-4", paidInvitee.Id, 2)
 		completeReferralCommissionTestTopUp(t, "s-a-order-5", paidInvitee.Id, 2)
 		completeReferralCommissionTestTopUp(t, "s-a-order-6", paidInvitee.Id, 2)
+		completeReferralCommissionTestTopUp(t, "s-a-order-7", paidInvitee.Id, 2)
 		require.NoError(t, DB.Model(&ReferralCommission{}).Where("ref_id = ?", "s-a-order-4").Update("status", ReferralCommissionStatusReview).Error)
 		require.NoError(t, DB.Model(&ReferralCommission{}).Where("ref_id = ?", "s-a-order-5").Update("status", ReferralCommissionStatusBlocked).Error)
 		require.NoError(t, DB.Model(&ReferralCommission{}).Where("ref_id = ?", "s-a-order-6").Update("status", ReferralCommissionStatusRejected).Error)
+		require.NoError(t, DB.Model(&ReferralCommission{}).Where("ref_id = ?", "s-a-order-7").Update("status", ReferralCommissionStatusRefunded).Error)
 
 		t.Run("lists every invitee with commission aggregates and the window end", func(t *testing.T) {
 			query := ReferralInvitationQuery{InviterId: inviter.Id}
@@ -1455,8 +1711,9 @@ func TestReferralInvitationStats(t *testing.T) {
 			assert.EqualValues(t, 100000, paid.ReviewQuota)
 			assert.EqualValues(t, 100000, paid.BlockedQuota)
 			assert.EqualValues(t, 100000, paid.RejectedQuota)
-			assert.EqualValues(t, 11000000, paid.TotalPaidQuota)
-			assert.EqualValues(t, 6, paid.CommissionCount)
+			assert.EqualValues(t, 100000, paid.RefundedQuota)
+			assert.EqualValues(t, 12000000, paid.TotalPaidQuota)
+			assert.EqualValues(t, 7, paid.CommissionCount)
 			assert.Equal(t,
 				referralCommissionWindowEnd(paidInvitee.CreatedAt, operation_setting.ReferralWindowMonthsDefault),
 				paid.CommissionEndsAt)
@@ -1493,6 +1750,12 @@ func TestReferralInvitationStats(t *testing.T) {
 			require.Len(t, blocked, 1)
 			assert.Equal(t, paidInvitee.Id, blocked[0].InviteeId)
 
+			// The reversed state is a filterable outcome as well (RF-05).
+			refunded, err := ListReferralInvitations(ReferralInvitationQuery{InviterId: inviter.Id, Status: ReferralCommissionStatusRefunded}, 0, 10)
+			require.NoError(t, err)
+			require.Len(t, refunded, 1)
+			assert.Equal(t, paidInvitee.Id, refunded[0].InviteeId)
+
 			// A keyword wildcard is a literal, not a pattern.
 			total, err = CountReferralInvitations(ReferralInvitationQuery{InviterId: inviter.Id, Keyword: "%"})
 			require.NoError(t, err)
@@ -1517,20 +1780,21 @@ func TestReferralInvitationStats(t *testing.T) {
 			require.NoError(t, err)
 			assert.EqualValues(t, 2, summary.TotalInvitees)
 			assert.EqualValues(t, 1, summary.InviteesWithCommission)
-			assert.EqualValues(t, 11000000, summary.TotalPaidQuota)
-			assert.EqualValues(t, 1100000, summary.TotalCommissionQuota)
+			assert.EqualValues(t, 12000000, summary.TotalPaidQuota)
+			assert.EqualValues(t, 1200000, summary.TotalCommissionQuota)
 			assert.EqualValues(t, 500000, summary.PendingQuota)
 			assert.EqualValues(t, 200000, summary.LockedQuota)
 			assert.EqualValues(t, 100000, summary.SettledQuota)
 			assert.EqualValues(t, 100000, summary.ReviewQuota)
 			assert.EqualValues(t, 100000, summary.BlockedQuota)
 			assert.EqualValues(t, 100000, summary.RejectedQuota)
+			assert.EqualValues(t, 100000, summary.RefundedQuota)
 			// Every recorded state is bucketed, so the buckets add up to the
-			// recorded total of the payable and refused events.
+			// recorded total of the payable, refused and reversed events.
 			assert.Equal(t,
 				summary.TotalCommissionQuota,
 				summary.PendingQuota+summary.LockedQuota+summary.SettledQuota+
-					summary.ReviewQuota+summary.BlockedQuota+summary.RejectedQuota)
+					summary.ReviewQuota+summary.BlockedQuota+summary.RejectedQuota+summary.RefundedQuota)
 
 			onlyQuiet, err := SummarizeReferralInvitations(ReferralInvitationQuery{InviterId: inviter.Id, Source: ReferralSourceOAuth})
 			require.NoError(t, err)
@@ -1586,7 +1850,7 @@ func TestMaskReferralIdentifier(t *testing.T) {
 // sources and known commission states are accepted, the empty string meaning
 // "any".
 func TestReferralInvitationQueryValidation(t *testing.T) {
-	for _, source := range []string{"", ReferralSourceLink, ReferralSourceCode, ReferralSourceOAuth, ReferralSourceAdmin} {
+	for _, source := range []string{"", ReferralSourceLink, ReferralSourceCode, ReferralSourceOAuth, ReferralSourceAdmin, ReferralSourceLegacy} {
 		assert.True(t, IsReferralSource(source), "source %q must be accepted", source)
 	}
 	assert.False(t, IsReferralSource("unknown"))
@@ -1599,6 +1863,7 @@ func TestReferralInvitationQueryValidation(t *testing.T) {
 		ReferralCommissionStatusRejected,
 		ReferralCommissionStatusLocked,
 		ReferralCommissionStatusSettled,
+		ReferralCommissionStatusRefunded,
 	} {
 		assert.True(t, IsReferralCommissionStatus(status), "status %q must be accepted", status)
 	}

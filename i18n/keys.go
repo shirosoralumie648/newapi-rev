@@ -51,6 +51,12 @@ const (
 	MsgRelayRetryNoAvailableChannel      = "relay.retry_no_available_channel"
 	MsgRelayAccessTokenUnsupported       = "relay.access_token_unsupported"
 	MsgRelayFirstTokenTimeout            = "relay.first_token_timeout"
+	// MsgRelayChannelCapacityExhausted reports that every candidate channel
+	// refused the request for lack of admission capacity.
+	MsgRelayChannelCapacityExhausted = "relay.channel_capacity_exhausted"
+	// MsgRelayTokenRateLimitExceeded reports that the token's own RPM or TPM
+	// limit refused the request.
+	MsgRelayTokenRateLimitExceeded = "relay.token_rate_limit_exceeded"
 )
 
 // Emails and the name of the token created at registration, in the

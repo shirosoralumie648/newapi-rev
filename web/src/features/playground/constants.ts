@@ -68,6 +68,7 @@ export const PLAYGROUND_TOOL_CALL_RESULT_MAX_CHARS = 64_000
 export const API_ENDPOINTS = {
   CHAT_COMPLETIONS: '/pg/chat/completions',
   IMAGE_GENERATIONS: '/pg/images/generations',
+  IMAGE_EDITS: '/pg/images/edits',
   VIDEO_GENERATIONS: '/pg/videos',
   AUDIO_SPEECH: '/pg/audio/speech',
   AUDIO_TRANSCRIPTIONS: '/pg/audio/transcriptions',

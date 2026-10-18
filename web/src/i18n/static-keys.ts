@@ -80,6 +80,7 @@ export const STATIC_I18N_KEYS = [
   // REFERRAL_COMMISSION_STATUS_LABEL_KEYS in the wallet feature.
   'Link',
   'Settled',
+  'Refunded',
   'In Review',
   'Blocked by risk control',
   'Rejected',
@@ -1181,4 +1182,27 @@ export const STATIC_I18N_KEYS = [
   // from Go through message_key, so the literal scan cannot see them.
   'No periodic limit',
   'Invalid periodic reset cycle',
+  // Canvas image tool titles and problem messages render through t(key) from
+  // CANVAS_IMAGE_TOOL_TITLES / CANVAS_IMAGE_TOOL_MESSAGES, so the literal scan
+  // cannot see them.
+  'Crop image',
+  'Redraw image area',
+  'Upscale image',
+  'The image could not be read from this node.',
+  'The image is larger than the 8 MiB limit.',
+  'The crop area is too small.',
+  'The image cannot be upscaled within the 4096-pixel limit.',
+  'Paint over the area you want to change.',
+  'Describe the change for the painted area.',
+  'Choose a model for the redraw.',
+  'The generated image could not be added to the canvas.',
+  'The canvas is full; the result could not be added.',
+  'The image operation failed.',
+  // Legacy referral migration (RF-09): the binding source label renders
+  // through t(label) from REFERRAL_SOURCE_LABEL_KEYS, and the migration log
+  // line and the reconciliation warning are returned from Go, so the literal
+  // scan cannot see them.
+  'Legacy',
+  'Legacy invitation reward transferred to balance {{quota}}',
+  'Legacy referral reconciliation found {{count}} deviating accounts; see the legacy_referral_reconcile system task result',
 ] as const

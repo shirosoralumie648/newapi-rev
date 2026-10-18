@@ -49,6 +49,12 @@ const (
 	// the wallet (uncovered parts become wallet debt) exactly once per day. It
 	// only runs while the optional storage billing tier is enabled.
 	SystemTaskTypePlaygroundStorageSettle = "playground_storage_settle"
+	// SystemTaskTypePlaygroundObjectOutbox retries deleting stored objects
+	// whose owning database row is already gone.
+	SystemTaskTypePlaygroundObjectOutbox = "playground_object_outbox"
+	// SystemTaskTypePlaygroundObjectReconcile lists the stored objects below
+	// the Playground key space and removes the ones no database row owns.
+	SystemTaskTypePlaygroundObjectReconcile = "playground_object_reconcile"
 	// SystemTaskTypeWalletReconcile compares every wallet balance with the sum
 	// of its append-only ledger and alerts on deviation without changing balances.
 	SystemTaskTypeWalletReconcile = "wallet_reconcile"
@@ -63,6 +69,10 @@ const (
 	// commissions whose refund window elapsed and issues them to the inviter
 	// (credit grant or the configured cash payout form).
 	SystemTaskTypeReferralCommissionSettlement = "referral_commission_settlement"
+	// SystemTaskTypeLegacyReferralReconcile audits the one-time legacy import
+	// (bindings backfilled from users.inviter_id, affiliate balances imported
+	// into the wallet) and alerts on deviation without changing any balance.
+	SystemTaskTypeLegacyReferralReconcile = "legacy_referral_reconcile"
 )
 
 var ErrSystemTaskLockLost = errors.New("system task lock lost")

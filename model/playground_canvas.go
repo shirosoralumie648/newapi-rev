@@ -492,7 +492,9 @@ func UpdatePlaygroundCanvasProject(userID int, id string, revision int64, input 
 		return nil, ErrPlaygroundCanvasInvalid
 	}
 	var project PlaygroundCanvasProject
-	var removedObjects []playgroundStoredObject
+	var queued []playgroundQueuedObjectDelete
+	var prunedSnapshots []playgroundStoredObject
+	var replacedDocument []playgroundStoredObject
 	writtenObject := ""
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		if err := lockForUpdate(tx).Where("id = ? AND user_id = ? AND deleted_at = 0", id, userID).First(&project).Error; err != nil {
@@ -541,7 +543,7 @@ func UpdatePlaygroundCanvasProject(userID int, id string, revision int64, input 
 				if err != nil {
 					return err
 				}
-				removedObjects = append(removedObjects, pruned...)
+				prunedSnapshots = append(prunedSnapshots, pruned...)
 			}
 			updates["document"] = *input.Document
 			updates["document_bytes"] = size
@@ -563,7 +565,7 @@ func UpdatePlaygroundCanvasProject(userID int, id string, revision int64, input 
 			// The replaced document object (if any) loses its row with this
 			// save and is dropped after the transaction commits.
 			if project.ObjectKey != "" && project.ObjectKey != writtenObject {
-				removedObjects = append(removedObjects, playgroundStoredObject{ObjectKey: project.ObjectKey})
+				replacedDocument = append(replacedDocument, playgroundStoredObject{ObjectKey: project.ObjectKey})
 			}
 		}
 		result := tx.Model(&PlaygroundCanvasProject{}).
@@ -592,8 +594,17 @@ func UpdatePlaygroundCanvasProject(userID int, id string, revision int64, input 
 			if err != nil {
 				return err
 			}
-			removedObjects = append(removedObjects, pruned...)
+			prunedSnapshots = append(prunedSnapshots, pruned...)
 		}
+		queuedSnapshots, err := enqueuePlaygroundObjectDeletes(tx, prunedSnapshots, playgroundObjectOriginSnapshot)
+		if err != nil {
+			return err
+		}
+		queuedDocument, err := enqueuePlaygroundObjectDeletes(tx, replacedDocument, playgroundObjectOriginCanvas)
+		if err != nil {
+			return err
+		}
+		queued = append(queuedSnapshots, queuedDocument...)
 		return nil
 	})
 	if err != nil {
@@ -602,7 +613,7 @@ func UpdatePlaygroundCanvasProject(userID int, id string, revision int64, input 
 		deletePlaygroundObject(nil, writtenObject)
 		return nil, err
 	}
-	deletePlaygroundObjects(removedObjects)
+	drainPlaygroundObjectDeletes(nil, queued)
 	if input.Document != nil {
 		// The response acknowledges the stored document even though the row
 		// may keep only the object key.
@@ -679,7 +690,7 @@ func RestorePlaygroundCanvasProject(userID int, id string) (*PlaygroundCanvasPro
 // use it; the user-facing API only ever soft deletes. The stored document and
 // history objects are deleted after the database commit.
 func PurgePlaygroundCanvasProject(userID int, id string) error {
-	var removedObjects []playgroundStoredObject
+	var queued []playgroundQueuedObjectDelete
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var project PlaygroundCanvasProject
 		err := lockForUpdate(tx).Where("id = ? AND user_id = ? AND deleted_at > 0", id, userID).First(&project).Error
@@ -690,20 +701,20 @@ func PurgePlaygroundCanvasProject(userID int, id string) error {
 			return err
 		}
 		removed, err := purgePlaygroundCanvasProjectTx(tx, &project)
-		removedObjects = removed
+		queued = removed
 		return err
 	})
 	if err != nil {
 		return err
 	}
-	deletePlaygroundObjects(removedObjects)
+	drainPlaygroundObjectDeletes(nil, queued)
 	return nil
 }
 
 // purgePlaygroundCanvasProjectTx removes one locked canvas and everything it
-// held inside the caller's transaction. The returned objects lost their rows
-// and must be deleted after the transaction commits.
-func purgePlaygroundCanvasProjectTx(tx *gorm.DB, project *PlaygroundCanvasProject) ([]playgroundStoredObject, error) {
+// held inside the caller's transaction. The returned queued deletions lost
+// their rows and must be drained after the transaction commits.
+func purgePlaygroundCanvasProjectTx(tx *gorm.DB, project *PlaygroundCanvasProject) ([]playgroundQueuedObjectDelete, error) {
 	usage, err := lockPlaygroundUserUsage(tx, project.UserID)
 	if err != nil {
 		return nil, err
@@ -731,14 +742,23 @@ func purgePlaygroundCanvasProjectTx(tx *gorm.DB, project *PlaygroundCanvasProjec
 	if err := tx.Where("id = ? AND user_id = ?", project.ID, project.UserID).Delete(&PlaygroundCanvasProject{}).Error; err != nil {
 		return nil, err
 	}
-	removed := make([]playgroundStoredObject, 0, len(snapshots)+1)
+	removedSnapshots := make([]playgroundStoredObject, 0, len(snapshots))
+	removedDocument := make([]playgroundStoredObject, 0, 1)
 	snapshotBytes := int64(0)
 	for index := range snapshots {
-		removed = append(removed, playgroundStoredObject{ObjectKey: snapshots[index].ObjectKey})
+		removedSnapshots = append(removedSnapshots, playgroundStoredObject{ObjectKey: snapshots[index].ObjectKey})
 		snapshotBytes += snapshots[index].ByteSize
 	}
 	if project.ObjectKey != "" {
-		removed = append(removed, playgroundStoredObject{ObjectKey: project.ObjectKey})
+		removedDocument = append(removedDocument, playgroundStoredObject{ObjectKey: project.ObjectKey})
+	}
+	queuedSnapshots, err := enqueuePlaygroundObjectDeletes(tx, removedSnapshots, playgroundObjectOriginSnapshot)
+	if err != nil {
+		return nil, err
+	}
+	queuedDocument, err := enqueuePlaygroundObjectDeletes(tx, removedDocument, playgroundObjectOriginCanvas)
+	if err != nil {
+		return nil, err
 	}
 	usage.apply(playgroundUserUsageDelta{
 		CanvasCount:         -1,
@@ -749,7 +769,7 @@ func purgePlaygroundCanvasProjectTx(tx *gorm.DB, project *PlaygroundCanvasProjec
 	if err := savePlaygroundUserUsage(tx, usage); err != nil {
 		return nil, err
 	}
-	return removed, nil
+	return append(queuedSnapshots, queuedDocument...), nil
 }
 
 // purgeExpiredPlaygroundCanvasProject removes one trash candidate inside a
@@ -758,7 +778,7 @@ func purgePlaygroundCanvasProjectTx(tx *gorm.DB, project *PlaygroundCanvasProjec
 // purging it early. A candidate that was restored in the meantime is skipped.
 func purgeExpiredPlaygroundCanvasProject(candidate *PlaygroundCanvasProject, now int64) (int64, error) {
 	purged := int64(0)
-	var removedObjects []playgroundStoredObject
+	var queued []playgroundQueuedObjectDelete
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var project PlaygroundCanvasProject
 		if err := lockForUpdate(tx).Where("id = ? AND user_id = ? AND deleted_at > 0", candidate.ID, candidate.UserID).First(&project).Error; err != nil {
@@ -778,14 +798,14 @@ func purgeExpiredPlaygroundCanvasProject(candidate *PlaygroundCanvasProject, now
 		if err != nil {
 			return err
 		}
-		removedObjects = removed
+		queued = removed
 		purged = 1
 		return nil
 	})
 	if err != nil {
 		return 0, err
 	}
-	deletePlaygroundObjects(removedObjects)
+	drainPlaygroundObjectDeletes(nil, queued)
 	return purged, nil
 }
 

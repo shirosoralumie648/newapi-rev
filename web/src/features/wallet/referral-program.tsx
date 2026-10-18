@@ -166,7 +166,7 @@ export function ReferralProgram() {
                     ))}
                   </div>
                   <p className='text-muted-foreground text-xs'>
-                    {`${t('Pending')} ${formatQuota(summary.pending_quota)} · ${t('Locked')} ${formatQuota(summary.locked_quota)} · ${t('Settled')} ${formatQuota(summary.settled_quota)}`}
+                    {`${t('Pending')} ${formatQuota(summary.pending_quota)} · ${t('Locked')} ${formatQuota(summary.locked_quota)} · ${t('Settled')} ${formatQuota(summary.settled_quota)} · ${t('Refunded')} ${formatQuota(summary.refunded_quota)}`}
                   </p>
                   {!profile.enabled ? (
                     <p className='text-muted-foreground text-xs'>

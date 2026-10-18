@@ -3,11 +3,13 @@ package objectstore
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -79,6 +81,64 @@ func (f *fakeS3Server) writeMultipartUploads(w http.ResponseWriter, prefix strin
 	_, _ = w.Write([]byte(body.String()))
 }
 
+// writeListObjects answers the object listing the reconciliation reads. The
+// page size is deliberately one object so the store's pagination loop is
+// exercised instead of a single oversized page.
+func (f *fakeS3Server) writeListObjects(w http.ResponseWriter, prefix, token string) {
+	const pageSize = 1
+	f.mu.Lock()
+	keys := make([]string, 0, len(f.objects))
+	for key := range f.objects {
+		if prefix == "" || strings.HasPrefix(key, prefix) {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	objects := make(map[string]fakeS3Object, len(keys))
+	for _, key := range keys {
+		objects[key] = f.objects[key]
+	}
+	f.mu.Unlock()
+
+	start := 0
+	if token != "" {
+		parsed, err := strconv.Atoi(token)
+		if err != nil {
+			writeFakeS3Error(w, http.StatusBadRequest, "InvalidArgument")
+			return
+		}
+		start = parsed
+	}
+	end := min(start+pageSize, len(keys))
+	var body strings.Builder
+	body.WriteString(`<?xml version="1.0" encoding="UTF-8"?><ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Name>`)
+	body.WriteString(fakeS3Bucket)
+	body.WriteString(`</Name><KeyCount>`)
+	body.WriteString(strconv.Itoa(end - start))
+	body.WriteString(`</KeyCount>`)
+	for _, key := range keys[start:end] {
+		object := objects[key]
+		body.WriteString(`<Contents><Key>`)
+		body.WriteString(key)
+		body.WriteString(`</Key><LastModified>`)
+		body.WriteString(object.modified.UTC().Format(time.RFC3339))
+		body.WriteString(`</LastModified><Size>`)
+		body.WriteString(strconv.FormatInt(int64(len(object.body)), 10))
+		body.WriteString(`</Size><StorageClass>STANDARD</StorageClass></Contents>`)
+	}
+	if end < len(keys) {
+		body.WriteString(`<IsTruncated>true</IsTruncated><NextContinuationToken>`)
+		body.WriteString(strconv.Itoa(end))
+		body.WriteString(`</NextContinuationToken>`)
+	} else {
+		body.WriteString(`<IsTruncated>false</IsTruncated>`)
+	}
+	body.WriteString(`</ListBucketResult>`)
+	w.Header().Set("Content-Type", "application/xml")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(body.String()))
+}
+
 func (f *fakeS3Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/")
 	f.mu.Lock()
@@ -87,8 +147,12 @@ func (f *fakeS3Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	bucket, key, found := strings.Cut(path, "/")
 	if !found || key == "" {
-		// Bucket-level requests: the store lists in-progress multipart uploads
-		// before it aborts them.
+		// Bucket-level requests: the store lists objects for reconciliation
+		// and in-progress multipart uploads before it aborts them.
+		if bucket == fakeS3Bucket && r.Method == http.MethodGet && r.URL.Query().Get("list-type") == "2" {
+			f.writeListObjects(w, r.URL.Query().Get("prefix"), r.URL.Query().Get("continuation-token"))
+			return
+		}
 		if bucket == fakeS3Bucket && r.Method == http.MethodGet && r.URL.Query().Has("uploads") {
 			f.writeMultipartUploads(w, r.URL.Query().Get("prefix"))
 			return
@@ -330,6 +394,7 @@ func TestS3StoreRejectsCanceledContext(t *testing.T) {
 	_, err = store.Head(ctx, "tasks/1/2026/10/task-1/image")
 	assert.ErrorIs(t, err, context.Canceled)
 	assert.ErrorIs(t, store.Delete(ctx, "tasks/1/2026/10/task-1/image"), context.Canceled)
+	assert.ErrorIs(t, store.List(ctx, "tasks/1", func(ObjectInfo) error { return nil }), context.Canceled)
 }
 
 func TestS3StorePresignAppliesPrefixAddressingAndTTL(t *testing.T) {
@@ -474,4 +539,51 @@ func TestS3StoreSurfacesEndpointFailures(t *testing.T) {
 	require.Error(t, err)
 	assert.NotErrorIs(t, err, ErrObjectNotFound)
 	assert.Contains(t, err.Error(), key)
+}
+
+// TestS3StoreListsObjectsBelowPrefix proves the reconciliation listing returns
+// logical keys with sizes and modification times, hides everything outside the
+// requested or the configured prefix, and pages through the backend listing.
+func TestS3StoreListsObjectsBelowPrefix(t *testing.T) {
+	server := newFakeS3Server()
+	store, _ := newTestS3Store(t, server)
+	ctx := t.Context()
+	for _, object := range []struct {
+		key  string
+		body string
+	}{
+		{"pg/7/attachments/a", "aa"},
+		{"pg/7/attachments/sub/b", "bbb"},
+		{"pg/8/attachments/c", "c"},
+		{"other/d", "dddd"},
+	} {
+		_, err := store.Put(ctx, object.key, strings.NewReader(object.body))
+		require.NoError(t, err)
+	}
+
+	// Keys come back in their logical form, without the configured prefix, and
+	// only below the requested one. The fake answers one object per page, so
+	// the pagination loop is exercised.
+	listed := make(map[string]ObjectInfo)
+	require.NoError(t, store.List(ctx, "pg/7", func(info ObjectInfo) error {
+		listed[info.Key] = info
+		return nil
+	}))
+	require.Len(t, listed, 2)
+	assert.EqualValues(t, 2, listed["pg/7/attachments/a"].Size)
+	assert.EqualValues(t, 3, listed["pg/7/attachments/sub/b"].Size)
+	assert.False(t, listed["pg/7/attachments/a"].ModTime.IsZero())
+
+	// An empty prefix lists the whole configured key space, keyed logically.
+	listed = make(map[string]ObjectInfo)
+	require.NoError(t, store.List(ctx, "", func(info ObjectInfo) error {
+		listed[info.Key] = info
+		return nil
+	}))
+	assert.Len(t, listed, 4)
+	assert.EqualValues(t, 4, listed["other/d"].Size)
+
+	// A callback error stops the pagination and comes back untouched.
+	sentinel := errors.New("stop listing")
+	assert.ErrorIs(t, store.List(ctx, "pg", func(ObjectInfo) error { return sentinel }), sentinel)
 }

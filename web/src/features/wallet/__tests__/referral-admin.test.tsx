@@ -52,6 +52,7 @@ function makeInvitation(
     pending_quota: 0,
     locked_quota: 0,
     settled_quota: 0,
+    refunded_quota: 0,
     review_quota: 0,
     blocked_quota: 0,
     rejected_quota: 0,
@@ -135,7 +136,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-it('summarizes all six commission states of the filtered list', async () => {
+it('summarizes all seven commission states of the filtered list', async () => {
   vi.spyOn(api, 'get').mockResolvedValue(
     mockAdminPage(
       [makeInvitation()],
@@ -144,10 +145,11 @@ it('summarizes all six commission states of the filtered list', async () => {
         total_invitees: 23,
         invitees_with_commission: 9,
         total_paid_quota: 7_000_000,
-        total_commission_quota: 2_200_000,
+        total_commission_quota: 4_900_000,
         pending_quota: 2_000_000,
         locked_quota: 1_000_000,
         settled_quota: 500_000,
+        refunded_quota: 600_000,
         review_quota: 400_000,
         blocked_quota: 300_000,
         rejected_quota: 100_000,
@@ -163,6 +165,7 @@ it('summarizes all six commission states of the filtered list', async () => {
     `${i18n.t('Pending')}: ${formatQuota(2_000_000)}`,
     `${i18n.t('Locked')}: ${formatQuota(1_000_000)}`,
     `${i18n.t('Settled')}: ${formatQuota(500_000)}`,
+    `${i18n.t('Refunded')}: ${formatQuota(600_000)}`,
     `${i18n.t('In Review')}: ${formatQuota(400_000)}`,
     `${i18n.t('Blocked by risk control')}: ${formatQuota(300_000)}`,
     `${i18n.t('Rejected')}: ${formatQuota(100_000)}`,
@@ -176,6 +179,7 @@ it('names the anti-abuse commission states on an administrative row', async () =
       [
         makeInvitation({
           pending_quota: 100_000,
+          refunded_quota: 200_000,
           blocked_quota: 300_000,
           total_paid_quota: 500_000,
         }),
@@ -188,10 +192,10 @@ it('names the anti-abuse commission states on an administrative row', async () =
 
   expect(
     screen.getByText(
-      `${i18n.t('Pending')} · ${i18n.t('Blocked by risk control')}`
+      `${i18n.t('Pending')} · ${i18n.t('Refunded')} · ${i18n.t('Blocked by risk control')}`
     )
   ).toBeVisible()
-  expect(screen.getByText(formatQuota(400_000))).toBeVisible()
+  expect(screen.getByText(formatQuota(600_000))).toBeVisible()
 })
 
 it('sends the keyword filter to the administrative list endpoint', async () => {
