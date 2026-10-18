@@ -391,7 +391,14 @@ func TestPlaygroundCanvasLimits(t *testing.T) {
 		"title": "Third", "document": canvasDocument(nil, nil),
 	}, controller.CreatePlaygroundCanvasProject)
 	assert.Equal(t, http.StatusUnprocessableEntity, third.Code, third.Body.String())
+	// The deleted board stays in the trash, where it keeps its slot, and only
+	// the purge that follows the retention window releases it.
 	require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodDelete, "/api/playground/canvases/"+first["id"].(string), nil, controller.DeletePlaygroundCanvasProject).Code)
+	third = playgroundRequest(t, 7, http.MethodPost, "/api/playground/canvases", map[string]any{
+		"title": "Third", "document": canvasDocument(nil, nil),
+	}, controller.CreatePlaygroundCanvasProject)
+	assert.Equal(t, http.StatusUnprocessableEntity, third.Code, third.Body.String())
+	require.NoError(t, model.PurgePlaygroundCanvasProject(7, first["id"].(string)))
 	require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodPost, "/api/playground/canvases", map[string]any{
 		"title": "Third", "document": canvasDocument(nil, nil),
 	}, controller.CreatePlaygroundCanvasProject).Code)
@@ -461,8 +468,12 @@ func TestPlaygroundCanvasAttachmentPins(t *testing.T) {
 	inUse := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+sessionID+"/attachments/"+attachmentID, nil, controller.DeletePlaygroundAttachment)
 	assert.Equal(t, http.StatusConflict, inUse.Code, inUse.Body.String())
 
-	// Deleting the canvas releases the pin, after which the cleanup collects it.
+	// The deleted canvas stays in the trash with its pin intact, so the bytes
+	// stay protected until the purge releases the pin and the cleanup collects it.
 	require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodDelete, "/api/playground/canvases/"+canvasID, nil, controller.DeletePlaygroundCanvasProject).Code)
+	require.NoError(t, db.Model(&model.PlaygroundCanvasAsset{}).Where("canvas_id = ?", canvasID).Count(&pins).Error)
+	assert.EqualValues(t, 1, pins)
+	require.NoError(t, model.PurgePlaygroundCanvasProject(7, canvasID))
 	require.NoError(t, db.Model(&model.PlaygroundCanvasAsset{}).Where("canvas_id = ?", canvasID).Count(&pins).Error)
 	assert.Zero(t, pins)
 	require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("id = ?", attachmentID).Update("updated_at", now-100000).Error)
@@ -567,6 +578,9 @@ func TestPlaygroundCanvasAttachmentUpload(t *testing.T) {
 			assert.Equal(t, http.StatusBadRequest, cross.Code, cross.Body.String())
 
 			require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodDelete, "/api/playground/canvases/"+boardID, nil, controller.DeletePlaygroundCanvasProject).Code)
+			// The trashed board keeps pinning the bytes; purging it returns the
+			// attachment to the orphan countdown.
+			require.NoError(t, model.PurgePlaygroundCanvasProject(7, boardID))
 			require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("id = ?", attachmentID).Update("updated_at", now-100000).Error)
 			deleted, err = model.DeleteOrphanedPlaygroundAttachments(now-3600, 100)
 			require.NoError(t, err)
@@ -624,20 +638,34 @@ func TestPlaygroundCanvasSessionCascade(t *testing.T) {
 	}, controller.CreatePlaygroundCanvasProject).Body.Bytes())
 	canvasID := created["id"].(string)
 
+	// The deleted conversation moves to the trash: it keeps its attachments,
+	// the pins that protect their bytes, and a reachable canvas node, until the
+	// purge cascades.
 	require.NoError(t, model.DeletePlaygroundSession(7, sessionID))
 	var attachments, pins int64
-	require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("session_id = ?", sessionID).Count(&attachments).Error)
-	assert.Zero(t, attachments)
-	require.NoError(t, db.Model(&model.PlaygroundCanvasAsset{}).Where("canvas_id = ?", canvasID).Count(&pins).Error)
-	assert.Zero(t, pins)
-
-	detail := playgroundRequest(t, 7, http.MethodGet, "/api/playground/canvases/"+canvasID, nil, controller.GetPlaygroundCanvasProject)
 	var envelope struct {
 		Success bool
 		Data    struct {
 			UnavailableNodeIDs []string `json:"unavailable_node_ids"`
 		}
 	}
+	require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("session_id = ?", sessionID).Count(&attachments).Error)
+	assert.EqualValues(t, 1, attachments)
+	require.NoError(t, db.Model(&model.PlaygroundCanvasAsset{}).Where("canvas_id = ?", canvasID).Count(&pins).Error)
+	assert.EqualValues(t, 1, pins)
+	detail := playgroundRequest(t, 7, http.MethodGet, "/api/playground/canvases/"+canvasID, nil, controller.GetPlaygroundCanvasProject)
+	require.NoError(t, common.Unmarshal(detail.Body.Bytes(), &envelope))
+	require.True(t, envelope.Success, detail.Body.String())
+	assert.Empty(t, envelope.Data.UnavailableNodeIDs)
+
+	// The purge releases the attachments and pins, and the canvas reports the
+	// now-missing source instead of silently losing the node.
+	require.NoError(t, model.PurgePlaygroundSession(7, sessionID))
+	require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("session_id = ?", sessionID).Count(&attachments).Error)
+	assert.Zero(t, attachments)
+	require.NoError(t, db.Model(&model.PlaygroundCanvasAsset{}).Where("canvas_id = ?", canvasID).Count(&pins).Error)
+	assert.Zero(t, pins)
+	detail = playgroundRequest(t, 7, http.MethodGet, "/api/playground/canvases/"+canvasID, nil, controller.GetPlaygroundCanvasProject)
 	require.NoError(t, common.Unmarshal(detail.Body.Bytes(), &envelope))
 	require.True(t, envelope.Success, detail.Body.String())
 	assert.Equal(t, []string{"a1"}, envelope.Data.UnavailableNodeIDs)
