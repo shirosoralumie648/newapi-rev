@@ -75,6 +75,7 @@ export const API_ENDPOINTS = {
   USER_GROUPS: '/api/user/self/groups',
   PLAYGROUND_SESSIONS: '/api/playground/sessions',
   PLAYGROUND_CANVASES: '/api/playground/canvases',
+  PLAYGROUND_UPLOADS: '/api/playground/uploads',
   PLAYGROUND_PRESETS: '/api/playground/presets',
   PLAYGROUND_SNIPPETS: '/api/playground/snippets',
   PLAYGROUND_USAGE: '/api/playground/usage',
@@ -214,11 +215,52 @@ export const PLAYGROUND_INPUT_HISTORY_MAX_ENTRIES = 50
 export const PLAYGROUND_INPUT_HISTORY_ENTRY_MAX_CHARS = 8_000
 export const PLAYGROUND_INPUT_DRAFT_DEBOUNCE_MS = 400
 
-// Conversation attachment limits; the server enforces the same budgets.
+// Conversation attachment limits; the server enforces the same budgets. The
+// chat composer accepts images only. The canvas additionally accepts the
+// extended kinds below, which upload through the reservation/presign flow
+// instead of a base64 JSON envelope.
 export const PLAYGROUND_ATTACHMENT_ACCEPT =
   'image/png,image/jpeg,image/webp,image/gif'
 export const PLAYGROUND_ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024
 export const PLAYGROUND_ATTACHMENT_MAX_COUNT = 8
+export const PLAYGROUND_VIDEO_MAX_BYTES = 64 * 1024 * 1024
+export const PLAYGROUND_AUDIO_MAX_BYTES = 16 * 1024 * 1024
+export const PLAYGROUND_DOCUMENT_MAX_BYTES = 16 * 1024 * 1024
+export const PLAYGROUND_CANVAS_ATTACHMENT_ACCEPT = [
+  PLAYGROUND_ATTACHMENT_ACCEPT,
+  'video/mp4',
+  'video/webm',
+  'video/quicktime',
+  'audio/mpeg',
+  'audio/wav',
+  'audio/ogg',
+  'audio/mp4',
+  'application/pdf',
+].join(',')
+
+/**
+ * Per-file ceiling of one declared media type. The server resolves the same
+ * rule from the owner's quota policy; the client keeps the defaults so an
+ * obviously oversized drop is refused before any reservation is created.
+ */
+export function playgroundAttachmentMaxBytes(mediaType: string): number {
+  if (mediaType.startsWith('video/')) return PLAYGROUND_VIDEO_MAX_BYTES
+  if (mediaType.startsWith('audio/')) return PLAYGROUND_AUDIO_MAX_BYTES
+  if (mediaType === 'application/pdf') return PLAYGROUND_DOCUMENT_MAX_BYTES
+  return PLAYGROUND_ATTACHMENT_MAX_BYTES
+}
+
+/** The renderer of an attachment's bytes; a missing type is an older image. */
+export type PlaygroundAttachmentKind = 'image' | 'video' | 'audio' | 'file'
+
+export function playgroundAttachmentKind(
+  mediaType: string | undefined
+): PlaygroundAttachmentKind {
+  if (!mediaType || mediaType.startsWith('image/')) return 'image'
+  if (mediaType.startsWith('video/')) return 'video'
+  if (mediaType.startsWith('audio/')) return 'audio'
+  return 'file'
+}
 
 // Generation entry defaults. The server validates every model and parameter
 // again through the ordinary Relay/task pipeline.

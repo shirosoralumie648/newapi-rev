@@ -28,6 +28,9 @@ const (
 	SystemTaskTypePlaygroundAttachmentMigrate = "playground_attachment_migrate"
 	// SystemTaskTypePlaygroundTaskCleanup deletes expired terminal Playground task rows.
 	SystemTaskTypePlaygroundTaskCleanup = "playground_task_cleanup"
+	// SystemTaskTypePlaygroundUploadCleanup releases presigned upload
+	// reservations whose upload window elapsed without a completion.
+	SystemTaskTypePlaygroundUploadCleanup = "playground_upload_cleanup"
 	// SystemTaskTypePlaygroundTaskArtifactStore pulls the provider results of
 	// finished Playground tasks into the object store, enforcing the account
 	// result budget and marking unpinnable results as expired.

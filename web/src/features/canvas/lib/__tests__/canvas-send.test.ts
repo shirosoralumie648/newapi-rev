@@ -64,7 +64,7 @@ test('a user message becomes a prompt node that keeps session and message refs',
     messageKey: 'm1',
     role: 'user',
     text: 'Hello canvas',
-    attachments: [{ id: 'pgf_1', filename: 'cat.png' }],
+    attachments: [{ id: 'pgf_1', filename: 'cat.png', mediaType: 'image/png' }],
   })
 
   expect(seeds).toEqual([
@@ -76,6 +76,7 @@ test('a user message becomes a prompt node that keeps session and message refs',
     {
       kind: 'attachment',
       label: 'cat.png',
+      mediaType: 'image/png',
       ref: { sessionId: 'pgs_1', attachmentId: 'pgf_1' },
     },
   ])
@@ -121,12 +122,14 @@ test('a saved attachment becomes a node that references the attachment by id', (
     buildAttachmentCanvasSeeds({
       sessionId: 'pgs_1',
       attachmentId: 'pgf_1',
-      filename: 'cat.png',
+      filename: 'notes.pdf',
+      mediaType: 'application/pdf',
     })
   ).toEqual([
     {
       kind: 'attachment',
-      label: 'cat.png',
+      label: 'notes.pdf',
+      mediaType: 'application/pdf',
       ref: { sessionId: 'pgs_1', attachmentId: 'pgf_1' },
     },
   ])

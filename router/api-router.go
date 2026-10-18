@@ -134,6 +134,15 @@ func SetApiRouter(router *gin.Engine) {
 			// A canvas owns its own attachment partition, so a file dropped on
 			// the board is uploaded without inventing a conversation for it.
 			playgroundRoute.POST("/canvases/:canvasId/attachments", controller.CreatePlaygroundCanvasAttachment)
+			// Large files and the extended kinds (video, audio, PDF) upload in
+			// two steps: a reservation returns a presigned PUT when the object
+			// store can sign one (otherwise the content route relays the bytes),
+			// and completing it verifies the stored object and stores the
+			// attachment. Both partitions share these routes.
+			playgroundRoute.POST("/uploads", controller.CreatePlaygroundUpload)
+			playgroundRoute.PUT("/uploads/:uploadId/content", controller.PutPlaygroundUploadContent)
+			playgroundRoute.POST("/uploads/:uploadId/complete", controller.CompletePlaygroundUpload)
+			playgroundRoute.DELETE("/uploads/:uploadId", controller.DeletePlaygroundUpload)
 		}
 
 		userRoute := apiRouter.Group("/user")
