@@ -16,6 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { TFunction } from 'i18next'
+
+import { formatDuration } from '@/features/subscriptions/lib/format'
+
+import type { Redemption } from '../types'
+
 /**
  * Utility functions for redemption codes
  */
@@ -42,4 +48,33 @@ export function isRedemptionExpired(
   status: number
 ): boolean {
   return status === 1 && isTimestampExpired(expired_time)
+}
+
+/**
+ * Render the duration a subscription code grants: the plan duration when the
+ * code carries no override, otherwise the override.
+ */
+export function formatRedemptionDuration(
+  redemption: Pick<
+    Redemption,
+    'duration_unit' | 'duration_value' | 'duration_seconds'
+  >,
+  t: TFunction
+): string {
+  if (!redemption.duration_unit) {
+    return t('Plan duration')
+  }
+  return formatDuration(
+    {
+      duration_unit: redemption.duration_unit as
+        | 'year'
+        | 'month'
+        | 'day'
+        | 'hour'
+        | 'custom',
+      duration_value: redemption.duration_value,
+      custom_seconds: redemption.duration_seconds,
+    },
+    t
+  )
 }

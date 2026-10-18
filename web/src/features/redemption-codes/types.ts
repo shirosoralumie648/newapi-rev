@@ -29,6 +29,12 @@ export const redemptionSchema = z.object({
   key: z.string(),
   status: z.number(), // 1: enabled, 2: disabled, 3: used
   quota: z.number(),
+  // "quota" (legacy default) or "subscription"; empty legacy values read as quota.
+  type: z.string().default('quota'),
+  plan_id: z.number().default(0),
+  duration_unit: z.string().default(''),
+  duration_value: z.number().default(0),
+  duration_seconds: z.number().default(0),
   created_time: z.number(),
   redeemed_time: z.number(),
   expired_time: z.number(), // 0 for never expires
@@ -36,6 +42,26 @@ export const redemptionSchema = z.object({
 })
 
 export type Redemption = z.infer<typeof redemptionSchema>
+
+// ============================================================================
+// Redemption Types
+// ============================================================================
+
+export const REDEMPTION_TYPE_QUOTA = 'quota'
+export const REDEMPTION_TYPE_SUBSCRIPTION = 'subscription'
+
+export type RedemptionType =
+  | typeof REDEMPTION_TYPE_QUOTA
+  | typeof REDEMPTION_TYPE_SUBSCRIPTION
+
+/** Legacy rows and unknown values are quota codes. */
+export function redemptionTypeOf(redemption: {
+  type?: string
+}): RedemptionType {
+  return redemption.type === REDEMPTION_TYPE_SUBSCRIPTION
+    ? REDEMPTION_TYPE_SUBSCRIPTION
+    : REDEMPTION_TYPE_QUOTA
+}
 
 // ============================================================================
 // API Request/Response Types
@@ -66,6 +92,7 @@ export interface GetRedemptionsResponse {
 export interface SearchRedemptionsParams {
   keyword?: string
   status?: string
+  type?: string
   p?: number
   page_size?: number
 }
@@ -77,6 +104,11 @@ export interface RedemptionFormData {
   expired_time: number
   count?: number // Only for create
   status?: number // Only for status update
+  type?: RedemptionType
+  plan_id?: number
+  duration_unit?: string
+  duration_value?: number
+  duration_seconds?: number
 }
 
 // ============================================================================

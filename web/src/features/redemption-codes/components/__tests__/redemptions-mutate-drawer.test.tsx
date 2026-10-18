@@ -53,6 +53,7 @@ type ApiMethod = (url: string, data?: unknown) => Promise<{ data: unknown }>
 type MockableApi = {
   get: ApiMethod
   put: ApiMethod
+  post: ApiMethod
 }
 type RenderedDrawer = {
   result: RenderResult
@@ -65,6 +66,7 @@ type CurrencyFixture = {
 const apiClient = api as unknown as MockableApi
 const originalGet = apiClient.get
 const originalPut = apiClient.put
+const originalPost = apiClient.post
 const originalConsoleLog = Reflect.get(console, 'log')
 let renderedDrawer: RenderedDrawer | null = null
 
@@ -76,6 +78,11 @@ function redemption(id: number, quota = 500001): Redemption {
     key: `key-${id}`,
     status: 1,
     quota,
+    type: 'quota',
+    plan_id: 0,
+    duration_unit: '',
+    duration_value: 0,
+    duration_seconds: 0,
     created_time: 1,
     redeemed_time: 0,
     expired_time: 0,
@@ -108,6 +115,17 @@ function drawerTree(currentRow: Redemption) {
   )
 }
 
+function createDrawerTree() {
+  return (
+    <I18nextProvider i18n={i18n}>
+      <RedemptionsProvider>
+        <RedemptionsMutateDrawer open onOpenChange={() => undefined} />
+      </RedemptionsProvider>
+      <Toaster duration={60_000} />
+    </I18nextProvider>
+  )
+}
+
 async function renderDrawer(
   currentRow: Redemption,
   currency: CurrencyFixture = {
@@ -134,6 +152,21 @@ async function rerenderDrawer(currentRow: Redemption): Promise<void> {
     throw new Error('Expected a rendered redemption drawer')
   }
   renderedDrawer.result.rerender(drawerTree(currentRow))
+}
+
+async function renderCreateDrawer(): Promise<void> {
+  useSystemConfigStore.getState().setConfig({
+    currency: {
+      displayInCurrency: true,
+      quotaDisplayType: 'USD',
+      quotaPerUnit: 500000,
+      usdExchangeRate: 1,
+      customCurrencySymbol: '¤',
+      customCurrencyExchangeRate: 1,
+    },
+  })
+
+  renderedDrawer = { result: render(createDrawerTree()) }
 }
 
 function getSaveButton(): HTMLButtonElement {
@@ -180,6 +213,7 @@ async function waitForLoadedForm(): Promise<void> {
 afterEach(() => {
   apiClient.get = originalGet
   apiClient.put = originalPut
+  apiClient.post = originalPost
   Reflect.set(console, 'log', originalConsoleLog)
   toast.dismiss()
   localStorage.clear()
@@ -314,5 +348,32 @@ describe('redemption drawer', () => {
 
     expect(updates[0]?.id).toBe(2)
     expect(updates[0]?.quota).toBe(1000001)
+  })
+
+  test('swaps the quota input for the subscription plan fields', async () => {
+    apiClient.get = async (url) => {
+      if (url === '/api/subscription/admin/plans') {
+        return {
+          data: {
+            success: true,
+            data: [{ plan: { id: 7, title: 'Pro plan' } }],
+          },
+        }
+      }
+      throw new Error(`Unexpected GET ${url}`)
+    }
+
+    await renderCreateDrawer()
+    await waitForLoadedForm()
+    expect(getControlByLabel('Quota (USD)')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Subscription' }))
+
+    await waitFor(() =>
+      expect(screen.queryByLabelText('Quota (USD)')).not.toBeInTheDocument()
+    )
+    expect(screen.getByText('Subscription plan')).toBeInTheDocument()
+    expect(screen.getByText('Duration override')).toBeInTheDocument()
+    expect(screen.queryByText('Duration Value')).not.toBeInTheDocument()
   })
 })
