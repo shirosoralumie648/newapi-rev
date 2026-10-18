@@ -24,13 +24,15 @@ import (
 	"gorm.io/gorm"
 )
 
-// referralCommissionSettlementColumns are the columns the settlement step
-// (RF-04) added to the commission event table, with a portable definition:
+// referralCommissionExtensionColumns are the columns appended to the
+// commission event table after its introduction, with a portable definition:
 // PostgreSQL and MySQL refuse to add a NOT NULL column to a non-empty table
 // without a default. The payout form has no default, so it stays nullable and
 // NULL means "not settled yet" — the shape AutoMigrate itself would create and
 // the only one it can append without rewriting the column on every startup.
-var referralCommissionSettlementColumns = []struct {
+// Settlement added the first four (RF-04), the refund/chargeback reversal the
+// last one (RF-05).
+var referralCommissionExtensionColumns = []struct {
 	name       string
 	definition string
 }{
@@ -38,17 +40,18 @@ var referralCommissionSettlementColumns = []struct {
 	{"settled_at", "bigint NOT NULL DEFAULT 0"},
 	{"grant_id", "bigint NOT NULL DEFAULT 0"},
 	{"settlement_method", "varchar(16)"},
+	{"reversed_at", "bigint NOT NULL DEFAULT 0"},
 }
 
-// migrateReferralCommissionSettlementColumns adds the settlement columns to an
+// migrateReferralCommissionExtensionColumns adds the extension columns to an
 // installation whose commission table predates them, so their existing events
-// keep their values and start as pending with no lock or settlement. The
-// migration is a no-op on a fresh database and once the columns exist; the
+// keep their values and start as pending with no lock, settlement or reversal.
+// The migration is a no-op on a fresh database and once the columns exist; the
 // resolved table name comes from the statement parser so it honors the
 // configured naming strategy (including a table prefix).
-func migrateReferralCommissionSettlementColumns(db *gorm.DB) error {
+func migrateReferralCommissionExtensionColumns(db *gorm.DB) error {
 	if db == nil {
-		return fmt.Errorf("migrate referral commission settlement columns: database is nil")
+		return fmt.Errorf("migrate referral commission extension columns: database is nil")
 	}
 	target := &ReferralCommission{}
 	if !db.Migrator().HasTable(target) {
@@ -61,7 +64,7 @@ func migrateReferralCommissionSettlementColumns(db *gorm.DB) error {
 	if statement.Table == "" {
 		return fmt.Errorf("resolve referral commission table: empty table name")
 	}
-	for _, column := range referralCommissionSettlementColumns {
+	for _, column := range referralCommissionExtensionColumns {
 		if db.Migrator().HasColumn(target, column.name) {
 			continue
 		}

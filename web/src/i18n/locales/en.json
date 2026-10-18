@@ -5638,6 +5638,8 @@
     "Reference Video": "Reference Video",
     "Referral": "Referral",
     "Referral commission is disabled; recorded amounts remain listed.": "Referral commission is disabled; recorded amounts remain listed.",
+    "Referral commission reclaimed because the order payment was reversed: {{quota}}, debt added: {{debt}}": "Referral commission reclaimed because the order payment was reversed: {{quota}}, debt added: {{debt}}",
+    "Referral commission revoked because the order payment was reversed: {{quota}}": "Referral commission revoked because the order payment was reversed: {{quota}}",
     "Referral flag updated": "Referral flag updated",
     "Referral identity cleared": "Referral identity cleared",
     "Referral identity updated": "Referral identity updated",

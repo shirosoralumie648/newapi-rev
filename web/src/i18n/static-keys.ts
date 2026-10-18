@@ -80,6 +80,7 @@ export const STATIC_I18N_KEYS = [
   // REFERRAL_COMMISSION_STATUS_LABEL_KEYS in the wallet feature.
   'Link',
   'Settled',
+  'Refunded',
   'In Review',
   'Blocked by risk control',
   'Rejected',

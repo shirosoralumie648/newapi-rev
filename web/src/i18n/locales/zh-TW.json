@@ -5638,6 +5638,8 @@
     "Reference Video": "參照生影片",
     "Referral": "邀請返傭",
     "Referral commission is disabled; recorded amounts remain listed.": "返佣已關閉；已記錄的金額仍會列出。",
+    "Referral commission reclaimed because the order payment was reversed: {{quota}}, debt added: {{debt}}": "訂單付款已沖正，返佣已收回：{{quota}}，新增欠款：{{debt}}",
+    "Referral commission revoked because the order payment was reversed: {{quota}}": "訂單付款已沖正，返佣已撤銷：{{quota}}",
     "Referral flag updated": "推薦標記已更新",
     "Referral identity cleared": "推薦身分已清除",
     "Referral identity updated": "推薦身分已更新",

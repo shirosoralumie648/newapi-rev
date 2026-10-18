@@ -5638,6 +5638,8 @@
     "Reference Video": "参照動画",
     "Referral": "紹介報酬",
     "Referral commission is disabled; recorded amounts remain listed.": "紹介コミッションは無効です。記録済みの金額は引き続き表示されます。",
+    "Referral commission reclaimed because the order payment was reversed: {{quota}}, debt added: {{debt}}": "注文の支払いが取り消されたため、紹介コミッションを回収しました：{{quota}}、追加された債務：{{debt}}",
+    "Referral commission revoked because the order payment was reversed: {{quota}}": "注文の支払いが取り消されたため、紹介コミッションが無効になりました：{{quota}}",
     "Referral flag updated": "紹介フラグを更新しました",
     "Referral identity cleared": "紹介の本人確認情報を消去しました",
     "Referral identity updated": "紹介の本人確認情報を更新しました",

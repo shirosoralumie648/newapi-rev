@@ -295,6 +295,8 @@ export function ReferralAdminDialog(props: ReferralAdminDialogProps) {
           {formatQuota(summary.locked_quota)} ·{' '}
           {t(REFERRAL_COMMISSION_STATUS_LABEL_KEYS.settled)}:{' '}
           {formatQuota(summary.settled_quota)} ·{' '}
+          {t(REFERRAL_COMMISSION_STATUS_LABEL_KEYS.refunded)}:{' '}
+          {formatQuota(summary.refunded_quota)} ·{' '}
           {t(REFERRAL_COMMISSION_STATUS_LABEL_KEYS.review)}:{' '}
           {formatQuota(summary.review_quota)} ·{' '}
           {t(REFERRAL_COMMISSION_STATUS_LABEL_KEYS.blocked)}:{' '}

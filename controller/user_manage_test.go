@@ -988,6 +988,12 @@ func TestReferralInvitationStatisticsEndpoints(t *testing.T) {
 		Status: model.ReferralCommissionStatusBlocked, Reason: model.ReferralCommissionReasonDailyCap,
 		CreatedAt: now, UpdatedAt: now,
 	}).Error)
+	require.NoError(t, db.Create(&model.ReferralCommission{
+		InviterId: inviter.Id, InviteeId: invitee.Id, Source: model.ReferralCommissionSourceTopUp,
+		RefType: model.WalletLedgerRefTopUp, RefId: "stats-order-3",
+		BaseQuota: 3000000, RatePercent: "10", CommissionQuota: 300000,
+		Status: model.ReferralCommissionStatusRefunded, CreatedAt: now, UpdatedAt: now,
+	}).Error)
 
 	invoke := func(userID int, method, path string, handler gin.HandlerFunc) *httptest.ResponseRecorder {
 		recorder := httptest.NewRecorder()
@@ -1008,6 +1014,7 @@ func TestReferralInvitationStatisticsEndpoints(t *testing.T) {
 	assert.Contains(t, selfBody, `"identifier":"s***@example.com"`)
 	assert.Contains(t, selfBody, fmt.Sprintf(`"invitee_id":%d`, invitee.Id))
 	assert.Contains(t, selfBody, `"pending_quota":500000`)
+	assert.Contains(t, selfBody, `"refunded_quota":300000`, "a revoked commission stays visible in the inviter's own history")
 	assert.Contains(t, selfBody, `"commission_enabled":`)
 	assert.NotContains(t, selfBody, "stats-invitee@example.com")
 	assert.NotContains(t, selfBody, fmt.Sprintf(`"invitee_id":%d`, otherInvitee.Id))
@@ -1021,12 +1028,15 @@ func TestReferralInvitationStatisticsEndpoints(t *testing.T) {
 	assert.Contains(t, adminBody, `"inviter_username":"stats-inviter"`)
 	assert.Contains(t, adminBody, `"total_invitees":2`)
 	assert.Contains(t, adminBody, `"invitees_with_commission":1`)
-	assert.Contains(t, adminBody, `"total_paid_quota":7000000`)
+	assert.Contains(t, adminBody, `"total_paid_quota":10000000`)
 	assert.Contains(t, adminBody, `"pending_quota":500000`)
 	assert.Contains(t, adminBody, `"blocked_quota":200000`)
+	assert.Contains(t, adminBody, `"refunded_quota":300000`)
 
 	recorder = invoke(9999, http.MethodGet, "/api/user/referrals?p=1&page_size=20&status=blocked", GetReferralInvitations)
 	assert.Contains(t, recorder.Body.String(), `"total":1`)
+	recorder = invoke(9999, http.MethodGet, "/api/user/referrals?p=1&page_size=20&status=refunded", GetReferralInvitations)
+	assert.Contains(t, recorder.Body.String(), `"total":1`, "the reversed state is a filterable outcome")
 	recorder = invoke(9999, http.MethodGet, "/api/user/referrals?p=1&page_size=20&status=unknown", GetReferralInvitations)
 	assert.Contains(t, recorder.Body.String(), `"success":false`)
 	recorder = invoke(9999, http.MethodGet, "/api/user/referrals?p=1&page_size=20&source=unknown", GetReferralInvitations)
@@ -1046,7 +1056,7 @@ func TestReferralInvitationStatisticsEndpoints(t *testing.T) {
 			"invitee_id", "username", "email", "display_name", "inviter_id", "inviter_username",
 			"source", "bound_at", "commission_ends_at",
 			"pending_quota", "locked_quota", "settled_quota",
-			"review_quota", "blocked_quota", "rejected_quota",
+			"review_quota", "blocked_quota", "rejected_quota", "refunded_quota",
 			"total_paid_quota", "commission_count",
 		},
 		header)
@@ -1055,6 +1065,7 @@ func TestReferralInvitationStatisticsEndpoints(t *testing.T) {
 	assert.Equal(t, model.ReferralSourceLink, row[6])
 	assert.Equal(t, "500000", row[9])
 	assert.Equal(t, "200000", row[13])
+	assert.Equal(t, "300000", row[15], "the reversed commission keeps its recorded amount")
 
 	var stored model.User
 	require.NoError(t, db.First(&stored, inviter.Id).Error)
