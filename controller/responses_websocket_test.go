@@ -91,7 +91,7 @@ func setupResponsesWSRequestTest(t *testing.T) (*model.User, *model.Token) {
 	// Wallet holds and ledger rows are written in the same transaction as the
 	// balance change, so both tables have to exist for the billing accounting
 	// assertions.
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Token{}, &model.WalletHold{}, &model.WalletLedgerEntry{}, &model.WalletDebt{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Token{}, &model.WalletHold{}, &model.WalletHoldGrant{}, &model.WalletLedgerEntry{}, &model.WalletDebt{}, &model.CreditGrant{}))
 	// The shared in-memory limiter outlives each database fixture. Give every
 	// user a separate quota bucket, including when the tests run with -count.
 	user := &model.User{Id: 5062000 + int(responsesWSTestUserSequence.Add(1)), Username: "responses-ws-user", Status: common.UserStatusEnabled, Group: "default", Quota: 1000, AuthVersion: 1}

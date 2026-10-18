@@ -7,6 +7,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"gorm.io/gorm"
 )
@@ -351,7 +352,10 @@ func Redeem(key string, userId int) (*RedeemResult, error) {
 			if redemption.Quota <= 0 {
 				return errors.New("invalid redemption code")
 			}
-			if err := creditTopUpQuota(tx, userId, redemption.Quota, WalletLedgerKindRedeem, WalletLedgerRefRedeem, strconv.Itoa(redemption.Id), nil); err != nil {
+			// 兑换码额度进入 redeem 桶，按配置的兑换码额度有效期生效。
+			source := operation_setting.CreditGrantSourceRedeem
+			expiresAt := operation_setting.GetCreditGrantSetting().ExpiryTimestampFor(source, common.GetTimestamp())
+			if _, err := IssueCreditGrantTx(tx, userId, source, redemption.Quota, expiresAt, WalletLedgerKindRedeem, WalletLedgerRefRedeem, strconv.Itoa(redemption.Id), ""); err != nil {
 				return err
 			}
 			result = &RedeemResult{Type: RedemptionTypeQuota, Quota: redemption.Quota}

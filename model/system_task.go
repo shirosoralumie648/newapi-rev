@@ -41,6 +41,10 @@ const (
 	// SystemTaskTypeWalletHoldRecovery refunds wallet holds whose reservation
 	// lifetime elapsed without a settlement or refund (crash recovery).
 	SystemTaskTypeWalletHoldRecovery = "wallet_hold_recovery"
+	// SystemTaskTypeCreditGrantExpiry voids the unspent remainder of credit
+	// grants whose validity elapsed, reducing the wallet balance with a ledger
+	// entry in the same transaction.
+	SystemTaskTypeCreditGrantExpiry = "credit_grant_expiry"
 )
 
 var ErrSystemTaskLockLost = errors.New("system task lock lost")

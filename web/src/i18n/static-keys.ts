@@ -1024,6 +1024,12 @@ export const STATIC_I18N_KEYS = [
   'Hourly Consumption',
   'Chargeback',
   'Storage Fee',
+  'Credit Grant Expired',
+  // Credit grant source labels render through t(label) from
+  // CREDIT_GRANT_SOURCE_LABELS, so the literal scan cannot see them.
+  'Gift',
+  'Invite',
+  'Promo',
   // Canvas workflow run messages: the run reports these keys from constants,
   // so the literal scan cannot see them.
   'The canvas is full; the run could not add a result node.',

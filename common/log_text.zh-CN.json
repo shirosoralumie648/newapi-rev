@@ -856,5 +856,9 @@
   "zhipu_image_get_b64_failed: %s": "智谱图片转 b64 失败: %s",
   "zhipu_image_missing_url": "智谱图片接口没有返回 URL",
   "¥%.6f quota": "¥%.6f 额度",
-  "＄%.6f quota": "＄%.6f 额度"
+  "＄%.6f quota": "＄%.6f 额度",
+  "credit grant expiry voided %d grants (%d failed, %d quota)": "赠送额度过期处理：作废 %d 笔（失败 %d 笔，作废额度 %d）",
+  "credit grant %d (user %d) claimed %d more than the wallet held, voided %d": "赠送额度 %d（用户 %d）的可认领额度超出钱包余额 %d，仅作废 %d",
+  "failed to void expired credit grant %d (user %d): %s": "作废过期赠送额度 %d（用户 %d）失败：%s",
+  "failed to attribute a wallet charge of user %d to credit grants: %s": "用户 %d 的钱包扣费无法归属到赠送额度：%s"
 }

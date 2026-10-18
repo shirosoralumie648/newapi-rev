@@ -142,10 +142,31 @@ func persistTokenQuotaDelta(id int, delta int) error {
 }
 
 func reserveUserQuotaDB(id int, quota int, overdraftLimit int64) (bool, error) {
-	result := DB.Model(&User{}).
-		Where("id = ? AND quota + ? >= ?", id, overdraftLimit, quota).
-		Update("quota", gorm.Expr("quota - ?", quota))
-	return result.RowsAffected == 1, result.Error
+	reserved := false
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&User{}).
+			Where("id = ? AND quota + ? >= ?", id, overdraftLimit, quota).
+			Update("quota", gorm.Expr("quota - ?", quota))
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return nil
+		}
+		reserved = true
+		// The charge is attributed to the account's credit grants in spending
+		// order inside the same transaction that moved the balance.
+		grants, err := lockCreditGrantsTx(tx, id)
+		if err != nil {
+			return err
+		}
+		_, _, err = claimCreditGrantsTx(tx, id, int64(quota), grants, common.GetTimestamp())
+		return err
+	})
+	if err != nil {
+		return false, err
+	}
+	return reserved, nil
 }
 
 func reserveTokenQuotaDB(id int, quota int) (bool, error) {
@@ -202,6 +223,9 @@ func TryReserveUserQuota(id int, quota int, requestId string) (bool, error) {
 			}
 			return false, err
 		}
+		// Attribute the charge to the account's credit grants, so a bucket that
+		// reached its expiry can never claim money the wallet no longer holds.
+		ClaimCreditGrantsForCharge(id, quota)
 		return true, nil
 	}
 	if !common.RedisEnabled {
@@ -223,7 +247,11 @@ func TryReserveUserQuota(id int, quota int, requestId string) (bool, error) {
 		return applied > 0, err
 	}
 	if result == cacheQuotaInsufficient {
-		return false, nil
+		// The cache authorizes a charge against the paid balance only, so it
+		// cannot admit a charge that the account's credit grants cover. Re-check
+		// against the database, where the buckets live.
+		applied, err := reserveWalletQuotaWithHoldTx(id, int64(quota), requestId, true)
+		return applied > 0, err
 	}
 	// The cache already authorized the reservation, so the database write only
 	// has to persist it together with the hold.

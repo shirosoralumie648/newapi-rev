@@ -344,3 +344,70 @@ export interface WalletDebtorPage {
 export interface CompleteOrderRequest {
   trade_no: string
 }
+
+/**
+ * One credit grant bucket: the amount credited by one event, what is still
+ * unspent and when the remainder stops being spendable (0 never expires).
+ */
+export interface CreditGrantBucket {
+  grant_id: number
+  source: string
+  remaining: number
+  expires_at: number
+  created_at: number
+}
+
+/**
+ * Wallet composition of one account: the paid balance that never expires, the
+ * grant buckets still spendable and the expired remainder the sweep has not
+ * voided yet.
+ */
+export interface CreditGrantWallet {
+  user_id: number
+  total_quota: number
+  paid_quota: number
+  grant_quota: number
+  expired_quota: number
+  grants: CreditGrantBucket[]
+}
+
+/**
+ * One grant source in the administrator overview.
+ */
+export interface CreditGrantSourceStats {
+  source: string
+  granted: number
+  remaining: number
+  spent: number
+  grants: number
+  accounts: number
+}
+
+/**
+ * Administrator overview of the wallet: money that entered through top-ups,
+ * granted credit broken down by source, consumption, refunds and the credit
+ * that expired unused.
+ */
+export interface CreditGrantStats {
+  total_topup: number
+  total_granted: number
+  total_remaining: number
+  total_spent: number
+  total_consumed: number
+  total_refunded: number
+  total_expired: number
+  sources: CreditGrantSourceStats[]
+}
+
+/**
+ * Administrator credit grant issuance. `expires_in_days` is optional: omitted
+ * keeps the configured validity of the source, 0 issues credit that never
+ * expires.
+ */
+export interface CreditGrantIssueRequest {
+  user_id: number
+  source: string
+  quota: number
+  expires_in_days?: number
+  note?: string
+}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
@@ -83,6 +84,18 @@ func AdjustUserQuota(userID, operatorRole int, mode string, value int) (*UserQuo
 			}
 			if !applied {
 				return errors.New("wallet ledger reference conflict")
+			}
+			// Keep the credit grant buckets in step with the balance: an
+			// increase is an admin-source credit, a decrease gives up the
+			// account's outstanding claims in spending order.
+			if delta > 0 {
+				source := operation_setting.CreditGrantSourceAdmin
+				expiresAt := operation_setting.GetCreditGrantSetting().ExpiryTimestampFor(source, common.GetTimestamp())
+				if _, err := createCreditGrantTx(tx, userID, source, delta, expiresAt, ""); err != nil {
+					return err
+				}
+			} else if _, err := reduceCreditGrantClaimsTx(tx, userID, -delta, common.GetTimestamp()); err != nil {
+				return err
 			}
 		}
 		adjustment = UserQuotaAdjustment{UserID: user.Id, Username: user.Username, Before: user.Quota, After: after}

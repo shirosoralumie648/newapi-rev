@@ -41,6 +41,9 @@ import type {
   WaffoPancakePaymentResponse,
   WalletLedgerPage,
   WalletDebtorPage,
+  CreditGrantIssueRequest,
+  CreditGrantStats,
+  CreditGrantWallet,
 } from './types'
 
 // ============================================================================
@@ -310,5 +313,49 @@ export async function getWalletDebtors(
     page_size: pageSize.toString(),
   })
   const res = await api.get(`/api/user/wallet/debts?${params.toString()}`)
+  return res.data
+}
+
+// ============================================================================
+// Credit Grant API Functions
+// ============================================================================
+
+/**
+ * Get the caller's own wallet composition (paid balance and grant buckets).
+ */
+export async function getSelfCreditGrants(): Promise<
+  ApiResponse<CreditGrantWallet>
+> {
+  const res = await api.get('/api/user/self/wallet/grants')
+  return res.data
+}
+
+/**
+ * Get one user's wallet composition (admin only).
+ */
+export async function getUserCreditGrants(
+  userId: number
+): Promise<ApiResponse<CreditGrantWallet>> {
+  const res = await api.get(`/api/user/${userId}/wallet/grants`)
+  return res.data
+}
+
+/**
+ * Get the wallet totals administrators audit by grant source (admin only).
+ */
+export async function getCreditGrantStats(): Promise<
+  ApiResponse<CreditGrantStats>
+> {
+  const res = await api.get('/api/user/wallet/grants/stats')
+  return res.data
+}
+
+/**
+ * Issue a grant-typed credit to one user (admin only).
+ */
+export async function issueCreditGrant(
+  request: CreditGrantIssueRequest
+): Promise<ApiResponse> {
+  const res = await api.post('/api/user/wallet/grants', request)
   return res.data
 }

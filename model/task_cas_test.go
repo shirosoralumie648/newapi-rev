@@ -62,7 +62,9 @@ func TestMain(m *testing.M) {
 		&UserAccessToken{},
 		&WalletLedgerEntry{},
 		&WalletHold{},
+		&WalletHoldGrant{},
 		&WalletDebt{},
+		&CreditGrant{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}

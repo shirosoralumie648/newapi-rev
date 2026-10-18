@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // Wallet hold lifecycle states. A hold stays active until the request it was
@@ -78,6 +79,100 @@ type WalletHold struct {
 
 func (WalletHold) TableName() string {
 	return "wallet_holds"
+}
+
+// WalletHoldGrant records how much of one wallet hold was attributed to one
+// credit grant. The rows are the composition of the reservation: a refund or a
+// partial release returns the money to the same buckets it came from, and the
+// rows are deleted together with their hold.
+type WalletHoldGrant struct {
+	Id        int   `json:"id" gorm:"primaryKey;autoIncrement"`
+	HoldId    int   `json:"hold_id" gorm:"not null;uniqueIndex:idx_wallet_hold_grant,priority:1"`
+	GrantId   int   `json:"grant_id" gorm:"not null;uniqueIndex:idx_wallet_hold_grant,priority:2"`
+	Amount    int64 `json:"amount" gorm:"type:bigint;not null"`
+	CreatedAt int64 `json:"created_at" gorm:"bigint;not null"`
+}
+
+func (WalletHoldGrant) TableName() string {
+	return "wallet_hold_grants"
+}
+
+// recordWalletHoldGrantClaimsTx appends the grant composition of one
+// reservation. Extending an active hold adds to the existing per-grant claims.
+func recordWalletHoldGrantClaimsTx(tx *gorm.DB, holdId int, allocations []creditGrantAllocation) error {
+	for _, allocation := range allocations {
+		if allocation.Amount <= 0 {
+			continue
+		}
+		row := &WalletHoldGrant{
+			HoldId:    holdId,
+			GrantId:   allocation.GrantId,
+			Amount:    allocation.Amount,
+			CreatedAt: common.GetTimestamp(),
+		}
+		if err := tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "hold_id"}, {Name: "grant_id"}},
+			DoUpdates: clause.Assignments(map[string]any{
+				"amount": gorm.Expr("wallet_hold_grants.amount + ?", allocation.Amount),
+			}),
+		}).Create(row).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// lockWalletHoldGrantClaimsTx loads the recorded claims of one hold in the
+// order they were claimed, which is the spending order of the reservation.
+func lockWalletHoldGrantClaimsTx(tx *gorm.DB, holdId int) ([]WalletHoldGrant, error) {
+	var rows []WalletHoldGrant
+	err := lockForUpdate(tx).Where("hold_id = ? AND amount > 0", holdId).Order("id asc").Find(&rows).Error
+	return rows, err
+}
+
+// releaseWalletHoldClaimsTx returns release quota of a hold's reservation to
+// the wallet in reverse charging order and keeps the recorded composition in
+// step: the part of the charge that was not attributed to a grant comes back
+// first, then the claims are restored from the most recently claimed grant back
+// to the earliest. The caller is responsible for the balance movement itself
+// (which always returns the whole released amount) and must hold the user row
+// lock, so the lock order stays hold -> user -> grants.
+func releaseWalletHoldClaimsTx(tx *gorm.DB, hold *WalletHold, release int64) error {
+	if hold == nil || release <= 0 {
+		return nil
+	}
+	claims, err := lockWalletHoldGrantClaimsTx(tx, hold.Id)
+	if err != nil {
+		return err
+	}
+	claimTotal := int64(0)
+	for i := range claims {
+		claimTotal += claims[i].Amount
+	}
+	// The unattributed part of the reservation is the paid balance; it was
+	// charged after the grants, so it is returned first.
+	remaining := release - min(release, max(hold.Amount-claimTotal, 0))
+	if remaining <= 0 {
+		return nil
+	}
+	for i := len(claims) - 1; i >= 0 && remaining > 0; i-- {
+		take := min(claims[i].Amount, remaining)
+		if take <= 0 {
+			continue
+		}
+		restored, err := restoreCreditGrantTx(tx, claims[i].GrantId, take)
+		if err != nil {
+			return err
+		}
+		if restored <= 0 {
+			continue
+		}
+		if err := tx.Model(&WalletHoldGrant{}).Where("id = ?", claims[i].Id).Update("amount", claims[i].Amount-restored).Error; err != nil {
+			return err
+		}
+		remaining -= restored
+	}
+	return nil
 }
 
 func (h *WalletHold) BeforeCreate(tx *gorm.DB) error {
@@ -197,14 +292,18 @@ func closeWalletHoldChildrenTx(tx *gorm.DB, parentId int, status string, now int
 
 // reserveWalletQuotaWithHoldTx deducts quota and records the matching hold in
 // one transaction. The lock order is fixed (hold first, then the user row, then
-// the debt row) so concurrent reserves, settlements, refunds and debt
-// collections of one user cannot deadlock.
+// the credit grants and the debt row) so concurrent reserves, settlements,
+// refunds and debt collections of one user cannot deadlock.
 //
 // requireBalance=true is the pre-consume reservation: it only deducts when the
 // whole amount fits above the account's credit line (-limit). requireBalance=false
 // mirrors the settlement top-up: the wallet is debited down to the credit line
 // and the remainder becomes tracked debt. The returned value is the amount that
 // actually left the wallet.
+//
+// The deduction is attributed to the account's credit grants in spending order
+// (earliest expiry first) and that composition is recorded on the hold, so a
+// refund returns the money to the same buckets.
 func reserveWalletQuotaWithHoldTx(userId int, quota int64, requestId string, requireBalance bool) (int64, error) {
 	if quota <= 0 {
 		return 0, nil
@@ -219,12 +318,24 @@ func reserveWalletQuotaWithHoldTx(userId int, quota int64, requestId string, req
 		if hold != nil && hold.Status != WalletHoldStatusActive {
 			return ErrWalletHoldClosed
 		}
+		if hold != nil && hold.UserId != userId {
+			return fmt.Errorf("wallet hold %s belongs to user %d", requestId, hold.UserId)
+		}
+		now := common.GetTimestamp()
+		grants := []CreditGrant(nil)
 		if requireBalance {
 			balance, err := lockUserQuotaTx(tx, userId)
 			if err != nil {
 				return err
 			}
-			if balance+limit < quota {
+			grants, err = lockCreditGrantsTx(tx, userId)
+			if err != nil {
+				return err
+			}
+			// Credit a grant whose validity already elapsed still sits in the
+			// balance until the sweep voids it; it is not spendable.
+			_, expired := creditGrantAvailability(grants, now)
+			if balance-expired+limit < quota {
 				return nil
 			}
 			next, err := addWalletQuotaChecked(balance, -quota, "wallet hold reserve")
@@ -240,14 +351,27 @@ func reserveWalletQuotaWithHoldTx(userId int, quota int64, requestId string, req
 			if err != nil {
 				return err
 			}
+			if applied > 0 {
+				grants, err = lockCreditGrantsTx(tx, userId)
+				if err != nil {
+					return err
+				}
+			}
 		}
 		if applied <= 0 {
 			return nil
 		}
+		allocations, _, err := claimCreditGrantsTx(tx, userId, applied, grants, now)
+		if err != nil {
+			return err
+		}
 		// The hold records exactly the money the wallet actually gave up, so a
 		// refund can never return more than was deducted.
-		_, err = upsertWalletHoldTx(tx, hold, userId, requestId, applied, common.GetTimestamp())
-		return err
+		nextHold, err := upsertWalletHoldTx(tx, hold, userId, requestId, applied, now)
+		if err != nil {
+			return err
+		}
+		return recordWalletHoldGrantClaimsTx(tx, nextHold.Id, allocations)
 	})
 	if err != nil {
 		return 0, err
@@ -262,6 +386,10 @@ func reserveWalletQuotaWithHoldTx(userId int, quota int64, requestId string, req
 // replay). A top-up beyond the account's credit line is not deducted from the
 // wallet: it is recorded as debt, so the returned value can be smaller than the
 // difference that was charged.
+//
+// A settlement top-up is attributed to the account's credit grants (earliest
+// expiry first) and a settlement refund is returned in reverse charging order,
+// so the buckets of a partially used reservation stay exactly reversible.
 //
 // A hold that was already refunded or expired (the process stopped before
 // settling and the sweep returned the reservation) is not re-opened: the full
@@ -278,6 +406,7 @@ func SettleWalletHold(userId int, requestId string, delta int64) (int64, error) 
 		if err != nil {
 			return err
 		}
+		now := common.GetTimestamp()
 		charged := int64(0)
 		if hold == nil {
 			// A request admitted before wallet holds existed settles the raw
@@ -307,7 +436,7 @@ func SettleWalletHold(userId int, requestId string, delta int64) (int64, error) 
 			if err := tx.Save(hold).Error; err != nil {
 				return err
 			}
-			if err := closeWalletHoldChildrenTx(tx, hold.Id, WalletHoldStatusSettled, common.GetTimestamp()); err != nil {
+			if err := closeWalletHoldChildrenTx(tx, hold.Id, WalletHoldStatusSettled, now); err != nil {
 				return err
 			}
 		}
@@ -320,6 +449,15 @@ func SettleWalletHold(userId int, requestId string, delta int64) (int64, error) 
 				return err
 			}
 			walletDelta = applied
+			if applied > 0 {
+				grants, err := lockCreditGrantsTx(tx, userId)
+				if err != nil {
+					return err
+				}
+				if _, _, err := claimCreditGrantsTx(tx, userId, applied, grants, now); err != nil {
+					return err
+				}
+			}
 			return nil
 		}
 		balance, err := lockUserQuotaTx(tx, userId)
@@ -334,7 +472,7 @@ func SettleWalletHold(userId int, requestId string, delta int64) (int64, error) 
 			return err
 		}
 		walletDelta = charged
-		return nil
+		return releaseWalletHoldClaimsTx(tx, hold, -charged)
 	})
 	if err != nil {
 		return 0, err
@@ -387,6 +525,9 @@ func RefundWalletHold(userId int, requestId string, fallbackAmount int) (bool, e
 			if applied {
 				refunded = hold.Amount
 			}
+		}
+		if err := releaseWalletHoldClaimsTx(tx, hold, hold.Amount); err != nil {
+			return err
 		}
 		hold.Status = WalletHoldStatusRefunded
 		if err := tx.Save(hold).Error; err != nil {
@@ -441,6 +582,11 @@ func ReverseWalletHoldReserve(userId int, requestId string, delta int) error {
 			return err
 		}
 		if err := writeLockedWalletQuotaTx(tx, userId, next); err != nil {
+			return err
+		}
+		// The returned part follows the reverse charging order, so the grant
+		// composition of the remaining reservation stays correct.
+		if err := releaseWalletHoldClaimsTx(tx, hold, asserted); err != nil {
 			return err
 		}
 		hold.Amount -= asserted
@@ -603,6 +749,9 @@ func refundExpiredWalletHoldTx(holdId int, now int64) (int64, bool, error) {
 				refunded = hold.Amount
 			}
 		}
+		if err := releaseWalletHoldClaimsTx(tx, &hold, hold.Amount); err != nil {
+			return err
+		}
 		hold.Status = WalletHoldStatusExpired
 		if err := tx.Save(&hold).Error; err != nil {
 			return err
@@ -633,6 +782,10 @@ func CleanupClosedWalletHolds(cutoff int64, limit int) (int, error) {
 	}
 	if len(ids) == 0 {
 		return 0, nil
+	}
+	// The recorded grant composition of a hold is pruned with it.
+	if err := DB.Where("hold_id IN ?", ids).Delete(&WalletHoldGrant{}).Error; err != nil {
+		return 0, err
 	}
 	res := DB.Where("id IN ?", ids).Delete(&WalletHold{})
 	return int(res.RowsAffected), res.Error

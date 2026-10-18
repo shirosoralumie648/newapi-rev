@@ -1725,6 +1725,15 @@ func chargeWalletOverflowTx(tx *gorm.DB, userId int, overflow int64) (charged in
 	if err := tx.Model(&User{}).Where("id = ?", userId).Update("quota", int64(user.Quota)-charged).Error; err != nil {
 		return 0, 0, err
 	}
+	// The part of the overflow the wallet covers is attributed to the account's
+	// credit grants in spending order.
+	grants, err := lockCreditGrantsTx(tx, userId)
+	if err != nil {
+		return 0, 0, err
+	}
+	if _, _, err := claimCreditGrantsTx(tx, userId, charged, grants, common.GetTimestamp()); err != nil {
+		return 0, 0, err
+	}
 	if err := upsertWalletConsumeLedgerTx(tx, userId, walletConsumeHourBucket(common.GetTimestamp()), -charged); err != nil {
 		return 0, 0, err
 	}
