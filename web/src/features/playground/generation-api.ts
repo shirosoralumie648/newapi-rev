@@ -180,6 +180,28 @@ export async function cancelPlaygroundTask(
 }
 
 /**
+ * Keeps or releases one stored generation result. The server enforces
+ * ownership, the workspace origin, and the finished task state; a pinned
+ * result is exempt from the result retention window.
+ */
+export async function setPlaygroundTaskArtifactPin(
+  taskId: string,
+  artifactKey: string,
+  pinned: boolean,
+  signal?: AbortSignal
+): Promise<boolean> {
+  const response = await api.put(
+    `${API_ENDPOINTS.PLAYGROUND_TASKS}/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactKey)}/pin`,
+    { pinned },
+    { signal, skipErrorHandler: true }
+  )
+  const body = requireServerSuccess(response.data) as {
+    data?: { pinned?: unknown }
+  }
+  return body.data?.pinned === true
+}
+
+/**
  * Generates speech through the Playground audio route. The relay returns the
  * audio bytes themselves, so the panel plays them from an object URL.
  */

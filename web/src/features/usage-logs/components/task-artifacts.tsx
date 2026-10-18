@@ -27,6 +27,7 @@ import {
 } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { useQuery } from '@tanstack/react-query'
+import { Pin } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -211,7 +212,10 @@ function MediaFailure(props: { onRetry: () => void }) {
   )
 }
 
-function TaskArtifactCard(props: { artifact: TaskArtifact }) {
+function TaskArtifactCard(props: {
+  artifact: TaskArtifact
+  onTogglePin?: (artifact: TaskArtifact) => void
+}) {
   const { t } = useTranslation()
   const [mediaFailed, setMediaFailed] = useState(false)
   const [mediaRevision, setMediaRevision] = useState(0)
@@ -272,10 +276,21 @@ function TaskArtifactCard(props: { artifact: TaskArtifact }) {
               {props.artifact.mime_type}
             </span>
           ) : null}
+          {props.artifact.expired ? (
+            <span
+              className='text-muted-foreground block text-[11px]'
+              role='status'
+              title={t(
+                'The result is not stored on this server, so it stops working when the provider link expires.'
+              )}
+            >
+              {t('Not stored')}
+            </span>
+          ) : null}
         </CardDescription>
       </CardHeader>
       <CardContent>{cardContent}</CardContent>
-      <CardFooter>
+      <CardFooter className='flex flex-wrap gap-2'>
         <Button
           variant='outline'
           size='sm'
@@ -296,6 +311,22 @@ function TaskArtifactCard(props: { artifact: TaskArtifact }) {
           />
           {t('Download')}
         </Button>
+        {props.onTogglePin && props.artifact.stored ? (
+          <Button
+            type='button'
+            variant={props.artifact.pinned ? 'secondary' : 'outline'}
+            size='sm'
+            aria-pressed={props.artifact.pinned === true}
+            onClick={() => props.onTogglePin?.(props.artifact)}
+          >
+            <Pin
+              aria-hidden='true'
+              data-icon='inline-start'
+              className={props.artifact.pinned ? 'fill-current' : undefined}
+            />
+            {t(props.artifact.pinned ? 'Stop keeping results' : 'Keep results')}
+          </Button>
+        ) : null}
       </CardFooter>
     </Card>
   )
@@ -305,6 +336,7 @@ interface TaskArtifactsProps {
   taskId: string
   enabled: boolean
   emptyContent?: (legacyContentUrl?: string) => React.ReactNode
+  onTogglePin?: (artifact: TaskArtifact) => void
 }
 
 function TaskArtifacts(props: TaskArtifactsProps) {
@@ -374,7 +406,11 @@ function TaskArtifacts(props: TaskArtifactsProps) {
       )}
     >
       {artifactsQuery.data.artifacts.map((artifact) => (
-        <TaskArtifactCard key={artifact.key} artifact={artifact} />
+        <TaskArtifactCard
+          key={artifact.key}
+          artifact={artifact}
+          onTogglePin={props.onTogglePin}
+        />
       ))}
     </div>
   )
@@ -402,7 +438,10 @@ function LegacyTaskArtifacts(props: { legacyContentUrl?: string }) {
   return <EmptyTaskArtifacts />
 }
 
-export function TaskArtifactsCell(props: { log: TaskLog }) {
+export function TaskArtifactsCell(props: {
+  log: TaskLog
+  onTogglePin?: (artifact: TaskArtifact) => void
+}) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const previewMode = resolveTaskPreviewMode(props.log)
@@ -486,6 +525,7 @@ export function TaskArtifactsCell(props: { log: TaskLog }) {
         <TaskArtifacts
           taskId={props.log.task_id}
           enabled={shouldLoadTaskArtifacts(props.log, open)}
+          onTogglePin={props.onTogglePin}
           emptyContent={(legacyContentUrl) => (
             <LegacyTaskArtifacts legacyContentUrl={legacyContentUrl} />
           )}

@@ -46,6 +46,7 @@ import {
 import {
   useCancelPlaygroundTask,
   usePlaygroundTasks,
+  useSetPlaygroundTaskArtifactPin,
   useTaskArtifactsRequest,
 } from '../../hooks'
 
@@ -66,6 +67,7 @@ export function PlaygroundTaskList(props: PlaygroundTaskListProps) {
   const { t } = useTranslation()
   const tasksQuery = usePlaygroundTasks(props.active)
   const artifactsRequest = useTaskArtifactsRequest()
+  const setArtifactPin = useSetPlaygroundTaskArtifactPin()
   const cancelTask = useCancelPlaygroundTask()
   const [pendingTaskId, setPendingTaskId] = useState<string | null>(null)
   const [taskToCancel, setTaskToCancel] = useState<TaskLog | null>(null)
@@ -121,6 +123,27 @@ export function PlaygroundTaskList(props: PlaygroundTaskListProps) {
       )
     } finally {
       setTaskToCancel(null)
+    }
+  }
+
+  // Keeping a stored result exempts it from the retention window; the server
+  // re-checks ownership and the finished state on every request.
+  const handleToggleArtifactPin = async (
+    task: TaskLog,
+    artifact: TaskArtifact
+  ) => {
+    const pinned = !artifact.pinned
+    try {
+      await setArtifactPin.mutateAsync({
+        taskId: task.task_id,
+        artifactKey: artifact.key,
+        pinned,
+      })
+      toast.success(
+        t(pinned ? 'Results will be kept' : 'Results will expire again')
+      )
+    } catch (error) {
+      handleServerError(error, t(PLAYGROUND_GENERATION_ERRORS.PIN_FAILED))
     }
   }
 
@@ -217,7 +240,12 @@ export function PlaygroundTaskList(props: PlaygroundTaskListProps) {
               ) : null}
               {isSuccessful ? (
                 <div className='mt-2 flex flex-wrap items-center gap-1.5'>
-                  <TaskArtifactsCell log={task} />
+                  <TaskArtifactsCell
+                    log={task}
+                    onTogglePin={(artifact) =>
+                      void handleToggleArtifactPin(task, artifact)
+                    }
+                  />
                   <Button
                     aria-label={t('Send to canvas')}
                     disabled={isPending}

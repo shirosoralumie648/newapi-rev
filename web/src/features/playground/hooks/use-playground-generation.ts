@@ -28,6 +28,7 @@ import {
 } from '../constants'
 import {
   cancelPlaygroundTask,
+  setPlaygroundTaskArtifactPin,
   submitAudioSpeech,
   submitImageGeneration,
   submitVideoGeneration,
@@ -77,6 +78,33 @@ export function useTaskArtifactsRequest() {
   return useMutation({
     mutationFn: (taskId: string) => getTaskArtifacts(taskId),
     meta: { errorToast: false },
+  })
+}
+
+/**
+ * Keeps or releases one stored generation result. The server enforces
+ * ownership and the finished task state; the artifact projection of the task
+ * is invalidated so an open dialog shows the new retention state.
+ */
+export function useSetPlaygroundTaskArtifactPin() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: {
+      taskId: string
+      artifactKey: string
+      pinned: boolean
+    }) =>
+      setPlaygroundTaskArtifactPin(
+        input.taskId,
+        input.artifactKey,
+        input.pinned
+      ),
+    meta: { errorToast: false },
+    onSuccess: (_pinned, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: ['usage-logs', 'task-artifacts', variables.taskId],
+      })
+    },
   })
 }
 
