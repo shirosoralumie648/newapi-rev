@@ -1000,11 +1000,13 @@ export const STATIC_I18N_KEYS = [
   'Edges per canvas',
   'Node data size limit',
   'Canvas storage per user',
+  'Object storage per user',
   'Concurrent Playground tasks',
   'Task result storage per user',
   'Presets',
   'Presets per user',
   'System prompt size limit',
+  'Storage',
   // Channel priority ordering API errors.
   'Channel priorities changed. Refresh and try again.',
   'Invalid channel priority move',

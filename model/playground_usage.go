@@ -32,12 +32,14 @@ type PlaygroundUsageMetric struct {
 // PlaygroundResourceUsage groups the storage the owner holds across the
 // Playground workspace. Every figure is filtered by user ID, the same owner
 // scope the read and write paths use, so one account can never observe another
-// account's totals.
+// account's totals. Group is the user group the limits were resolved from.
 type PlaygroundResourceUsage struct {
+	Group       string                `json:"group"`
 	Sessions    PlaygroundUsageMetric `json:"sessions"`
 	Attachments PlaygroundUsageMetric `json:"attachments"`
 	Artifacts   PlaygroundUsageMetric `json:"artifacts"`
 	Canvas      PlaygroundUsageMetric `json:"canvas"`
+	Storage     PlaygroundUsageMetric `json:"storage"`
 	Tasks       PlaygroundUsageMetric `json:"tasks"`
 }
 
@@ -49,11 +51,12 @@ type PlaygroundResourceUsage struct {
 // the counters were introduced is measured on the fly. It is read-only and
 // never mutates state.
 func PlaygroundUsageForUser(userID int) (*PlaygroundResourceUsage, error) {
-	policy, err := PlaygroundQuotaPolicyForUser(userID)
+	policy, group, err := playgroundPolicyForGroup(DB, userID)
 	if err != nil {
 		return nil, err
 	}
 	usage := &PlaygroundResourceUsage{
+		Group: group,
 		Sessions: PlaygroundUsageMetric{
 			Limit: int64(policy.SessionMaxCount),
 		},
@@ -68,6 +71,9 @@ func PlaygroundUsageForUser(userID int) (*PlaygroundResourceUsage, error) {
 		Canvas: PlaygroundUsageMetric{
 			Limit:      int64(policy.CanvasUserMaxProjects),
 			LimitBytes: policy.CanvasUserMaxBytes,
+		},
+		Storage: PlaygroundUsageMetric{
+			LimitBytes: policy.ObjectUserMaxBytes,
 		},
 		Tasks: PlaygroundUsageMetric{
 			Limit:      int64(policy.TaskMaxConcurrency),
@@ -86,6 +92,9 @@ func PlaygroundUsageForUser(userID int) (*PlaygroundResourceUsage, error) {
 	usage.Artifacts.UsedBytes = counters.ArtifactBytes
 	usage.Canvas.Used = counters.CanvasCount
 	usage.Canvas.UsedBytes = counters.CanvasBytes
+	// Storage counts the bytes that live in the object store, the same figure
+	// the upload path checks against ObjectUserMaxBytes.
+	usage.Storage.UsedBytes = counters.ObjectBytes
 
 	// Async generation tasks live outside the Playground tables: their rows are
 	// created, polled and finished by the relay and task pipeline, so the two

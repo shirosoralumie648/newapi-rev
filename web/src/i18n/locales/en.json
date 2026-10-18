@@ -7706,6 +7706,18 @@
     "A connected reference image could not be read.": "A connected reference image could not be read.",
     "A connected reference image is larger than the 8 MiB limit.": "A connected reference image is larger than the 8 MiB limit.",
     "First Token Timeout": "First Token Timeout",
-    "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch.": "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch."
+    "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch.": "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch.",
+    "Current group": "Current group",
+    "Object storage": "Object storage",
+    "Object storage per user": "Object storage per user",
+    "Open Playground resource quotas": "Open Playground resource quotas",
+    "Playground resource quotas could not be loaded.": "Playground resource quotas could not be loaded.",
+    "Playground storage quota": "Playground storage quota",
+    "Save storage quota": "Save storage quota",
+    "Select an upgrade group to configure the Playground storage quota it grants.": "Select an upgrade group to configure the Playground storage quota it grants.",
+    "Subscribe to a plan to get more storage.": "Subscribe to a plan to get more storage.",
+    "Subscription plans grant the limits of their Upgrade Group, so give a paid group a larger storage quota here.": "Subscription plans grant the limits of their Upgrade Group, so give a paid group a larger storage quota here.",
+    "Upgrade for more storage": "Upgrade for more storage",
+    "Users who purchase this plan join {{group}}. These Playground storage limits apply to that group; leave a field empty to inherit the global default.": "Users who purchase this plan join {{group}}. These Playground storage limits apply to that group; leave a field empty to inherit the global default."
   }
 }

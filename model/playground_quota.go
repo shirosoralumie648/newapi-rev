@@ -34,12 +34,22 @@ func PlaygroundQuotaPolicyForUser(userID int) (playground_setting.PlaygroundQuot
 // playgroundPolicyForUser reads the owner's group and resolves the policy on the
 // given connection, so a transactional caller sees the group it locked.
 func playgroundPolicyForUser(tx *gorm.DB, userID int) (playground_setting.PlaygroundQuotaPolicy, error) {
+	policy, _, err := playgroundPolicyForGroup(tx, userID)
+	return policy, err
+}
+
+// playgroundPolicyForGroup resolves the effective resource budget for one
+// account together with the user group it was resolved from. The unified usage
+// view reports that group so the caller can see which group's entitlement
+// applies and where a subscription upgrade would take them; every write path
+// keeps using the policy alone.
+func playgroundPolicyForGroup(tx *gorm.DB, userID int) (playground_setting.PlaygroundQuotaPolicy, string, error) {
 	if userID <= 0 {
-		return playground_setting.GetPlaygroundQuotaPolicy(""), nil
+		return playground_setting.GetPlaygroundQuotaPolicy(""), "", nil
 	}
 	var user User
-	if err := tx.Where("id = ?", userID).First(&user).Error; err != nil {
-		return playground_setting.PlaygroundQuotaPolicy{}, err
+	if err := tx.Select("id", "group").Where("id = ?", userID).First(&user).Error; err != nil {
+		return playground_setting.PlaygroundQuotaPolicy{}, "", err
 	}
-	return playground_setting.GetPlaygroundQuotaPolicy(user.Group), nil
+	return playground_setting.GetPlaygroundQuotaPolicy(user.Group), user.Group, nil
 }

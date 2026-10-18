@@ -7706,6 +7706,18 @@
     "A connected reference image could not be read.": "Une image de référence connectée n'a pas pu être lue.",
     "A connected reference image is larger than the 8 MiB limit.": "Une image de référence connectée dépasse la limite de 8 Mio.",
     "First Token Timeout": "Délai du premier jeton",
-    "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch.": "Nombre de secondes d'attente du premier bloc de données en streaming après la réponse de l'amont. Si rien n'arrive à temps, la requête bascule vers un autre canal ; 0 utilise la valeur globale par défaut. Les flux ayant déjà envoyé des données ne basculent jamais."
+    "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch.": "Nombre de secondes d'attente du premier bloc de données en streaming après la réponse de l'amont. Si rien n'arrive à temps, la requête bascule vers un autre canal ; 0 utilise la valeur globale par défaut. Les flux ayant déjà envoyé des données ne basculent jamais.",
+    "Current group": "Groupe actuel",
+    "Object storage": "Stockage d'objets",
+    "Object storage per user": "Stockage d'objets par utilisateur",
+    "Open Playground resource quotas": "Ouvrir les quotas de ressources Playground",
+    "Playground resource quotas could not be loaded.": "Les quotas de ressources Playground n'ont pas pu être chargés.",
+    "Playground storage quota": "Quota de stockage Playground",
+    "Save storage quota": "Enregistrer le quota de stockage",
+    "Select an upgrade group to configure the Playground storage quota it grants.": "Sélectionnez un groupe de mise à niveau pour configurer le quota de stockage Playground qu'il accorde.",
+    "Subscribe to a plan to get more storage.": "Abonnez-vous à un forfait pour obtenir plus d'espace de stockage.",
+    "Subscription plans grant the limits of their Upgrade Group, so give a paid group a larger storage quota here.": "Les forfaits accordent les limites de leur groupe de mise à niveau ; attribuez ici un quota de stockage plus élevé à un groupe payant.",
+    "Upgrade for more storage": "Passer à une offre supérieure pour plus de stockage",
+    "Users who purchase this plan join {{group}}. These Playground storage limits apply to that group; leave a field empty to inherit the global default.": "Les utilisateurs qui achètent ce forfait rejoignent {{group}}. Ces limites de stockage Playground s'appliquent à ce groupe ; laissez un champ vide pour hériter de la valeur globale par défaut."
   }
 }

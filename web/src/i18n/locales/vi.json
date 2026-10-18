@@ -7706,6 +7706,18 @@
     "A connected reference image could not be read.": "Không đọc được ảnh tham chiếu đã kết nối.",
     "A connected reference image is larger than the 8 MiB limit.": "Ảnh tham chiếu đã kết nối vượt quá giới hạn 8 MiB.",
     "First Token Timeout": "Hết thời gian chờ token đầu tiên",
-    "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch.": "Số giây chờ khối dữ liệu phát trực tuyến đầu tiên sau khi upstream phản hồi. Nếu không có dữ liệu trong thời gian này, yêu cầu sẽ chuyển sang kênh khác; 0 dùng giá trị mặc định toàn cục. Luồng đã gửi dữ liệu sẽ không chuyển nữa."
+    "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch.": "Số giây chờ khối dữ liệu phát trực tuyến đầu tiên sau khi upstream phản hồi. Nếu không có dữ liệu trong thời gian này, yêu cầu sẽ chuyển sang kênh khác; 0 dùng giá trị mặc định toàn cục. Luồng đã gửi dữ liệu sẽ không chuyển nữa.",
+    "Current group": "Nhóm hiện tại",
+    "Object storage": "Lưu trữ đối tượng",
+    "Object storage per user": "Lưu trữ đối tượng mỗi người dùng",
+    "Open Playground resource quotas": "Mở hạn mức tài nguyên Playground",
+    "Playground resource quotas could not be loaded.": "Không thể tải hạn mức tài nguyên Playground.",
+    "Playground storage quota": "Hạn mức lưu trữ Playground",
+    "Save storage quota": "Lưu hạn mức lưu trữ",
+    "Select an upgrade group to configure the Playground storage quota it grants.": "Chọn nhóm nâng cấp để cấu hình hạn mức lưu trữ Playground mà nhóm đó được cấp.",
+    "Subscribe to a plan to get more storage.": "Đăng ký gói để có thêm dung lượng lưu trữ.",
+    "Subscription plans grant the limits of their Upgrade Group, so give a paid group a larger storage quota here.": "Gói đăng ký cấp hạn mức của Nhóm nâng cấp tương ứng, hãy đặt hạn mức lưu trữ lớn hơn cho nhóm trả phí tại đây.",
+    "Upgrade for more storage": "Nâng cấp để có thêm dung lượng lưu trữ",
+    "Users who purchase this plan join {{group}}. These Playground storage limits apply to that group; leave a field empty to inherit the global default.": "Người dùng mua gói này sẽ tham gia {{group}}. Các hạn mức lưu trữ Playground này áp dụng cho nhóm đó; để trống để kế thừa giá trị mặc định toàn cục."
   }
 }

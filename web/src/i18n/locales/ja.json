@@ -7706,6 +7706,18 @@
     "A connected reference image could not be read.": "接続済みの参照画像を読み込めませんでした。",
     "A connected reference image is larger than the 8 MiB limit.": "接続済みの参照画像が 8 MiB の上限を超えています。",
     "First Token Timeout": "初回トークンのタイムアウト",
-    "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch.": "上流の応答後に最初のストリーミングデータを受信するまで待つ秒数。時間内にデータが届かない場合は別のチャネルに切り替わります。0 はグローバル既定値を使用します。すでにデータを送信したストリームは切り替わりません。"
+    "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch.": "上流の応答後に最初のストリーミングデータを受信するまで待つ秒数。時間内にデータが届かない場合は別のチャネルに切り替わります。0 はグローバル既定値を使用します。すでにデータを送信したストリームは切り替わりません。",
+    "Current group": "現在のグループ",
+    "Object storage": "オブジェクトストレージ",
+    "Object storage per user": "ユーザーごとのオブジェクトストレージ",
+    "Open Playground resource quotas": "Playground のリソース容量を開く",
+    "Playground resource quotas could not be loaded.": "Playground のリソース容量を読み込めませんでした。",
+    "Playground storage quota": "Playground ストレージ容量",
+    "Save storage quota": "ストレージ容量を保存",
+    "Select an upgrade group to configure the Playground storage quota it grants.": "アップグレードグループを選択すると、そのグループに付与される Playground ストレージ容量を設定できます。",
+    "Subscribe to a plan to get more storage.": "プランを購読するとストレージを増やせます。",
+    "Subscription plans grant the limits of their Upgrade Group, so give a paid group a larger storage quota here.": "サブスクリプションは「アップグレードグループ」の上限を付与します。有料グループにはここでより大きなストレージ容量を設定してください。",
+    "Upgrade for more storage": "アップグレードしてストレージを増やす",
+    "Users who purchase this plan join {{group}}. These Playground storage limits apply to that group; leave a field empty to inherit the global default.": "このプランを購入したユーザーは {{group}} に所属します。これらの Playground ストレージ上限はそのグループに適用されます。空欄の項目はグローバル既定値を継承します。"
   }
 }

@@ -7706,6 +7706,18 @@
     "A connected reference image could not be read.": "無法讀取已連接的參考圖片。",
     "A connected reference image is larger than the 8 MiB limit.": "已連接的參考圖片超過 8 MiB 上限。",
     "First Token Timeout": "首字逾時",
-    "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch.": "收到上游回應後等待第一個串流資料區塊的秒數；逾時未收到資料時會切換到其他管道；0 表示使用全域預設值。已開始向客戶端輸出的串流不會再切換。"
+    "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch.": "收到上游回應後等待第一個串流資料區塊的秒數；逾時未收到資料時會切換到其他管道；0 表示使用全域預設值。已開始向客戶端輸出的串流不會再切換。",
+    "Current group": "目前使用者群組",
+    "Object storage": "物件儲存",
+    "Object storage per user": "每位使用者的物件儲存",
+    "Open Playground resource quotas": "開啟 Playground 資源配額",
+    "Playground resource quotas could not be loaded.": "無法載入 Playground 資源配額。",
+    "Playground storage quota": "Playground 儲存配額",
+    "Save storage quota": "儲存配額設定",
+    "Select an upgrade group to configure the Playground storage quota it grants.": "選擇升級使用者群組後即可設定該群組取得的 Playground 儲存配額。",
+    "Subscribe to a plan to get more storage.": "訂閱方案即可獲得更大的儲存空間。",
+    "Subscription plans grant the limits of their Upgrade Group, so give a paid group a larger storage quota here.": "訂閱方案授予其「升級使用者群組」的配額，請在這裡為付費群組設定更大的儲存配額。",
+    "Upgrade for more storage": "升級取得更大儲存空間",
+    "Users who purchase this plan join {{group}}. These Playground storage limits apply to that group; leave a field empty to inherit the global default.": "購買此方案的會員會加入 {{group}}。這些 Playground 儲存上限適用於該群組；留空表示沿用全域預設值。"
   }
 }

@@ -1,4 +1,3 @@
-import type { FileUIPart } from 'ai'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -17,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { FileUIPart } from 'ai'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -87,6 +87,7 @@ import type {
 export function Playground(props: {
   target?: PlaygroundRouteTarget
   onOpenCanvas?: (projectId: string) => void
+  onOpenUpgrade?: () => void
 }) {
   const userId = useAuthStore((state) => state.auth.user?.id ?? null)
   return (
@@ -94,6 +95,7 @@ export function Playground(props: {
       key={userId ?? 'signed-out'}
       target={props.target}
       onOpenCanvas={props.onOpenCanvas}
+      onOpenUpgrade={props.onOpenUpgrade}
     />
   )
 }
@@ -101,6 +103,7 @@ export function Playground(props: {
 function PlaygroundContent(props: {
   target?: PlaygroundRouteTarget
   onOpenCanvas?: (projectId: string) => void
+  onOpenUpgrade?: () => void
 }) {
   const { t } = useTranslation()
   const userId = useAuthStore((state) => state.auth.user?.id ?? null)
@@ -793,7 +796,12 @@ function PlaygroundContent(props: {
         onSwitch={handleSwitchSession}
         sessions={sessions}
         usagePanel={
-          userId ? <PlaygroundUsagePopover userId={userId} /> : undefined
+          userId ? (
+            <PlaygroundUsagePopover
+              userId={userId}
+              onOpenUpgrade={props.onOpenUpgrade}
+            />
+          ) : undefined
         }
         inspectorView={inspectorView}
         artifactsDisabled={!canonicalSessionId}

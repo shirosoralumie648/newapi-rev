@@ -7706,6 +7706,18 @@
     "A connected reference image could not be read.": "Не удалось прочитать подключённое референсное изображение.",
     "A connected reference image is larger than the 8 MiB limit.": "Подключённое референсное изображение превышает лимит 8 MiB.",
     "First Token Timeout": "Тайм-аут первого токена",
-    "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch.": "Сколько секунд ждать первый блок потоковых данных после ответа вышестоящего сервиса. Если данные не приходят вовремя, запрос переключается на другой канал; 0 — использовать глобальное значение по умолчанию. Потоки, которые уже отправили данные, не переключаются."
+    "Seconds to wait for the first streamed data chunk after the upstream responds. When nothing arrives in time, the request switches to another channel; 0 uses the global default. Streams that already sent data never switch.": "Сколько секунд ждать первый блок потоковых данных после ответа вышестоящего сервиса. Если данные не приходят вовремя, запрос переключается на другой канал; 0 — использовать глобальное значение по умолчанию. Потоки, которые уже отправили данные, не переключаются.",
+    "Current group": "Текущая группа",
+    "Object storage": "Объектное хранилище",
+    "Object storage per user": "Объектное хранилище на пользователя",
+    "Open Playground resource quotas": "Открыть квоты ресурсов Playground",
+    "Playground resource quotas could not be loaded.": "Не удалось загрузить квоты ресурсов Playground.",
+    "Playground storage quota": "Квота хранилища Playground",
+    "Save storage quota": "Сохранить квоту хранилища",
+    "Select an upgrade group to configure the Playground storage quota it grants.": "Выберите группу повышения, чтобы настроить предоставляемую ей квоту хранилища Playground.",
+    "Subscribe to a plan to get more storage.": "Оформите подписку, чтобы получить больше места для хранения.",
+    "Subscription plans grant the limits of their Upgrade Group, so give a paid group a larger storage quota here.": "Подписки предоставляют лимиты своей группы повышения, поэтому задайте здесь больший лимит хранилища для платной группы.",
+    "Upgrade for more storage": "Обновить тариф для большего хранилища",
+    "Users who purchase this plan join {{group}}. These Playground storage limits apply to that group; leave a field empty to inherit the global default.": "Пользователи, купившие этот тариф, попадают в группу {{group}}. Эти лимиты хранилища Playground применяются к этой группе; пустое поле наследует глобальное значение по умолчанию."
   }
 }

@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
+import { useNavigate } from '@tanstack/react-router'
 import { CalendarClock, CreditCard, RefreshCw, Settings2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useForm, type Resolver } from 'react-hook-form'
@@ -82,6 +83,7 @@ import {
   type PlanFormValues,
 } from '../lib'
 import type { PlanRecord } from '../types'
+import { PlaygroundGroupQuotaEditor } from './playground-group-quota'
 import { useSubscriptions } from './subscriptions-provider'
 
 interface Props {
@@ -96,6 +98,7 @@ export function SubscriptionsMutateDrawer({
   currentRow,
 }: Props) {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const isEdit = !!currentRow?.plan?.id
   const { triggerRefresh } = useSubscriptions()
   const { meta: currencyMeta } = getCurrencyDisplay()
@@ -152,6 +155,7 @@ export function SubscriptionsMutateDrawer({
 
   const durationUnit = form.watch('duration_unit')
   const resetPeriod = form.watch('quota_reset_period')
+  const watchedUpgradeGroup = form.watch('upgrade_group')
   // Gate "+ Create on Pancake" on the same checks the mint handler runs.
   const watchedTitle = form.watch('title')
   const watchedPrice = form.watch('price_amount')
@@ -261,6 +265,16 @@ export function SubscriptionsMutateDrawer({
 
   const durationUnitOpts = getDurationUnitOptions(t)
   const resetPeriodOpts = getResetPeriodOptions(t)
+
+  // The plan sells the upgrade group's Playground storage entitlement, so the
+  // editor links straight to the section that owns the full group policy.
+  const handleOpenPlaygroundQuotas = () => {
+    onOpenChange(false)
+    void navigate({
+      to: '/system-settings/security/$section',
+      params: { section: 'playground-quotas' },
+    })
+  }
 
   return (
     <Sheet
@@ -491,6 +505,19 @@ export function SubscriptionsMutateDrawer({
                   )}
                 />
               </div>
+
+              {watchedUpgradeGroup ? (
+                <PlaygroundGroupQuotaEditor
+                  group={watchedUpgradeGroup}
+                  onConfigure={handleOpenPlaygroundQuotas}
+                />
+              ) : (
+                <p className='text-muted-foreground text-sm'>
+                  {t(
+                    'Select an upgrade group to configure the Playground storage quota it grants.'
+                  )}
+                </p>
+              )}
 
               <FormField
                 control={form.control}
