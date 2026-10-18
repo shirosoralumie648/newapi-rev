@@ -16,10 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { AudioLines, ImageIcon } from 'lucide-react'
+import { AudioLines, FileText, ImageIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { isPlaygroundDocumentMediaType } from '../../constants'
 import {
   getPlaygroundAttachmentDataUrl,
   getPlaygroundAttachmentObjectUrl,
@@ -30,18 +31,23 @@ import type { MessageAttachment } from '../../types'
 /**
  * Display URL of one stored attachment. Freshly uploaded bytes are already
  * cached; anything else loads through the owner-scoped content endpoint once.
+ * A document renders from its icon and never downloads its bytes.
  */
 export function useMessageAttachmentPreviewUrl(
   attachment: MessageAttachment
 ): string | undefined {
-  const [url, setUrl] = useState<string | undefined>(
-    () =>
-      getPlaygroundAttachmentObjectUrl(attachment.id) ??
-      getPlaygroundAttachmentDataUrl(attachment.id)
+  const wantsBytes =
+    attachment.mediaType.startsWith('image/') ||
+    attachment.mediaType.startsWith('audio/')
+  const [url, setUrl] = useState<string | undefined>(() =>
+    wantsBytes
+      ? (getPlaygroundAttachmentObjectUrl(attachment.id) ??
+        getPlaygroundAttachmentDataUrl(attachment.id))
+      : undefined
   )
 
   useEffect(() => {
-    if (url || !attachment.url) return
+    if (!wantsBytes || url || !attachment.url) return
     let active = true
     void loadPlaygroundAttachment(attachment.url, attachment.id)
       .then((entry) => {
@@ -53,7 +59,7 @@ export function useMessageAttachmentPreviewUrl(
     return () => {
       active = false
     }
-  }, [attachment.id, attachment.url, url])
+  }, [attachment.id, attachment.url, url, wantsBytes])
 
   return url
 }
@@ -67,6 +73,7 @@ function MessageAttachmentCard({
   const previewUrl = useMessageAttachmentPreviewUrl(attachment)
   const isImage = attachment.mediaType.startsWith('image/')
   const isAudio = attachment.mediaType.startsWith('audio/')
+  const isDocument = isPlaygroundDocumentMediaType(attachment.mediaType)
   const label = attachment.filename || t('Attachment')
 
   return (
@@ -101,6 +108,11 @@ function MessageAttachmentCard({
             <AudioLines className='size-5' />
           </div>
         ))}
+      {isDocument && (
+        <div className='text-muted-foreground flex h-24 w-40 items-center justify-center'>
+          <FileText className='size-5' aria-hidden='true' />
+        </div>
+      )}
       <figcaption className='text-muted-foreground w-40 truncate px-2 py-1 text-xs'>
         {label}
       </figcaption>

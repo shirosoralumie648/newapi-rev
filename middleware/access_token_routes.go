@@ -101,6 +101,7 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"POST /api/playground/sessions/:id/attachments":                              accessTokenSessionRule,
 	"GET /api/playground/sessions/:id/attachments/:attachmentId":                 accessTokenSessionRule,
 	"GET /api/playground/sessions/:id/attachments/:attachmentId/content":         accessTokenSessionRule,
+	"GET /api/playground/sessions/:id/attachments/:attachmentId/text":            accessTokenSessionRule,
 	"DELETE /api/playground/sessions/:id/attachments/:attachmentId":              accessTokenSessionRule,
 	"GET /api/playground/canvases":                                               accessTokenSessionRule,
 	"POST /api/playground/canvases":                                              accessTokenSessionRule,

@@ -41,6 +41,12 @@ export const STATIC_I18N_KEYS = [
   'Attachment is too large.',
   'Attachment data could not be read.',
   'Attachment upload failed. Your message was not sent.',
+  // Playground document text extraction server messages.
+  'This file type cannot be read as text.',
+  'The document is too large to read as text.',
+  'The document text could not be extracted.',
+  'The document contains no extractable text.',
+  'The document text could not be loaded.',
   // Playground generation task server messages and client feedback.
   'Failed to cancel the task',
   'Task not found.',
@@ -1012,6 +1018,8 @@ export const STATIC_I18N_KEYS = [
   'Video size limit',
   'Audio size limit',
   'Document size limit',
+  'Document text size limit',
+  'Document pages read limit',
   'Attachments per user',
   'Attachment storage per user',
   'Active artifacts per conversation',

@@ -123,6 +123,7 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.POST("/sessions/:id/attachments", controller.CreatePlaygroundAttachment)
 			playgroundRoute.GET("/sessions/:id/attachments/:attachmentId", controller.GetPlaygroundAttachment)
 			playgroundRoute.GET("/sessions/:id/attachments/:attachmentId/content", controller.GetPlaygroundAttachmentContent)
+			playgroundRoute.GET("/sessions/:id/attachments/:attachmentId/text", controller.GetPlaygroundAttachmentText)
 			playgroundRoute.DELETE("/sessions/:id/attachments/:attachmentId", controller.DeletePlaygroundAttachment)
 			playgroundRoute.GET("/canvases", controller.ListPlaygroundCanvasProjects)
 			playgroundRoute.POST("/canvases", controller.CreatePlaygroundCanvasProject)

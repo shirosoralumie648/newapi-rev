@@ -32,6 +32,7 @@ import {
 import {
   PLAYGROUND_ATTACHMENT_MAX_BYTES,
   PLAYGROUND_ATTACHMENT_MAX_COUNT,
+  isPlaygroundDocumentMediaType,
   playgroundAttachmentMaxBytes,
 } from '../constants'
 import type { MessageAttachment } from '../types'
@@ -57,6 +58,53 @@ function attachmentBase64(file: FileUIPart): string {
 }
 
 /**
+ * The type an uploaded file really carries. Browsers report an empty type or
+ * `application/octet-stream` for Markdown and sometimes for plain text, so the
+ * extension names those documents; every other kind keeps its declared type.
+ */
+export function playgroundAttachmentUploadMediaType(
+  mediaType: string | undefined,
+  filename: string | undefined
+): string {
+  const name = (filename ?? '').toLowerCase()
+  if (
+    mediaType === 'text/markdown' ||
+    name.endsWith('.md') ||
+    name.endsWith('.markdown')
+  ) {
+    return 'text/markdown'
+  }
+  if (mediaType === 'text/plain' || name.endsWith('.txt')) {
+    return 'text/plain'
+  }
+  return mediaType || 'application/octet-stream'
+}
+
+/** Turns a submitted data URL back into the bytes of a document upload. */
+function documentFile(file: FileUIPart, mediaType: string): File {
+  const base64 = attachmentBase64(file)
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index)
+  }
+  return new File([bytes], file.filename || 'document', { type: mediaType })
+}
+
+/** The reference one uploaded attachment stores on an outgoing message. */
+function playgroundAttachmentReference(
+  attachment: PlaygroundServerAttachment
+): MessageAttachment {
+  return {
+    id: attachment.id,
+    url: playgroundAttachmentContentUrl(attachment.sessionId, attachment.id),
+    mediaType: attachment.mediaType,
+    filename: attachment.filename,
+    byteSize: attachment.byteSize,
+  }
+}
+
+/**
  * Uploads the input files to the conversation and returns the attachment
  * references stored on the outgoing message.
  */
@@ -69,6 +117,20 @@ export async function uploadPlaygroundAttachments(
   }
   const attachments: MessageAttachment[] = []
   for (const file of files) {
+    const mediaType = playgroundAttachmentUploadMediaType(
+      file.mediaType,
+      file.filename
+    )
+    // A document may exceed the base64 request envelope, so it uploads through
+    // the reservation flow; its text is added to the prompt at send time.
+    if (isPlaygroundDocumentMediaType(mediaType)) {
+      const attachment = await uploadPlaygroundAttachmentDirect(
+        { sessionId },
+        documentFile(file, mediaType)
+      )
+      attachments.push(playgroundAttachmentReference(attachment))
+      continue
+    }
     const data = attachmentBase64(file)
     // Base64 length is the decoded size rounded up to a 4-character group.
     if (Math.ceil((data.length * 3) / 4) > PLAYGROUND_ATTACHMENT_MAX_BYTES) {
@@ -76,18 +138,12 @@ export async function uploadPlaygroundAttachments(
     }
     const { attachment } = await uploadPlaygroundAttachment(sessionId, {
       clientKey: file.id ?? nanoid(),
-      mediaType: file.mediaType || 'application/octet-stream',
+      mediaType,
       filename: file.filename,
       data,
     })
     primePlaygroundAttachment(attachment.id, file.url)
-    attachments.push({
-      id: attachment.id,
-      url: playgroundAttachmentContentUrl(attachment.sessionId, attachment.id),
-      mediaType: attachment.mediaType,
-      filename: attachment.filename,
-      byteSize: attachment.byteSize,
-    })
+    attachments.push(playgroundAttachmentReference(attachment))
   }
   return attachments
 }
@@ -222,11 +278,5 @@ export async function uploadPlaygroundSpeechAttachment(
     data: dataUrl.slice(separator + 1),
   })
   primePlaygroundAttachment(attachment.id, dataUrl)
-  return {
-    id: attachment.id,
-    url: playgroundAttachmentContentUrl(attachment.sessionId, attachment.id),
-    mediaType: attachment.mediaType,
-    filename: attachment.filename,
-    byteSize: attachment.byteSize,
-  }
+  return playgroundAttachmentReference(attachment)
 }

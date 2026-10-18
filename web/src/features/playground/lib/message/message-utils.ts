@@ -228,18 +228,25 @@ export function getTextContent(content: string | ContentPart[]): string {
 
 /**
  * Format message for API request. Attachments contribute image parts from the
- * attachment cache; prepare the cache with ensurePlaygroundMessageAttachments
- * before building a payload for older messages.
+ * attachment cache and document context from the document cache; prepare both
+ * with ensurePlaygroundMessageAttachments and ensurePlaygroundDocumentTexts
+ * before building a payload.
  */
-export function formatMessageForAPI(message: Message): ChatCompletionMessage {
+export function formatMessageForAPI(
+  message: Message,
+  documentContext = ''
+): ChatCompletionMessage {
   const currentVersion = getCurrentVersion(message)
   const imageUrls = (currentVersion.attachments ?? [])
     .filter((attachment) => attachment.mediaType.startsWith('image/'))
     .map((attachment) => getPlaygroundAttachmentDataUrl(attachment.id))
     .filter((url): url is string => Boolean(url))
+  const text = documentContext
+    ? `${currentVersion.content}${currentVersion.content.trim() ? '\n\n' : ''}${documentContext}`
+    : currentVersion.content
   return {
     role: message.from,
-    content: buildMessageContent(currentVersion.content, imageUrls),
+    content: buildMessageContent(text, imageUrls),
   }
 }
 

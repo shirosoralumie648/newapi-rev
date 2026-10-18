@@ -31,6 +31,7 @@ import {
 } from '../attachment-store'
 import {
   PLAYGROUND_ATTACHMENT_ERRORS,
+  playgroundAttachmentUploadMediaType,
   uploadPlaygroundAttachments,
   uploadPlaygroundSpeechAttachment,
 } from '../attachment-upload'
@@ -251,5 +252,77 @@ test('loads missing attachment bytes once and reuses them for later sends', asyn
   )
   expect(getPlaygroundAttachmentDataUrl('pgf_1')).toMatch(
     /^data:image\/png;base64,/
+  )
+})
+
+test('uploads a document through the reservation flow with its normalized type', async () => {
+  const post = vi.spyOn(api, 'post').mockImplementation(async (url) => {
+    if (url === '/api/playground/uploads') {
+      return { data: { success: true, data: { id: 'pgu_1', mode: 'relay' } } }
+    }
+    return {
+      data: {
+        success: true,
+        data: {
+          created: true,
+          id: 'pgf_doc',
+          session_id: 'pgs_server',
+          media_type: 'text/markdown',
+          filename: 'notes.md',
+          byte_size: 4,
+          created_at: 1,
+          updated_at: 1,
+        },
+      },
+    }
+  })
+  const put = vi.spyOn(api, 'put').mockResolvedValue({
+    data: { success: true, data: {} },
+  })
+
+  const attachments = await uploadPlaygroundAttachments('pgs_server', [
+    inputFile({
+      id: 'file-md',
+      url: 'data:text/plain;base64,IyBIaQ==',
+      mediaType: '',
+      filename: 'notes.md',
+    }),
+  ])
+
+  expect(post.mock.calls[0]?.[0]).toBe('/api/playground/uploads')
+  expect(post.mock.calls[0]?.[1]).toMatchObject({
+    media_type: 'text/markdown',
+    filename: 'notes.md',
+    byte_size: 4,
+    session_id: 'pgs_server',
+  })
+  const relayed = put.mock.calls[0]?.[1] as File
+  expect(put.mock.calls[0]?.[0]).toBe('/api/playground/uploads/pgu_1/content')
+  expect(relayed).toBeInstanceOf(File)
+  expect(relayed.name).toBe('notes.md')
+  expect(relayed.type).toBe('text/markdown')
+  expect(attachments).toEqual([
+    {
+      id: 'pgf_doc',
+      url: '/api/playground/sessions/pgs_server/attachments/pgf_doc/content',
+      mediaType: 'text/markdown',
+      filename: 'notes.md',
+      byteSize: 4,
+    },
+  ])
+})
+
+test('normalizes the declared type of Markdown and text uploads by extension', () => {
+  expect(playgroundAttachmentUploadMediaType('', 'notes.md')).toBe(
+    'text/markdown'
+  )
+  expect(
+    playgroundAttachmentUploadMediaType(
+      'application/octet-stream',
+      'readme.txt'
+    )
+  ).toBe('text/plain')
+  expect(playgroundAttachmentUploadMediaType('image/png', 'photo.png')).toBe(
+    'image/png'
   )
 })

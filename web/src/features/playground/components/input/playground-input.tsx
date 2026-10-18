@@ -32,9 +32,9 @@ import {
 } from '@/components/ai-elements/prompt-input'
 
 import {
-  PLAYGROUND_ATTACHMENT_ACCEPT,
-  PLAYGROUND_ATTACHMENT_MAX_BYTES,
   PLAYGROUND_ATTACHMENT_MAX_COUNT,
+  PLAYGROUND_CHAT_ATTACHMENT_ACCEPT,
+  PLAYGROUND_DOCUMENT_MAX_BYTES,
 } from '../../constants'
 import { usePlaygroundComposerMemory } from '../../hooks'
 import type { PlaygroundContextPlan } from '../../lib'
@@ -168,11 +168,11 @@ export function PlaygroundInput({
   return (
     <div className='grid shrink-0 gap-4 px-1 md:pb-4'>
       <PromptInput
-        accept={PLAYGROUND_ATTACHMENT_ACCEPT}
+        accept={PLAYGROUND_CHAT_ATTACHMENT_ACCEPT}
         className='relative'
         groupClassName='bg-background/95 dark:bg-background/80 border-border/70 shadow-[0_18px_60px_-32px_rgba(0,0,0,0.65)] ring-1 ring-foreground/5 rounded-xl overflow-hidden transition-all duration-200 focus-within:border-primary/45 focus-within:ring-primary/15 focus-within:shadow-[0_22px_70px_-34px_rgba(0,0,0,0.75)]'
         maxFiles={PLAYGROUND_ATTACHMENT_MAX_COUNT}
-        maxFileSize={PLAYGROUND_ATTACHMENT_MAX_BYTES}
+        maxFileSize={PLAYGROUND_DOCUMENT_MAX_BYTES}
         multiple
         onError={(error) => toast.error(error.message)}
         onSubmit={handleSubmit}

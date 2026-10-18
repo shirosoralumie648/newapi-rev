@@ -38,6 +38,8 @@ export const PLAYGROUND_QUOTA_FIELD_KEYS = [
   'attachment_video_max_file_bytes',
   'attachment_audio_max_file_bytes',
   'attachment_document_max_file_bytes',
+  'document_text_max_bytes',
+  'document_text_max_pages',
   'attachment_user_max_count',
   'attachment_user_max_bytes',
   'artifact_session_max_count',
@@ -196,6 +198,17 @@ export const PLAYGROUND_QUOTA_FIELDS: readonly PlaygroundQuotaField[] = [
     group: 'attachments',
     labelKey: 'Document size limit',
     bytes: true,
+  },
+  {
+    key: 'document_text_max_bytes',
+    group: 'attachments',
+    labelKey: 'Document text size limit',
+    bytes: true,
+  },
+  {
+    key: 'document_text_max_pages',
+    group: 'attachments',
+    labelKey: 'Document pages read limit',
   },
   {
     key: 'attachment_user_max_count',
