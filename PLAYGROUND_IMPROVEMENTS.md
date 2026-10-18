@@ -308,7 +308,7 @@ Playground
 3. **云端推荐 R2**（出流量免费，$0.015/GB-月）；不推荐“Workers 代理 AWS S3”（S3 → Cloudflare 仍按 S3 出流量 $0.09/GB 计费）。R2 预签名 URL 不能用自定义域名/CDN，只有需要“鉴权 + 边缘缓存”时才在 R2 前加 Worker 校验 HMAC 令牌。中国大陆用户可选 OSS/COS + CDN。
 4. **消息增量写**：保留会话 `MessageRevision` CAS，按 `(session_id, client_key)` upsert 变化行；同步协议发送增量，旧全量接口保留一个版本兼容。
 5. **配额计数器**：新表 `playground_user_usage`，写事务锁该行，不再锁 `users`、不再 SUM，每日对账。
-6. **拆库**仅在主库约 500 GB 以上或 Playground 写入明显影响扣费延迟时考虑，仿 `LOG_SQL_DSN` 增加可选 `PLAYGROUND_SQL_DSN`（DB-04 只出设计文档）。规模估算：1 万活跃用户时附件存 DB（base64）约 270 GB，而消息约 63 GB——最先压垮单库的是字节数据。
+6. **拆库**仅在主库约 500 GB 以上或 Playground 写入明显影响扣费延迟时考虑，仿 `LOG_SQL_DSN` 增加可选 `PLAYGROUND_SQL_DSN`（DB-04 设计文档见第 13 节，仅文档、不改代码）。规模估算：1 万活跃用户时附件存 DB（base64）约 270 GB，而消息约 63 GB——最先压垮单库的是字节数据；ST-03/ST-05/DB-03 之后字节已外置，拆库只搬关系型元数据。
 
 ### 9.3 计费决策
 
@@ -576,6 +576,171 @@ Step 进度：
 **RF-02 进展（2026-10-18，已完成，CI-only，本地未运行测试）**：邀请关系与归因记录落为独立模型——新增主库表 `referral_bindings(invitee_id 唯一索引, inviter_id 索引, source varchar(16), bound_at)`（`model/referral.go`）作为唯一事实来源，`users.inviter_id` 只是镜像，由同一事务内的条件更新写入（绝不覆盖已存在的不同邀请人），绑定一次写定、任何路径都不改绑。归因来源四种：`link` / `code`（密码注册表单：邀请码输入框 + `?aff=` 链接进入时预填，`referral-attribution.ts` 按「与链接带入的码一致 → link，否则 code」解析并提交 `referral_source`）、`oauth`（OAuth 注册在 state 中携带邀请码，`InsertWithTx` 在注册事务内写关系，修复注册后邀请关系不落库）、`admin`（管理员手工绑定）。账号创建路径统一：密码 `Register`、OAuth `findOrCreateOAuthUser`、管理员建号与微信等全部经 `Insert`/`InsertWithTx` 携带 `ReferralAttribution`，登录、改资料与 `UpdateUser` 都无法改写邀请关系；未知/空邀请码不报错也不归因，自我邀请按 id 与规范化邮箱双重拒绝，被封禁的邀请人由 `LookupReferralInviter`/`CreateReferralBindingWithTx` 拒绝（注册不失败，仅丢弃归因并记日志），`ActiveReferralInviter` 在发奖与邀请计数前复核邀请人仍可用（修 #4360）；邀请人数在未配置邀请奖励时也正确自增（修 #6362/#6363）。管理员绑定接口 `POST /api/user/:id/inviter`（`AdminAuth` + `CriticalRateLimit`，角色层级校验、`user:write` 访问令牌规则）只允许给尚无邀请人的账号绑定，四类关系错误返回可翻译文案（自邀/邀请人不存在/已禁用/已有邀请人），成功写 `user.inviter_bind` 审计（目标用户、邀请人、来源），不提供任何用户自助改绑（不采用上游 #3249）。测试：`model/user_update_test.go` 的 `TestReferralBindingMatrix`（SQLite/MySQL/PostgreSQL 真库矩阵：单次绑定与镜像、改资料与管理员都不改绑、无效归因丢弃、id/邮箱自邀拒绝、管理员只绑未绑账号、OAuth 风格 `InsertWithTx` 持久化与 `ActiveReferralInviter` 解析、邀请计数与封禁邀请人不发奖），`controller/user_manage_test.go` 的 `TestBindUserInviterAdminContract`（控制器契约：四类错误文案、成功响应带 `source=admin` 绑定、已有关系不被替换、仅成功调用写审计），前端 `referral-attribution.test.ts`（3 用例）；`.github/workflows/ci.yml` 的 `database` job（MySQL 8 + PostgreSQL 16 + SQLite）过滤清单已含 `TestAffCode|TestReferralBinding`。前端补 8 个新键的七语言翻译（`i18n:sync` missingCount=0、extrasCount=0）；无新依赖。尚未包含：存量 `users.inviter_id` 回填（RF-09）与管理端绑定 UI（RF-07，可选）。
 
 **RF-03 进展（2026-10-18，已完成，CI-only，本地未运行测试）**：充值返佣引擎落为「事件表 + 同事务记账 + 幂等键」——新增主库表 `referral_commissions`（`inviter_id`/`invitee_id` 索引、`source`、`(ref_type, ref_id)` 唯一索引幂等、`base_quota`（实付入账额度）、`rate_percent`、`commission_quota`、`status=pending`、`created_at`；`model/referral_commission.go`），只写事件与比例明细、绝不直接改余额（分桶、锁定与发放属于 RF-04）；`RecordReferralCommissionTx` 在充值/兑换的同一事务内调用：解析被邀请人绑定的邀请人（关系不存在、邀请人已删除（软删）或已封禁则静默跳过）、按邀请人用户组解析比例（全局默认 `commission_rate_percent` + 用户组覆盖 `group_rate_overrides`，非有限/负值归零、超过 100% 收敛到上限）、按触发窗口判定（默认注册后 12 个自然月，`0`=仅首充、`-1`=永久、上限 120 个月；`0` 按该被邀请人已记录事件计数实现），佣金 = 实付入账额度 × 比例（`decimal` 精度换算后走 `common.WalletQuotaFromDecimalStrict`，饱和时由公共转换记录审计并跳过事件、不阻塞支付），先按引用预检重放、`(ref_type, ref_id)` 唯一索引兜底并发（非重放错误让整个事务失败，保证「充值成功则事件必在」）；入口接线：`creditTopUpQuota`（epay/Stripe/Creem/Waffo/WaffoPancake/手工补单六条充值路径共用）与兑换码额度分支（`include_redemption_codes` 开关、默认关闭，对应 #5829 的争议；订阅码不参与）；设置新增 `setting/operation_setting/referral_setting.go`（`referral_setting` 注册进 `config.GlobalConfig`：`enabled`、`commission_rate_percent`、`group_rate_overrides`、`window_months`、`include_redemption_codes`、`cash_settlement_enabled`，引擎默认关闭、窗口默认 12 个月、现金结算默认关闭），`ValidateReferralOption` 接入 `model/option.go` 的 `validateOptionValue`（单键与批量更新同门）：比例 0–100、覆盖表为 group → 比例的 JSON 对象、窗口仅 `-1` 或 0–120、开启引擎或现金结算要求 `IsPaymentComplianceConfirmed`（运行时同样复核合规门）；单人覆盖与档位留待 RF-08、管理端面板留待 RF-07。测试：`model/referral_commission_test.go` 的 `TestReferralCommissionEngine`（SQLite/MySQL/PostgreSQL 真库矩阵：真实 `RechargeEpay` 路径记一笔且余额与账本恒等式不变、重复 webhook 不重复计佣、窗口 12/0/-1 行为、用户组覆盖与封顶/负值归零、主开关与合规门、兑换码开关与重复兑换、引用重放与唯一索引、无绑定/封禁/已删除邀请人不计佣）、`TestReferralCommissionOptionValidation`、`TestReferralCommissionWindowEnd`；`.github/workflows/ci.yml` 的 `database` job 过滤清单已加入 `TestReferralCommission`。无前端/i18n 变更（未新增用户可见文案）；无新依赖。
+
+## 13. DB-04 设计文档：PLAYGROUND_SQL_DSN 独立库、分区与冷会话归档（2026-10-18）
+
+> 范围：**仅设计文档，不改代码**。上游依据：`/workspace/newapi-rev-research/report.md` 第 3.5–3.7 节；本仓库现状以 main @ `99a0bd88` 的代码为准。参考项目（LobeHub / infinite-canvas）只参考交互与数据边界，本设计不复制其源码。拆库、分区改造与归档任务的实现都留给后续 Step，本文给出触发阈值、目标架构、跨库事务边界与迁移步骤，供届时直接执行。
+
+### 13.1 现状与前提
+
+数据面：15 张 `playground_*` 表全部由 `model/main.go` 的 `AutoMigrate` 建在主库（GORM 默认复数化命名，`PlaygroundUserUsage`/`PlaygroundUpload`/`PlaygroundCanvasSnapshot` 显式 `TableName` 固定为计划表名）：
+
+| 表 | 内容 | 关键约束 |
+| --- | --- | --- |
+| `playground_sessions` | 会话元数据、`message_revision` CAS、`deleted_at` 回收站、系统提示词与上下文配置 | `uk_playground_session_user_client(user_id, client_id)` |
+| `playground_messages` | 消息快照（稀疏 `position`，步长 1024；DB-01 起按 `(session_id, client_key)` 增量写） | `uk_playground_message_session_client(session_id, client_key)`、`idx_playground_message_session_position` |
+| `playground_presets` / `playground_snippets` | 助手预设、提示词片段 | owner 归属列索引 |
+| `playground_artifacts` / `playground_artifact_versions` | Artifact 与不可变版本；超过 64 KiB 的正文 DB-03 起 gzip 外置到 ObjectStore | `uk_pg_artifact_create(user_id, create_request_key)`、`uk_pg_artifact_number`、`uk_pg_artifact_request` |
+| `playground_attachments` | 附件元数据；ST-03 起字节在 ObjectStore，`data` 只作旧数据兼容读取 | `uk_playground_attachment_client(user_id, client_key_hash)` |
+| `playground_uploads` | 预签名直传预留（pending 数量与字节预算） | `uk_playground_upload_client(user_id, client_key_hash)` |
+| `playground_user_usage` | 账户级资源计数器（DB-02 的唯一串行点） | 主键 `user_id` |
+| `playground_canvas_projects` / `playground_canvas_snapshots` / `playground_canvas_assets` | 画布文档、快照历史（gzip 外置）、附件 pin | `uk_playground_canvas_client`、`idx_playground_canvas_snapshot_canvas` |
+| `playground_task_artifacts` / `playground_task_artifact_pins` / `playground_task_artifact_syncs` | 生成结果元数据、pin、投影完成标记 | `uk_playground_task_artifact(task_id, artifact_key)`、`uk_playground_task_artifact_pin` |
+
+三点前提已经就位，因此现在设计拆库是可行的：
+
+1. **写事务自包含**：DB-02 之后所有 Playground 资源写入只锁 `playground_user_usage` 行，不再锁 `users`，也不再跨表 `COUNT`/`SUM`；会话级联、回收站、画布 pin 全部在 Playground 表内完成。这正是 report.md 第 3.7 节要求的跨库事务前提。
+2. **字节与元数据分离**：ST-01/ST-03/ST-05/DB-03 之后，附件、生成结果、大 Artifact 版本与画布快照正文都在 ObjectStore，数据库只存元数据与索引，拆库不再搬 TB 级字节（第 9.2 节 1 万活跃用户约 270 GB 的附件估算已随 ST-03 移出数据库）。
+3. **库外引用都是只读或 saga**：Playground 代码对主库的交叉访问只有 `users.group`（配额策略解析）、`tasks`（并发计数、结果字节、投影、清理）与 `logs`（`LOG_DB`，只读费用查询）；`tasks` 相关流程本来就是「检查—提交—轮询—补偿」的状态机，不是单事务。
+
+### 13.2 触发阈值（何时才拆）
+
+以下阈值是经验估算（沿用 report.md 第 3.7 节），上线后按实际硬件校准；出现任一「规模信号」或任一「延迟信号」即进入评估，但仍受下方反触发约束：
+
+**规模信号**
+
+- 主库（含 `playground_*` 表）数据卷 ≥ 500 GB，或达到实例磁盘/备份窗口的 70%；
+- `playground_messages` ≥ 1 亿行或 ≥ 100 GB，且 13.5 的分区后仍无改善；
+- 1 万活跃用户的估算：消息约 63 GB（字节类数据已外置）——最先压垮单库的是消息与索引，不再是附件字节。
+
+**延迟信号**
+
+- Playground 写入拖累 relay 结算：结算请求 p95 相对基线上升 ≥ 30%，且 `SQL_SLOW_THRESHOLD_MS` 慢查询里 `playground_*` 占比 ≥ 50%；
+- 锁等待集中在 Playground 表（不是单账号的 `playground_user_usage` 行串行），或只读副本延迟被 Playground 写入拖累；
+- 备份/恢复窗口超过目标 RTO。
+
+**反触发**：主库 < 50 GB、瓶颈在对象存储或网络、尚未完成第 9.2 节的字节外置与增量写时，一律不拆（收益小于双库运维成本）。评估前先跑一次全量对账（`ReconcilePlaygroundUserUsage`）并确认漂移为 0，再进入迁移。
+
+### 13.3 `PLAYGROUND_SQL_DSN` 配置与表归属
+
+沿用 `LOG_SQL_DSN` 的既有模式（`model/main.go` 的 `chooseDB`/`InitLogDB`、`common/database.go` 的 `UsingLogDatabase`）：
+
+- 新增环境变量 `PLAYGROUND_SQL_DSN`：**未设置（默认）= 全部 Playground 表继续在主库，行为零变化**；设置后 = 独立库。
+- 引擎支持与主库一致：MySQL DSN、`postgres://`/`postgresql://` DSN、`local` 前缀的 SQLite 文件；**明确拒绝 ClickHouse**（沿用主库的报错风格：Playground 是事务型数据，不走 ClickHouse）。
+- 连接管理与连接池仿 `InitLogDB`：新增 `model.PLAYGROUND_DB`、`common.SetPlaygroundDatabaseType`/`UsingPlaygroundDatabase`（`common/database.go` 现有 `SetDatabaseTypes(main, log)` 扩展第三个类型），池参数沿用 `SQL_MAX_IDLE_CONNS`（默认 100）/`SQL_MAX_OPEN_CONNS`（默认 1000）/`SQL_MAX_LIFETIME`（默认 60s）；`main.go` 的 `InitResources` 在 `model.InitLogDB()` 之后增加 `model.InitPlaygroundDB()`。
+- **归属表**：13.1 表中的 15 张 `playground_*` 表全部迁入独立库。
+- **留在主库**：`users`（含 `group`）、`tasks`（relay/任务管线创建与轮询的行）、`tokens`、钱包/订阅/返利表、`options`、`system_tasks` 等；`logs` 继续由 `LOG_SQL_DSN` 决定（主库、独立 SQL 库或 ClickHouse）。
+- **代码路由规则**：`model/playground*.go` 与 `model/task_artifact.go` 中所有 Playground 表查询改走 `PLAYGROUND_DB`；`DB` 保持主库；`playground_task_artifacts.task_id`、`playground_canvas_*.user_id` 等对主库对象的引用是逻辑引用（无外键），跨库不影响读写。实现时提供包内辅助（如 `playgroundDB()` 返回初始化时确定的句柄），让现有单库测试可注入。
+- **启动与迁移**：master 在 `migrateDB()` 之外调用 `migratePlaygroundDB()`（对 15 张表 `AutoMigrate`，复用 `migratePlaygroundMessageUniqueness`、`migratePlaygroundAttachmentStorage`、`migratePlaygroundTrashColumns`、`migratePlaygroundUserUsageCounters` 等幂等迁移辅助）；非 master 只校验目标库关键表/列可读，不执行 DDL。
+- **部署一致性（必须解决）**：所有节点（master 与非 master）必须设置相同的 `PLAYGROUND_SQL_DSN`，混用会把同一账号的写入分裂到两个库。实现时必须加入启动守卫：
+  - 主库与 Playground 库各写一张位置标记行（如 `playground_schema_placement(singleton_id, placement, schema_version, updated_at)`，主库 `placement=main`、独立库 `placement=dedicated`）；
+  - 启动时校验配置与主库标记一致：配置了独立 DSN 但主库仍标记 `placement=main`（或相反）→ **拒绝启动**并给出修复命令（fail-closed）；
+  - 滚动升级顺序：先发布能识别标记的版本（默认单库并写标记），再统一打开 DSN 并重启；回滚见 13.6。
+- **运维影响**：两库分别备份、分别监控容量与慢查询；跨库一致性不依赖跨库快照，而依赖「资源行 + DB-02 每日对账修复」。
+
+### 13.4 跨库事务边界
+
+**总原则**
+
+1. 单个数据库事务**绝不跨库**；跨库流程一律拆成「主事务 + 幂等补偿/状态机」（saga），每一步可重试且幂等。
+2. 资源归属与账户配额全部在 Playground 库内原子（`playground_user_usage` 行锁串行）；计费、钱包、任务行永远在主库，Playground 绝不与钱包同事务。
+3. 跨库读只读且允许短暂不一致；接口语义按现状容忍（任务状态本来就是轮询）。
+4. 任何补偿失败都留下可重试记录并告警，绝不静默丢数据。
+
+**逐项边界清单（现状 → 拆库后）**
+
+| 流程 | 现状 | 拆库后的处理 |
+| --- | --- | --- |
+| 配额策略解析 `playgroundPolicyForGroup(tx, userID)` | 在 Playground 事务内读 `users.group` | 改为「事务前用主库解析策略，事务内不再读 `users`」；组变更即时生效的语义不变（配额是账户级硬上限，写入以解析结果为准）。可选按 `user_id` 缓存 30–60 秒 |
+| 任务并发 `CountActivePlaygroundTasks`、结果字节 `PlaygroundTaskResultStorageBytes` | 读主库 `tasks` | 保持只读主库、事务外检查（现状即非事务内）；429 仍是「提交前尽力检查」，跨库不改变 |
+| 任务产物投影 `StorePendingPlaygroundTaskArtifacts` | 主库任务行 → 同库产物记录（pending→stored）→ sync 标记 | 已是状态机：先 `EnsurePlaygroundTaskArtifacts`（Playground 库）、再写对象、最后 `MarkPlaygroundTaskArtifactsSynced`；拆库后保持该顺序，失败由每轮任务重试 |
+| 任务过期清理 `DeleteExpiredPlaygroundTasks` | 主库删 `tasks` + 同函数删除 sync 标记 | 顺序固化为：① 从 Playground 库只读 pin 集合（删除前复核）→ ② 主库 CAS 删除 `tasks` → ③ Playground 库删除 sync 标记；③ 失败可重试，且下一轮 `ListPlaygroundTasksMissingArtifactSync` 发现任务行消失会走 `expireTaskArtifactsOfMissingTask` 关闭 pending 记录，不丢数据；pin 与删除之间的竞态容忍「pin 未生效时结果进入可见的 expired」，绝不静默删除 |
+| 取消任务 `CancelPlaygroundTask` + `RefundTaskQuota` | 全在主库 | 不变（tasks 与钱包都在主库） |
+| 会话/画布级联、回收站清理、附件孤儿清理、上传预留回收 | 全在 Playground 表 | 不变（同库事务）；对象存储删除仍在数据库提交后执行（既有规则） |
+| 费用查询 `GetUserConsumeLogsByRequestIds` | 读 `LOG_DB`（可能独立库/ClickHouse） | 只读，不变；三库拓扑下仍是单库查询 + 内存合并 |
+| 用量视图 `PlaygroundUsageForUser` | 主库策略 + 计数器 + `tasks` | 两次查询（主库 group/tasks、Playground 计数器）在内存合并；不做跨库 JOIN |
+| 钱包欠款只读门禁 `enforcePlaygroundWalletWritable` | 读主库 `ResolveWalletDebtStatus` | 只读检查、事务外，不变 |
+
+**可观测性**：每个跨库 saga 步骤写结构化日志（任务 ID、用户 ID、步骤、重试次数），系统任务报告失败计数；补偿连续失败的记录保留待重试，绝不自动删除。
+
+### 13.5 PG / MySQL 分区设计
+
+分区只对承载 `playground_*` 表的 MySQL / PostgreSQL 有意义；SQLite 不支持分区，且其部署规模远低于 13.2 阈值（保持单文件 + WAL 即可）。
+
+**目标表（按增长排序）**：`playground_messages`（最大）、`playground_artifact_versions`、`playground_attachments`、`playground_canvas_snapshots`；`playground_sessions` 等小表不分区。
+
+**通用约束（两种数据库一致）**：分区列必须出现在每个唯一索引中，因此：
+
+- `playground_messages` 按 `user_id` HASH 分区时，`uk_playground_message_session_client` 扩为 `(user_id, session_id, client_key)`（`session_id` 本身全局唯一，唯一性语义不变；所有读写都带 `user_id = ?`，可分区裁剪）；
+- `playground_attachments` 的 `uk_playground_attachment_client(user_id, client_key_hash)` 已含 `user_id`，可直接分区；
+- `playground_artifact_versions` 的 `uk_pg_artifact_number`/`uk_pg_artifact_request` 需与 owner 关联（版本表加 `user_id` 冗余列，或先只对 `playground_messages` 一张表分区）。
+
+**PostgreSQL（16）**：声明式分区 `PARTITION BY HASH (user_id)`，推荐 32 个分区；唯一索引随分区表重建并包含 `user_id`；`AutoMigrate` 不理解分区，迁移脚本在 `AutoMigrate` 之后执行并保持幂等；在线迁移用 `ATTACH/DETACH PARTITION`（PG 14+ 支持 `DETACH ... CONCURRENTLY`），回填见 13.6。
+
+**MySQL（5.7.8+/8.0）**：InnoDB `PARTITION BY HASH(user_id) PARTITIONS 32`；两个硬限制必须接受：分区表**不支持外键**（当前模型无外键，可接受）、所有唯一键必须包含分区列（同上调整）；分区数固定，扩容需 `ALTER TABLE ... REORGANIZE PARTITION`（离线、有成本，初始一次取 32）；不使用按时间 RANGE + 自动滚动（MySQL 无可靠内置 job，`event_scheduler` 不宜依赖）。
+
+**分区迁移步骤（可独立于拆库执行）**：
+
+1. 新建分区表（`_partitioned` 后缀），含调整后的唯一索引；
+2. 按 `user_id` 分块回填（`INSERT ... SELECT` 幂等，主键冲突跳过），记录每块水位；
+3. 校验：行数、每用户计数器（用 `ReconcilePlaygroundUserUsage` 重算比对）、抽样 `content_hash`（外置正文按解码后比对）；
+4. 原子切换：PostgreSQL 单事务 `ALTER TABLE ... RENAME`；MySQL `RENAME TABLE old TO backup, new TO old`（原子多表重命名）；
+5. 保留旧表一个发布周期，确认无需回滚后再另行删除（不自动删）。
+
+### 13.6 迁移步骤（主库 → `PLAYGROUND_SQL_DSN`）
+
+前置门禁（Gate 0）：所有节点运行能识别位置标记的版本；`ReconcilePlaygroundUserUsage` 漂移为 0；主库全量备份完成；维护窗口与回滚预案确认。
+
+1. **准备目标库**：创建空库（与主库同引擎、推荐同版本），master 执行 `migratePlaygroundDB()` 建 15 张表与索引，写入 `placement=dedicated` 标记；主库写入 `placement=main` 标记。
+2. **冻结与复制**：进入短暂只读窗口（或按表分批复制、逐表校验）；表之间无外键，任意顺序都可；带唯一索引的表用 `INSERT ... ON CONFLICT DO NOTHING`（PostgreSQL）/`INSERT IGNORE`（MySQL）按主键幂等复制；先大表后小表，`playground_user_usage` 最后复制并在目标库重算校验。
+3. **校验**：行数、每用户计数器、索引与唯一约束存在性、抽样哈希；确认目标库不缺任何 `playground_*` 表。
+4. **切换**：全部节点设置相同的 `PLAYGROUND_SQL_DSN` 并统一重启；启动守卫校验位置标记后放行；观察一周（慢查询、错误率、对账任务）。
+5. **回滚**：切换前**不删除**主库旧表；回滚 = 停写 → 把目标库增量按主键 upsert 回主库（按 `updated_at`/`deleted_at` 取较新者）→ 清空 `PLAYGROUND_SQL_DSN` 统一重启 → 重算计数器。主库旧表至少保留一个发布周期。
+6. **清理**：稳定运行一个发布周期后人工确认，再删除主库旧表并移除兼容分支；删除提供脚本与二次确认，**绝不静默删除用户数据**。
+
+**三库验证要求**（实现该 Step 时）：SQLite（两个 `local` 文件）、MySQL、PostgreSQL 均需覆盖「迁移执行两次幂等、复制与对账一致、启动守卫拒绝不一致配置、跨库 saga 重试」的矩阵测试，并入 CI 的真实数据库 job；本地不跑测试的会话只做静态核对。
+
+### 13.7 冷会话归档
+
+**目标**：长时间不活跃的会话，把消息体打包到 ObjectStore，数据库只留摘要与归档引用；附件字节本来就在 ObjectStore，Artifact、画布与任务结果有独立生命周期与 pin，**不参与消息归档**。
+
+**触发条件（可配置、按用户组覆盖）**：活跃态（非回收站）且存在消息、`updated_at` 早于 `session_archive_after_days`（默认 180 天）、消息行数或总字节超过下限（如 ≥ 500 行或 ≥ 256 KiB，避免归档小会话增加管理成本）；每轮任务有界（每批 N 个会话）。
+
+**归档物与库内记录**
+
+- 对象：`pg/{user_id}/archive/{yyyy}/{mm}/{session_id}.json.gz`，版本化信封 `{version, session_id, user_id, archived_at, message_count, messages:[...], digest}`（消息为 DB-01 的原始快照，含 `client_key`/`position`/`payload`）；
+- 库内新增 `playground_session_archives`（`session_id` 主键、`user_id` 索引、`object_key`、`message_count`、`byte_size`、`content_hash`、`state`（`writing`/`done`/`restoring`）、`created_at`、`restored_at`），不改动 `playground_sessions` 的既有语义；
+- `playground_user_usage` 新增 `ArchiveCount`/`ArchiveBytes` 计数器与配额字段 `session_archive_user_max_bytes`；归档字节计入账户存储预算（BL-02 计量制的输入之一），**绝不因此产生钱包扣费**（除非管理员显式开启 9.3 的存储计量）。
+
+**归档流程（严格顺序，失败可重试、绝不丢数据）**
+
+1. 候选选择与抢占：事务内锁会话行并写入归档记录 `state=writing`，消息写路径与打开路径在渲染/CAS 前检查该状态（阻止并发编辑与打开）；
+2. 读消息、序列化 gzip、写对象；
+3. 读回对象校验 sha256；
+4. 同一事务内：写 `content_hash`/`byte_size`、删除消息行、`refreshPlaygroundUserUsage` 重算计数器、`state=done`；
+5. 任何一步失败都保留原消息行（第 4 步之前）或保留归档对象供重试（第 4 步失败），下一轮继续。
+
+**读取与还原**
+
+- 列表/搜索只读数据库（归档会话正常展示并带归档标记）；打开归档会话按需还原：读对象 → 校验 hash → 单事务内按原 `position` 重建消息行、删除归档记录、保持 `message_revision` CAS 语义 → 才接受新写入；还原失败返回稳定错误码，绝不半还原；
+- 导出（CH-04）对归档会话可直接流式解包，不必先还原；回收站中的会话不参与归档，会话 purge 时同步删除对应归档对象；
+- 配额缩小不阻塞还原：既有数据始终可读可还原（第 5 节质量要求），新写入按当前策略校验。
+
+**调度**：新增系统任务 `playground_session_archive`（低频，例如每天一轮、每批 200）；对象存储不可用时跳过本轮；归档对象删除复用会话 purge 的对象删除路径。
+
+### 13.8 风险、非目标与后续落地清单
+
+**风险与开放问题**
+
+- 两库版本漂移与备份一致性；迁移窗口时长依赖实际数据量（需先量一遍大表体积）；
+- 位置标记误判会让启动被拒绝（fail-closed 是刻意设计，错误信息必须给出修复命令）；
+- `users.group` 事务外解析的 TOCTOU 是既有语义的延续（配额是硬上限、组变更是低频操作），如需更严可加短 TTL 缓存；
+- `tasks` 与产物投影的跨库竞态按 13.4 选定方案执行（删除前复核 pin + 幂等重试 + 可见降级）；
+- MySQL 分区扩容（`REORGANIZE PARTITION`）与归档还原延迟对体验的影响，需要在实现时补监控指标。
+
+**非目标（明确不做）**：跨库分布式事务（2PC/XA）、自动 sharding、把 `tasks`/钱包搬出主库、把 `logs` 合回主库；归档对象沿用 ObjectStore 既有的访问控制与加密，不做额外格式承诺。
+
+**后续实现清单（下一个 Step 若启动）**：`common/database.go` 增加 `SetPlaygroundDatabaseType`/`UsingPlaygroundDatabase`；model 层新增 `PLAYGROUND_DB` 与 `playgroundDB()` 路由；`InitPlaygroundDB`/`migratePlaygroundDB` 与位置标记守卫；`model/playground*.go` 全部查询改句柄、策略解析移出事务；跨库 saga 顺序按 13.4 固化并补幂等测试；归档表/任务/还原路径按 13.7 实现；CI 三库矩阵覆盖迁移、复制、守卫与归档往返。
 
 ## 8. 变更记录
 
