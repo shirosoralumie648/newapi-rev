@@ -601,11 +601,13 @@ func lastPDFTextMatrixPosition(operands []pdfTextOperand) (float64, float64, boo
 }
 
 // parsePDFLiteralString reads one `(...)` string with its escapes, nested
-// parentheses and a trailing backslash.
+// parentheses and a trailing backslash. The opening parenthesis is consumed by
+// the caller's scan position, so the loop starts after it and a parenthesis
+// seen at depth zero closes the string.
 func parsePDFLiteralString(content []byte, start int) (string, int) {
 	var builder strings.Builder
 	depth := 0
-	position := start
+	position := start + 1
 	for position < len(content) {
 		current := content[position]
 		if current == '\\' {
