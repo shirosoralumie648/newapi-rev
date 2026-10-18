@@ -154,7 +154,7 @@ test('a group override can grant a larger object storage entitlement', async () 
   const user = userEvent.setup()
   renderSection(
     { object_user_max_bytes: 1024 },
-    { pro: { session_max_count: 5 } }
+    { pro: { session_max_count: 5, object_user_max_bytes: 1024 } }
   )
 
   const storage = screen.getAllByRole('spinbutton', {
