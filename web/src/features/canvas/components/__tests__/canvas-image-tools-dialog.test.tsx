@@ -95,7 +95,9 @@ function renderDialog(overrides: Partial<CanvasImageToolsDialogProps> = {}) {
       {...overrides}
     />
   )
-  const image = view.container.querySelector('img')
+  // The dialog is portaled to the document, so the preview is queried from the
+  // base element rather than the render container.
+  const image = view.baseElement.querySelector('img')
   const surface = image?.parentElement ?? null
   return { ...view, image, surface, onClose, onCrop, onRedraw, onUpscale }
 }
