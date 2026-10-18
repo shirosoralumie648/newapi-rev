@@ -48,7 +48,10 @@ vi.mock('@/features/playground/hooks/use-stream-request', () => ({
 
 const sendStreamRequest =
   vi.fn<
-    (payload: ChatCompletionRequest, callbacks: StreamRequestCallbacks) => void
+    (
+      payload: ChatCompletionRequest,
+      callbacks: StreamRequestCallbacks
+    ) => Promise<void> | undefined
   >()
 const stopStream = vi.fn<() => void>()
 
