@@ -23,7 +23,7 @@ import { StaticDataTable } from '@/components/data-table'
 import { EmptyState } from '@/components/empty-state'
 import { IconBadge } from '@/components/ui/icon-badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { formatQuota, formatTimestampToDate } from '@/lib/format'
+import { formatNumber, formatQuota, formatTimestampToDate } from '@/lib/format'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -223,7 +223,7 @@ function AdminTotals(props: {
       header: t('Accounts'),
       className: 'text-right',
       cellClassName: 'text-right',
-      cell: (entry: CreditGrantSourceStats) => entry.accounts.toLocaleString(),
+      cell: (entry: CreditGrantSourceStats) => formatNumber(entry.accounts),
     },
   ]
 

@@ -1023,32 +1023,11 @@ export const STATIC_I18N_KEYS = [
   'Chargeback',
   'Storage Fee',
   'Credit Grant Expired',
-  // Credit grant sources and the wallet bucket view: the source labels are
-  // rendered from CREDIT_GRANT_SOURCE_LABELS via t(label), so the literal scan
-  // cannot see them.
+  // Credit grant source labels render through t(label) from
+  // CREDIT_GRANT_SOURCE_LABELS, so the literal scan cannot see them.
   'Gift',
   'Invite',
   'Promo',
-  'Credit grants',
-  'Paid balance',
-  'Granted credit',
-  'Expired credit',
-  'Grant source',
-  'Remaining',
-  'Total top-up',
-  'Total granted',
-  'Total spent',
-  'Total consumed',
-  'Total refunded',
-  'Total expired',
-  'Accounts',
-  'Wallet totals',
-  'No credit grants',
-  'Credit grant validity',
-  'Default validity (days)',
-  'Per-source validity (days)',
-  'Validity (days)',
-  'Save credit grant validity',
   // Canvas workflow run messages: the run reports these keys from constants,
   // so the literal scan cannot see them.
   'The canvas is full; the run could not add a result node.',
