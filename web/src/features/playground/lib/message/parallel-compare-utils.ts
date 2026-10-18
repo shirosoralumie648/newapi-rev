@@ -29,6 +29,7 @@ import type {
   ChatCompletionResponse,
   Message,
   MessageAttachment,
+  MessageStatus,
   MessageUsage,
   MessageVersion,
 } from '../../types'
@@ -42,7 +43,9 @@ type ChatCompletionChoice = ChatCompletionResponse['choices'][number]
  * Whether the message is the group one parallel comparison produced. Only the
  * assistant path stores it; user and system messages never compare models.
  */
-export function isParallelMessage(message: Message | undefined): boolean {
+export function isParallelMessage(
+  message: Message | undefined
+): message is Message {
   return message?.from === MESSAGE_ROLES.ASSISTANT && message.parallel === true
 }
 
