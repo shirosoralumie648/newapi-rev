@@ -21,6 +21,7 @@ import { safeJsonParse } from '../utils/json-parser'
 // These keys must mirror the JSON tags of playground_setting.PlaygroundQuotaPolicy.
 export const PLAYGROUND_QUOTA_FIELD_KEYS = [
   'session_max_count',
+  'trash_retention_days',
   'preset_user_max_count',
   'system_prompt_max_bytes',
   'snippet_user_max_count',
@@ -83,6 +84,7 @@ export const PLAYGROUND_QUOTA_GROUPS = [
   { id: 'attachments', labelKey: 'Attachments' },
   { id: 'artifacts', labelKey: 'Artifacts' },
   { id: 'canvas', labelKey: 'Canvas' },
+  { id: 'trash', labelKey: 'Trash' },
   { id: 'storage', labelKey: 'Storage' },
   { id: 'tasks', labelKey: 'Tasks' },
 ] as const
@@ -279,6 +281,11 @@ export const PLAYGROUND_QUOTA_FIELDS: readonly PlaygroundQuotaField[] = [
     group: 'canvas',
     labelKey: 'Canvas history storage per user',
     bytes: true,
+  },
+  {
+    key: 'trash_retention_days',
+    group: 'trash',
+    labelKey: 'Trash retention in days',
   },
   {
     key: 'object_user_max_bytes',

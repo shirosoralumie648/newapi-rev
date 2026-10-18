@@ -175,6 +175,20 @@ export async function deleteCanvasProject(
   requireServerSuccess(response.data)
 }
 
+/** Restores a canvas the account previously moved to the trash. */
+export async function restoreCanvasProject(
+  projectId: string,
+  signal?: AbortSignal
+): Promise<CanvasServerProject> {
+  const response = await api.post(
+    `${CANVAS_ENDPOINT}/${encodeURIComponent(projectId)}/restore`,
+    undefined,
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  return mapCanvasProject(response.data.data)
+}
+
 /**
  * The canvas history, newest first. The server stores snapshot bodies in the
  * object store and answers with metadata only, so the list never carries a

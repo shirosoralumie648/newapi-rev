@@ -23,6 +23,7 @@ import { toast } from 'sonner'
 
 import { ErrorState } from '@/components/error-state'
 import { Button } from '@/components/ui/button'
+import { restoreCanvasProject } from '@/features/canvas/api'
 import { CanvasSendDialog } from '@/features/canvas/components/canvas-send-dialog'
 import {
   buildArtifactCanvasSeeds,
@@ -50,6 +51,7 @@ import { PlaygroundInput } from './components/input/playground-input'
 import { PlaygroundCanvasPanel } from './components/workspace/playground-canvas-panel'
 import { PlaygroundPresetPanel } from './components/workspace/playground-preset-panel'
 import { PlaygroundSessionUsage } from './components/workspace/playground-session-usage'
+import { PlaygroundTrashPanel } from './components/workspace/playground-trash-panel'
 import { PlaygroundUsagePopover } from './components/workspace/playground-usage-popover'
 import {
   PlaygroundWorkspace,
@@ -120,8 +122,10 @@ function PlaygroundContent(props: {
   const [canvasOpen, setCanvasOpen] = useState(false)
   const [generationOpen, setGenerationOpen] = useState(false)
   const [canvasProjectId, setCanvasProjectId] = useState<string | null>(null)
+  const [canvasRefreshSignal, setCanvasRefreshSignal] = useState(0)
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [presetsOpen, setPresetsOpen] = useState(false)
+  const [trashOpen, setTrashOpen] = useState(false)
   const [pendingLibraryFiles, setPendingLibraryFiles] = useState<File[]>([])
   const [pendingLibraryText, setPendingLibraryText] = useState<string | null>(
     null
@@ -213,6 +217,7 @@ function PlaygroundContent(props: {
   // the autosave waits for it exactly like it waits for a streamed reply.
   const sync = usePlaygroundServer(local, isGenerating || isComparing)
   const deleteSession = sync.deleteSession
+  const restoreSession = sync.restoreSession
   const activeSession = sessions.find(
     (session) => session.id === activeSessionId
   )
@@ -408,6 +413,9 @@ function PlaygroundContent(props: {
   const handleDeleteSession = useCallback(
     (sessionId: string) => {
       if (sync.isLoading) return
+      const trashed = sessions.some(
+        (session) => session.id === sessionId && session.server != null
+      )
       handleWorkspaceTransition(() => {
         if (sessionId === activeSessionId) {
           stopBeforeSessionChange()
@@ -415,15 +423,18 @@ function PlaygroundContent(props: {
           setArtifactSource(null)
         }
         deleteSession(sessionId)
+        if (trashed) toast.success(t('Conversation moved to the trash'))
       })
     },
     [
       activeSessionId,
       deleteSession,
+      sessions,
       sync.isLoading,
       stopBeforeSessionChange,
       handleEditOpenChange,
       handleWorkspaceTransition,
+      t,
     ]
   )
 
@@ -555,6 +566,7 @@ function PlaygroundContent(props: {
   else if (generationOpen) inspectorView = 'generate'
   else if (libraryOpen) inspectorView = 'library'
   else if (presetsOpen) inspectorView = 'presets'
+  else if (trashOpen) inspectorView = 'trash'
 
   const openCanvasInspector = useCallback(
     (projectId: string | null) => {
@@ -563,6 +575,7 @@ function PlaygroundContent(props: {
         setGenerationOpen(false)
         setLibraryOpen(false)
         setPresetsOpen(false)
+        setTrashOpen(false)
         setCanvasProjectId(projectId)
         setCanvasOpen(true)
       }
@@ -586,6 +599,7 @@ function PlaygroundContent(props: {
         setGenerationOpen(false)
         setLibraryOpen(false)
         setPresetsOpen(false)
+        setTrashOpen(false)
         artifactController.store.getState().setOpen(true)
         return
       }
@@ -608,6 +622,7 @@ function PlaygroundContent(props: {
           setCanvasOpen(false)
           setGenerationOpen(false)
           setPresetsOpen(false)
+          setTrashOpen(false)
           setLibraryOpen(true)
         }
         if (artifactController.state.dirty) {
@@ -627,6 +642,7 @@ function PlaygroundContent(props: {
           setCanvasOpen(false)
           setGenerationOpen(false)
           setLibraryOpen(false)
+          setTrashOpen(false)
           setPresetsOpen(true)
         }
         if (artifactController.state.dirty) {
@@ -634,6 +650,26 @@ function PlaygroundContent(props: {
           return
         }
         openPresets()
+        return
+      }
+      if (view === 'trash') {
+        if (trashOpen) {
+          setTrashOpen(false)
+          return
+        }
+        const openTrash = () => {
+          artifactController.store.getState().setOpen(false)
+          setCanvasOpen(false)
+          setGenerationOpen(false)
+          setLibraryOpen(false)
+          setPresetsOpen(false)
+          setTrashOpen(true)
+        }
+        if (artifactController.state.dirty) {
+          artifactController.store.getState().requestDiscard(openTrash)
+          return
+        }
+        openTrash()
         return
       }
       if (generationOpen) {
@@ -645,6 +681,7 @@ function PlaygroundContent(props: {
         setCanvasOpen(false)
         setLibraryOpen(false)
         setPresetsOpen(false)
+        setTrashOpen(false)
         setGenerationOpen(true)
       }
       if (artifactController.state.dirty) {
@@ -664,6 +701,7 @@ function PlaygroundContent(props: {
       libraryOpen,
       openCanvasInspector,
       presetsOpen,
+      trashOpen,
     ]
   )
 
@@ -684,6 +722,10 @@ function PlaygroundContent(props: {
       setPresetsOpen(false)
       return
     }
+    if (trashOpen) {
+      setTrashOpen(false)
+      return
+    }
     setLibraryOpen(false)
   }, [
     artifactController.state.isOpen,
@@ -691,12 +733,25 @@ function PlaygroundContent(props: {
     closeArtifactPanel,
     generationOpen,
     presetsOpen,
+    trashOpen,
   ])
 
   const handleOpenPresets = useCallback(
     () => handleToggleInspector('presets'),
     [handleToggleInspector]
   )
+
+  const handleOpenTrash = useCallback(
+    () => handleToggleInspector('trash'),
+    [handleToggleInspector]
+  )
+
+  // Restoring a trashed canvas remounts the canvas preview against the freshly
+  // restored project; the trash panel already removed the row.
+  const handleRestoreTrashedCanvas = useCallback(async (projectId: string) => {
+    await restoreCanvasProject(projectId)
+    setCanvasRefreshSignal((value) => value + 1)
+  }, [])
 
   const handleOpenCanvasProject = useCallback(
     (projectId: string) => {
@@ -848,6 +903,7 @@ function PlaygroundContent(props: {
         onCreate={handleCreateSession}
         onDelete={handleDeleteSession}
         onOpenPresets={handleOpenPresets}
+        onOpenTrash={handleOpenTrash}
         onRename={renameSession}
         disabled={sync.isLoading}
         onSwitch={handleSwitchSession}
@@ -869,6 +925,7 @@ function PlaygroundContent(props: {
             <PlaygroundCanvasPanel
               activeProjectId={canvasProjectId}
               onOpenProject={handleOpenCanvasProject}
+              refreshSignal={canvasRefreshSignal}
             />
           ) : inspectorView === 'generate' ? (
             <PlaygroundGenerationPanel
@@ -898,6 +955,11 @@ function PlaygroundContent(props: {
               models={models}
               onApplyPreset={handleApplyPreset}
               onCreateSession={handleCreateSessionWithPreset}
+            />
+          ) : inspectorView === 'trash' ? (
+            <PlaygroundTrashPanel
+              onRestoreCanvas={handleRestoreTrashedCanvas}
+              onRestoreSession={restoreSession}
             />
           ) : canonicalSessionId ? (
             <PlaygroundArtifactPanel

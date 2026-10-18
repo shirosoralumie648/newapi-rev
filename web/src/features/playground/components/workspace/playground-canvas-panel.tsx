@@ -39,6 +39,8 @@ interface PlaygroundCanvasPanelProps {
   /** Project to focus, e.g. the canvas a message was just sent to. */
   activeProjectId: string | null
   onOpenProject: (projectId: string) => void
+  /** Bump to re-read the list, e.g. after restoring a canvas from the trash. */
+  refreshSignal?: number
 }
 
 type LoadStatus = 'loading' | 'ready' | 'error'
@@ -50,10 +52,7 @@ function toError(value: unknown): Error {
 function nodePreviewText(node: CanvasFlowNode): string {
   const data = node.data
   return (
-    data.text?.trim() ||
-    data.snapshot?.text?.trim() ||
-    data.label?.trim() ||
-    ''
+    data.text?.trim() || data.snapshot?.text?.trim() || data.label?.trim() || ''
   )
 }
 
@@ -98,7 +97,7 @@ export function PlaygroundCanvasPanel(props: PlaygroundCanvasPanelProps) {
     return () => {
       active = false
     }
-  }, [refreshKey])
+  }, [refreshKey, props.refreshSignal])
 
   useEffect(() => {
     if (props.activeProjectId) setSelectedId(props.activeProjectId)
@@ -127,7 +126,7 @@ export function PlaygroundCanvasPanel(props: PlaygroundCanvasPanelProps) {
     return () => {
       active = false
     }
-  }, [selectedId, refreshKey])
+  }, [selectedId, refreshKey, props.refreshSignal])
 
   const nodes: CanvasFlowNode[] = preview
     ? fromServerDocument(preview.document).nodes
@@ -168,9 +167,7 @@ export function PlaygroundCanvasPanel(props: PlaygroundCanvasPanelProps) {
               )}
               {projects.map((project) => (
                 <Button
-                  aria-current={
-                    project.id === selectedId ? 'true' : undefined
-                  }
+                  aria-current={project.id === selectedId ? 'true' : undefined}
                   className='h-auto min-w-0 justify-start px-2 py-2 text-left'
                   key={project.id}
                   onClick={() => setSelectedId(project.id)}
@@ -213,10 +210,7 @@ export function PlaygroundCanvasPanel(props: PlaygroundCanvasPanelProps) {
                 <ScrollArea className='min-h-0 flex-1'>
                   <ul className='grid gap-2 pr-2'>
                     {nodes.map((node) => (
-                      <li
-                        className='rounded-md border p-2'
-                        key={node.id}
-                      >
+                      <li className='rounded-md border p-2' key={node.id}>
                         <p className='text-xs font-medium'>
                           {t(CANVAS_NODE_KIND_LABELS[node.data.kind])}
                         </p>

@@ -47,8 +47,11 @@ import type {
   PlaygroundConfig,
   PlaygroundContextSettings,
   PlaygroundContextSummary,
+  PlaygroundExportFormat,
   PlaygroundMessageCost,
   PlaygroundServerSession,
+  PlaygroundSessionExport,
+  PlaygroundTrashListing,
   PromptSnippet,
 } from './types'
 
@@ -438,6 +441,87 @@ export async function deletePlaygroundSession(
     { signal }
   )
   requireServerSuccess(response.data)
+}
+
+/**
+ * One conversation export rendered by the host: Markdown or JSON with
+ * attachment references instead of attachment bodies. A trashed conversation
+ * can be exported before it is restored or purged.
+ */
+export async function exportPlaygroundSession(
+  sessionId: string,
+  format: PlaygroundExportFormat,
+  signal?: AbortSignal
+): Promise<PlaygroundSessionExport> {
+  const response = await api.get(
+    `${API_ENDPOINTS.PLAYGROUND_SESSIONS}/${encodeURIComponent(sessionId)}/export`,
+    { params: { format }, signal }
+  )
+  requireServerSuccess(response.data)
+  const data = z
+    .object({
+      format: z.enum(['markdown', 'json']),
+      filename: z.string().min(1),
+      content_type: z.string().min(1),
+      content: z.string(),
+    })
+    .parse(response.data.data)
+  return {
+    format: data.format,
+    filename: data.filename,
+    contentType: data.content_type,
+    content: data.content,
+  }
+}
+
+const playgroundTrashItemSchema = z.object({
+  kind: z.enum(['session', 'canvas']),
+  id: z.string().min(1),
+  title: z.string(),
+  deleted_at: z.number().int().nonnegative(),
+  purge_at: z.number().int().nonnegative(),
+})
+
+/**
+ * The account's trash: every trashed conversation and canvas plus the owner's
+ * effective retention window. Trashed rows still count against the resource
+ * quotas until the retention sweep purges them.
+ */
+export async function getPlaygroundTrash(
+  signal?: AbortSignal
+): Promise<PlaygroundTrashListing> {
+  const response = await api.get(API_ENDPOINTS.PLAYGROUND_TRASH, { signal })
+  requireServerSuccess(response.data)
+  const data = z
+    .object({
+      retention_days: z.number().int().positive(),
+      items: z.array(playgroundTrashItemSchema),
+    })
+    .parse(response.data.data)
+  return {
+    retentionDays: data.retention_days,
+    items: data.items.map((item) => ({
+      kind: item.kind,
+      id: item.id,
+      title: item.title,
+      deletedAt: item.deleted_at * 1000,
+      purgeAt: item.purge_at * 1000,
+    })),
+  }
+}
+
+/** Restores a trashed conversation and answers its refreshed server row. */
+export async function restorePlaygroundSession(
+  sessionId: string,
+  signal?: AbortSignal
+): Promise<PlaygroundServerSession> {
+  const response = await api.post(
+    `${API_ENDPOINTS.PLAYGROUND_SESSIONS}/${encodeURIComponent(sessionId)}/restore`,
+    undefined,
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  return mapServerSession(response.data.data)
 }
 
 function mapMessageSnapshot(

@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Bot, Plus, Search } from 'lucide-react'
+import { Bot, Plus, Search, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -36,6 +36,7 @@ interface PlaygroundSessionListProps {
   onSwitch: (sessionId: string) => void
   onRename: (sessionId: string, title: string) => void
   onDelete: (sessionId: string) => void
+  onOpenTrash?: () => void
   onAction?: () => void
   onOpenPresets?: () => void
 }
@@ -63,6 +64,11 @@ export function PlaygroundSessionList(props: PlaygroundSessionListProps) {
     setSessionToDelete(null)
     props.onAction?.()
   }
+
+  // A persisted conversation moves to the server-side trash, where it stays
+  // recoverable until the retention window ends; a local-only draft is removed
+  // from this browser for good.
+  const trashing = sessionToDelete?.server != null
 
   return (
     <div className='flex min-h-0 flex-1 flex-col gap-3'>
@@ -118,6 +124,22 @@ export function PlaygroundSessionList(props: PlaygroundSessionListProps) {
         </div>
       </ScrollArea>
 
+      {props.onOpenTrash && (
+        <Button
+          className='w-full justify-start'
+          onClick={() => {
+            props.onOpenTrash?.()
+            props.onAction?.()
+          }}
+          size='sm'
+          type='button'
+          variant='outline'
+        >
+          <Trash2 aria-hidden='true' />
+          {t('Trash')}
+        </Button>
+      )}
+
       {props.onOpenPresets && (
         <Button
           className='w-full justify-start'
@@ -135,17 +157,25 @@ export function PlaygroundSessionList(props: PlaygroundSessionListProps) {
       )}
 
       <ConfirmDialog
-        confirmText={t('Delete')}
-        desc={t(
-          'This conversation will be deleted from your account and this browser.'
-        )}
+        confirmText={t(trashing ? 'Move to trash' : 'Delete')}
+        desc={
+          trashing
+            ? t(
+                'The conversation moves to the trash and can be restored until the retention period ends.'
+              )
+            : t(
+                'This conversation will be deleted from your account and this browser.'
+              )
+        }
         destructive
         handleConfirm={handleDelete}
         onOpenChange={(open) => {
           if (!open) setSessionToDelete(null)
         }}
         open={sessionToDelete !== null}
-        title={t('Delete conversation?')}
+        title={t(
+          trashing ? 'Move conversation to trash?' : 'Delete conversation?'
+        )}
       />
     </div>
   )

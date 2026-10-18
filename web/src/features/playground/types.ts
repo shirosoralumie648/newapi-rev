@@ -247,6 +247,38 @@ export interface PlaygroundServerSession extends Omit<
   messageRevision: number
 }
 
+/** File format of a conversation export rendered by the host. */
+export type PlaygroundExportFormat = 'markdown' | 'json'
+
+/** One conversation export file: body, media type and suggested filename. */
+export interface PlaygroundSessionExport {
+  format: PlaygroundExportFormat
+  filename: string
+  contentType: string
+  content: string
+}
+
+/** The kind of resource a trash entry points to. */
+export type PlaygroundTrashItemKind = 'session' | 'canvas'
+
+/** One trashed conversation or canvas with its purge deadline. */
+export interface PlaygroundTrashItem {
+  kind: PlaygroundTrashItemKind
+  id: string
+  title: string
+  /** When the entry moved to the trash, in epoch milliseconds. */
+  deletedAt: number
+  /** The earliest time the retention sweep may purge it, epoch milliseconds. */
+  purgeAt: number
+}
+
+/** The account's trash: entries plus the owner's retention window. */
+export interface PlaygroundTrashListing {
+  /** Days a trash entry stays recoverable before the sweep may purge it. */
+  retentionDays: number
+  items: PlaygroundTrashItem[]
+}
+
 // API payload types
 export type PlaygroundInputAttachment = MessageAttachment
 

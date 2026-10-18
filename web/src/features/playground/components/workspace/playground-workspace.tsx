@@ -51,6 +51,7 @@ export type PlaygroundInspectorView =
   | 'generate'
   | 'library'
   | 'presets'
+  | 'trash'
 
 interface PlaygroundWorkspaceProps {
   disabled?: boolean
@@ -67,6 +68,7 @@ interface PlaygroundWorkspaceProps {
   onToggleInspector: (view: PlaygroundInspectorView) => void
   onCloseInspector: () => void
   artifactsDisabled?: boolean
+  onOpenTrash?: () => void
   onOpenPresets?: () => void
 }
 
@@ -83,6 +85,7 @@ export function PlaygroundWorkspace(props: PlaygroundWorkspaceProps) {
       onCreate={props.onCreate}
       onDelete={props.onDelete}
       onOpenPresets={props.onOpenPresets}
+      onOpenTrash={props.onOpenTrash}
       onRename={props.onRename}
       onSwitch={props.onSwitch}
       sessions={props.sessions}
@@ -108,6 +111,11 @@ export function PlaygroundWorkspace(props: PlaygroundWorkspaceProps) {
     inspectorTitle = t('Assistant presets')
     inspectorDescription = t(
       'Reusable assistants with their own model, parameters and system prompt.'
+    )
+  } else if (props.inspectorView === 'trash') {
+    inspectorTitle = t('Trash')
+    inspectorDescription = t(
+      'Deleted conversations and canvases stay recoverable until the retention period ends.'
     )
   }
 

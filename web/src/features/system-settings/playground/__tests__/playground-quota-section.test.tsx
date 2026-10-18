@@ -184,6 +184,27 @@ test('a group override can grant a larger object storage entitlement', async () 
   expect(bodyFor('playground_setting.defaults')).toBeUndefined()
 })
 
+test('the trash retention default round-trips through the quota policy', async () => {
+  const user = userEvent.setup()
+  renderSection({ session_max_count: 100, trash_retention_days: 30 })
+
+  const retention = screen.getByRole('spinbutton', {
+    name: 'Trash retention in days',
+  })
+  expect(retention).toHaveValue(30)
+  fireEvent.change(retention, { target: { value: '14' } })
+  await user.click(
+    screen.getByRole('button', { name: 'Save Playground quotas' })
+  )
+
+  await waitFor(() =>
+    expect(bodyFor('playground_setting.defaults')).toBeDefined()
+  )
+  expect(
+    JSON.parse(bodyFor('playground_setting.defaults')?.value ?? '{}')
+  ).toMatchObject({ session_max_count: 100, trash_retention_days: 14 })
+})
+
 test('toggling the sandbox preview switch saves only that option', async () => {
   const user = userEvent.setup()
   renderSection({ session_max_count: 100 })

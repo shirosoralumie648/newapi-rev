@@ -26,7 +26,11 @@ import {
 } from '@/lib/server-error-message'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { deletePlaygroundSession, getPlaygroundSessions } from '../api'
+import {
+  deletePlaygroundSession,
+  getPlaygroundSessions,
+  restorePlaygroundSession,
+} from '../api'
 import { playgroundQueryKeys } from '../lib/query-keys'
 import {
   assertPlaygroundOwner,
@@ -42,6 +46,7 @@ type Operation =
   | { type: 'hydrate'; remote: PlaygroundServerSession[] }
   | { type: 'save'; draft: PlaygroundSession }
   | { type: 'delete'; id: string }
+  | { type: 'restore'; id: string }
 
 function readPendingDeletions(owner: number | null): string[] {
   if (owner === null) return []
@@ -161,6 +166,26 @@ export function usePlaygroundServer(
         syncedMessages.current.delete(operation.id)
         return null
       }
+      if (operation.type === 'restore') {
+        const restored = await restorePlaygroundSession(operation.id, signal)
+        assertPlaygroundOwner(owner, signal)
+        // Read the restored conversation exactly like a fresh hydration so the
+        // next autosave compares against the stored messages, then re-join it
+        // with the workspace the user currently sees.
+        const hydrated = await hydratePlaygroundWorkspace(
+          [],
+          [restored],
+          [],
+          owner,
+          signal,
+          syncedMessages.current
+        )
+        const remaining = latest.current.sessions.filter(
+          (session) =>
+            session.id !== restored.id && session.server?.id !== restored.id
+        )
+        return [...remaining, ...hydrated]
+      }
       await savePlaygroundSession(
         operation.draft,
         owner,
@@ -204,6 +229,13 @@ export function usePlaygroundServer(
         setReady(true)
       }
       if (operation.type === 'delete') {
+        rememberDeletions(
+          deletedRef.current.filter((id) => id !== operation.id)
+        )
+      }
+      if (operation.type === 'restore') {
+        // The conversation is alive again: a stale queued deletion must not
+        // send it back to the trash.
         rememberDeletions(
           deletedRef.current.filter((id) => id !== operation.id)
         )
@@ -335,6 +367,14 @@ export function usePlaygroundServer(
     }
     local.deleteSession(id)
   }
+  // Restoring goes through the same mutation pipeline as saves and deletes, so
+  // the refreshed workspace is applied by the mutation's success handler.
+  const restoreSession = useCallback(
+    async (id: string) => {
+      await mutateAsync({ type: 'restore', id })
+    },
+    [mutateAsync]
+  )
   // Attachment uploads need the canonical server session, so a send that
   // carries files creates the conversation first when it is still local-only.
   const ensureServerSession = useCallback(
@@ -362,6 +402,7 @@ export function usePlaygroundServer(
     conflict,
     saveAsNew,
     deleteSession,
+    restoreSession,
     ensureServerSession,
   }
 }

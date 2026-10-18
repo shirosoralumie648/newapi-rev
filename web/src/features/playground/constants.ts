@@ -74,6 +74,7 @@ export const API_ENDPOINTS = {
   USER_GROUPS: '/api/user/self/groups',
   PLAYGROUND_SESSIONS: '/api/playground/sessions',
   PLAYGROUND_CANVASES: '/api/playground/canvases',
+  PLAYGROUND_TRASH: '/api/playground/trash',
   PLAYGROUND_PRESETS: '/api/playground/presets',
   PLAYGROUND_SNIPPETS: '/api/playground/snippets',
   PLAYGROUND_USAGE: '/api/playground/usage',

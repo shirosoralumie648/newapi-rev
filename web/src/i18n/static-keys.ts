@@ -1100,4 +1100,9 @@ export const STATIC_I18N_KEYS = [
   'Prompt snippet content limit exceeded.',
   'Prompt snippets per user',
   'Prompt snippet size limit',
+  // Playground quota policy groups and field labels render through
+  // t(labelKey) from PLAYGROUND_QUOTA_GROUPS / PLAYGROUND_QUOTA_FIELDS; the
+  // trash entries are the CH-04 additions.
+  'Trash',
+  'Trash retention in days',
 ] as const

@@ -55,6 +55,11 @@ const sessions = [
   makeSession('newer', 'Newest conversation', 2),
 ]
 
+const persistedSession: PlaygroundSession = {
+  ...makeSession('saved', 'Saved conversation', 3),
+  server: { id: 'pgs_saved', revision: 1, messageRevision: 1 },
+}
+
 test('filters sessions by title and switches the selected conversation', async () => {
   const user = userEvent.setup()
   const onSwitch = vi.fn()
@@ -126,4 +131,73 @@ test('confirms deletion before removing a session', async () => {
   expect(screen.getByRole('alertdialog')).toBeVisible()
   await user.click(screen.getByRole('button', { name: 'Delete' }))
   expect(onDelete).toHaveBeenCalledWith('older')
+})
+
+test('opens the trash from the session list footer', async () => {
+  const user = userEvent.setup()
+  const onAction = vi.fn()
+  const onOpenTrash = vi.fn()
+  render(
+    <PlaygroundSessionList
+      activeSessionId='older'
+      onAction={onAction}
+      onCreate={vi.fn()}
+      onDelete={vi.fn()}
+      onOpenTrash={onOpenTrash}
+      onRename={vi.fn()}
+      onSwitch={vi.fn()}
+      sessions={sessions}
+    />
+  )
+
+  await user.click(screen.getByRole('button', { name: 'Trash' }))
+  expect(onOpenTrash).toHaveBeenCalledTimes(1)
+  expect(onAction).toHaveBeenCalledTimes(1)
+})
+
+test('offers export only for a persisted conversation', async () => {
+  const user = userEvent.setup()
+  render(
+    <PlaygroundSessionList
+      activeSessionId='older'
+      onCreate={vi.fn()}
+      onDelete={vi.fn()}
+      onRename={vi.fn()}
+      onSwitch={vi.fn()}
+      sessions={[...sessions, persistedSession]}
+    />
+  )
+
+  expect(
+    screen.queryByRole('button', { name: 'Export Older conversation' })
+  ).toBeNull()
+  await user.click(
+    screen.getByRole('button', { name: 'Export Saved conversation' })
+  )
+  expect(
+    screen.getByRole('menuitem', { name: 'Export as Markdown' })
+  ).toBeVisible()
+  expect(screen.getByRole('menuitem', { name: 'Export as JSON' })).toBeVisible()
+})
+
+test('moves a persisted conversation to the trash instead of deleting it outright', async () => {
+  const user = userEvent.setup()
+  const onDelete = vi.fn()
+  render(
+    <PlaygroundSessionList
+      activeSessionId='saved'
+      onCreate={vi.fn()}
+      onDelete={onDelete}
+      onRename={vi.fn()}
+      onSwitch={vi.fn()}
+      sessions={[persistedSession]}
+    />
+  )
+
+  await user.click(
+    screen.getByRole('button', { name: 'Delete Saved conversation' })
+  )
+  expect(screen.getByText('Move conversation to trash?')).toBeVisible()
+  await user.click(screen.getByRole('button', { name: 'Move to trash' }))
+  expect(onDelete).toHaveBeenCalledWith('saved')
 })
