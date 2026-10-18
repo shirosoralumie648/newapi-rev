@@ -37,16 +37,36 @@ func matchAnyModelPattern(patterns []string, model string) bool {
 	return false
 }
 
-func ShouldChatCompletionsUseResponsesPolicy(policy model_setting.ChatCompletionsToResponsesPolicy, channelID int, channelType int, model string) bool {
+func policyMatchesChannelModel(policy model_setting.ChatCompletionsToResponsesPolicy, channelID int, channelType int, model string) bool {
 	if !policy.IsChannelEnabled(channelID, channelType) {
 		return false
 	}
 	return matchAnyModelPattern(policy.ModelPatterns, model)
 }
 
+func ShouldChatCompletionsUseResponsesPolicy(policy model_setting.ChatCompletionsToResponsesPolicy, channelID int, channelType int, model string) bool {
+	return policyMatchesChannelModel(policy, channelID, channelType, model)
+}
+
 func ShouldChatCompletionsUseResponsesGlobal(channelID int, channelType int, model string) bool {
-	return ShouldChatCompletionsUseResponsesPolicy(
+	return policyMatchesChannelModel(
 		model_setting.GetGlobalSettings().ChatCompletionsToResponsesPolicy,
+		channelID,
+		channelType,
+		model,
+	)
+}
+
+// ShouldResponsesUseChatCompletionsPolicy reports whether a Responses request
+// for the channel and model is downgraded to Chat Completions. The downgrade
+// uses the same channel scope and model patterns as the upgrade direction.
+func ShouldResponsesUseChatCompletionsPolicy(policy model_setting.ResponsesToChatCompletionsPolicy, channelID int, channelType int, model string) bool {
+	return policyMatchesChannelModel(policy, channelID, channelType, model)
+}
+
+func ShouldResponsesUseChatCompletionsGlobal(channelID int, channelType int, model string) bool {
+	return policyMatchesChannelModel(
+		model_setting.GetGlobalSettings().ResponsesToChatCompletionsPolicy,
 		channelID,
 		channelType,
 		model,

@@ -113,6 +113,20 @@ const defaultBillingSettings: BillingSettings = {
   'checkin_setting.enabled': false,
   'checkin_setting.min_quota': 1000,
   'checkin_setting.max_quota': 10000,
+  'referral_setting.enabled': false,
+  'referral_setting.commission_rate_percent': 0,
+  'referral_setting.group_rate_overrides': '{}',
+  'referral_setting.window_months': 12,
+  'referral_setting.include_redemption_codes': false,
+  'referral_setting.cash_settlement_enabled': false,
+  'referral_setting.invite_limit_per_ip': 0,
+  'referral_setting.invite_limit_per_device': 0,
+  'referral_setting.invite_limit_per_email_domain': 0,
+  'referral_setting.daily_commission_cap_usd': 0,
+  'referral_setting.monthly_commission_cap_usd': 0,
+  'referral_setting.invitee_commission_cap_usd': 0,
+  'referral_setting.review_threshold_usd': 0,
+  'referral_setting.require_real_name': false,
 }
 
 export function BillingSettings() {

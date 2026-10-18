@@ -111,6 +111,31 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
     [controller, reportError]
   )
 
+  // The restored canvas becomes the active project, so the editor remounts on
+  // the new project id. Resources the archive lost are reported instead of
+  // hiding that the board imported without them.
+  const handleImportArchive = useCallback(
+    async (file: File) => {
+      try {
+        const result = await controller.importProjectArchive(file)
+        setListOpen(false)
+        setHistoryOpen(false)
+        if (result.resourcesMissing > 0) {
+          toast.warning(
+            t(
+              'Canvas archive imported, but some resources could not be restored.'
+            )
+          )
+        } else {
+          toast.success(t('Canvas archive imported.'))
+        }
+      } catch (error) {
+        reportError(error)
+      }
+    },
+    [controller, reportError, t]
+  )
+
   const handleRename = useCallback(
     async (projectId: string, title: string) => {
       try {
@@ -208,6 +233,7 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
         key={`${project.id}:${epoch}`}
         disabled={status === 'loading'}
         onChange={handleDocumentChange}
+        onImportArchive={handleImportArchive}
         onOpenSource={handleOpenSource}
         project={project}
       />

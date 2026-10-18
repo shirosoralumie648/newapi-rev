@@ -35,6 +35,11 @@ func (p ChatCompletionsToResponsesPolicy) IsChannelEnabled(channelID int, channe
 	return false
 }
 
+// ResponsesToChatCompletionsPolicy selects the channels and models whose
+// Responses requests are downgraded to Chat Completions. It shares the shape
+// and matching rules of the opposite conversion policy.
+type ResponsesToChatCompletionsPolicy = ChatCompletionsToResponsesPolicy
+
 type GlobalSettings struct {
 	PassThroughRequestEnabled bool     `json:"pass_through_request_enabled"`
 	ThinkingModelBlacklist    []string `json:"thinking_model_blacklist"`
@@ -42,6 +47,7 @@ type GlobalSettings struct {
 	// family whitelist but whose names already end in an effort word.
 	EffortTailModelIDs               []string                         `json:"effort_tail_model_ids"`
 	ChatCompletionsToResponsesPolicy ChatCompletionsToResponsesPolicy `json:"chat_completions_to_responses_policy"`
+	ResponsesToChatCompletionsPolicy ResponsesToChatCompletionsPolicy `json:"responses_to_chat_completions_policy"`
 }
 
 // 默认配置
@@ -59,6 +65,10 @@ var defaultOpenaiSettings = GlobalSettings{
 		"yi-medium",
 	},
 	ChatCompletionsToResponsesPolicy: ChatCompletionsToResponsesPolicy{
+		Enabled:     false,
+		AllChannels: true,
+	},
+	ResponsesToChatCompletionsPolicy: ResponsesToChatCompletionsPolicy{
 		Enabled:     false,
 		AllChannels: true,
 	},

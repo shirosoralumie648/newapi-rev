@@ -47,6 +47,11 @@ import type {
   ReferralInvitationPage,
   ReferralAdminInvitationPage,
   ReferralInvitationFilters,
+  ReferralProfile,
+  ReferralFlag,
+  ReferralFlagLevel,
+  ReferralReviewPage,
+  ReferralReviewDecision,
 } from './types'
 
 // ============================================================================
@@ -401,6 +406,78 @@ export async function exportReferralInvitationsCsv(
     { responseType: 'blob' }
   )
   return res.data as Blob
+}
+
+// ============================================================================
+// Referral Anti-Abuse API Functions
+// ============================================================================
+
+/**
+ * Get the anti-abuse profile of one account (admin only): the registration
+ * signal, the identity correlation prefix, the flag and the commission
+ * summary.
+ */
+export async function getUserReferralProfile(
+  userId: number
+): Promise<ApiResponse<ReferralProfile>> {
+  const res = await api.get(`/api/user/${userId}/referral-profile`)
+  return res.data
+}
+
+/** Set or clear the anti-abuse mark of one account (admin only). */
+export async function setUserReferralFlag(
+  userId: number,
+  request: { level: ReferralFlagLevel; note?: string }
+): Promise<ApiResponse<{ flag: ReferralFlag | null }>> {
+  const res = await api.post(`/api/user/${userId}/referral-flag`, request)
+  return res.data
+}
+
+/**
+ * Record the administrator-verified real-name identity of one account (admin
+ * only). Only a one-way hash is stored; the response carries its 8-character
+ * correlation prefix.
+ */
+export async function setUserReferralIdentity(
+  userId: number,
+  identity: string
+): Promise<ApiResponse<{ identity_ref: string }>> {
+  const res = await api.post(`/api/user/${userId}/referral-identity`, {
+    identity,
+  })
+  return res.data
+}
+
+/** Remove the recorded real-name identity of one account (admin only). */
+export async function clearUserReferralIdentity(
+  userId: number
+): Promise<ApiResponse> {
+  const res = await api.delete(`/api/user/${userId}/referral-identity`)
+  return res.data
+}
+
+/**
+ * List the commission events waiting for a manual decision (admin only).
+ */
+export async function getReferralCommissionReviews(
+  page: number,
+  pageSize: number
+): Promise<ApiResponse<ReferralReviewPage>> {
+  const params = new URLSearchParams({
+    p: page.toString(),
+    page_size: pageSize.toString(),
+  })
+  const res = await api.get(`/api/user/referral/reviews?${params.toString()}`)
+  return res.data
+}
+
+/** Approve or reject one reviewed commission event (admin only). */
+export async function decideReferralCommissionReview(
+  id: number,
+  decision: ReferralReviewDecision
+): Promise<ApiResponse> {
+  const res = await api.post(`/api/user/referral/reviews/${id}`, { decision })
+  return res.data
 }
 
 // ============================================================================

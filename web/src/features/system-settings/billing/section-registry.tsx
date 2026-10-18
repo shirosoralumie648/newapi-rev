@@ -26,6 +26,7 @@ import { RatioSettingsCard } from '../models/ratio-settings-card'
 import type { BillingSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
 import { CreditGrantValiditySection } from './credit-grant-validity-section'
+import { ReferralCommissionSection } from './referral-commission-section'
 import { WalletOverdraftSection } from './wallet-overdraft-section'
 
 const getModelDefaults = (settings: BillingSettings) => ({
@@ -223,6 +224,50 @@ const BILLING_SECTIONS = [
         defaultDays={settings['credit_grant_setting.default_expiry_days']}
         sourceExpiryDaysJson={
           settings['credit_grant_setting.source_expiry_days']
+        }
+      />
+    ),
+  },
+  {
+    id: 'referral',
+    titleKey: 'Referral Commission',
+    build: (settings: BillingSettings) => (
+      <ReferralCommissionSection
+        enabled={settings['referral_setting.enabled']}
+        commissionRatePercent={
+          settings['referral_setting.commission_rate_percent']
+        }
+        groupRateOverridesJson={
+          settings['referral_setting.group_rate_overrides']
+        }
+        windowMonths={settings['referral_setting.window_months']}
+        includeRedemptionCodes={
+          settings['referral_setting.include_redemption_codes']
+        }
+        cashSettlementEnabled={
+          settings['referral_setting.cash_settlement_enabled']
+        }
+        inviteLimitPerIp={settings['referral_setting.invite_limit_per_ip']}
+        inviteLimitPerDevice={
+          settings['referral_setting.invite_limit_per_device']
+        }
+        inviteLimitPerEmailDomain={
+          settings['referral_setting.invite_limit_per_email_domain']
+        }
+        dailyCommissionCapUsd={
+          settings['referral_setting.daily_commission_cap_usd']
+        }
+        monthlyCommissionCapUsd={
+          settings['referral_setting.monthly_commission_cap_usd']
+        }
+        inviteeCommissionCapUsd={
+          settings['referral_setting.invitee_commission_cap_usd']
+        }
+        reviewThresholdUsd={settings['referral_setting.review_threshold_usd']}
+        requireRealName={settings['referral_setting.require_real_name']}
+        complianceConfirmed={
+          (settings['payment_setting.compliance_confirmed'] ?? false) &&
+          settings['payment_setting.compliance_terms_version'] === 'v1'
         }
       />
     ),

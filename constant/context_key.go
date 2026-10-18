@@ -24,6 +24,11 @@ const (
 	ContextKeyTokenModelLimit        ContextKey = "token_model_limit"
 	ContextKeyTokenCrossGroupRetry   ContextKey = "token_cross_group_retry"
 	ContextKeyTokenAutoGroups        ContextKey = "token_auto_groups"
+	// ContextKeyTokenPeriodLimited marks a token whose periodic budget must be
+	// enforced on every pre-consume, and ContextKeyTokenPeriodReset carries its
+	// reset cycle (day/week/month).
+	ContextKeyTokenPeriodLimited ContextKey = "token_period_limited"
+	ContextKeyTokenPeriodReset   ContextKey = "token_period_reset"
 
 	/* channel related keys */
 	ContextKeyChannelId                ContextKey = "channel_id"

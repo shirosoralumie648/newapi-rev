@@ -34,7 +34,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import {
-  CREDIT_GRANT_SOURCES,
+  CREDIT_GRANT_VALIDITY_SOURCES,
   getCreditGrantSourceLabel,
 } from '@/features/wallet/lib/credit-grant'
 
@@ -63,7 +63,7 @@ function parseSourceExpiry(json: string): SourceDraft[] {
     const parsed: unknown = JSON.parse(json)
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
       return []
-    return CREDIT_GRANT_SOURCES.filter(
+    return CREDIT_GRANT_VALIDITY_SOURCES.filter(
       (source) => source in (parsed as Record<string, unknown>)
     ).map((source) => ({
       source,
@@ -75,7 +75,7 @@ function parseSourceExpiry(json: string): SourceDraft[] {
 }
 
 function serializeSourceExpiry(drafts: SourceDraft[]): string {
-  const entries = CREDIT_GRANT_SOURCES.filter((source) =>
+  const entries = CREDIT_GRANT_VALIDITY_SOURCES.filter((source) =>
     drafts.some((draft) => draft.source === source)
   ).map((source) => {
     const draft = drafts.find((entry) => entry.source === source)
@@ -113,7 +113,7 @@ export function CreditGrantValiditySection(
     setErrors({})
   }, [baselineDays, props.sourceExpiryDaysJson])
 
-  const availableSources = CREDIT_GRANT_SOURCES.filter(
+  const availableSources = CREDIT_GRANT_VALIDITY_SOURCES.filter(
     (source) => !sources.some((draft) => draft.source === source)
   )
 

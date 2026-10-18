@@ -47,6 +47,11 @@ export const apiKeySchema = z.object({
   model_limits: z.string().nullish().default(''),
   allow_ips: z.string().nullish().default(''),
   allow_user_quota_query: z.boolean().optional().default(false),
+  // Periodic budget: enforced alongside remain_quota; 0 disables it.
+  period_quota: z.number().optional().default(0),
+  period_reset_period: z.string().nullish().default(''),
+  period_used: z.number().optional().default(0),
+  period_window_start: z.number().optional().default(0),
 })
 
 export type ApiKey = z.infer<typeof apiKeySchema>
@@ -96,6 +101,8 @@ export interface ApiKeyFormData {
   group: string
   auto_groups: string[]
   cross_group_retry: boolean
+  period_quota: number
+  period_reset_period: string
 }
 
 export interface TokenAutoGroupsConfig {

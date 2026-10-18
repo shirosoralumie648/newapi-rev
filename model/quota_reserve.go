@@ -41,6 +41,7 @@ return 1`
 
 const tokenQuotaReserveScript = `
 if tonumber(redis.call('HGET', KEYS[1], 'Id') or '0') ~= tonumber(ARGV[2])
+  or tonumber(redis.call('HGET', KEYS[1], 'CacheSchema') or '0') ~= tonumber(ARGV[4])
   or redis.call('HEXISTS', KEYS[1], 'RemainQuota') == 0
   or redis.call('HEXISTS', KEYS[1], 'UsedQuota') == 0 then
   return -1
@@ -93,7 +94,7 @@ func cacheApplyUserQuotaDelta(userID int, delta int64) (cacheQuotaResult, error)
 
 func cacheTryReserveTokenQuota(id int, key string, amount int64) (cacheQuotaResult, error) {
 	result, err := common.RDB.Eval(context.Background(), tokenQuotaReserveScript,
-		[]string{getTokenCacheKey(key)}, amount, id, common.GetTimestamp()).Int()
+		[]string{getTokenCacheKey(key)}, amount, id, common.GetTimestamp(), tokenCacheSchemaVersion).Int()
 	return quotaResultFromLua(result, err)
 }
 
@@ -129,6 +130,7 @@ func persistTokenQuotaDelta(id int, delta int) error {
 		map[string]any{
 			"remain_quota":  gorm.Expr("remain_quota + ?", delta),
 			"used_quota":    gorm.Expr("used_quota - ?", delta),
+			"period_used":   gorm.Expr("CASE WHEN period_used - ? < 0 THEN 0 ELSE period_used - ? END", delta, delta),
 			"accessed_time": common.GetTimestamp(),
 		},
 	)
@@ -176,6 +178,28 @@ func reserveTokenQuotaDB(id int, quota int) (bool, error) {
 			"remain_quota":  gorm.Expr("remain_quota - ?", quota),
 			"used_quota":    gorm.Expr("used_quota + ?", quota),
 			"accessed_time": common.GetTimestamp(),
+		})
+	return result.RowsAffected == 1, result.Error
+}
+
+// reserveTokenQuotaWithPeriodDB 在一条条件 UPDATE 内同时校验余额与周期预算。
+// 预算窗口按请求认证时使用的周期计算：窗口已过期时，本窗口累计用量从本次
+// 扣费重新开始，检查与写入由同一条语句完成，不存在检查通过后被并发超扣的
+// 间隙。unlimited 令牌跳过余额条件但仍维护余额与周期用量记账。
+func reserveTokenQuotaWithPeriodDB(id int, quota int, unlimited bool, periodReset string, now int64) (bool, error) {
+	windowStart := TokenPeriodWindowStart(periodReset, now)
+	query := DB.Model(&Token{}).Where("id = ?", id)
+	if !unlimited {
+		query = query.Where("remain_quota >= ?", quota)
+	}
+	result := query.
+		Where("period_quota <= 0 OR (CASE WHEN period_window_start <> ? THEN 0 ELSE period_used END) + ? <= period_quota", windowStart, quota).
+		Updates(map[string]any{
+			"remain_quota":        gorm.Expr("remain_quota - ?", quota),
+			"used_quota":          gorm.Expr("used_quota + ?", quota),
+			"period_used":         gorm.Expr("CASE WHEN period_window_start <> ? THEN ? ELSE period_used + ? END", windowStart, quota, quota),
+			"period_window_start": windowStart,
+			"accessed_time":       now,
 		})
 	return result.RowsAffected == 1, result.Error
 }
@@ -301,13 +325,19 @@ func ReserveUserQuotaWithDebt(id int, quota int, requestId string) (int64, error
 }
 
 // TryReserveTokenQuota atomically checks and deducts a token quota. Unlimited
-// tokens skip the balance check but still update remain/used accounting.
-func TryReserveTokenQuota(id int, key string, quota int, unlimited bool) (bool, error) {
+// tokens skip the balance check but still update remain/used accounting. A
+// non-empty periodReset enforces the token's periodic budget in the same
+// conditional statement: the window state lives in the token row, which the
+// Redis balance cache never carries, so this path always reads the database.
+func TryReserveTokenQuota(id int, key string, quota int, unlimited bool, periodReset string) (bool, error) {
 	if quota < 0 {
 		return false, errors.New("quota cannot be negative")
 	}
 	if quota == 0 {
 		return true, nil
+	}
+	if periodReset != "" {
+		return reserveTokenQuotaWithPeriodDB(id, quota, unlimited, periodReset, common.GetTimestamp())
 	}
 	if unlimited {
 		return true, DecreaseTokenQuota(id, key, quota)

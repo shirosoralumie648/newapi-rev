@@ -148,6 +148,29 @@ test('lists the paid balance, the grant buckets and their validity', async () =>
   ).toBeVisible()
 })
 
+test('labels a referral commission bucket like the other grant sources', async () => {
+  mockApi(
+    walletView({
+      grant_quota: 500,
+      grants: [
+        {
+          grant_id: 21,
+          source: 'referral',
+          remaining: 500,
+          expires_at: 1_700_003_600,
+          created_at: 1_700_000_000,
+        },
+      ],
+      total_quota: 900,
+      paid_quota: 400,
+      expired_quota: 0,
+    })
+  )
+  renderCard()
+
+  expect(await screen.findByText('Referral')).toBeVisible()
+})
+
 test('shows the empty state when the account holds no granted credit', async () => {
   mockApi(
     walletView({

@@ -194,9 +194,18 @@ func SummarizeReferralInvitations(query ReferralInvitationQuery) (*ReferralStats
 // referralInvitationScope builds the invitation filter shared by the count,
 // list and summary queries.
 func referralInvitationScope(query ReferralInvitationQuery) *gorm.DB {
+	// The account table derives its name from the model, so the raw join must
+	// resolve it the same way every model query does and follow the active
+	// naming strategy (the test databases run with a table prefix). The two
+	// referral tables pin their names with TableName and stay verbatim.
+	usersTable := "users"
+	statement := &gorm.Statement{DB: DB}
+	if err := statement.Parse(&User{}); err == nil {
+		usersTable = statement.Table
+	}
 	scope := DB.Table("referral_bindings AS b").
-		Joins("JOIN users AS u ON u.id = b.invitee_id").
-		Joins("JOIN users AS i ON i.id = b.inviter_id")
+		Joins("JOIN " + usersTable + " AS u ON u.id = b.invitee_id").
+		Joins("JOIN " + usersTable + " AS i ON i.id = b.inviter_id")
 	if query.InviterId > 0 {
 		scope = scope.Where("b.inviter_id = ?", query.InviterId)
 	}

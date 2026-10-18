@@ -43,7 +43,7 @@ func createReversalTestTopUp(t *testing.T, tradeNo string, userId int, quota int
 		Status:          common.TopUpStatusPending,
 	}
 	require.NoError(t, topUp.Insert())
-	_, err := Recharge(tradeNo, TopUpPaymentInfo{
+	err := Recharge(tradeNo, TopUpPaymentInfo{
 		CustomerID:        "cus_reversal",
 		ProviderPaymentID: "pi_" + tradeNo,
 		Currency:          "USD",
