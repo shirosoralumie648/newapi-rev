@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 package model_test
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/base64"
 	"fmt"
@@ -33,6 +34,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service/objectstore"
 	"github.com/QuantumNous/new-api/setting/playground_setting"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -705,4 +707,278 @@ func TestPlaygroundCanvasReferenceSourceDeleted(t *testing.T) {
 	}, controller.UpdatePlaygroundCanvasProject)
 	require.Equal(t, http.StatusOK, updated.Code, updated.Body.String())
 	assert.Contains(t, updated.Body.String(), "snapshot text")
+}
+
+// Canvas history: the first document save stores an entry, later saves only
+// store one when the policy trigger or interval fires, identical states are
+// never stored twice, the per-board cap prunes the oldest entry, a full
+// account budget skips the new entry without failing the save, restore rewrites
+// the document and captures the state it replaces, and a purge removes rows,
+// objects and counters together.
+func TestPlaygroundCanvasSnapshotHistory(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			var defaults *playground_setting.PlaygroundQuotaPolicy
+			usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+				defaults = policy
+				policy.CanvasSnapshotEverySaves = 2
+				policy.CanvasSnapshotPerCanvasMaxCount = 4
+			})
+			created := createCanvasProject(t, 7, "canvas-history")
+			id := created["id"].(string)
+			path := "/api/playground/canvases/" + id
+			snapshotsPath := path + "/snapshots"
+
+			save := func(revision int64, marker string) map[string]any {
+				t.Helper()
+				response := playgroundRequest(t, 7, http.MethodPatch, path, map[string]any{
+					"revision": revision,
+					"document": canvasDocument([]any{
+						canvasNode("n1", "prompt", 1, 2),
+						map[string]any{"id": "n2", "type": "text", "position": map[string]any{"x": 3, "y": 4},
+							"data": map[string]any{"kind": "text", "text": marker}},
+					}, nil),
+				}, controller.UpdatePlaygroundCanvasProject)
+				require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+				return canvasEnvelope(t, response.Body.Bytes())
+			}
+			list := func() []map[string]any {
+				t.Helper()
+				response := playgroundRequest(t, 7, http.MethodGet, snapshotsPath+"?p=1&page_size=50", nil, controller.ListPlaygroundCanvasSnapshots)
+				require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+				var listing struct {
+					Data struct {
+						Items []map[string]any `json:"items"`
+						Total int              `json:"total"`
+					} `json:"data"`
+				}
+				require.NoError(t, common.Unmarshal(response.Body.Bytes(), &listing))
+				require.Len(t, listing.Data.Items, listing.Data.Total)
+				return listing.Data.Items
+			}
+			revisions := func(items []map[string]any) []int64 {
+				result := make([]int64, 0, len(items))
+				for _, item := range items {
+					result = append(result, int64(item["revision"].(float64)))
+				}
+				return result
+			}
+			nodeText := func(project map[string]any) string {
+				for _, item := range project["document"].(map[string]any)["nodes"].([]any) {
+					node := item.(map[string]any)
+					if node["id"] == "n2" {
+						return node["data"].(map[string]any)["text"].(string)
+					}
+				}
+				return ""
+			}
+			restore := func(snapshotID string, revision int64) *httptest.ResponseRecorder {
+				return playgroundRequest(t, 7, http.MethodPost, snapshotsPath+"/"+snapshotID+"/restore",
+					map[string]any{"revision": revision}, controller.RestorePlaygroundCanvasSnapshot)
+			}
+
+			// The create itself stores no history; the first document save does.
+			assert.Empty(t, list())
+			assert.EqualValues(t, 1, save(0, "alpha")["revision"])
+			items := list()
+			require.Len(t, items, 1)
+			assert.EqualValues(t, 1, items[0]["revision"])
+			assert.EqualValues(t, 2, items[0]["node_count"])
+			assert.EqualValues(t, 0, items[0]["edge_count"])
+			assert.Equal(t, id, items[0]["canvas_id"])
+			assert.NotEmpty(t, items[0]["byte_size"])
+			assert.NotZero(t, items[0]["created_at"])
+			assert.NotContains(t, items[0], "content")
+			assert.NotContains(t, items[0], "object_key")
+			alphaSnapshotID := items[0]["id"].(string)
+
+			// A save below the trigger stores nothing; the save whose revision
+			// distance reaches the policy stores one entry.
+			save(1, "beta")
+			require.Equal(t, []int64{1}, revisions(list()))
+			save(2, "gamma")
+			items = list()
+			require.Equal(t, []int64{3, 1}, revisions(items))
+			gammaSnapshotID := items[0]["id"].(string)
+
+			// An identical state is never stored twice, even when the trigger fires.
+			defaults.CanvasSnapshotEverySaves = 1
+			save(3, "gamma")
+			require.Equal(t, []int64{3, 1}, revisions(list()))
+			save(4, "delta")
+			require.Equal(t, []int64{5, 3, 1}, revisions(list()))
+
+			// A restore rewrites the document and answers with the restored
+			// state; the replaced state is already the newest entry here, so
+			// deduplication keeps the history at one entry per state.
+			restored := restore(alphaSnapshotID, 5)
+			require.Equal(t, http.StatusOK, restored.Code, restored.Body.String())
+			restoredData := canvasEnvelope(t, restored.Body.Bytes())
+			assert.EqualValues(t, 6, restoredData["revision"])
+			assert.Equal(t, "alpha", nodeText(restoredData))
+			require.Equal(t, []int64{6, 5, 3, 1}, revisions(list()))
+
+			// A save the trigger skips leaves the live document newer than the
+			// newest entry; the next restore captures that replaced state first
+			// and prunes the oldest entry to honor the per-board cap.
+			defaults.CanvasSnapshotEverySaves = 5
+			save(6, "epsilon")
+			require.Equal(t, []int64{6, 5, 3, 1}, revisions(list()))
+			restored = restore(gammaSnapshotID, 7)
+			require.Equal(t, http.StatusOK, restored.Code, restored.Body.String())
+			restoredData = canvasEnvelope(t, restored.Body.Bytes())
+			assert.EqualValues(t, 8, restoredData["revision"])
+			assert.Equal(t, "gamma", nodeText(restoredData))
+			items = list()
+			require.Equal(t, []int64{7, 6, 5, 3}, revisions(items))
+
+			// A stale revision conflicts; unknown, foreign and trashed-canvas
+			// snapshots are 404.
+			assert.Equal(t, http.StatusConflict, restore(gammaSnapshotID, 7).Code)
+			assert.Equal(t, http.StatusNotFound, restore("pgs_missing", 8).Code)
+			foreign := playgroundRequest(t, 8, http.MethodGet, snapshotsPath+"?p=1&page_size=50", nil, controller.ListPlaygroundCanvasSnapshots)
+			assert.Equal(t, http.StatusNotFound, foreign.Code)
+			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 8, http.MethodPost, snapshotsPath+"/"+gammaSnapshotID+"/restore",
+				map[string]any{"revision": 0}, controller.RestorePlaygroundCanvasSnapshot).Code)
+
+			// A full account snapshot budget skips the new entry instead of
+			// failing the save or deleting existing history.
+			defaults.CanvasSnapshotEverySaves = 1
+			defaults.CanvasSnapshotUserMaxCount = 4
+			assert.EqualValues(t, 9, save(8, "zeta")["revision"])
+			require.Equal(t, []int64{7, 6, 5, 3}, revisions(list()))
+
+			// The account counters and the usage view agree with the stored rows.
+			var measured struct {
+				Count int64
+				Bytes int64
+			}
+			require.NoError(t, db.Model(&model.PlaygroundCanvasSnapshot{}).Where("canvas_id = ?", id).
+				Select("COUNT(*) AS count, COALESCE(SUM(byte_size), 0) AS bytes").Scan(&measured).Error)
+			var usage model.PlaygroundUserUsage
+			require.NoError(t, db.Where("user_id = ?", 7).First(&usage).Error)
+			assert.EqualValues(t, measured.Count, usage.CanvasSnapshotCount)
+			assert.EqualValues(t, measured.Bytes, usage.CanvasSnapshotBytes)
+			usageView, err := model.PlaygroundUsageForUser(7)
+			require.NoError(t, err)
+			assert.EqualValues(t, 4, usageView.CanvasSnapshots.Used)
+			assert.EqualValues(t, measured.Bytes, usageView.CanvasSnapshots.UsedBytes)
+			assert.EqualValues(t, 4, usageView.CanvasSnapshots.Limit)
+
+			// A trashed board keeps its history; the purge removes the rows and
+			// their objects, and the counters return to zero.
+			rows := make([]model.PlaygroundCanvasSnapshot, 0)
+			require.NoError(t, db.Where("canvas_id = ?", id).Find(&rows).Error)
+			require.Len(t, rows, 4)
+			require.NoError(t, model.DeletePlaygroundCanvasProject(7, id))
+			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 7, http.MethodGet, snapshotsPath, nil, controller.ListPlaygroundCanvasSnapshots).Code)
+			require.NoError(t, model.PurgePlaygroundCanvasProject(7, id))
+			var remaining int64
+			require.NoError(t, db.Model(&model.PlaygroundCanvasSnapshot{}).Where("canvas_id = ?", id).Count(&remaining).Error)
+			assert.Zero(t, remaining)
+			require.NoError(t, db.Where("user_id = ?", 7).First(&usage).Error)
+			assert.Zero(t, usage.CanvasSnapshotCount)
+			assert.Zero(t, usage.CanvasSnapshotBytes)
+			assert.Zero(t, usage.CanvasCount)
+			store := objectstore.DefaultStore()
+			require.NotNil(t, store)
+			for index := range rows {
+				_, objectErr := store.Head(context.Background(), rows[index].ObjectKey)
+				assert.ErrorIs(t, objectErr, objectstore.ErrObjectNotFound, rows[index].ObjectKey)
+			}
+		})
+	}
+}
+
+// A canvas document larger than the externalization threshold moves into the
+// object store as gzip bytes while the row keeps only metadata; reads hydrate
+// it, a replacing save deletes the previous object, a small document returns
+// to the inline column, and the account byte counter measures the logical
+// document size throughout.
+func TestPlaygroundCanvasLargeDocumentExternalization(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			blob := strings.Repeat("x", 40<<10)
+			largeDocument := func(marker string) map[string]any {
+				data := map[string]any{"kind": "text", "text": marker}
+				return canvasDocument([]any{
+					map[string]any{"id": "n1", "type": "text", "position": map[string]any{"x": 1, "y": 2}, "data": data},
+					map[string]any{"id": "n2", "type": "text", "position": map[string]any{"x": 3, "y": 4}, "data": data},
+				}, nil)
+			}
+
+			response := playgroundRequest(t, 7, http.MethodPost, "/api/playground/canvases", map[string]any{
+				"client_id": "canvas-externalized", "title": "Big", "document": largeDocument(blob),
+			}, controller.CreatePlaygroundCanvasProject)
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			created := canvasEnvelope(t, response.Body.Bytes())
+			id := created["id"].(string)
+			documentBytes := int64(created["document_bytes"].(float64))
+			require.Greater(t, documentBytes, int64(64<<10))
+			path := "/api/playground/canvases/" + id
+
+			// The row keeps only metadata; the object store holds the gzip bytes.
+			var stored model.PlaygroundCanvasProject
+			require.NoError(t, db.Where("id = ?", id).First(&stored).Error)
+			assert.Empty(t, string(stored.Document))
+			assert.Equal(t, system_setting.ObjectStoreBackendLocal, stored.StorageBackend)
+			assert.Equal(t, "gzip", stored.ContentEncoding)
+			assert.Equal(t, documentBytes, stored.DocumentBytes)
+			assert.True(t, strings.HasPrefix(stored.ObjectKey, "pg/7/canvases/"), stored.ObjectKey)
+			firstKey := stored.ObjectKey
+			store := objectstore.DefaultStore()
+			require.NotNil(t, store)
+			reader, _, objectErr := store.Get(context.Background(), firstKey)
+			require.NoError(t, objectErr)
+			gzipReader, objectErr := gzip.NewReader(reader)
+			require.NoError(t, objectErr)
+			decompressed, objectErr := io.ReadAll(gzipReader)
+			require.NoError(t, objectErr)
+			require.NoError(t, gzipReader.Close())
+			require.NoError(t, reader.Close())
+			assert.EqualValues(t, documentBytes, len(decompressed))
+			var persisted any
+			require.NoError(t, common.Unmarshal(decompressed, &persisted))
+
+			// The detail read decompresses the object back into the document.
+			detail := playgroundRequest(t, 7, http.MethodGet, path, nil, controller.GetPlaygroundCanvasProject)
+			require.Equal(t, http.StatusOK, detail.Code, detail.Body.String())
+			fetched := canvasEnvelope(t, detail.Body.Bytes())
+			assert.Equal(t, fetched["document"], persisted)
+			for _, item := range fetched["document"].(map[string]any)["nodes"].([]any) {
+				assert.Equal(t, blob, item.(map[string]any)["data"].(map[string]any)["text"])
+			}
+
+			// A replacing save writes a new object and deletes the old one.
+			updated := playgroundRequest(t, 7, http.MethodPatch, path, map[string]any{
+				"revision": 0, "document": largeDocument(strings.Repeat("y", 40<<10)),
+			}, controller.UpdatePlaygroundCanvasProject)
+			require.Equal(t, http.StatusOK, updated.Code, updated.Body.String())
+			require.NoError(t, db.Where("id = ?", id).First(&stored).Error)
+			assert.NotEmpty(t, stored.ObjectKey)
+			assert.NotEqual(t, firstKey, stored.ObjectKey)
+			_, objectErr = store.Head(context.Background(), firstKey)
+			assert.ErrorIs(t, objectErr, objectstore.ErrObjectNotFound)
+			secondKey := stored.ObjectKey
+
+			// A small document returns to the inline column and releases the object.
+			updated = playgroundRequest(t, 7, http.MethodPatch, path, map[string]any{
+				"revision": 1, "document": canvasDocument([]any{canvasNode("n1", "text", 0, 0)}, nil),
+			}, controller.UpdatePlaygroundCanvasProject)
+			require.Equal(t, http.StatusOK, updated.Code, updated.Body.String())
+			require.NoError(t, db.Where("id = ?", id).First(&stored).Error)
+			assert.Empty(t, stored.ObjectKey)
+			assert.Empty(t, stored.StorageBackend)
+			assert.NotEmpty(t, string(stored.Document))
+			_, objectErr = store.Head(context.Background(), secondKey)
+			assert.ErrorIs(t, objectErr, objectstore.ErrObjectNotFound)
+
+			// The account counter measures logical document bytes throughout.
+			var usage model.PlaygroundUserUsage
+			require.NoError(t, db.Where("user_id = ?", 7).First(&usage).Error)
+			assert.EqualValues(t, len(string(stored.Document)), usage.CanvasBytes)
+		})
+	}
 }

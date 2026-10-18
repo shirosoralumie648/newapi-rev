@@ -113,6 +113,10 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.GET("/canvases/:canvasId", controller.GetPlaygroundCanvasProject)
 			playgroundRoute.PATCH("/canvases/:canvasId", controller.UpdatePlaygroundCanvasProject)
 			playgroundRoute.DELETE("/canvases/:canvasId", controller.DeletePlaygroundCanvasProject)
+			// The board history: list stored snapshots and restore one as the
+			// canvas document, keeping the replaced state as a snapshot too.
+			playgroundRoute.GET("/canvases/:canvasId/snapshots", controller.ListPlaygroundCanvasSnapshots)
+			playgroundRoute.POST("/canvases/:canvasId/snapshots/:snapshotId/restore", controller.RestorePlaygroundCanvasSnapshot)
 			// A canvas owns its own attachment partition, so a file dropped on
 			// the board is uploaded without inventing a conversation for it.
 			playgroundRoute.POST("/canvases/:canvasId/attachments", controller.CreatePlaygroundCanvasAttachment)

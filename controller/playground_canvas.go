@@ -141,6 +141,8 @@ func writePlaygroundCanvasError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, model.ErrPlaygroundCanvasNotFound):
 		status, code, message = http.StatusNotFound, "PLAYGROUND_NOT_FOUND", err.Error()
+	case errors.Is(err, model.ErrPlaygroundCanvasSnapshotNotFound):
+		status, code, message = http.StatusNotFound, "PLAYGROUND_NOT_FOUND", err.Error()
 	case errors.Is(err, model.ErrPlaygroundConflict):
 		status, code, message = http.StatusConflict, "PLAYGROUND_CONFLICT", err.Error()
 	case errors.Is(err, model.ErrPlaygroundCanvasLimit):
@@ -509,4 +511,83 @@ func DeletePlaygroundCanvasProject(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, gin.H{"id": c.Param("canvasId")})
+}
+
+// ListPlaygroundCanvasSnapshots returns the stored history of one active
+// canvas, newest first. The model checks canvas ownership first, so another
+// account sees the same 404 as a missing board.
+func ListPlaygroundCanvasSnapshots(c *gin.Context) {
+	page := playgroundCanvasPage(c)
+	if page == nil {
+		return
+	}
+	items, total, err := model.ListPlaygroundCanvasSnapshots(c.GetInt("id"), c.Param("canvasId"), page.GetStartIdx(), page.PageSize)
+	if err != nil {
+		writePlaygroundCanvasError(c, err)
+		return
+	}
+	page.SetItems(items)
+	page.SetTotal(int(total))
+	common.ApiSuccess(c, page)
+}
+
+// RestorePlaygroundCanvasSnapshot writes one stored history entry back as the
+// canvas document. The restored document is re-validated like any save — node
+// and edge limits plus reference ownership — and the state the restore replaces
+// is captured as one more history entry first, so a restore can itself be
+// undone.
+func RestorePlaygroundCanvasSnapshot(c *gin.Context) {
+	userID := c.GetInt("id")
+	if userID <= 0 {
+		common.ApiErrorStatus(c, http.StatusUnauthorized, common.NewMessage("Authentication required."))
+		return
+	}
+	var request struct {
+		Revision *int64 `json:"revision"`
+	}
+	if !decodePlaygroundCanvasRequest(c, &request) {
+		return
+	}
+	if request.Revision == nil || *request.Revision < 0 {
+		writePlaygroundCanvasError(c, model.ErrPlaygroundCanvasInvalid)
+		return
+	}
+	policy, ok := playgroundRequestPolicy(c)
+	if !ok {
+		return
+	}
+	_, document, err := model.GetPlaygroundCanvasSnapshot(userID, c.Param("canvasId"), c.Param("snapshotId"))
+	if err != nil {
+		writePlaygroundCanvasError(c, err)
+		return
+	}
+	var decoded playgroundCanvasDocument
+	if common.UnmarshalJsonStr(document, &decoded) != nil {
+		writePlaygroundCanvasError(c, model.ErrPlaygroundCanvasInvalid)
+		return
+	}
+	normalized, nodeCount, edgeCount, err := normalizePlaygroundCanvasDocument(&decoded, policy)
+	if err != nil {
+		writePlaygroundCanvasError(c, err)
+		return
+	}
+	pins, err := validatePlaygroundCanvasReferences(userID, &decoded)
+	if err != nil {
+		writePlaygroundCanvasError(c, err)
+		return
+	}
+	project, err := model.UpdatePlaygroundCanvasProject(userID, c.Param("canvasId"), *request.Revision, model.UpdatePlaygroundCanvasInput{
+		Document:       &normalized,
+		NodeCount:      nodeCount,
+		EdgeCount:      edgeCount,
+		Pins:           pins,
+		SnapshotBefore: true,
+	})
+	if err != nil {
+		writePlaygroundCanvasError(c, err)
+		return
+	}
+	response := playgroundDecodeCanvasProject(project, false)
+	response.UnavailableNodeIDs = playgroundCanvasUnavailableNodeIDs(userID, string(project.Document))
+	common.ApiSuccess(c, response)
 }

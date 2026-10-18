@@ -207,6 +207,13 @@ type PlaygroundCanvasProject struct {
 	NodeCount     int   `gorm:"not null"`
 	EdgeCount     int   `gorm:"not null"`
 	Revision      int64 `gorm:"not null"`
+	// StorageBackend/ObjectKey/ContentEncoding mirror the payload layout of
+	// attachments: a document larger than the externalization threshold is
+	// gzip-compressed into the object store and Document stays empty. ObjectKey
+	// is empty for inline documents.
+	StorageBackend  string `gorm:"size:32"`
+	ObjectKey       string `gorm:"size:512"`
+	ContentEncoding string `gorm:"size:16"`
 	// DeletedAt is the trash tombstone, like the one on PlaygroundSession: 0
 	// means the canvas is active, a positive value is when it was soft-deleted.
 	// A trashed canvas keeps its document, pins and counter share until the
@@ -261,6 +268,9 @@ func FindPlaygroundCanvasProjectByClientID(userID int, clientID string) (*Playgr
 		}
 		return nil, err
 	}
+	if err := hydratePlaygroundCanvasProject(&project); err != nil {
+		return nil, err
+	}
 	return &project, nil
 }
 
@@ -303,6 +313,17 @@ func CreatePlaygroundCanvasProject(userID int, project *PlaygroundCanvasProject,
 	if project.Title == "" {
 		project.Title = "New canvas"
 	}
+	// A first document larger than the externalization threshold moves into the
+	// object store before the row is written; a store failure keeps it inline.
+	storedDocument := project.Document
+	documentSize := int64(len(storedDocument))
+	storedObject := ""
+	if backend, objectKey, encoding, externalized := externalizePlaygroundPayload(
+		playgroundCanvasDocumentObjectKey(userID, now, project.ID, 0), []byte(storedDocument)); externalized {
+		project.StorageBackend, project.ObjectKey, project.ContentEncoding = backend, objectKey, encoding
+		project.Document = ""
+		storedObject = objectKey
+	}
 	created := false
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		policy, err := playgroundPolicyForUser(tx, userID)
@@ -320,8 +341,7 @@ func CreatePlaygroundCanvasProject(userID int, project *PlaygroundCanvasProject,
 		if usage.CanvasCount >= int64(policy.CanvasUserMaxProjects) {
 			return ErrPlaygroundCanvasLimit
 		}
-		size := int64(len(project.Document))
-		if usage.CanvasBytes+size > policy.CanvasUserMaxBytes {
+		if usage.CanvasBytes+documentSize > policy.CanvasUserMaxBytes {
 			return ErrPlaygroundCanvasLimit
 		}
 		// A trashed canvas keeps its client key for restore; a client that
@@ -343,7 +363,7 @@ func CreatePlaygroundCanvasProject(userID int, project *PlaygroundCanvasProject,
 		if err := syncPlaygroundCanvasTaskArtifactPins(tx, userID, project.ID, pins.TaskArtifacts); err != nil {
 			return err
 		}
-		usage.apply(playgroundUserUsageDelta{CanvasCount: 1, CanvasBytes: size})
+		usage.apply(playgroundUserUsageDelta{CanvasCount: 1, CanvasBytes: documentSize})
 		if err := savePlaygroundUserUsage(tx, usage); err != nil {
 			return err
 		}
@@ -351,6 +371,9 @@ func CreatePlaygroundCanvasProject(userID int, project *PlaygroundCanvasProject,
 		return nil
 	})
 	if err != nil {
+		// The bytes never became a durable row; the row keeps its inline copy
+		// and this object is redundant.
+		deletePlaygroundObject(nil, storedObject)
 		// A concurrent create with the same client ID may have won the unique index.
 		if project.ClientID != nil {
 			if existing, findErr := FindPlaygroundCanvasProjectByClientID(userID, *project.ClientID); findErr == nil {
@@ -358,6 +381,11 @@ func CreatePlaygroundCanvasProject(userID int, project *PlaygroundCanvasProject,
 			}
 		}
 		return nil, false, err
+	}
+	if storedObject != "" {
+		// The response acknowledges the stored document even though the row
+		// keeps only the object key.
+		project.Document = storedDocument
 	}
 	return project, created, nil
 }
@@ -371,7 +399,24 @@ func GetPlaygroundCanvasProject(userID int, id string) (*PlaygroundCanvasProject
 	if err != nil {
 		return nil, err
 	}
+	if err := hydratePlaygroundCanvasProject(&project); err != nil {
+		return nil, err
+	}
 	return &project, nil
+}
+
+// hydratePlaygroundCanvasProject loads the externalized document of one canvas
+// row so callers always see the real document instead of an empty column.
+func hydratePlaygroundCanvasProject(project *PlaygroundCanvasProject) error {
+	if project.ObjectKey == "" {
+		return nil
+	}
+	document, err := readPlaygroundStoredPayload(nil, project.ObjectKey, project.ContentEncoding, project.DocumentBytes)
+	if err != nil {
+		return err
+	}
+	project.Document = LongText(document)
+	return nil
 }
 
 // lockPlaygroundCanvasProject acquires the canvas row a canvas-scoped child
@@ -415,6 +460,10 @@ type UpdatePlaygroundCanvasInput struct {
 	// Pins are the resources the replacement document references. They replace
 	// the canvas pins only when a document is written.
 	Pins PlaygroundCanvasPins
+	// SnapshotBefore forces one history entry of the document this write
+	// replaces, so a restore can itself be undone. It is best-effort: a full
+	// snapshot budget skips the entry without failing the write.
+	SnapshotBefore bool
 }
 
 func UpdatePlaygroundCanvasProject(userID int, id string, revision int64, input UpdatePlaygroundCanvasInput) (*PlaygroundCanvasProject, error) {
@@ -422,6 +471,8 @@ func UpdatePlaygroundCanvasProject(userID int, id string, revision int64, input 
 		return nil, ErrPlaygroundCanvasInvalid
 	}
 	var project PlaygroundCanvasProject
+	var removedObjects []playgroundStoredObject
+	writtenObject := ""
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		if err := lockForUpdate(tx).Where("id = ? AND user_id = ? AND deleted_at = 0", id, userID).First(&project).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -432,7 +483,8 @@ func UpdatePlaygroundCanvasProject(userID int, id string, revision int64, input 
 		if project.Revision != revision {
 			return ErrPlaygroundConflict
 		}
-		updates := map[string]any{"updated_at": common.GetTimestamp(), "revision": revision + 1}
+		now := common.GetTimestamp()
+		updates := map[string]any{"updated_at": now, "revision": revision + 1}
 		if input.Title != nil {
 			updates["title"] = *input.Title
 		}
@@ -457,10 +509,41 @@ func UpdatePlaygroundCanvasProject(userID int, id string, revision int64, input 
 					return err
 				}
 			}
+			// The board history keeps the state this save is about to replace,
+			// so a restore lands on a snapshot like any other save does.
+			if input.SnapshotBefore {
+				document, err := playgroundCanvasProjectDocument(&project)
+				if err != nil {
+					return err
+				}
+				pruned, err := capturePlaygroundCanvasSnapshot(tx, &project, document, true)
+				if err != nil {
+					return err
+				}
+				removedObjects = append(removedObjects, pruned...)
+			}
 			updates["document"] = *input.Document
 			updates["document_bytes"] = size
 			updates["node_count"] = input.NodeCount
 			updates["edge_count"] = input.EdgeCount
+			backend, objectKey, encoding, externalized := externalizePlaygroundPayload(
+				playgroundCanvasDocumentObjectKey(userID, now, id, revision+1), []byte(*input.Document))
+			if externalized {
+				updates["document"] = ""
+				updates["storage_backend"] = backend
+				updates["object_key"] = objectKey
+				updates["content_encoding"] = encoding
+				writtenObject = objectKey
+			} else {
+				updates["storage_backend"] = ""
+				updates["object_key"] = ""
+				updates["content_encoding"] = ""
+			}
+			// The replaced document object (if any) loses its row with this
+			// save and is dropped after the transaction commits.
+			if project.ObjectKey != "" && project.ObjectKey != writtenObject {
+				removedObjects = append(removedObjects, playgroundStoredObject{ObjectKey: project.ObjectKey})
+			}
 		}
 		result := tx.Model(&PlaygroundCanvasProject{}).
 			Where("id = ? AND user_id = ? AND revision = ?", id, userID, revision).Updates(updates)
@@ -478,12 +561,47 @@ func UpdatePlaygroundCanvasProject(userID int, id string, revision int64, input 
 				return err
 			}
 		}
-		return tx.Where("id = ? AND user_id = ?", id, userID).First(&project).Error
+		if err := tx.Where("id = ? AND user_id = ?", id, userID).First(&project).Error; err != nil {
+			return err
+		}
+		if input.Document != nil {
+			// History entries are written for the stored revision, and the
+			// policy decides whether this save deserves one.
+			pruned, err := capturePlaygroundCanvasSnapshot(tx, &project, *input.Document, false)
+			if err != nil {
+				return err
+			}
+			removedObjects = append(removedObjects, pruned...)
+		}
+		return nil
 	})
 	if err != nil {
+		// The row still owns its previous document; the copy written for this
+		// rolled-back save is redundant.
+		deletePlaygroundObject(nil, writtenObject)
 		return nil, err
 	}
+	deletePlaygroundObjects(removedObjects)
+	if input.Document != nil {
+		// The response acknowledges the stored document even though the row
+		// may keep only the object key.
+		project.Document = LongText(*input.Document)
+	}
 	return &project, nil
+}
+
+// playgroundCanvasProjectDocument returns the stored document of one canvas
+// row, reading and decompressing the object copy when the row was
+// externalized.
+func playgroundCanvasProjectDocument(project *PlaygroundCanvasProject) (string, error) {
+	if project.ObjectKey == "" {
+		return string(project.Document), nil
+	}
+	document, err := readPlaygroundStoredPayload(nil, project.ObjectKey, project.ContentEncoding, project.DocumentBytes)
+	if err != nil {
+		return "", err
+	}
+	return string(document), nil
 }
 
 // DeletePlaygroundCanvasProject moves one canvas to the trash. The document,
@@ -537,9 +655,11 @@ func RestorePlaygroundCanvasProject(userID int, id string) (*PlaygroundCanvasPro
 // PurgePlaygroundCanvasProject permanently removes one trashed canvas, releases
 // the attachment and generated-result pins it held and returns its document
 // bytes to the account budget. Only the trash cleanup and tests use it; the API
-// only ever soft deletes.
+// only ever soft deletes. The stored document and history objects are deleted
+// after the database commit.
 func PurgePlaygroundCanvasProject(userID int, id string) error {
-	return DB.Transaction(func(tx *gorm.DB) error {
+	var removedObjects []playgroundStoredObject
+	err := DB.Transaction(func(tx *gorm.DB) error {
 		var project PlaygroundCanvasProject
 		err := lockForUpdate(tx).Where("id = ? AND user_id = ? AND deleted_at > 0", id, userID).First(&project).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -548,33 +668,67 @@ func PurgePlaygroundCanvasProject(userID int, id string) error {
 		if err != nil {
 			return err
 		}
-		return purgePlaygroundCanvasProjectTx(tx, &project)
+		removed, err := purgePlaygroundCanvasProjectTx(tx, &project)
+		removedObjects = removed
+		return err
 	})
+	if err != nil {
+		return err
+	}
+	deletePlaygroundObjects(removedObjects)
+	return nil
 }
 
 // purgePlaygroundCanvasProjectTx removes one locked canvas and everything it
-// held inside the caller's transaction.
-func purgePlaygroundCanvasProjectTx(tx *gorm.DB, project *PlaygroundCanvasProject) error {
+// held inside the caller's transaction. The returned objects lost their rows
+// and must be deleted after the transaction commits.
+func purgePlaygroundCanvasProjectTx(tx *gorm.DB, project *PlaygroundCanvasProject) ([]playgroundStoredObject, error) {
 	usage, err := lockPlaygroundUserUsage(tx, project.UserID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// Deleting the canvas releases every attachment pin it held, so the orphan
 	// cleanup can collect images this board was the last user of.
 	if err := tx.Where("canvas_id = ? AND user_id = ?", project.ID, project.UserID).Delete(&PlaygroundCanvasAsset{}).Error; err != nil {
-		return err
+		return nil, err
 	}
 	// The canvas also releases the generated results it kept alive, so the
 	// result retention window resumes for them.
 	if err := tx.Where("source = ? AND source_id = ? AND user_id = ?", PlaygroundTaskArtifactPinSourceCanvas, project.ID, project.UserID).
 		Delete(&PlaygroundTaskArtifactPin{}).Error; err != nil {
-		return err
+		return nil, err
+	}
+	// The board history goes with the board: the snapshot rows are removed and
+	// their objects are collected for deletion after the commit.
+	snapshots := make([]PlaygroundCanvasSnapshot, 0)
+	if err := tx.Select("id, object_key, byte_size").Where("canvas_id = ? AND user_id = ?", project.ID, project.UserID).Find(&snapshots).Error; err != nil {
+		return nil, err
+	}
+	if err := tx.Where("canvas_id = ? AND user_id = ?", project.ID, project.UserID).Delete(&PlaygroundCanvasSnapshot{}).Error; err != nil {
+		return nil, err
 	}
 	if err := tx.Where("id = ? AND user_id = ?", project.ID, project.UserID).Delete(&PlaygroundCanvasProject{}).Error; err != nil {
-		return err
+		return nil, err
 	}
-	usage.apply(playgroundUserUsageDelta{CanvasCount: -1, CanvasBytes: -project.DocumentBytes})
-	return savePlaygroundUserUsage(tx, usage)
+	removed := make([]playgroundStoredObject, 0, len(snapshots)+1)
+	snapshotBytes := int64(0)
+	for index := range snapshots {
+		removed = append(removed, playgroundStoredObject{ObjectKey: snapshots[index].ObjectKey})
+		snapshotBytes += snapshots[index].ByteSize
+	}
+	if project.ObjectKey != "" {
+		removed = append(removed, playgroundStoredObject{ObjectKey: project.ObjectKey})
+	}
+	usage.apply(playgroundUserUsageDelta{
+		CanvasCount:         -1,
+		CanvasBytes:         -project.DocumentBytes,
+		CanvasSnapshotCount: -int64(len(snapshots)),
+		CanvasSnapshotBytes: -snapshotBytes,
+	})
+	if err := savePlaygroundUserUsage(tx, usage); err != nil {
+		return nil, err
+	}
+	return removed, nil
 }
 
 // purgeExpiredPlaygroundCanvasProject removes one trash candidate inside a
@@ -583,6 +737,7 @@ func purgePlaygroundCanvasProjectTx(tx *gorm.DB, project *PlaygroundCanvasProjec
 // purging it early. A candidate that was restored in the meantime is skipped.
 func purgeExpiredPlaygroundCanvasProject(candidate *PlaygroundCanvasProject, now int64) (int64, error) {
 	purged := int64(0)
+	var removedObjects []playgroundStoredObject
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var project PlaygroundCanvasProject
 		if err := lockForUpdate(tx).Where("id = ? AND user_id = ? AND deleted_at > 0", candidate.ID, candidate.UserID).First(&project).Error; err != nil {
@@ -598,13 +753,19 @@ func purgeExpiredPlaygroundCanvasProject(candidate *PlaygroundCanvasProject, now
 		if now-project.DeletedAt < retention {
 			return nil
 		}
-		if err := purgePlaygroundCanvasProjectTx(tx, &project); err != nil {
+		removed, err := purgePlaygroundCanvasProjectTx(tx, &project)
+		if err != nil {
 			return err
 		}
+		removedObjects = removed
 		purged = 1
 		return nil
 	})
-	return purged, err
+	if err != nil {
+		return 0, err
+	}
+	deletePlaygroundObjects(removedObjects)
+	return purged, nil
 }
 
 // PlaygroundCanvasAsset pins one attachment while at least one canvas node
