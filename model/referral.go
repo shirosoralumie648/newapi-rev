@@ -11,12 +11,15 @@ import (
 )
 
 // Referral binding sources. A binding is created once — at sign-up or by an
-// administrator — and records which channel carried the invitation.
+// administrator — and records which channel carried the invitation. The legacy
+// source is written only by the one-time import of relations that predate the
+// binding table (RF-09).
 const (
-	ReferralSourceLink  = "link"
-	ReferralSourceCode  = "code"
-	ReferralSourceOAuth = "oauth"
-	ReferralSourceAdmin = "admin"
+	ReferralSourceLink   = "link"
+	ReferralSourceCode   = "code"
+	ReferralSourceOAuth  = "oauth"
+	ReferralSourceAdmin  = "admin"
+	ReferralSourceLegacy = "legacy"
 )
 
 var (
