@@ -137,6 +137,28 @@ test('generating an image posts to the playground relay route and previews the r
   expect(await screen.findByAltText('Generated image 1')).toBeVisible()
 })
 
+test('an asynchronous image submission leaves the result to the task list', async () => {
+  mockTaskEndpoints([])
+  vi.spyOn(api, 'post').mockResolvedValue({
+    data: {
+      success: true,
+      data: { task_id: 'task-3', status: 'submitted', model: 'gpt-image-1' },
+    },
+  })
+  const user = userEvent.setup()
+  renderPanel()
+
+  await user.type(screen.getByLabelText('Prompt'), 'a red fox')
+  await user.click(screen.getByRole('button', { name: 'Generate' }))
+
+  expect(
+    await screen.findByText(
+      'Image generation submitted as a task; the result appears in the task list.'
+    )
+  ).toBeVisible()
+  expect(screen.queryByAltText('Generated image 1')).not.toBeInTheDocument()
+})
+
 test('generating a video posts to the playground video route', async () => {
   mockTaskEndpoints([])
   vi.spyOn(api, 'post').mockResolvedValue({

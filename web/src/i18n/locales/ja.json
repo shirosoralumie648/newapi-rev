@@ -3390,6 +3390,7 @@
     "Image count {{count}}": "生成枚数 {{count}}",
     "Image Generation": "画像生成",
     "Image generation failed": "画像の生成に失敗しました",
+    "Image generation submitted as a task; the result appears in the task list.": "画像生成をタスクとして送信しました。結果はタスク一覧に表示されます。",
     "Image In": "画像入力",
     "Image input": "画像入力",
     "Image input price": "画像入力価格",

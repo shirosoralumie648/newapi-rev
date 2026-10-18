@@ -3390,6 +3390,7 @@
     "Image count {{count}}": "生成数量 {{count}}",
     "Image Generation": "图片生成",
     "Image generation failed": "图片生成失败",
+    "Image generation submitted as a task; the result appears in the task list.": "图片生成已作为任务提交，结果将显示在任务列表中。",
     "Image In": "图像输入",
     "Image input": "图片输入",
     "Image input price": "图像输入价格",
