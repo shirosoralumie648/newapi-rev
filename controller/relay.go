@@ -161,6 +161,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 	relayInfo.RetryIndex = 0
 	relayInfo.LastError = nil
+	// The attempt leases of the last dispatch are released when the relay ends:
+	// a settled attempt frees its concurrency slot, and a failed attempt also
+	// returns the token reservation that settlement never consumed.
+	defer service.ReleaseAdmissionAttempt(c)
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
 		relayInfo.StreamStatus = nil
@@ -275,38 +279,140 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) (*model.Channel, *types.NewAPIError) {
-	if info.ChannelMeta == nil {
-		autoBan := c.GetBool("auto_ban")
-		autoBanInt := 1
-		if !autoBan {
-			autoBanInt = 0
+// contextSelectedChannel returns the channel the distributor selected for the
+// first attempt. The distributor stores the full record so admission can read
+// the channel's limits; a caller without one falls back to the minimal identity
+// record built from the request context.
+func contextSelectedChannel(c *gin.Context) *model.Channel {
+	if selected, ok := common.GetContextKeyType[*model.Channel](c, constant.ContextKeySelectedChannel); ok && selected != nil {
+		return selected
+	}
+	autoBan := c.GetBool("auto_ban")
+	autoBanInt := 1
+	if !autoBan {
+		autoBanInt = 0
+	}
+	return &model.Channel{
+		Id:      c.GetInt("channel_id"),
+		Type:    c.GetInt("channel_type"),
+		Name:    c.GetString("channel_name"),
+		AutoBan: &autoBanInt,
+	}
+}
+
+// maxAdmissionReselects bounds the capacity-driven channel re-selection. Every
+// iteration excludes one channel, so the bound only protects against a
+// selection regression.
+const maxAdmissionReselects = 100
+
+// channelSelectAPIError renders a selection failure for the HTTP relay path.
+// Capacity failures keep their stable rate-limit code.
+func channelSelectAPIError(c *gin.Context, selectErr *service.ChannelSelectError) *types.NewAPIError {
+	message := selectErr.Message
+	if selectErr.MessageID != "" {
+		message = i18n.T(c, selectErr.MessageID, selectErr.Params)
+	}
+	code := selectErr.Code
+	if code == "" {
+		code = types.ErrorCodeGetChannelFailed
+	}
+	status := selectErr.StatusCode
+	if status == 0 {
+		status = http.StatusServiceUnavailable
+	}
+	return types.NewErrorWithStatusCode(errors.New(message), code, status, types.ErrOptionWithSkipRetry())
+}
+
+// capacityOrSelectError turns an empty selection into a capacity rejection when
+// the request already skipped a saturated channel, and keeps the original
+// selection error otherwise.
+func capacityOrSelectError(c *gin.Context, info *relaycommon.RelayInfo, selectErr *service.ChannelSelectError) *types.NewAPIError {
+	if selectErr.NoAvailableChannel && service.HasExcludedChannels(c) {
+		return channelCapacityAPIError(c, info)
+	}
+	return channelSelectAPIError(c, selectErr)
+}
+
+func channelCapacityAPIError(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
+	c.Header("Retry-After", "1")
+	return channelSelectAPIError(c, service.ChannelCapacityExhaustedError(c, info.OriginModelName))
+}
+
+func tokenRateLimitAPIError(c *gin.Context) *types.NewAPIError {
+	c.Header("Retry-After", "1")
+	return channelSelectAPIError(c, service.TokenRateLimitExceededError())
+}
+
+// reserveFirstAttemptChannel reserves capacity for the distributor-selected
+// channel. A saturated channel is replaced without consuming the retry budget;
+// a pinned channel or a token rejected by its own limit fails the attempt.
+func reserveFirstAttemptChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) (*model.Channel, *types.NewAPIError) {
+	channel := contextSelectedChannel(c)
+	for range maxAdmissionReselects {
+		outcome := service.AdmitChannelAttempt(c, channel, info.GetEstimatePromptTokens())
+		if outcome.Admitted {
+			service.RequestPolicy(c).BeginAttempt(channel, info.UsingGroup)
+			return channel, nil
 		}
-		channel := &model.Channel{
-			Id:      c.GetInt("channel_id"),
-			Type:    c.GetInt("channel_type"),
-			Name:    c.GetString("channel_name"),
-			AutoBan: &autoBanInt,
+		if outcome.Scope == service.AdmissionScopeToken {
+			return nil, tokenRateLimitAPIError(c)
 		}
-		service.RequestPolicy(c).BeginAttempt(channel, info.UsingGroup)
+		pin, pinned, _ := service.GetChannelConstraints(c).ResolvedPin()
+		if pinned && pin.ChannelId == channel.Id {
+			return nil, channelCapacityAPIError(c, info)
+		}
+		service.ExcludeSaturatedChannel(c, channel.Id)
+		next, _, selectErr := service.SelectChannelForRequest(c, info.OriginModelName, retryParam)
+		if selectErr != nil {
+			return nil, capacityOrSelectError(c, info, selectErr)
+		}
+		channel = next
+		info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
+		if apiErr := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName); apiErr != nil {
+			return nil, apiErr
+		}
+	}
+	return nil, channelCapacityAPIError(c, info)
+}
+
+// reserveRetryChannel selects and admits the channel of a retry attempt.
+// Saturated candidates are excluded and skipped without consuming the retry
+// budget.
+func reserveRetryChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) (*model.Channel, *types.NewAPIError) {
+	for range maxAdmissionReselects {
+		channel, selectGroup, err := service.CacheGetRandomSatisfiedChannel(retryParam)
+		if err != nil {
+			return nil, types.NewError(errors.New(i18n.T(c, i18n.MsgRelayRetryGetChannelFailed, map[string]any{"Group": selectGroup, "Model": info.OriginModelName, "Error": err.Error()})), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		}
+		if channel == nil {
+			if service.HasExcludedChannels(c) {
+				return nil, channelCapacityAPIError(c, info)
+			}
+			return nil, types.NewError(errors.New(i18n.T(c, i18n.MsgRelayRetryNoAvailableChannel, map[string]any{"Group": selectGroup, "Model": info.OriginModelName})), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		}
+		outcome := service.AdmitChannelAttempt(c, channel, info.GetEstimatePromptTokens())
+		if !outcome.Admitted {
+			if outcome.Scope == service.AdmissionScopeToken {
+				return nil, tokenRateLimitAPIError(c)
+			}
+			service.ExcludeSaturatedChannel(c, channel.Id)
+			continue
+		}
+		info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
+		service.RequestPolicy(c).BeginAttempt(channel, selectGroup)
+		if apiErr := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName); apiErr != nil {
+			return nil, apiErr
+		}
 		return channel, nil
 	}
-	channel, selectGroup, err := service.CacheGetRandomSatisfiedChannel(retryParam)
-	if err != nil {
-		return nil, types.NewError(errors.New(i18n.T(c, i18n.MsgRelayRetryGetChannelFailed, map[string]any{"Group": selectGroup, "Model": info.OriginModelName, "Error": err.Error()})), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
-	}
-	if channel == nil {
-		return nil, types.NewError(errors.New(i18n.T(c, i18n.MsgRelayRetryNoAvailableChannel, map[string]any{"Group": selectGroup, "Model": info.OriginModelName})), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
-	}
+	return nil, channelCapacityAPIError(c, info)
+}
 
-	info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
-
-	service.RequestPolicy(c).BeginAttempt(channel, selectGroup)
-	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
-	if newAPIError != nil {
-		return nil, newAPIError
+func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) (*model.Channel, *types.NewAPIError) {
+	if info.ChannelMeta == nil {
+		return reserveFirstAttemptChannel(c, info, retryParam)
 	}
-	return channel, nil
+	return reserveRetryChannel(c, info, retryParam)
 }
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError, relayInfo *relaycommon.RelayInfo) {
