@@ -1100,4 +1100,13 @@ export const STATIC_I18N_KEYS = [
   'Prompt snippet content limit exceeded.',
   'Prompt snippets per user',
   'Prompt snippet size limit',
+  // Read-aloud and dictation messages render from PLAYGROUND_SPEECH_ERRORS and
+  // PLAYGROUND_DICTATION_ERRORS, and the message action label from
+  // MESSAGE_ACTION_LABELS, so the literal scan cannot see them.
+  'Read aloud',
+  'Unable to save the audio to the conversation.',
+  'Audio recording is not supported in this browser.',
+  'Microphone access failed.',
+  'Transcription failed',
+  'No speech was detected.',
 ] as const
