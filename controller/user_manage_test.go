@@ -918,23 +918,29 @@ func TestReferralAntiAbuseAdminEndpoints(t *testing.T) {
 
 	recorder = invoke(http.MethodPost, fmt.Sprintf("/api/user/referral/reviews/%d", rejected.Id), `{"decision":"reject"}`, userParams(rejected.Id), ReviewReferralCommission)
 	assert.Contains(t, recorder.Body.String(), `"success":true`)
-	require.NoError(t, db.First(&reloaded, rejected.Id).Error)
-	assert.Equal(t, model.ReferralCommissionStatusRejected, reloaded.Status)
+	var rejectedRow model.ReferralCommission
+	require.NoError(t, db.First(&rejectedRow, rejected.Id).Error)
+	assert.Equal(t, model.ReferralCommissionStatusRejected, rejectedRow.Status)
 
 	for _, expected := range []struct {
-		action  string
-		content string
+		action   string
+		contents []string
 	}{
-		{"user.referral_flag", "Updated the referral flag of user " + invitee.Username + " to frozen"},
-		{"user.referral_identity", "Recorded the referral identity of user " + inviter.Username},
-		{"user.referral_identity_clear", "Cleared the referral identity of user " + inviter.Username},
+		{"user.referral_flag", []string{
+			"Updated the referral flag of user " + invitee.Username + " to frozen",
+			"Updated the referral flag of user " + invitee.Username + " to clear",
+		}},
+		{"user.referral_identity", []string{"Recorded the referral identity of user " + inviter.Username}},
+		{"user.referral_identity_clear", []string{"Cleared the referral identity of user " + inviter.Username}},
 	} {
 		var audits []model.AuditLog
-		require.NoError(t, model.LOG_DB.Where("action = ?", expected.action).Find(&audits).Error)
-		require.Len(t, audits, 1, "%s must be audited exactly once", expected.action)
-		assert.Equal(t, expected.content, audits[0].Content)
-		assert.Equal(t, 9999, audits[0].UserId)
-		assert.Equal(t, "root-operator", audits[0].Username)
+		require.NoError(t, model.LOG_DB.Where("action = ?", expected.action).Order("id").Find(&audits).Error)
+		require.Len(t, audits, len(expected.contents), "%s must be audited once per call", expected.action)
+		for i, content := range expected.contents {
+			assert.Equal(t, content, audits[i].Content)
+			assert.Equal(t, 9999, audits[i].UserId)
+			assert.Equal(t, "root-operator", audits[i].Username)
+		}
 	}
 	var identityAudits []model.AuditLog
 	require.NoError(t, model.LOG_DB.Where("action = ?", "user.referral_identity").Find(&identityAudits).Error)
