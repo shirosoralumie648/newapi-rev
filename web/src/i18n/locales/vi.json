@@ -7735,6 +7735,9 @@
     "Subscribe to a plan to get more storage.": "Đăng ký gói để có thêm dung lượng lưu trữ.",
     "Subscription plans grant the limits of their Upgrade Group, so give a paid group a larger storage quota here.": "Gói đăng ký cấp hạn mức của Nhóm nâng cấp tương ứng, hãy đặt hạn mức lưu trữ lớn hơn cho nhóm trả phí tại đây.",
     "Upgrade for more storage": "Nâng cấp để có thêm dung lượng lưu trữ",
-    "Users who purchase this plan join {{group}}. These Playground storage limits apply to that group; leave a field empty to inherit the global default.": "Người dùng mua gói này sẽ tham gia {{group}}. Các hạn mức lưu trữ Playground này áp dụng cho nhóm đó; để trống để kế thừa giá trị mặc định toàn cục."
+    "Users who purchase this plan join {{group}}. These Playground storage limits apply to that group; leave a field empty to inherit the global default.": "Người dùng mua gói này sẽ tham gia {{group}}. Các hạn mức lưu trữ Playground này áp dụng cho nhóm đó; để trống để kế thừa giá trị mặc định toàn cục.",
+    "Request timing": "Thời gian xử lý yêu cầu",
+    "Upstream first byte": "Byte đầu tiên của thượng nguồn",
+    "Retries": "Số lần thử lại"
   }
 }

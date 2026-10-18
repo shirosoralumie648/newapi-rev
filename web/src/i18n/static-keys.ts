@@ -1049,4 +1049,11 @@ export const STATIC_I18N_KEYS = [
   'Video',
   'Audio',
   'Group',
+  // Request timing phase labels render through t(label) from
+  // REQUEST_TIMING_PHASES.
+  'Auth',
+  'Channel selection',
+  'Upstream first byte',
+  'First token',
+  'Total',
 ] as const

@@ -93,6 +93,7 @@ import {
 import { USAGE_BILLING_PATH, type LogOtherData } from '../../types'
 import { ResponseModelDetails } from '../model-badge'
 import { PluginAuthorLink } from '../plugin-author-link'
+import { RequestTimingBreakdown } from '../request-timing-breakdown'
 import { DetailRow, DetailSection } from './log-detail-layout'
 
 // Maps a channel-update changed-field token (as recorded by the backend audit)
@@ -506,6 +507,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const showAdminIp =
     !!props.log.ip && (showTiming || (props.isAdmin && isTopup))
   const adminInfo = other?.admin_info
+  const requestTiming = other?.request_timing
   const topupAuditFields =
     isTopup && props.isAdmin && adminInfo
       ? ([
@@ -759,6 +761,13 @@ export function DetailsDialog(props: DetailsDialogProps) {
             />
           )}
         </div>
+
+        {/* Server-side phase breakdown of the main LLM entries. */}
+        {requestTiming && (
+          <DetailSection label={t('Request timing')}>
+            <RequestTimingBreakdown timing={requestTiming} />
+          </DetailSection>
+        )}
 
         {/* Request conversion (admin only, not for refund) */}
         {showConversion && (

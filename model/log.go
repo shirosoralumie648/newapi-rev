@@ -609,7 +609,9 @@ func GetUserLogs(userId int, filter LogFilter, startIdx int, num int) (logs []*L
 // of the query, so a request id that belongs to another account (or to a
 // non-consume event such as a task refund) simply has no row: the lookup can
 // never disclose another account's billing. Rows are read from the log
-// database, which may be a separate connection or ClickHouse.
+// database, which may be a separate connection or ClickHouse; the stored
+// `other` document is loaded as well so the caller can project its public
+// request timing.
 func GetUserConsumeLogsByRequestIds(userId int, requestIds []string) ([]Log, error) {
 	logs := make([]Log, 0, len(requestIds))
 	if userId <= 0 || len(requestIds) == 0 {
@@ -618,7 +620,7 @@ func GetUserConsumeLogsByRequestIds(userId int, requestIds []string) ([]Log, err
 	// The conditions stay unqualified on purpose: the log table name may carry
 	// a naming prefix, so a hard-coded `logs.` alias would not match it.
 	err := LOG_DB.Model(&Log{}).
-		Select("request_id", "quota", "prompt_tokens", "completion_tokens", "model_name", "created_at").
+		Select("request_id", "quota", "prompt_tokens", "completion_tokens", "model_name", "created_at", "other").
 		Where("user_id = ? AND type = ?", userId, LogTypeConsume).
 		Where("request_id IN ?", requestIds).
 		Find(&logs).Error

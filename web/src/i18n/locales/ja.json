@@ -7735,6 +7735,9 @@
     "Subscribe to a plan to get more storage.": "プランを購読するとストレージを増やせます。",
     "Subscription plans grant the limits of their Upgrade Group, so give a paid group a larger storage quota here.": "サブスクリプションは「アップグレードグループ」の上限を付与します。有料グループにはここでより大きなストレージ容量を設定してください。",
     "Upgrade for more storage": "アップグレードしてストレージを増やす",
-    "Users who purchase this plan join {{group}}. These Playground storage limits apply to that group; leave a field empty to inherit the global default.": "このプランを購入したユーザーは {{group}} に所属します。これらの Playground ストレージ上限はそのグループに適用されます。空欄の項目はグローバル既定値を継承します。"
+    "Users who purchase this plan join {{group}}. These Playground storage limits apply to that group; leave a field empty to inherit the global default.": "このプランを購入したユーザーは {{group}} に所属します。これらの Playground ストレージ上限はそのグループに適用されます。空欄の項目はグローバル既定値を継承します。",
+    "Request timing": "リクエスト処理時間",
+    "Upstream first byte": "アップストリーム初回バイト",
+    "Retries": "再試行回数"
   }
 }

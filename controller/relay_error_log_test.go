@@ -60,6 +60,12 @@ func TestProcessChannelErrorUsesSnapshotWithoutLeakingChannelMetadata(t *testing
 	ctx.Set("channel_type", 9)
 	ctx.Set("use_channel", []string{"101"})
 	common.SetContextKey(ctx, constant.ContextKeyRequestStartTime, time.Now().Add(-time.Second))
+	// The timing middleware started a session for this entry point and the
+	// admission/channel-selection phases were already observed.
+	session := common.NewRequestTimingSession()
+	common.SetRequestTimingSession(ctx, session)
+	common.MarkRequestTiming(ctx, common.RequestTimingPhaseAuthenticated)
+	common.MarkRequestTiming(ctx, common.RequestTimingPhaseChannelSelected)
 
 	channelSnapshot := types.ChannelError{
 		ChannelId:   101,
@@ -83,6 +89,16 @@ func TestProcessChannelErrorUsesSnapshotWithoutLeakingChannelMetadata(t *testing
 	adminInfo, ok := storedOther["admin_info"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, []any{"101"}, adminInfo["use_channel"])
+	// The phase breakdown is part of the stored row, with only the phases that
+	// were actually observed.
+	storedTiming, ok := storedOther["request_timing"].(map[string]any)
+	require.True(t, ok)
+	assert.Contains(t, storedTiming, "total_ms")
+	assert.Contains(t, storedTiming, "auth_ms")
+	assert.Contains(t, storedTiming, "channel_select_ms")
+	assert.Equal(t, float64(0), storedTiming["retries"])
+	assert.NotContains(t, storedTiming, "upstream_ms")
+	assert.NotContains(t, storedTiming, "first_token_ms")
 
 	logs, total, err := model.GetUserLogs(7, model.LogFilter{Type: model.LogTypeError}, 0, 10)
 	require.NoError(t, err)
@@ -96,4 +112,9 @@ func TestProcessChannelErrorUsesSnapshotWithoutLeakingChannelMetadata(t *testing
 	for _, key := range []string{"channel_id", "channel_name", "channel_type"} {
 		assert.NotContains(t, userOther, key)
 	}
+	// The owner keeps the timing breakdown: it is public log metadata.
+	userTiming, ok := userOther["request_timing"].(map[string]any)
+	require.True(t, ok)
+	assert.Contains(t, userTiming, "total_ms")
+	assert.NotContains(t, userTiming, "upstream_ms")
 }

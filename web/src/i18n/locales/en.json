@@ -7735,6 +7735,9 @@
     "Subscribe to a plan to get more storage.": "Subscribe to a plan to get more storage.",
     "Subscription plans grant the limits of their Upgrade Group, so give a paid group a larger storage quota here.": "Subscription plans grant the limits of their Upgrade Group, so give a paid group a larger storage quota here.",
     "Upgrade for more storage": "Upgrade for more storage",
-    "Users who purchase this plan join {{group}}. These Playground storage limits apply to that group; leave a field empty to inherit the global default.": "Users who purchase this plan join {{group}}. These Playground storage limits apply to that group; leave a field empty to inherit the global default."
+    "Users who purchase this plan join {{group}}. These Playground storage limits apply to that group; leave a field empty to inherit the global default.": "Users who purchase this plan join {{group}}. These Playground storage limits apply to that group; leave a field empty to inherit the global default.",
+    "Request timing": "Request timing",
+    "Upstream first byte": "Upstream first byte",
+    "Retries": "Retries"
   }
 }

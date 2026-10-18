@@ -3053,7 +3053,10 @@ func TestPlaygroundMessageCostLookup(t *testing.T) {
 				require.NoError(t, db.Migrator().DropTable(&model.Log{}))
 			})
 			require.NoError(t, db.Create(&[]model.Log{
-				{UserId: 7, Type: model.LogTypeConsume, RequestId: "pg-cost-owner", Quota: 1234, PromptTokens: 10, CompletionTokens: 20, ModelName: "cost-model", CreatedAt: 100},
+				{UserId: 7, Type: model.LogTypeConsume, RequestId: "pg-cost-owner", Quota: 1234, PromptTokens: 10, CompletionTokens: 20, ModelName: "cost-model", CreatedAt: 100,
+					Other: `{"request_timing":{"total_ms":1320,"auth_ms":24,"channel_select_ms":8,"upstream_ms":411,"first_token_ms":445,"retries":1},"admin_info":{"use_channel":[3]}}`},
+				{UserId: 7, Type: model.LogTypeConsume, RequestId: "pg-cost-no-timing", Quota: 50, PromptTokens: 2, CompletionTokens: 3, ModelName: "cost-model", CreatedAt: 100,
+					Other: `{"request_path":"/v1/chat/completions"}`},
 				{UserId: 8, Type: model.LogTypeConsume, RequestId: "pg-cost-other", Quota: 9999, PromptTokens: 1, CompletionTokens: 1, ModelName: "other-model", CreatedAt: 100},
 				{UserId: 7, Type: model.LogTypeError, RequestId: "pg-cost-error", Quota: 0, CreatedAt: 100},
 			}).Error)
@@ -3063,6 +3066,9 @@ func TestPlaygroundMessageCostLookup(t *testing.T) {
 			require.Len(t, logs, 1)
 			assert.Equal(t, "pg-cost-owner", logs[0].RequestId)
 			assert.Equal(t, 1234, logs[0].Quota)
+			// The stored other document is loaded so the caller can project the
+			// public request timing out of it.
+			assert.Contains(t, logs[0].Other, "request_timing")
 
 			empty, err := model.GetUserConsumeLogsByRequestIds(7, nil)
 			require.NoError(t, err)
@@ -3085,6 +3091,14 @@ func TestPlaygroundMessageCostLookup(t *testing.T) {
 						TotalTokens      int    `json:"total_tokens"`
 						ModelName        string `json:"model_name"`
 						CreatedAt        int64  `json:"created_at"`
+						Timing           *struct {
+							TotalMs         *int64 `json:"total_ms"`
+							AuthMs          *int64 `json:"auth_ms"`
+							ChannelSelectMs *int64 `json:"channel_select_ms"`
+							UpstreamMs      *int64 `json:"upstream_ms"`
+							FirstTokenMs    *int64 `json:"first_token_ms"`
+							Retries         *int   `json:"retries"`
+						} `json:"timing"`
 					} `json:"items"`
 				} `json:"data"`
 			}
@@ -3100,6 +3114,35 @@ func TestPlaygroundMessageCostLookup(t *testing.T) {
 			assert.Equal(t, 30, item.TotalTokens)
 			assert.Equal(t, "cost-model", item.ModelName)
 			assert.EqualValues(t, 100, item.CreatedAt)
+			// The public phase breakdown of the settle row is projected for the
+			// conversation metadata; nothing else from the stored other is.
+			require.NotNil(t, item.Timing)
+			require.NotNil(t, item.Timing.TotalMs)
+			assert.EqualValues(t, 1320, *item.Timing.TotalMs)
+			require.NotNil(t, item.Timing.UpstreamMs)
+			assert.EqualValues(t, 411, *item.Timing.UpstreamMs)
+			require.NotNil(t, item.Timing.Retries)
+			assert.Equal(t, 1, *item.Timing.Retries)
+			assert.NotContains(t, response.Body.String(), "use_channel")
+
+			// A settle row stored before the timing field existed answers with
+			// the cost figures and no timing object.
+			legacyResponse := playgroundRequest(t, 7, http.MethodGet, "/api/playground/message-costs?request_ids=pg-cost-no-timing", nil, controller.GetPlaygroundMessageCosts)
+			require.Equal(t, http.StatusOK, legacyResponse.Code, legacyResponse.Body.String())
+			var legacyEnvelope struct {
+				Data struct {
+					Items []struct {
+						RequestID string `json:"request_id"`
+						Timing    *struct {
+							TotalMs *int64 `json:"total_ms"`
+						} `json:"timing"`
+					} `json:"items"`
+				} `json:"data"`
+			}
+			require.NoError(t, common.Unmarshal(legacyResponse.Body.Bytes(), &legacyEnvelope))
+			require.Len(t, legacyEnvelope.Data.Items, 1)
+			assert.Equal(t, "pg-cost-no-timing", legacyEnvelope.Data.Items[0].RequestID)
+			assert.Nil(t, legacyEnvelope.Data.Items[0].Timing)
 
 			invalidQueries := []string{
 				"",

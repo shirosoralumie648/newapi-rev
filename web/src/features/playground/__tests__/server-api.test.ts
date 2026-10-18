@@ -294,6 +294,14 @@ test('the cost lookup sends the request ids and maps settled rows by id', async 
             total_tokens: 30,
             model_name: 'test-model',
             created_at: 100,
+            timing: {
+              total_ms: 1320,
+              auth_ms: 24,
+              channel_select_ms: 8,
+              upstream_ms: 411,
+              first_token_ms: 445,
+              retries: 1,
+            },
           },
         ],
       },
@@ -317,6 +325,14 @@ test('the cost lookup sends the request ids and maps settled rows by id', async 
     totalTokens: 30,
     modelName: 'test-model',
     createdAt: 100000,
+    timing: {
+      total_ms: 1320,
+      auth_ms: 24,
+      channel_select_ms: 8,
+      upstream_ms: 411,
+      first_token_ms: 445,
+      retries: 1,
+    },
   })
   expect(lookup.costs.has('req-2')).toBe(false)
 })

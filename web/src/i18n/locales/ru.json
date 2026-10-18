@@ -7735,6 +7735,9 @@
     "Subscribe to a plan to get more storage.": "Оформите подписку, чтобы получить больше места для хранения.",
     "Subscription plans grant the limits of their Upgrade Group, so give a paid group a larger storage quota here.": "Подписки предоставляют лимиты своей группы повышения, поэтому задайте здесь больший лимит хранилища для платной группы.",
     "Upgrade for more storage": "Обновить тариф для большего хранилища",
-    "Users who purchase this plan join {{group}}. These Playground storage limits apply to that group; leave a field empty to inherit the global default.": "Пользователи, купившие этот тариф, попадают в группу {{group}}. Эти лимиты хранилища Playground применяются к этой группе; пустое поле наследует глобальное значение по умолчанию."
+    "Users who purchase this plan join {{group}}. These Playground storage limits apply to that group; leave a field empty to inherit the global default.": "Пользователи, купившие этот тариф, попадают в группу {{group}}. Эти лимиты хранилища Playground применяются к этой группе; пустое поле наследует глобальное значение по умолчанию.",
+    "Request timing": "Разбивка по этапам",
+    "Upstream first byte": "Первый байт источника",
+    "Retries": "Повторные попытки"
   }
 }

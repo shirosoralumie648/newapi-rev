@@ -206,6 +206,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		if newAPIError == nil {
+			// A non-streaming response is written by the handler before it
+			// returns, so this is the first data the client received. Streamed
+			// responses already marked the milestone at their first chunk.
+			common.MarkRequestTiming(c, common.RequestTimingPhaseFirstToken)
 			service.MarkRequestPolicySuccess(c, relayInfo.StreamStatus)
 			relayInfo.LastError = nil
 			return
