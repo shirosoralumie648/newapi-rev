@@ -26,6 +26,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -104,7 +105,7 @@ func completeReferralCommissionTestTopUp(t *testing.T, tradeNo string, userId in
 	order := &TopUp{
 		UserId:          userId,
 		Amount:          amount,
-		Money:           float64(amount),
+		Money:           decimal.NewFromInt(amount),
 		TradeNo:         tradeNo,
 		PaymentMethod:   PaymentProviderEpay,
 		PaymentProvider: PaymentProviderEpay,
