@@ -1139,6 +1139,20 @@ export const STATIC_I18N_KEYS = [
   'Microphone access failed.',
   'Transcription failed',
   'No speech was detected.',
+  // Referral anti-abuse (RF-06) mark levels, review states, review reasons and
+  // the settings action label render through t(labelKey) from the referral
+  // label maps in features/wallet/lib/referral.ts and
+  // ReferralCommissionSection, so the literal scan cannot see them.
+  'Above the review threshold',
+  'Blocked',
+  'Clear',
+  'Frozen',
+  'Link',
+  'Rejected',
+  'Save referral commission',
+  'Under review',
+  'Watch',
+  'Watched account',
   // API key periodic quota options render through t(option.label) from
   // API_KEY_PERIOD_RESET_OPTIONS, and the invalid-cycle message is returned
   // from Go through message_key, so the literal scan cannot see them.
