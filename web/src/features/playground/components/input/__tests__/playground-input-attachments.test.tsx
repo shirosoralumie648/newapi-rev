@@ -16,10 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import i18next from 'i18next'
-import type { ComponentProps } from 'react'
+import type { ComponentProps, ReactElement, ReactNode } from 'react'
 import { afterEach, beforeAll, expect, test, vi } from 'vitest'
 
 import {
@@ -69,12 +70,24 @@ function buildInputElement(
   return <PlaygroundInput {...props} />
 }
 
+// The composer mounts the dictation panel, whose transcription mutation needs
+// the query client the app installs at its root.
+function renderComposer(ui: ReactElement) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
+  function QueryClientWrapper({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  }
+  return render(ui, { wrapper: QueryClientWrapper })
+}
+
 function renderInput(
   onSubmit: ComponentProps<typeof PlaygroundInput>['onSubmit'] = vi
     .fn()
     .mockResolvedValue(undefined)
 ) {
-  render(buildInputElement(onSubmit))
+  renderComposer(buildInputElement(onSubmit))
   return onSubmit
 }
 
@@ -179,7 +192,7 @@ test('a failed send keeps the draft text and attachment for retry', async () => 
 test('pending files from the library join the composer exactly once', async () => {
   const onPendingFilesConsumed = vi.fn()
   const pending = [attachmentFile()]
-  const { rerender } = render(
+  const { rerender } = renderComposer(
     buildInputElement(vi.fn().mockResolvedValue(undefined), {
       pendingFiles: pending,
       onPendingFilesConsumed,
@@ -204,7 +217,7 @@ test('pending artifact text is appended to the draft once', async () => {
   const user = userEvent.setup()
   const onPendingTextConsumed = vi.fn()
   const onSubmit = vi.fn().mockResolvedValue(undefined)
-  const { rerender } = render(buildInputElement(onSubmit))
+  const { rerender } = renderComposer(buildInputElement(onSubmit))
 
   await user.type(screen.getByPlaceholderText('Ask anything'), 'Draft')
   rerender(

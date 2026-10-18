@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import i18next from 'i18next'
@@ -43,33 +44,40 @@ function renderTools(
   config = DEFAULT_CONFIG,
   onDictateTranscript?: (text: string) => void
 ) {
+  // The dictation panel mounts a transcription mutation, which needs the query
+  // client the app installs at its root.
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
   render(
-    <PromptInputProvider>
-      <PlaygroundInputTools
-        config={config}
-        contextPlan={planPlaygroundContext({
-          messages: [],
-          settings: DEFAULT_CONTEXT_SETTINGS,
-        })}
-        contextSettings={DEFAULT_CONTEXT_SETTINGS}
-        contextSummary={null}
-        hasMessages
-        models={[{ label: 'gpt-4o', value: 'gpt-4o' }]}
-        compareModels={[]}
-        onCompareModelsChange={() => undefined}
-        onClearMessages={onClearMessages}
-        onConfigChange={() => undefined}
-        onContextSettingsChange={() => undefined}
-        onDictateTranscript={onDictateTranscript}
-        onInsertText={() => undefined}
-        onParameterEnabledChange={() => undefined}
-        onRemoveContextSummary={() => undefined}
-        onSummarizeContext={() => undefined}
-        onSystemPromptChange={onSystemPromptChange}
-        parameterEnabled={DEFAULT_PARAMETER_ENABLED}
-        systemPrompt={systemPrompt}
-      />
-    </PromptInputProvider>
+    <QueryClientProvider client={client}>
+      <PromptInputProvider>
+        <PlaygroundInputTools
+          config={config}
+          contextPlan={planPlaygroundContext({
+            messages: [],
+            settings: DEFAULT_CONTEXT_SETTINGS,
+          })}
+          contextSettings={DEFAULT_CONTEXT_SETTINGS}
+          contextSummary={null}
+          hasMessages
+          models={[{ label: 'gpt-4o', value: 'gpt-4o' }]}
+          compareModels={[]}
+          onCompareModelsChange={() => undefined}
+          onClearMessages={onClearMessages}
+          onConfigChange={() => undefined}
+          onContextSettingsChange={() => undefined}
+          onDictateTranscript={onDictateTranscript}
+          onInsertText={() => undefined}
+          onParameterEnabledChange={() => undefined}
+          onRemoveContextSummary={() => undefined}
+          onSummarizeContext={() => undefined}
+          onSystemPromptChange={onSystemPromptChange}
+          parameterEnabled={DEFAULT_PARAMETER_ENABLED}
+          systemPrompt={systemPrompt}
+        />
+      </PromptInputProvider>
+    </QueryClientProvider>
   )
   return { onClearMessages, onSystemPromptChange }
 }
