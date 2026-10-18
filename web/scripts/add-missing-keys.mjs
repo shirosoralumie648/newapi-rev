@@ -97,6 +97,8 @@ const newKeys = {
       'Daily metered storage charges, their free allowance and the wallet debt they raised',
     'Save storage billing': 'Save storage billing',
     Grace: 'Grace',
+    'Playground storage billing for {{date}}: {{quota}} quota charged, {{bytes}} bytes billed':
+      'Playground storage billing for {{date}}: {{quota}} quota charged, {{bytes}} bytes billed',
   },
   zh: {
     '0 means unlimited.': '0 表示无限制。',
@@ -165,6 +167,8 @@ const newKeys = {
       '每日计量的存储费用、其免费额度以及产生的钱包欠款',
     'Save storage billing': '保存存储计费设置',
     Grace: '宽限期',
+    'Playground storage billing for {{date}}: {{quota}} quota charged, {{bytes}} bytes billed':
+      '{{date}} 的 Playground 存储计费：已扣 {{quota}} 额度，计费 {{bytes}} 字节',
   },
   'zh-TW': {
     '0 means unlimited.': '0 表示無限制。',
@@ -233,6 +237,8 @@ const newKeys = {
       '每日計量的儲存費用、其免費額度以及產生的錢包欠款',
     'Save storage billing': '儲存儲存空間計費設定',
     Grace: '寬限期',
+    'Playground storage billing for {{date}}: {{quota}} quota charged, {{bytes}} bytes billed':
+      '{{date}} 的 Playground 儲存計費：已扣 {{quota}} 額度，計費 {{bytes}} 位元組',
   },
   fr: {
     '0 means unlimited.': '0 signifie illimité.',
@@ -311,6 +317,8 @@ const newKeys = {
       'Frais de stockage quotidiens au compteur, leur allocation gratuite et la dette de portefeuille engendrée',
     'Save storage billing': 'Enregistrer la facturation du stockage',
     Grace: 'En grâce',
+    'Playground storage billing for {{date}}: {{quota}} quota charged, {{bytes}} bytes billed':
+      'Facturation du stockage Playground du {{date}} : {{quota}} de quota facturé, {{bytes}} octets facturés',
   },
   ja: {
     '0 means unlimited.': '0 は無制限を意味します。',
@@ -383,6 +391,8 @@ const newKeys = {
       '日次の従量ストレージ料金、その無料枠、発生したウォレット債務',
     'Save storage billing': 'ストレージ課金設定を保存',
     Grace: '猶予中',
+    'Playground storage billing for {{date}}: {{quota}} quota charged, {{bytes}} bytes billed':
+      '{{date}} の Playground ストレージ課金：{{quota}} クォータを請求、{{bytes}} バイトを課金',
   },
   ru: {
     '0 means unlimited.': '0 означает отсутствие ограничений.',
@@ -458,6 +468,8 @@ const newKeys = {
       'Ежедневные метрические платежи за хранилище, их бесплатный лимит и возникший долг кошелька',
     'Save storage billing': 'Сохранить оплату хранилища',
     Grace: 'Льготный период',
+    'Playground storage billing for {{date}}: {{quota}} quota charged, {{bytes}} bytes billed':
+      'Оплата хранилища Playground за {{date}}: списано {{quota}} квоты, оплачено {{bytes}} байт',
   },
   vi: {
     '0 means unlimited.': '0 nghĩa là không giới hạn.',
