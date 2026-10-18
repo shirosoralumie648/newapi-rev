@@ -80,6 +80,11 @@ const (
 	// row per reversed top-up order, so a webhook replay can never reverse the
 	// same payment twice.
 	WalletLedgerRefTopUpReversal = "topup_reversal"
+	// WalletLedgerRefReferralCommissionReversal namespaces the wallet
+	// chargebacks of already issued referral commissions: the reference id is
+	// the referral_commissions row, so a reversed order can never take a
+	// commission back twice (RF-05).
+	WalletLedgerRefReferralCommissionReversal = "referral_commission_reversal"
 )
 
 // walletLedgerConsumeHourSeconds is the aggregation window for API consumption.
