@@ -16,12 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { AlertTriangle, Plus, Share2 } from 'lucide-react'
+import { AlertTriangle, Plus, Share2, ShieldCheck } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
 import { ReferralAdminDialog } from '@/features/wallet/components/dialogs/referral-admin-dialog'
+import { ReferralReviewDialog } from '@/features/wallet/components/dialogs/referral-review-dialog'
 import { WalletDebtDialog } from '@/features/wallet/components/dialogs/wallet-debt-dialog'
 
 import { useUsers } from './users-provider'
@@ -31,6 +32,7 @@ export function UsersPrimaryButtons() {
   const { setOpen, setCurrentRow } = useUsers()
   const [debtDialogOpen, setDebtDialogOpen] = useState(false)
   const [referralDialogOpen, setReferralDialogOpen] = useState(false)
+  const [reviewDialogOpen, setReviewDialogOpen] = useState(false)
 
   const handleCreate = () => {
     setCurrentRow(null)
@@ -55,6 +57,14 @@ export function UsersPrimaryButtons() {
         <Share2 className='h-4 w-4' />
         {t('Referral Invitations')}
       </Button>
+      <Button
+        size='sm'
+        variant='outline'
+        onClick={() => setReviewDialogOpen(true)}
+      >
+        <ShieldCheck className='h-4 w-4' />
+        {t('Referral Reviews')}
+      </Button>
       <Button size='sm' onClick={handleCreate}>
         <Plus className='h-4 w-4' />
         {t('Add User')}
@@ -66,6 +76,10 @@ export function UsersPrimaryButtons() {
       <ReferralAdminDialog
         open={referralDialogOpen}
         onOpenChange={setReferralDialogOpen}
+      />
+      <ReferralReviewDialog
+        open={reviewDialogOpen}
+        onOpenChange={setReviewDialogOpen}
       />
     </div>
   )

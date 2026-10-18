@@ -364,6 +364,20 @@ export type BillingSettings = {
   'checkin_setting.enabled': boolean
   'checkin_setting.min_quota': number
   'checkin_setting.max_quota': number
+  'referral_setting.enabled': boolean
+  'referral_setting.commission_rate_percent': number
+  'referral_setting.group_rate_overrides': string
+  'referral_setting.window_months': number
+  'referral_setting.include_redemption_codes': boolean
+  'referral_setting.cash_settlement_enabled': boolean
+  'referral_setting.invite_limit_per_ip': number
+  'referral_setting.invite_limit_per_device': number
+  'referral_setting.invite_limit_per_email_domain': number
+  'referral_setting.daily_commission_cap_usd': number
+  'referral_setting.monthly_commission_cap_usd': number
+  'referral_setting.invitee_commission_cap_usd': number
+  'referral_setting.review_threshold_usd': number
+  'referral_setting.require_real_name': boolean
 }
 
 export type OperationsSettings = {

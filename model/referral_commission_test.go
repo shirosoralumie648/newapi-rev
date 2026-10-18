@@ -405,6 +405,35 @@ func TestReferralCommissionAntiAbuse(t *testing.T) {
 			assert.EqualValues(t, 500000, commissions[0].CommissionQuota, "the would-be amount stays for the audit trail")
 		})
 
+		t.Run("rechecks a self-invite through the registration device", func(t *testing.T) {
+			restoreReferralCommissionTestSetting()
+			inviter := createReferralCommissionTestUser(t, db, "aa-a2-inviter", "default")
+			invitee := createReferralCommissionTestUser(t, db, "aa-a2-invitee", "default")
+			bindReferralCommissionTestInviter(t, invitee, inviter.Id)
+			recordReferralCommissionTestSignal(t, inviter.Id, "203.0.113.70", "aa-a2-shared-device", "one.example.com")
+			recordReferralCommissionTestSignal(t, invitee.Id, "203.0.113.71", "aa-a2-shared-device", "two.example.com")
+
+			completeReferralCommissionTestTopUp(t, "aa-a2-order", invitee.Id, 10)
+
+			blocked := loadReferralCommissionsByRef(t, WalletLedgerRefTopUp, "aa-a2-order")
+			require.Len(t, blocked, 1)
+			assert.Equal(t, ReferralCommissionStatusBlocked, blocked[0].Status)
+			assert.Equal(t, ReferralCommissionReasonSelfInvite, blocked[0].Reason)
+
+			// A shared registration IP alone is not a self-invite; only the
+			// device hash proves the same environment.
+			sharedIPInviter := createReferralCommissionTestUser(t, db, "aa-a2-ip-inviter", "default")
+			sharedIPInvitee := createReferralCommissionTestUser(t, db, "aa-a2-ip-invitee", "default")
+			bindReferralCommissionTestInviter(t, sharedIPInvitee, sharedIPInviter.Id)
+			recordReferralCommissionTestSignal(t, sharedIPInviter.Id, "203.0.113.72", "aa-a2-device-a", "same.example.com")
+			recordReferralCommissionTestSignal(t, sharedIPInvitee.Id, "203.0.113.72", "aa-a2-device-b", "same.example.com")
+
+			completeReferralCommissionTestTopUp(t, "aa-a2-ip-order", sharedIPInvitee.Id, 10)
+			paid := loadReferralCommissionsByRef(t, WalletLedgerRefTopUp, "aa-a2-ip-order")
+			require.Len(t, paid, 1)
+			assert.Equal(t, ReferralCommissionStatusPending, paid[0].Status)
+		})
+
 		t.Run("pays one canonical account per real-name identity", func(t *testing.T) {
 			restoreReferralCommissionTestSetting()
 			inviter := createReferralCommissionTestUser(t, db, "aa-b-inviter", "default")

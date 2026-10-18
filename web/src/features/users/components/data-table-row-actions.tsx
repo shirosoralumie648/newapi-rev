@@ -30,6 +30,7 @@ import {
   CreditCard,
   ScrollText,
   Gift,
+  Flag,
 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -51,6 +52,7 @@ import {
 import type { AdminUserManageAction } from '@/features/auth/secure-verification'
 import { UserSubscriptionsDialog } from '@/features/subscriptions/components/dialogs/user-subscriptions-dialog'
 import { CreditGrantDialog } from '@/features/wallet/components/dialogs/credit-grant-dialog'
+import { ReferralProfileDialog } from '@/features/wallet/components/dialogs/referral-profile-dialog'
 import { WalletLedgerDialog } from '@/features/wallet/components/dialogs/wallet-ledger-dialog'
 import { handleServerError } from '@/lib/handle-server-error'
 import { AuthOperationError } from '@/lib/secure-verification'
@@ -94,6 +96,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const [subscriptionsDialogOpen, setSubscriptionsDialogOpen] = useState(false)
   const [ledgerDialogOpen, setLedgerDialogOpen] = useState(false)
   const [creditGrantDialogOpen, setCreditGrantDialogOpen] = useState(false)
+  const [referralProfileOpen, setReferralProfileOpen] = useState(false)
 
   const handleEdit = () => {
     setCurrentRow(user)
@@ -305,6 +308,18 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
           </DropdownMenuShortcut>
         </DropdownMenuItem>
 
+        <DropdownMenuItem
+          onSelect={(event) => {
+            event.preventDefault()
+            setReferralProfileOpen(true)
+          }}
+        >
+          {t('Referral anti-abuse')}
+          <DropdownMenuShortcut>
+            <Flag size={16} />
+          </DropdownMenuShortcut>
+        </DropdownMenuItem>
+
         <DropdownMenuSeparator />
 
         <DropdownMenuItem
@@ -395,6 +410,13 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
       <CreditGrantDialog
         open={creditGrantDialogOpen}
         onOpenChange={setCreditGrantDialogOpen}
+        userId={user.id}
+        username={user.username}
+      />
+
+      <ReferralProfileDialog
+        open={referralProfileOpen}
+        onOpenChange={setReferralProfileOpen}
         userId={user.id}
         username={user.username}
       />
