@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { ImageIcon } from 'lucide-react'
+import { AudioLines, ImageIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -27,7 +27,11 @@ import {
 } from '../../lib'
 import type { MessageAttachment } from '../../types'
 
-function useAttachmentPreviewUrl(
+/**
+ * Display URL of one stored attachment. Freshly uploaded bytes are already
+ * cached; anything else loads through the owner-scoped content endpoint once.
+ */
+export function useMessageAttachmentPreviewUrl(
   attachment: MessageAttachment
 ): string | undefined {
   const [url, setUrl] = useState<string | undefined>(
@@ -60,8 +64,9 @@ function MessageAttachmentCard({
   attachment: MessageAttachment
 }) {
   const { t } = useTranslation()
-  const previewUrl = useAttachmentPreviewUrl(attachment)
+  const previewUrl = useMessageAttachmentPreviewUrl(attachment)
   const isImage = attachment.mediaType.startsWith('image/')
+  const isAudio = attachment.mediaType.startsWith('audio/')
   const label = attachment.filename || t('Attachment')
 
   return (
@@ -79,6 +84,21 @@ function MessageAttachmentCard({
         ) : (
           <div className='text-muted-foreground flex h-24 w-40 items-center justify-center'>
             <ImageIcon className='size-5' />
+          </div>
+        ))}
+      {isAudio &&
+        (previewUrl ? (
+          <div className='w-64 p-2'>
+            <audio
+              aria-label={label}
+              className='h-8 w-full'
+              controls
+              src={previewUrl}
+            />
+          </div>
+        ) : (
+          <div className='text-muted-foreground flex h-24 w-40 items-center justify-center'>
+            <AudioLines className='size-5' />
           </div>
         ))}
       <figcaption className='text-muted-foreground w-40 truncate px-2 py-1 text-xs'>

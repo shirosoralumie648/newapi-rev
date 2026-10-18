@@ -32,6 +32,7 @@ import {
 import {
   PLAYGROUND_ATTACHMENT_ERRORS,
   uploadPlaygroundAttachments,
+  uploadPlaygroundSpeechAttachment,
 } from '../attachment-upload'
 import { buildChatCompletionPayload } from '../streaming/payload-builder'
 
@@ -138,6 +139,55 @@ test('uploads each input file once with its client key and primes the byte cache
   ])
   expect(getPlaygroundAttachmentDataUrl('pgf_1')).toBe(
     `data:image/png;base64,${pngBase64}`
+  )
+})
+
+test('cached speech uploads as an audio attachment with a matching filename', async () => {
+  const post = vi.spyOn(api, 'post').mockImplementation(async (_url, body) => {
+    const input = body as {
+      client_key: string
+      media_type: string
+      filename?: string
+    }
+    return {
+      data: {
+        success: true,
+        data: {
+          created: true,
+          id: 'pgf_speech',
+          client_key: input.client_key,
+          session_id: 'pgs_server',
+          media_type: input.media_type,
+          filename: input.filename,
+          byte_size: 11,
+          created_at: 1,
+          updated_at: 1,
+        },
+      },
+    }
+  })
+
+  const attachment = await uploadPlaygroundSpeechAttachment(
+    'pgs_server',
+    new Blob(['audio bytes'], { type: 'audio/mpeg' })
+  )
+
+  expect(post.mock.calls[0]?.[0]).toBe(
+    '/api/playground/sessions/pgs_server/attachments'
+  )
+  expect(post.mock.calls[0]?.[1]).toMatchObject({
+    media_type: 'audio/mpeg',
+    filename: 'speech.mp3',
+  })
+  expect(attachment).toEqual({
+    id: 'pgf_speech',
+    url: '/api/playground/sessions/pgs_server/attachments/pgf_speech/content',
+    mediaType: 'audio/mpeg',
+    filename: 'speech.mp3',
+    byteSize: 11,
+  })
+  expect(getPlaygroundAttachmentDataUrl('pgf_speech')).toBe(
+    'data:audio/mpeg;base64,YXVkaW8gYnl0ZXM='
   )
 })
 

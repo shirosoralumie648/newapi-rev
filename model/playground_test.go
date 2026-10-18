@@ -1036,6 +1036,16 @@ func playgroundPNGFixture(size int) []byte {
 	return data
 }
 
+// playgroundMP3Fixture builds an ID3-tagged payload the audio validator
+// accepts as audio/mpeg.
+func playgroundMP3Fixture(size int) []byte {
+	data := []byte("ID3")
+	for len(data) < size {
+		data = append(data, byte(len(data)%251))
+	}
+	return data
+}
+
 // usePlaygroundQuotaDefaults overrides the global resource budget for one test
 // and restores it afterwards. The policy is the single source of the limits, so
 // tests no longer reach into package variables.
@@ -1189,6 +1199,8 @@ func TestPlaygroundAttachmentValidationLimits(t *testing.T) {
 	reject("invalid base64", map[string]any{"client_key": "c", "media_type": "image/png", "data": "not-base64!!"}, http.StatusBadRequest)
 	reject("empty client key", map[string]any{"client_key": " ", "media_type": "image/png", "data": encoded}, http.StatusBadRequest)
 	reject("oversized attachment", map[string]any{"client_key": "d", "media_type": "image/png", "data": base64.StdEncoding.EncodeToString(playgroundPNGFixture(4097))}, http.StatusUnprocessableEntity)
+	reject("audio bytes under an image type", map[string]any{"client_key": "e", "media_type": "image/png", "data": base64.StdEncoding.EncodeToString(playgroundMP3Fixture(64))}, http.StatusBadRequest)
+	reject("unsupported audio type", map[string]any{"client_key": "f", "media_type": "audio/flac", "data": base64.StdEncoding.EncodeToString(playgroundMP3Fixture(64))}, http.StatusBadRequest)
 
 	// The per-account budget counts every stored byte, including replays of one file.
 	playgroundUploadAttachment(t, 7, id, "budget-a", "image/png", playgroundPNGFixture(4096))
@@ -1276,6 +1288,67 @@ func TestPlaygroundAttachmentMessageReferences(t *testing.T) {
 	var stored int64
 	require.NoError(t, db.Model(&model.PlaygroundMessage{}).Where("session_id = ?", id).Count(&stored).Error)
 	assert.Zero(t, stored)
+}
+
+// Playground message speech references are the cached read-aloud audio of a
+// user or assistant reply. They follow the attachment reference contract: only
+// an owned id is accepted, the stored metadata always comes from the row, and
+// a lingering reference keeps the audio bytes alive.
+func TestPlaygroundMessageSpeechReferences(t *testing.T) {
+	db := playgroundTestDB(t, "sqlite")
+	session := createPlayground(t, 7, "speech-references")
+	id := session["id"].(string)
+	path := "/api/playground/sessions/" + id + "/messages"
+	speech := playgroundUploadAttachment(t, 7, id, "speech-a", "audio/mpeg", playgroundMP3Fixture(64))
+	speechID := speech["id"].(string)
+
+	message := func(key, from string, version map[string]any) map[string]any {
+		return map[string]any{"client_key": key, "payload": map[string]any{"key": key, "from": from, "versions": []any{version}}}
+	}
+
+	// An assistant reply keeps its cached read-aloud audio; the stored
+	// reference carries the owned metadata, not the client's claims.
+	response := playgroundRequest(t, 7, http.MethodPut, path, map[string]any{
+		"revision": 0,
+		"messages": []any{message("a1", "assistant", map[string]any{
+			"id": "a1-v1", "content": "Read this aloud",
+			"speech": map[string]any{"id": speechID, "media_type": "text/plain", "filename": "spoofed.mp3"},
+		})},
+	}, controller.ReplacePlaygroundMessages)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), speechID)
+	assert.Contains(t, response.Body.String(), `"media_type":"audio/mpeg"`)
+	assert.NotContains(t, response.Body.String(), "spoofed.mp3")
+
+	// The cached audio is a real reference: the attachment cannot be deleted.
+	inUse := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+id+"/attachments/"+speechID, nil, controller.DeletePlaygroundAttachment)
+	assert.Equal(t, http.StatusConflict, inUse.Code, inUse.Body.String())
+
+	// A system message can never carry speech, and an unowned id is rejected
+	// without replacing the stored history.
+	systemRejected := playgroundRequest(t, 7, http.MethodPut, path, map[string]any{
+		"revision": 1,
+		"messages": []any{message("s1", "system", map[string]any{"id": "s1-v1", "content": "Read this aloud", "speech": map[string]any{"id": speechID}})},
+	}, controller.ReplacePlaygroundMessages)
+	assert.Equal(t, http.StatusBadRequest, systemRejected.Code)
+	unknownRejected := playgroundRequest(t, 7, http.MethodPut, path, map[string]any{
+		"revision": 1,
+		"messages": []any{message("a2", "assistant", map[string]any{"id": "a2-v1", "content": "Read this aloud", "speech": map[string]any{"id": "pgf_missing"}})},
+	}, controller.ReplacePlaygroundMessages)
+	assert.Equal(t, http.StatusBadRequest, unknownRejected.Code)
+
+	// Dropping the reference releases the audio for deletion.
+	released := playgroundRequest(t, 7, http.MethodPut, path, map[string]any{
+		"revision": 1,
+		"messages": []any{message("a1", "assistant", map[string]any{"id": "a1-v1", "content": "Read this aloud"})},
+	}, controller.ReplacePlaygroundMessages)
+	require.Equal(t, http.StatusOK, released.Code, released.Body.String())
+	deleted := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+id+"/attachments/"+speechID, nil, controller.DeletePlaygroundAttachment)
+	assert.Equal(t, http.StatusOK, deleted.Code, deleted.Body.String())
+
+	var stored int64
+	require.NoError(t, db.Model(&model.PlaygroundMessage{}).Where("session_id = ?", id).Count(&stored).Error)
+	assert.EqualValues(t, 1, stored)
 }
 
 func TestPlaygroundAttachmentOrphanCleanup(t *testing.T) {

@@ -105,6 +105,7 @@ const messageVersionSchema = z.object({
   status: messageStatusSchema.optional(),
   errorCode: z.string().max(500).nullable().optional(),
   attachments: z.array(messageAttachmentSchema).optional(),
+  speech: messageAttachmentSchema.optional(),
   toolCalls: z.array(messageToolCallSchema).optional(),
   // Display-only generation record. A stored version that carries it keeps the
   // relay request id (64 characters, the logs.request_id column) and the token

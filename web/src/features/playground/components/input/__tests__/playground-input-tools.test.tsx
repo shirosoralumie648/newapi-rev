@@ -40,7 +40,8 @@ function renderTools(
   onClearMessages = vi.fn(),
   onSystemPromptChange = vi.fn(),
   systemPrompt = '',
-  config = DEFAULT_CONFIG
+  config = DEFAULT_CONFIG,
+  onDictateTranscript?: (text: string) => void
 ) {
   render(
     <PromptInputProvider>
@@ -59,6 +60,7 @@ function renderTools(
         onClearMessages={onClearMessages}
         onConfigChange={() => undefined}
         onContextSettingsChange={() => undefined}
+        onDictateTranscript={onDictateTranscript}
         onInsertText={() => undefined}
         onParameterEnabledChange={() => undefined}
         onRemoveContextSummary={() => undefined}
@@ -128,6 +130,18 @@ test('clearing the stored system prompt persists an empty value', async () => {
   await user.click(await screen.findByRole('button', { name: 'Clear' }))
 
   expect(onSystemPromptChange).toHaveBeenCalledWith('')
+})
+
+test('the dictation entry is offered when the composer accepts transcripts', () => {
+  renderTools(vi.fn(), vi.fn(), '', DEFAULT_CONFIG, vi.fn())
+
+  expect(screen.getByRole('button', { name: 'Dictation' })).toBeVisible()
+})
+
+test('the dictation entry is hidden when the composer accepts no transcripts', () => {
+  renderTools()
+
+  expect(screen.queryByRole('button', { name: 'Dictation' })).toBeNull()
 })
 
 test('offers the reasoning effort control for a model that accepts an effort', async () => {
