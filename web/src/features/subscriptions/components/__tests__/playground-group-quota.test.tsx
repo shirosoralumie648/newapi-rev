@@ -88,20 +88,20 @@ test('editing the upgrade group storage budget saves a merged override map', asy
   // The storage budgets of the group are the entitlement the plan sells.
   expect(
     await screen.findByRole('spinbutton', {
-      name: 'Attachment storage per user',
+      name: /Attachment storage per user/,
     })
   ).toBeVisible()
   expect(
-    screen.getByRole('spinbutton', { name: 'Artifact storage per user' })
+    screen.getByRole('spinbutton', { name: /Artifact storage per user/ })
   ).toBeVisible()
   expect(
-    screen.getByRole('spinbutton', { name: 'Canvas storage per user' })
+    screen.getByRole('spinbutton', { name: /Canvas storage per user/ })
   ).toBeVisible()
   expect(
-    screen.getByRole('spinbutton', { name: 'Task result storage per user' })
+    screen.getByRole('spinbutton', { name: /Task result storage per user/ })
   ).toBeVisible()
   const storage = screen.getByRole('spinbutton', {
-    name: 'Object storage per user',
+    name: /Object storage per user/,
   })
   expect(storage).toHaveValue(1024)
 
@@ -122,7 +122,7 @@ test('a non-positive storage budget blocks the save and marks the field', async 
   renderEditor()
 
   const storage = await screen.findByRole('spinbutton', {
-    name: 'Object storage per user',
+    name: /Object storage per user/,
   })
   fireEvent.change(storage, { target: { value: '0' } })
   fireEvent.click(screen.getByRole('button', { name: 'Save storage quota' }))
@@ -141,7 +141,7 @@ test('saving without edits leaves the stored override map untouched', async () =
   renderEditor()
 
   const storage = await screen.findByRole('spinbutton', {
-    name: 'Object storage per user',
+    name: /Object storage per user/,
   })
   expect(storage).toHaveValue(1024)
   await user.click(screen.getByRole('button', { name: 'Save storage quota' }))

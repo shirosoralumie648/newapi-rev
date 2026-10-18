@@ -158,7 +158,7 @@ test('a group override can grant a larger object storage entitlement', async () 
   )
 
   const storage = screen.getAllByRole('spinbutton', {
-    name: 'Object storage per user',
+    name: /Object storage per user/,
   })[1]
   expect(storage).toHaveValue(1024)
   fireEvent.change(storage, { target: { value: String(16 * 1024 * 1024) } })
