@@ -214,7 +214,7 @@ func TestPlaygroundObjectReconcileMatrix(t *testing.T) {
 			require.NoError(t, err)
 			assert.True(t, report.DryRun)
 			assert.Equal(t, "pg", report.Prefix)
-			assert.Equal(t, store.Backend(), report.Backend())
+			assert.Equal(t, store.Backend(), report.Backend)
 			assert.EqualValues(t, 5, report.ListedCount)
 			assert.EqualValues(t, 1, report.OwnedCount)
 			assert.EqualValues(t, 1, report.PendingCount)
