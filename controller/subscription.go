@@ -24,6 +24,69 @@ func resolveSubscriptionPlanGroup(group string) (string, bool) {
 	return resolved, ratio_setting.ContainsGroupRatio(resolved)
 }
 
+// resolveSubscriptionPlanAllowedGroups validates and normalizes the plan's
+// allowed-group list (comma-separated display names or stable identifiers).
+// An empty list means every group may consume the plan.
+func resolveSubscriptionPlanAllowedGroups(raw string) (string, bool) {
+	resolved := make([]string, 0, 4)
+	seen := make(map[string]struct{}, 4)
+	for part := range strings.SplitSeq(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		group, ok := resolveSubscriptionPlanGroup(part)
+		if !ok || group == "" {
+			return "", false
+		}
+		if _, exists := seen[group]; exists {
+			continue
+		}
+		seen[group] = struct{}{}
+		resolved = append(resolved, group)
+	}
+	return strings.Join(resolved, ","), true
+}
+
+// resolveSubscriptionPlanAllowedModels validates and normalizes the plan's
+// allowed-model list (comma-separated model names; one trailing * matches a
+// prefix). An empty list means every model may consume the plan.
+func resolveSubscriptionPlanAllowedModels(raw string) (string, bool) {
+	models := make([]string, 0, 4)
+	seen := make(map[string]struct{}, 4)
+	for part := range strings.SplitSeq(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if len(part) > 128 || strings.ContainsAny(part, "\r\n\t") {
+			return "", false
+		}
+		if _, exists := seen[part]; exists {
+			continue
+		}
+		seen[part] = struct{}{}
+		models = append(models, part)
+	}
+	return strings.Join(models, ","), true
+}
+
+// validateSubscriptionPlanWindows reports whether the plan's hour/day/week/
+// month quota windows are valid; a zero window quota means unlimited.
+func validateSubscriptionPlanWindows(plan *model.SubscriptionPlan) (string, bool) {
+	switch {
+	case plan.QuotaWindowHour < 0:
+		return "Hourly quota cannot be negative", false
+	case plan.QuotaWindowDay < 0:
+		return "Daily quota cannot be negative", false
+	case plan.QuotaWindowWeek < 0:
+		return "Weekly quota cannot be negative", false
+	case plan.QuotaWindowMonth < 0:
+		return "Monthly quota cannot be negative", false
+	}
+	return "", true
+}
+
 // ---- Shared types ----
 
 type SubscriptionPlanDTO struct {
@@ -213,6 +276,22 @@ func AdminCreateSubscriptionPlan(c *gin.Context) {
 		common.ApiErrorT(c, "Custom reset cycle must be greater than 0 seconds")
 		return
 	}
+	allowedGroups, ok := resolveSubscriptionPlanAllowedGroups(req.Plan.AllowedGroups)
+	if !ok {
+		common.ApiErrorT(c, "Allowed groups contain an unknown group")
+		return
+	}
+	req.Plan.AllowedGroups = allowedGroups
+	allowedModels, ok := resolveSubscriptionPlanAllowedModels(req.Plan.AllowedModels)
+	if !ok {
+		common.ApiErrorT(c, "Allowed models are invalid")
+		return
+	}
+	req.Plan.AllowedModels = allowedModels
+	if message, ok := validateSubscriptionPlanWindows(&req.Plan); !ok {
+		common.ApiErrorT(c, message)
+		return
+	}
 	err := model.DB.Create(&req.Plan).Error
 	if err != nil {
 		common.ApiError(c, err)
@@ -285,6 +364,22 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 		common.ApiErrorT(c, "Custom reset cycle must be greater than 0 seconds")
 		return
 	}
+	allowedGroups, ok := resolveSubscriptionPlanAllowedGroups(req.Plan.AllowedGroups)
+	if !ok {
+		common.ApiErrorT(c, "Allowed groups contain an unknown group")
+		return
+	}
+	req.Plan.AllowedGroups = allowedGroups
+	allowedModels, ok := resolveSubscriptionPlanAllowedModels(req.Plan.AllowedModels)
+	if !ok {
+		common.ApiErrorT(c, "Allowed models are invalid")
+		return
+	}
+	req.Plan.AllowedModels = allowedModels
+	if message, ok := validateSubscriptionPlanWindows(&req.Plan); !ok {
+		common.ApiErrorT(c, message)
+		return
+	}
 
 	err := model.DB.Transaction(func(tx *gorm.DB) error {
 		// update plan (allow zero values updates with map)
@@ -305,6 +400,12 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 			"total_amount":               req.Plan.TotalAmount,
 			"upgrade_group":              req.Plan.UpgradeGroup,
 			"downgrade_group":            req.Plan.DowngradeGroup,
+			"allowed_groups":             req.Plan.AllowedGroups,
+			"allowed_models":             req.Plan.AllowedModels,
+			"quota_window_hour":          req.Plan.QuotaWindowHour,
+			"quota_window_day":           req.Plan.QuotaWindowDay,
+			"quota_window_week":          req.Plan.QuotaWindowWeek,
+			"quota_window_month":         req.Plan.QuotaWindowMonth,
 			"quota_reset_period":         req.Plan.QuotaResetPeriod,
 			"quota_reset_custom_seconds": req.Plan.QuotaResetCustomSeconds,
 			"updated_at":                 common.GetTimestamp(),

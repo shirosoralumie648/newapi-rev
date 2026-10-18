@@ -44,7 +44,7 @@ func TestSubscriptionPreConsumeRefundIsAtomicAndIdempotent(t *testing.T) {
 			AllowWalletOverflow: true, Status: "active", StartTime: now - 60, EndTime: now + 3600,
 		}).Error)
 
-		result, err := PreConsumeUserSubscription("wl03-refund-request", userId, "wl03-model", 0, 300)
+		result, err := PreConsumeUserSubscription("wl03-refund-request", userId, "", "wl03-model", 0, 300)
 		require.NoError(t, err)
 		assert.Equal(t, subId, result.UserSubscriptionId)
 		assert.EqualValues(t, 300, result.PreConsumed)
