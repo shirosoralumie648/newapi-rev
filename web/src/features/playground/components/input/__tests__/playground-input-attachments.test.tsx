@@ -39,33 +39,34 @@ function buildInputElement(
   onSubmit: ComponentProps<typeof PlaygroundInput>['onSubmit'],
   overrides: Partial<ComponentProps<typeof PlaygroundInput>> = {}
 ) {
-  return (
-    <PlaygroundInput
-      config={DEFAULT_CONFIG}
-      contextPlan={planPlaygroundContext({
-        messages: [],
-        settings: DEFAULT_CONTEXT_SETTINGS,
-      })}
-      contextSettings={DEFAULT_CONTEXT_SETTINGS}
-      contextSummary={null}
-      groupValue='default'
-      groups={[{ label: 'default', value: 'default', ratio: 1, desc: '' }]}
-      modelValue='gpt-4o'
-      models={[{ label: 'gpt-4o', value: 'gpt-4o' }]}
-      onConfigChange={() => undefined}
-      onContextSettingsChange={() => undefined}
-      onGroupChange={() => undefined}
-      onModelChange={() => undefined}
-      onParameterEnabledChange={() => undefined}
-      onRemoveContextSummary={() => undefined}
-      onSubmit={onSubmit}
-      onSummarizeContext={() => undefined}
-      onSystemPromptChange={() => undefined}
-      parameterEnabled={DEFAULT_PARAMETER_ENABLED}
-      systemPrompt=''
-      {...overrides}
-    />
-  )
+  const props: ComponentProps<typeof PlaygroundInput> = {
+    compareModels: [],
+    config: DEFAULT_CONFIG,
+    contextPlan: planPlaygroundContext({
+      messages: [],
+      settings: DEFAULT_CONTEXT_SETTINGS,
+    }),
+    contextSettings: DEFAULT_CONTEXT_SETTINGS,
+    contextSummary: null,
+    groupValue: 'default',
+    groups: [{ label: 'default', value: 'default', ratio: 1, desc: '' }],
+    modelValue: 'gpt-4o',
+    models: [{ label: 'gpt-4o', value: 'gpt-4o' }],
+    onCompareModelsChange: () => undefined,
+    onConfigChange: () => undefined,
+    onContextSettingsChange: () => undefined,
+    onGroupChange: () => undefined,
+    onModelChange: () => undefined,
+    onParameterEnabledChange: () => undefined,
+    onRemoveContextSummary: () => undefined,
+    onSubmit,
+    onSummarizeContext: () => undefined,
+    onSystemPromptChange: () => undefined,
+    parameterEnabled: DEFAULT_PARAMETER_ENABLED,
+    systemPrompt: '',
+    ...overrides,
+  }
+  return <PlaygroundInput {...props} />
 }
 
 function renderInput(

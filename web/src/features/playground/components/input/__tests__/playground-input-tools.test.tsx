@@ -53,6 +53,8 @@ function renderTools(
         contextSummary={null}
         hasMessages
         models={[{ label: 'gpt-4o', value: 'gpt-4o' }]}
+        compareModels={[]}
+        onCompareModelsChange={() => undefined}
         onClearMessages={onClearMessages}
         onConfigChange={() => undefined}
         onContextSettingsChange={() => undefined}
