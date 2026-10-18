@@ -45,6 +45,7 @@ import {
   useCanvasEditor,
   type CanvasAddedNode,
 } from '../hooks/use-canvas-editor'
+import { useCanvasImageTools } from '../hooks/use-canvas-image-tools'
 import { useCanvasWorkflowOptions } from '../hooks/use-canvas-workflow-options'
 import { useCanvasWorkflowRunner } from '../hooks/use-canvas-workflow-runner'
 import {
@@ -67,6 +68,7 @@ import type {
 } from '../types'
 import { CanvasAssistantPanel } from './canvas-assistant-panel'
 import { CanvasDropZone } from './canvas-drop-zone'
+import { CanvasImageToolsDialog } from './canvas-image-tools-dialog'
 import { CanvasInspectorViewToggle } from './canvas-inspector-view-toggle'
 import { CanvasFlowNodeView, CanvasGroupNodeView } from './canvas-node'
 import { CanvasNodeInspector } from './canvas-node-inspector'
@@ -143,6 +145,12 @@ export function CanvasEditor(props: CanvasEditorProps) {
   const [inspectorView, setInspectorView] =
     useState<CanvasInspectorView>('details')
 
+  const imageTools = useCanvasImageTools({
+    canvasId: props.project.id,
+    group: workflowOptions.group,
+    addLinkedNode: editor.addLinkedNode,
+  })
+
   const assistant = useCanvasAssistant({
     nodes: editor.nodes,
     edges: editor.edges,
@@ -182,6 +190,15 @@ export function CanvasEditor(props: CanvasEditorProps) {
     clearAssistantMessage()
   }, [assistantMessage, clearAssistantMessage, t])
   useEffect(notifyAssistant, [notifyAssistant])
+
+  const imageToolMessage = imageTools.message
+  const clearImageToolMessage = imageTools.clearMessage
+  const notifyImageTool = useCallback(() => {
+    if (!imageToolMessage) return
+    toast.error(translateServerText(t, imageToolMessage))
+    clearImageToolMessage()
+  }, [clearImageToolMessage, imageToolMessage, t])
+  useEffect(notifyImageTool, [notifyImageTool])
 
   const handleInsertAssistantReply = useCallback(
     (message: CanvasAssistantMessage) => {
@@ -334,6 +351,7 @@ export function CanvasEditor(props: CanvasEditorProps) {
           models={workflowOptions.models}
           node={editor.selectedNode}
           onDelete={editor.deleteNode}
+          onOpenImageTools={imageTools.open}
           onOpenSource={props.onOpenSource}
           onRetry={workflow.retry}
           onUpdateData={editor.updateNodeData}
@@ -429,6 +447,19 @@ export function CanvasEditor(props: CanvasEditorProps) {
       >
         {inspector}
       </WorkspaceInspector>
+
+      <CanvasImageToolsDialog
+        busy={imageTools.busy}
+        disabled={props.disabled}
+        models={workflowOptions.models}
+        onClose={imageTools.close}
+        onCrop={imageTools.crop}
+        onRedraw={imageTools.redraw}
+        onUpscale={imageTools.upscale}
+        source={imageTools.source}
+        sourceSize={imageTools.sourceSize}
+        tool={imageTools.tool}
+      />
     </div>
   )
 }
