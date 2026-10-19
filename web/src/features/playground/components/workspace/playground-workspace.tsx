@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Brain, Menu, PanelLeft } from 'lucide-react'
+import { Brain, ChartColumn, Menu, PanelLeft } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -38,11 +38,12 @@ import type {
 import { PlaygroundSessionList } from './playground-session-list'
 
 /**
- * Conversation-domain Inspector views only. Media generation, canvases,
- * artifacts and the asset library are creation-domain surfaces owned by the
- * canvas editor, so the chat workspace no longer exposes their entries.
+ * Chat-workspace Inspector views. Media generation, canvases, artifacts and
+ * the asset library are creation-domain surfaces owned by the canvas editor,
+ * so the chat workspace does not expose their entries. Usage is the read-only
+ * spend/performance view over the owner's own settled requests.
  */
-export type PlaygroundInspectorView = 'memory' | 'presets' | 'trash'
+export type PlaygroundInspectorView = 'memory' | 'presets' | 'trash' | 'usage'
 
 interface PlaygroundWorkspaceProps {
   disabled?: boolean
@@ -109,6 +110,11 @@ export function PlaygroundWorkspace(props: PlaygroundWorkspaceProps) {
     inspectorDescription = t(
       'Deleted conversations and canvases stay recoverable until the retention period ends.'
     )
+  } else if (props.inspectorView === 'usage') {
+    inspectorTitle = t('Usage')
+    inspectorDescription = t(
+      'Spend, tokens and latency by model and day, with the Playground and API origins kept apart.'
+    )
   }
 
   return (
@@ -164,19 +170,34 @@ export function PlaygroundWorkspace(props: PlaygroundWorkspaceProps) {
             </span>
             {props.usagePanel}
             {props.onToggleInspector && (
-              <Button
-                aria-pressed={props.inspectorView === 'memory'}
-                disabled={props.disabled}
-                onClick={() => props.onToggleInspector?.('memory')}
-                size='sm'
-                type='button'
-                variant={
-                  props.inspectorView === 'memory' ? 'secondary' : 'ghost'
-                }
-              >
-                <Brain aria-hidden='true' />
-                {t('Memory')}
-              </Button>
+              <>
+                <Button
+                  aria-pressed={props.inspectorView === 'usage'}
+                  disabled={props.disabled}
+                  onClick={() => props.onToggleInspector?.('usage')}
+                  size='sm'
+                  type='button'
+                  variant={
+                    props.inspectorView === 'usage' ? 'secondary' : 'ghost'
+                  }
+                >
+                  <ChartColumn aria-hidden='true' />
+                  {t('Usage')}
+                </Button>
+                <Button
+                  aria-pressed={props.inspectorView === 'memory'}
+                  disabled={props.disabled}
+                  onClick={() => props.onToggleInspector?.('memory')}
+                  size='sm'
+                  type='button'
+                  variant={
+                    props.inspectorView === 'memory' ? 'secondary' : 'ghost'
+                  }
+                >
+                  <Brain aria-hidden='true' />
+                  {t('Memory')}
+                </Button>
+              </>
             )}
           </div>
         </div>

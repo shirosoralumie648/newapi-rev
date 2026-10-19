@@ -169,6 +169,7 @@ export const API_ENDPOINTS = {
   PLAYGROUND_MEMORIES: '/api/playground/memories',
   PLAYGROUND_KNOWLEDGE_BASES: '/api/playground/knowledge-bases',
   PLAYGROUND_USAGE: '/api/playground/usage',
+  PLAYGROUND_USAGE_ANALYTICS: '/api/playground/usage/analytics',
   PLAYGROUND_STORAGE_BILLING: '/api/playground/storage/billing',
   PLAYGROUND_SETTINGS: '/api/playground/settings',
   PLAYGROUND_MODEL_CATALOG: '/api/playground/model-catalog',
@@ -344,6 +345,20 @@ export const PLAYGROUND_COMPARISON_STOP_ERROR_CODES: readonly string[] = [
   'pre_consume_token_quota_failed',
   'token_period_quota_exhausted',
 ]
+
+// Playground usage analytics (PG2-12). The Inspector opens on the shortest
+// range and the server accepts exactly these values, so the client never asks
+// for a window the server would reject. Aggregation stays in the log database.
+export const PLAYGROUND_USAGE_RANGE_DAYS = [7, 30, 90] as const
+export const PLAYGROUND_USAGE_DEFAULT_RANGE_DAYS = 7
+
+// Model table orderings. The server already aggregated the figures; the client
+// only reorders the presented rows.
+export const PLAYGROUND_USAGE_SORT_OPTIONS = [
+  { value: 'quota', labelKey: 'Cost' },
+  { value: 'requests', labelKey: 'Requests' },
+  { value: 'tokens', labelKey: 'Tokens' },
+] as const
 
 // Default group — uses 'default' as the safe fallback; auto-group is
 // only selected when the backend confirms it is available for the user.

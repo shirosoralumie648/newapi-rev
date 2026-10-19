@@ -6722,6 +6722,9 @@ func TestPlaygroundStorageBillingSettlement(t *testing.T) {
 			assert.Equal(t, model.PlaygroundStorageBillingModelName, logs[0].ModelName)
 			assert.Equal(t, 750_000, logs[0].Quota)
 			assert.Contains(t, logs[0].Other, "storage_date")
+			// The settlement has no request context; the row itself carries the
+			// Playground origin so the usage view does not count it as API spend.
+			assert.Contains(t, logs[0].Other, `"playground_origin":true`)
 
 			// Replaying the pass charges nothing again.
 			replay, err := model.SettlePlaygroundStorageLedgers(now, 10)

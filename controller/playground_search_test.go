@@ -101,6 +101,9 @@ func TestPlaygroundWebSearchBilling(t *testing.T) {
 		require.NoError(t, db.Where("request_id = ? AND model_name = ?", requestID, playgroundWebSearchModelName).First(&consumeLog).Error)
 		assert.Equal(t, quota, consumeLog.Quota)
 		assert.Equal(t, "default", consumeLog.Group)
+		// Search spend is Playground-originated even though the endpoint is
+		// under /api/playground; the usage view reads this marker back.
+		assert.Contains(t, consumeLog.Other, `"playground_origin":true`)
 	})
 
 	t.Run("provider failure refunds without a charge", func(t *testing.T) {

@@ -106,6 +106,37 @@ test('desktop marks the active memory inspector view', () => {
   expect(screen.getByText('Inspector body')).toBeVisible()
 })
 
+test('the top bar opens the usage inspector', async () => {
+  const user = userEvent.setup()
+  const onToggleInspector = vi.fn()
+  render(
+    <PlaygroundWorkspace {...baseProps} onToggleInspector={onToggleInspector}>
+      <div>Chat body</div>
+    </PlaygroundWorkspace>
+  )
+
+  await user.click(screen.getByRole('button', { name: 'Usage' }))
+  expect(onToggleInspector).toHaveBeenCalledWith('usage')
+})
+
+test('desktop marks the active usage inspector view', () => {
+  render(
+    <PlaygroundWorkspace
+      {...baseProps}
+      inspectorView='usage'
+      onToggleInspector={vi.fn()}
+    >
+      <div>Chat body</div>
+    </PlaygroundWorkspace>
+  )
+
+  expect(screen.getByRole('button', { name: 'Usage' })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  )
+  expect(screen.getByText('Inspector body')).toBeVisible()
+})
+
 test('desktop hides the inspector when no conversation panel is open', () => {
   render(
     <PlaygroundWorkspace {...baseProps}>

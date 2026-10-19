@@ -46,6 +46,10 @@ import {
   parameterEnabledSchema,
 } from './lib/storage/storage-schema'
 import type {
+  PlaygroundUsageAnalytics,
+  PlaygroundUsageAnalyticsBucket,
+} from './lib/usage/playground-usage-analytics'
+import type {
   AssistantPreset,
   ChatCompletionRequest,
   ChatCompletionResponse,
@@ -1378,6 +1382,65 @@ export async function getPlaygroundUsage(
     tasks: toMetric(metrics.tasks),
     comparisonRuns: toMetric(metrics.comparison_runs),
     workflowRuns: toMetric(metrics.workflow_runs),
+  }
+}
+
+const playgroundUsageAnalyticsBucketSchema = z.object({
+  day_start: z.number().int().nonnegative(),
+  model_name: z.string(),
+  origin: z.enum(['playground', 'api']),
+  quota: z.number().int(),
+  prompt_tokens: z.number().int().nonnegative(),
+  completion_tokens: z.number().int().nonnegative(),
+  cache_tokens: z.number().int().nonnegative(),
+  requests: z.number().int().nonnegative(),
+  errors: z.number().int().nonnegative(),
+  avg_time_seconds: z.number().int().nonnegative(),
+  avg_first_token_ms: z.number().int().nonnegative(),
+})
+
+const playgroundUsageAnalyticsSchema = z.object({
+  enabled: z.boolean(),
+  start_timestamp: z.number().int().nonnegative(),
+  end_timestamp: z.number().int().nonnegative(),
+  buckets: z.array(playgroundUsageAnalyticsBucketSchema),
+})
+
+/**
+ * Reads the caller's own settled usage grouped by day, model and origin over
+ * the last `days` days. It is strictly read-only: the query reserves, settles
+ * and recalculates nothing, and the figures are the sums the gateway already
+ * logged. Timestamps are mapped to milliseconds for display.
+ */
+export async function getPlaygroundUsageAnalytics(
+  days: number,
+  signal?: AbortSignal
+): Promise<PlaygroundUsageAnalytics> {
+  const response = await api.get(API_ENDPOINTS.PLAYGROUND_USAGE_ANALYTICS, {
+    params: { days },
+    signal,
+  })
+  requireServerSuccess(response.data)
+  const analytics = playgroundUsageAnalyticsSchema.parse(response.data.data)
+  return {
+    enabled: analytics.enabled,
+    startTimestamp: analytics.start_timestamp * 1000,
+    endTimestamp: analytics.end_timestamp * 1000,
+    buckets: analytics.buckets.map((bucket): PlaygroundUsageAnalyticsBucket => {
+      return {
+        dayStart: bucket.day_start * 1000,
+        modelName: bucket.model_name,
+        origin: bucket.origin,
+        quota: bucket.quota,
+        promptTokens: bucket.prompt_tokens,
+        completionTokens: bucket.completion_tokens,
+        cacheTokens: bucket.cache_tokens,
+        requests: bucket.requests,
+        errors: bucket.errors,
+        avgTimeSeconds: bucket.avg_time_seconds,
+        avgFirstTokenMs: bucket.avg_first_token_ms,
+      }
+    }),
   }
 }
 

@@ -23,6 +23,8 @@ export const playgroundQueryKeys = {
   memories: (userId: number | null) =>
     ['playground', userId, 'memories'] as const,
   usage: (userId: number | null) => ['playground', userId, 'usage'] as const,
+  usageAnalytics: (userId: number | null, days: number) =>
+    ['playground', userId, 'usage-analytics', days] as const,
   storageBilling: (userId: number | null) =>
     ['playground', userId, 'storage-billing'] as const,
   settings: (userId: number | null) =>
