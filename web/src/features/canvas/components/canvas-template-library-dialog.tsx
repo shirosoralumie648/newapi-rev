@@ -24,7 +24,14 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -544,10 +551,7 @@ export function CanvasTemplateLibraryDialog(
         open={props.open}
         title={t('Canvas templates')}
       >
-        <Tabs
-          onValueChange={handleTabChange}
-          value={tab}
-        >
+        <Tabs onValueChange={handleTabChange} value={tab}>
           <div className='mb-3 flex flex-wrap items-center justify-between gap-2'>
             <TabsList>
               <TabsTrigger value='mine'>{t('My templates')}</TabsTrigger>

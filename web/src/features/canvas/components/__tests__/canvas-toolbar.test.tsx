@@ -57,6 +57,7 @@ function toolbarProps(runPhase: CanvasWorkflowRunPhase = 'idle') {
     onGroupSelection: vi.fn(),
     onImportArchiveFile: vi.fn(),
     onImportFile: vi.fn(),
+    onOpenTemplates: vi.fn(),
     onPaste: vi.fn(),
     onRedo: vi.fn(),
     onRunWorkflow: vi.fn(),
