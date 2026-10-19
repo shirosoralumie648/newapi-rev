@@ -74,16 +74,25 @@ func GetPlaygroundUsage(c *gin.Context) {
 // GetPlaygroundSettings returns the Playground feature switches the browser
 // needs before it renders anything. The sandbox preview flag is the only
 // artifact-content gate: while it is off the client must not mount the
-// sandboxed iframe, and artifact bodies stay inert text.
+// sandboxed iframe, and artifact bodies stay inert text. The tool result byte
+// budget is the group policy the browser bounds an automatically produced tool
+// result by, so the value it writes already satisfies the stored snapshot
+// validation.
 func GetPlaygroundSettings(c *gin.Context) {
 	userID := c.GetInt("id")
 	if userID <= 0 {
 		common.ApiErrorStatus(c, http.StatusUnauthorized, common.NewMessage("Authentication required."))
 		return
 	}
+	policy, err := model.PlaygroundQuotaPolicyForUser(userID)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	common.ApiSuccess(c, gin.H{
-		"sandbox_preview_enabled": playground_setting.IsSandboxPreviewEnabled(),
-		"web_search_enabled":      playground_setting.IsWebSearchEnabled(),
+		"sandbox_preview_enabled":    playground_setting.IsSandboxPreviewEnabled(),
+		"web_search_enabled":         playground_setting.IsWebSearchEnabled(),
+		"tool_call_result_max_bytes": policy.ToolCallResultMaxBytes,
 	})
 }
 

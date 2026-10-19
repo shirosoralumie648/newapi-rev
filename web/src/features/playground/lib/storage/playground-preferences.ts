@@ -23,6 +23,10 @@ import {
   DEFAULT_PARAMETER_ENABLED,
   PLAYGROUND_NEW_SESSION_PROMPT_MAX_BYTES,
   PLAYGROUND_PREFERENCE_OVERRIDE_MAX_ENTRIES,
+  PLAYGROUND_TOOL_EXECUTION_DEFAULT_ENABLED,
+  PLAYGROUND_TOOL_EXECUTION_DEFAULT_MAX_ROUNDS,
+  PLAYGROUND_TOOL_EXECUTION_MAX_ROUNDS,
+  PLAYGROUND_TOOL_EXECUTION_MIN_ROUNDS,
   STORAGE_KEYS,
 } from '../../constants'
 import type { ParameterEnabled, PlaygroundConfig } from '../../types'
@@ -66,6 +70,16 @@ export interface PlaygroundAutoTitlePreferences {
   overrides: Record<string, boolean>
 }
 
+/**
+ * The account-level tool loop switch and its continuation round cap. Off by
+ * default because automatic continuation sends billed requests without a
+ * second click.
+ */
+export interface PlaygroundToolExecutionPreferences {
+  enabled: boolean
+  maxRounds: number
+}
+
 const newSessionDefaultsSchema = z.object({
   config: playgroundConfigSchema,
   parameterEnabled: parameterEnabledSchema,
@@ -80,6 +94,11 @@ const autoReadPreferencesSchema = z.object({
 const autoTitlePreferencesSchema = z.object({
   defaultEnabled: z.boolean(),
   overrides: z.record(z.string(), z.boolean()),
+})
+
+const toolExecutionPreferencesSchema = z.object({
+  enabled: z.boolean(),
+  maxRounds: z.number().int(),
 })
 
 function prefixedKey(key: string, userId: number): string {
@@ -220,5 +239,40 @@ export function saveAutoTitlePreferences(
   return writeEnvelope(STORAGE_KEYS.AUTO_TITLE, userId, {
     defaultEnabled: preferences.defaultEnabled,
     overrides: normalizeOverrides(preferences.overrides),
+  })
+}
+
+export function loadToolExecutionPreferences(
+  userId: number | null
+): PlaygroundToolExecutionPreferences {
+  const fallback: PlaygroundToolExecutionPreferences = {
+    enabled: PLAYGROUND_TOOL_EXECUTION_DEFAULT_ENABLED,
+    maxRounds: PLAYGROUND_TOOL_EXECUTION_DEFAULT_MAX_ROUNDS,
+  }
+  if (userId === null) return fallback
+  const parsed = toolExecutionPreferencesSchema.safeParse(
+    readEnvelope(STORAGE_KEYS.TOOL_EXECUTION, userId)
+  )
+  if (!parsed.success) return fallback
+  return {
+    enabled: parsed.data.enabled,
+    maxRounds: Math.min(
+      PLAYGROUND_TOOL_EXECUTION_MAX_ROUNDS,
+      Math.max(PLAYGROUND_TOOL_EXECUTION_MIN_ROUNDS, parsed.data.maxRounds)
+    ),
+  }
+}
+
+export function saveToolExecutionPreferences(
+  userId: number | null,
+  preferences: PlaygroundToolExecutionPreferences
+): boolean {
+  if (userId === null) return false
+  return writeEnvelope(STORAGE_KEYS.TOOL_EXECUTION, userId, {
+    enabled: preferences.enabled,
+    maxRounds: Math.min(
+      PLAYGROUND_TOOL_EXECUTION_MAX_ROUNDS,
+      Math.max(PLAYGROUND_TOOL_EXECUTION_MIN_ROUNDS, preferences.maxRounds)
+    ),
   })
 }
