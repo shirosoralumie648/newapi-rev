@@ -540,7 +540,10 @@ export async function importPlaygroundSessionDocument(
         )
         continue
       }
-      const file = new File([blob], source.filename, {
+      // A stored filename is display text; the upload needs a bare file name.
+      const filename =
+        source.filename.split(/[\\/]/).pop()?.trim() || 'attachment'
+      const file = new File([blob], filename, {
         type: source.mediaType || blob.type || 'application/octet-stream',
       })
       const attachment = await uploadPlaygroundAttachmentDirect(

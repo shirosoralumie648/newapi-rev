@@ -357,12 +357,12 @@ function PlaygroundContent(props: {
   }, [isComparing, isGenerating, stopComparison, stopGeneration])
 
   const handleWorkspaceTransition = useCallback(
-    (action: () => void) => {
+    <Result,>(action: () => Result): Result | undefined => {
       if (artifactController.state.dirty) {
         artifactController.store.getState().requestDiscard(action)
-        return
+        return undefined
       }
-      action()
+      return action()
     },
     [artifactController.state.dirty, artifactController.store]
   )
@@ -371,7 +371,7 @@ function PlaygroundContent(props: {
   // import helper recreates the session and every message through the ordinary
   // create/upload chain (so quotas apply), and the workspace adopts the result.
   // Attachments from another account are unreachable and stay placeholders.
-  const handleImportConversation = useCallback(
+  const performImportConversation = useCallback(
     async (file: File) => {
       if (file.size > PLAYGROUND_IMPORT_MAX_FILE_BYTES) {
         toast.error(t(PLAYGROUND_IMPORT_ERRORS.TOO_LARGE))
@@ -406,6 +406,16 @@ function PlaygroundContent(props: {
       }
     },
     [handleEditOpenChange, stopBeforeSessionChange, sync, t]
+  )
+
+  // Importing activates a new conversation, so an unsaved artifact draft must
+  // be confirmed before any server-side import starts (no orphan copy when the
+  // user keeps the draft). The immediate path returns the import promise so the
+  // session-list button keeps its busy state until the rebuild finishes.
+  const handleImportConversation = useCallback(
+    (file: File) =>
+      handleWorkspaceTransition(() => performImportConversation(file)),
+    [handleWorkspaceTransition, performImportConversation]
   )
 
   // The settings a preset contributes to a conversation: its model, sampling
