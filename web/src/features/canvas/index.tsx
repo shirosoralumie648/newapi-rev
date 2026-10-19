@@ -17,7 +17,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useNavigate } from '@tanstack/react-router'
-import { BookOpen, History, Menu, PanelLeft } from 'lucide-react'
+import {
+  BookOpen,
+  History,
+  Image as ImageIcon,
+  LayoutGrid,
+  Menu,
+  PanelLeft,
+} from 'lucide-react'
 import {
   useCallback,
   useEffect,
@@ -110,8 +117,12 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
   const [historyOpen, setHistoryOpen] = useState(false)
   const [knowledgeOpen, setKnowledgeOpen] = useState(false)
   const [epoch, setEpoch] = useState(0)
-  // Image projects start in the workbench; the board stays one toggle away.
-  const [view, setView] = useState<'workbench' | 'board'>('workbench')
+  // The layout a project opens in: images open in the single-image workbench,
+  // everything else on the node board. A manual toggle is kept while the same
+  // project stays open and resets when another project is selected.
+  const [viewChoice, setViewChoice] = useState<'workbench' | 'board' | null>(
+    null
+  )
   const createdForPrefill = useRef(false)
   const { project, status, error, dirty, conflict } = controller
 
@@ -135,6 +146,22 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
       : project
   }, [liveDocument, project])
 
+  const projectId = project?.id ?? ''
+  const projectMode = project?.mode ?? 'infinite'
+  const view: 'workbench' | 'board' =
+    viewChoice ?? (projectMode === 'image' ? 'workbench' : 'board')
+  const workbenchView = view === 'workbench' && projectMode === 'image'
+  useEffect(() => {
+    setViewChoice(null)
+  }, [projectId, projectMode])
+
+  const reportError = useCallback(
+    (error: unknown) => {
+      toast.error(t(getServerMessage(error) ?? 'Canvas operation failed.'))
+    },
+    [t]
+  )
+
   const handleCreate = useCallback(
     async (mode: CanvasProjectMode = 'infinite') => {
       try {
@@ -146,22 +173,6 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
     },
     [controller, reportError]
   )
-
-  const reportError = useCallback(
-    (error: unknown) => {
-      toast.error(t(getServerMessage(error) ?? 'Canvas operation failed.'))
-    },
-    [t]
-  )
-
-  const handleCreate = useCallback(async () => {
-    try {
-      await controller.createNewProject()
-      setListOpen(false)
-    } catch (error) {
-      reportError(error)
-    }
-  }, [controller, reportError])
 
   const handleSelect = useCallback(
     async (projectId: string) => {
@@ -251,9 +262,10 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
 
   const handleDocumentChange = useCallback(
     (document: CanvasServerDocument) => {
+      if (projectKey) liveDocumentRef.current = { key: projectKey, document }
       controller.scheduleSave(document)
     },
-    [controller]
+    [controller, projectKey]
   )
 
   const handleOpenSource = useCallback(
@@ -313,10 +325,19 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
   let body: ReactNode
   if (status === 'loading' && !project) {
     body = <LoadingState message={t('Loading canvas...')} />
-  } else if (project) {
+  } else if (project && activeProject && workbenchView) {
+    body = (
+      <CanvasImageWorkbench
+        key={`${project.id}:${epoch}:workbench`}
+        disabled={status === 'loading'}
+        onChange={handleDocumentChange}
+        project={activeProject}
+      />
+    )
+  } else if (project && activeProject) {
     body = (
       <CanvasEditor
-        key={`${project.id}:${epoch}`}
+        key={`${project.id}:${epoch}:board`}
         artifactTarget={props.artifactTarget}
         disabled={status === 'loading'}
         generationPrefill={props.generationPrefill}
@@ -327,7 +348,7 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
         onOpenConversation={handleOpenConversation}
         onOpenProject={handleSelect}
         onOpenSource={handleOpenSource}
-        project={project}
+        project={activeProject}
         userId={userId}
       />
     )
@@ -386,6 +407,26 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
             <span className='truncate text-sm font-medium'>{displayTitle}</span>
           </div>
           <div className='flex shrink-0 items-center gap-1'>
+            {project?.mode === 'image' && (
+              <Button
+                aria-label={
+                  workbenchView ? t('Canvas board') : t('Image workbench')
+                }
+                aria-pressed={!workbenchView}
+                onClick={() =>
+                  setViewChoice(workbenchView ? 'board' : 'workbench')
+                }
+                size='icon-sm'
+                type='button'
+                variant='ghost'
+              >
+                {workbenchView ? (
+                  <LayoutGrid aria-hidden='true' />
+                ) : (
+                  <ImageIcon aria-hidden='true' />
+                )}
+              </Button>
+            )}
             <Button
               aria-label={t('Knowledge bases')}
               onClick={() => setKnowledgeOpen(true)}
