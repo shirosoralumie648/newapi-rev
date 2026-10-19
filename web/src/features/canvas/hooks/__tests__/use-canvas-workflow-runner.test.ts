@@ -1550,7 +1550,7 @@ function mockHistoryBackedRun() {
     nodes,
   })
 
-  vi.spyOn(api, 'post').mockImplementation(async (url, body) => {
+  vi.spyOn(api, 'post').mockImplementation(async (url) => {
     if (url === '/pg/chat/completions') {
       state.chatCalls += 1
       return {
