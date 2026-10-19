@@ -34,6 +34,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -118,14 +119,14 @@ func playgroundTestDB(t *testing.T, dialect string) *gorm.DB {
 	common.SetDatabaseTypes(common.DatabaseType(dialect), previousLog)
 	model.DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundKnowledgeChunk{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasTemplateAsset{}, &model.PlaygroundCanvasTemplate{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundUserUsage{}, &model.PlaygroundUpload{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundMessage{}, &model.PlaygroundSessionShare{}, &model.PlaygroundSession{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundKnowledgeChunk{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasTemplateAsset{}, &model.PlaygroundCanvasTemplate{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundComparisonRun{}, &model.PlaygroundUserUsage{}, &model.PlaygroundUpload{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundMessage{}, &model.PlaygroundSessionShare{}, &model.PlaygroundSession{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
 		model.DB = previous
 		common.SetDatabaseTypes(previousMain, previousLog)
 	})
-	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundSessionShare{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUpload{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasTemplate{}, &model.PlaygroundCanvasTemplateAsset{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeChunk{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundSessionShare{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUpload{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasTemplate{}, &model.PlaygroundCanvasTemplateAsset{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeChunk{}, &model.PlaygroundComparisonRun{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -190,6 +191,9 @@ func playgroundRequest(t *testing.T, user int, method, path string, body any, ha
 		}
 		if parts[3] == "tasks" {
 			c.Params = append(c.Params, gin.Param{Key: "taskId", Value: parts[4]})
+		}
+		if parts[3] == "comparisons" {
+			c.Params = append(c.Params, gin.Param{Key: "runId", Value: parts[4]})
 		}
 		if parts[3] == "uploads" {
 			c.Params = append(c.Params, gin.Param{Key: "uploadId", Value: parts[4]})
@@ -6610,6 +6614,176 @@ func TestPlaygroundSessionShares(t *testing.T) {
 			require.NoError(t, model.PurgePlaygroundSession(7, sessionID))
 			require.NoError(t, db.Model(&model.PlaygroundSessionShare{}).Where("session_id = ?", sessionID).Count(&shareCount).Error)
 			assert.Zero(t, shareCount)
+		})
+	}
+}
+
+// TestPlaygroundComparisonRunMatrix protects the persisted compare-run
+// contract on all three supported databases: pending cell creation, owner
+// isolation, revision compare-and-swap, capacity rollback and counter release.
+func TestPlaygroundComparisonRunMatrix(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			models := []string{"model-a", "model-b"}
+			prompts := []string{"first prompt", "second prompt", "third prompt"}
+			run, err := model.CreatePlaygroundComparisonRun(7, model.PlaygroundComparisonRunCreate{
+				Title:         "Release comparison",
+				Group:         "default",
+				Models:        models,
+				Prompts:       prompts,
+				Strategy:      model.PlaygroundComparisonStrategyConcurrent,
+				Concurrency:   2,
+				EstimateQuota: 120,
+				BudgetCap:     500,
+			})
+			require.NoError(t, err)
+			require.NotNil(t, run)
+			assert.EqualValues(t, 1, run.Revision)
+			require.Len(t, run.Results, 6)
+			for _, cell := range run.Results {
+				assert.Equal(t, model.PlaygroundComparisonCellPending, cell.Status)
+			}
+			var usage model.PlaygroundUserUsage
+			require.NoError(t, db.Where("user_id = ?", 7).First(&usage).Error)
+			assert.EqualValues(t, 1, usage.ComparisonRunCount)
+			assert.Equal(t, run.ByteSize, usage.ComparisonRunBytes)
+
+			reloaded, err := model.GetPlaygroundComparisonRun(7, run.ID)
+			require.NoError(t, err)
+			assert.Equal(t, models, reloaded.Models)
+			assert.Equal(t, prompts, reloaded.Prompts)
+			assert.Len(t, reloaded.Results, 6)
+			listed, err := model.ListPlaygroundComparisonRuns(7)
+			require.NoError(t, err)
+			require.Len(t, listed, 1)
+			assert.Equal(t, run.ID, listed[0].ID)
+			assert.Equal(t, 2, listed[0].ModelCount)
+			assert.Equal(t, 3, listed[0].PromptCount)
+			other, err := model.ListPlaygroundComparisonRuns(8)
+			require.NoError(t, err)
+			assert.Empty(t, other)
+
+			// Another account cannot read, update or delete the run through the
+			// model or the HTTP handler.
+			_, err = model.GetPlaygroundComparisonRun(8, run.ID)
+			require.ErrorIs(t, err, model.ErrPlaygroundComparisonNotFound)
+			_, err = model.UpdatePlaygroundComparisonRun(8, run.ID, model.PlaygroundComparisonRunUpdate{
+				Revision: run.Revision,
+				Status:   model.PlaygroundComparisonRunStatusCompleted,
+				Results:  run.Results,
+			})
+			require.ErrorIs(t, err, model.ErrPlaygroundComparisonNotFound)
+			require.ErrorIs(t, model.DeletePlaygroundComparisonRun(8, run.ID), model.ErrPlaygroundComparisonNotFound)
+			foreign := playgroundRequest(t, 8, http.MethodGet, "/api/playground/comparisons/"+run.ID, nil, controller.GetPlaygroundComparisonRun)
+			assert.Equal(t, http.StatusNotFound, foreign.Code, foreign.Body.String())
+			assert.Contains(t, foreign.Body.String(), `"code":"PLAYGROUND_COMPARISON_NOT_FOUND"`)
+
+			results := make([]model.PlaygroundComparisonCell, len(run.Results))
+			for index, cell := range run.Results {
+				results[index] = cell
+				results[index].Status = model.PlaygroundComparisonCellSucceeded
+				results[index].Output = fmt.Sprintf("answer-%d", index)
+				results[index].RequestId = fmt.Sprintf("req-%d", index)
+				results[index].PromptTokens = 10
+				results[index].CompletionTokens = 20
+				results[index].TotalTokens = 30
+				results[index].LatencyMs = 400
+			}
+			updated, err := model.UpdatePlaygroundComparisonRun(7, run.ID, model.PlaygroundComparisonRunUpdate{
+				Revision:      run.Revision,
+				Status:        model.PlaygroundComparisonRunStatusCompleted,
+				Results:       results,
+				BaselineModel: models[0],
+			})
+			require.NoError(t, err)
+			assert.EqualValues(t, 2, updated.Revision)
+			assert.Equal(t, model.PlaygroundComparisonRunStatusCompleted, updated.Status)
+			assert.Equal(t, models[0], updated.BaselineModel)
+			assert.Equal(t, results, updated.Results)
+
+			// A stale revision is rejected before it can overwrite the snapshot.
+			_, err = model.UpdatePlaygroundComparisonRun(7, run.ID, model.PlaygroundComparisonRunUpdate{
+				Revision: run.Revision,
+				Status:   model.PlaygroundComparisonRunStatusFailed,
+				Results:  results,
+			})
+			require.ErrorIs(t, err, model.ErrPlaygroundComparisonConflict)
+
+			// Two writers starting from the same revision: exactly one wins and
+			// the other observes the CAS conflict.
+			var waitGroup sync.WaitGroup
+			outcomes := make(chan error, 2)
+			for range 2 {
+				waitGroup.Go(func() {
+					_, updateErr := model.UpdatePlaygroundComparisonRun(7, run.ID, model.PlaygroundComparisonRunUpdate{
+						Revision: 2,
+						Status:   model.PlaygroundComparisonRunStatusCompleted,
+						Results:  results,
+					})
+					outcomes <- updateErr
+				})
+			}
+			waitGroup.Wait()
+			close(outcomes)
+			successes, conflicts := 0, 0
+			for outcome := range outcomes {
+				if outcome == nil {
+					successes++
+					continue
+				}
+				require.ErrorIs(t, outcome, model.ErrPlaygroundComparisonConflict)
+				conflicts++
+			}
+			assert.Equal(t, 1, successes)
+			assert.Equal(t, 1, conflicts)
+
+			afterCAS, err := model.GetPlaygroundComparisonRun(7, run.ID)
+			require.NoError(t, err)
+			assert.EqualValues(t, 3, afterCAS.Revision)
+
+			// The account runtime count cap rejects a second run and leaves the
+			// existing counters untouched.
+			usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+				policy.ComparisonRunUserMaxCount = 1
+			})
+			_, err = model.CreatePlaygroundComparisonRun(7, model.PlaygroundComparisonRunCreate{
+				Group:   "default",
+				Models:  models,
+				Prompts: []string{"overflow"},
+			})
+			require.ErrorIs(t, err, model.ErrPlaygroundComparisonLimit)
+			require.NoError(t, db.Where("user_id = ?", 7).First(&usage).Error)
+			assert.EqualValues(t, 1, usage.ComparisonRunCount)
+			assert.Equal(t, afterCAS.ByteSize, usage.ComparisonRunBytes)
+
+			// A rejected byte-growing update rolls back both the snapshot and the
+			// counter row.
+			usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+				policy.ComparisonRunUserMaxBytes = usage.ComparisonRunBytes + 16
+			})
+			grown := make([]model.PlaygroundComparisonCell, len(afterCAS.Results))
+			copy(grown, afterCAS.Results)
+			grown[0].Output = strings.Repeat("x", 512)
+			_, err = model.UpdatePlaygroundComparisonRun(7, run.ID, model.PlaygroundComparisonRunUpdate{
+				Revision: afterCAS.Revision,
+				Status:   model.PlaygroundComparisonRunStatusCompleted,
+				Results:  grown,
+			})
+			require.ErrorIs(t, err, model.ErrPlaygroundComparisonStorageLimit)
+			unchanged, err := model.GetPlaygroundComparisonRun(7, run.ID)
+			require.NoError(t, err)
+			assert.EqualValues(t, afterCAS.Revision, unchanged.Revision)
+			assert.Equal(t, afterCAS.Results, unchanged.Results)
+			require.NoError(t, db.Where("user_id = ?", 7).First(&usage).Error)
+			assert.Equal(t, afterCAS.ByteSize, usage.ComparisonRunBytes)
+
+			require.NoError(t, model.DeletePlaygroundComparisonRun(7, run.ID))
+			require.NoError(t, db.Where("user_id = ?", 7).First(&usage).Error)
+			assert.Zero(t, usage.ComparisonRunCount)
+			assert.Zero(t, usage.ComparisonRunBytes)
+			_, err = model.GetPlaygroundComparisonRun(7, run.ID)
+			require.ErrorIs(t, err, model.ErrPlaygroundComparisonNotFound)
 		})
 	}
 }

@@ -1029,6 +1029,7 @@ const playgroundUsageSchema = z.object({
   kb_chunks: playgroundUsageMetricSchema,
   storage: playgroundUsageMetricSchema,
   tasks: playgroundUsageMetricSchema,
+  comparison_runs: playgroundUsageMetricSchema,
 })
 
 const playgroundSettingsSchema = z.object({
@@ -1061,6 +1062,7 @@ export interface PlaygroundResourceUsage {
   knowledgeBaseChunks: PlaygroundUsageMetric
   storage: PlaygroundUsageMetric
   tasks: PlaygroundUsageMetric
+  comparisonRuns: PlaygroundUsageMetric
 }
 
 /**
@@ -1132,6 +1134,7 @@ export async function getPlaygroundUsage(
     knowledgeBaseChunks: toMetric(metrics.kb_chunks),
     storage: toMetric(metrics.storage),
     tasks: toMetric(metrics.tasks),
+    comparisonRuns: toMetric(metrics.comparison_runs),
   }
 }
 

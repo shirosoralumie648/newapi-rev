@@ -52,8 +52,11 @@ type PlaygroundResourceUsage struct {
 	KnowledgeBases         PlaygroundUsageMetric `json:"knowledge_bases"`
 	KnowledgeBaseDocuments PlaygroundUsageMetric `json:"kb_documents"`
 	KnowledgeBaseChunks    PlaygroundUsageMetric `json:"kb_chunks"`
-	Storage                PlaygroundUsageMetric `json:"storage"`
-	Tasks                  PlaygroundUsageMetric `json:"tasks"`
+	// ComparisonRuns is the persisted compare-run matrix count and snapshot
+	// bytes of the account.
+	ComparisonRuns PlaygroundUsageMetric `json:"comparison_runs"`
+	Storage        PlaygroundUsageMetric `json:"storage"`
+	Tasks          PlaygroundUsageMetric `json:"tasks"`
 }
 
 // PlaygroundUsageForUser reports the caller's Playground storage against the
@@ -106,6 +109,10 @@ func PlaygroundUsageForUser(userID int) (*PlaygroundResourceUsage, error) {
 			Limit:      int64(policy.KnowledgeBaseChunkUserMaxCount),
 			LimitBytes: policy.KnowledgeBaseUserMaxBytes,
 		},
+		ComparisonRuns: PlaygroundUsageMetric{
+			Limit:      int64(policy.ComparisonRunUserMaxCount),
+			LimitBytes: policy.ComparisonRunUserMaxBytes,
+		},
 		Storage: PlaygroundUsageMetric{
 			LimitBytes: policy.ObjectUserMaxBytes,
 		},
@@ -135,6 +142,8 @@ func PlaygroundUsageForUser(userID int) (*PlaygroundResourceUsage, error) {
 	usage.KnowledgeBaseDocuments.Used = counters.KnowledgeBaseDocumentCount
 	usage.KnowledgeBaseChunks.Used = counters.KnowledgeBaseChunkCount
 	usage.KnowledgeBaseChunks.UsedBytes = counters.KnowledgeBaseBytes
+	usage.ComparisonRuns.Used = counters.ComparisonRunCount
+	usage.ComparisonRuns.UsedBytes = counters.ComparisonRunBytes
 	// Storage counts the bytes that live in the object store, the same figure
 	// the upload path checks against ObjectUserMaxBytes.
 	usage.Storage.UsedBytes = counters.ObjectBytes
