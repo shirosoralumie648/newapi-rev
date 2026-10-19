@@ -163,7 +163,11 @@ func playgroundRequest(t *testing.T, user int, method, path string, body any, ha
 			c.Params = append(c.Params, gin.Param{Key: "canvasId", Value: parts[4]})
 		}
 		if parts[3] == "presets" {
-			c.Params = append(c.Params, gin.Param{Key: "presetId", Value: parts[4]})
+			presetID := parts[4]
+			if (presetID == "global" || presetID == "market") && len(parts) > 5 {
+				presetID = parts[5]
+			}
+			c.Params = append(c.Params, gin.Param{Key: "presetId", Value: presetID})
 		}
 		if parts[3] == "snippets" {
 			c.Params = append(c.Params, gin.Param{Key: "snippetId", Value: parts[4]})
@@ -2264,6 +2268,10 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodPost, "/api/playground/tasks/missing/cancel"},
 		{http.MethodGet, "/api/playground/presets"},
 		{http.MethodPost, "/api/playground/presets"},
+		{http.MethodGet, "/api/playground/presets/market"},
+		{http.MethodPost, "/api/playground/presets/market/missing/copy"},
+		{http.MethodPost, "/api/playground/presets/import"},
+		{http.MethodGet, "/api/playground/presets/missing/export"},
 		{http.MethodGet, "/api/playground/presets/missing"},
 		{http.MethodPatch, "/api/playground/presets/missing"},
 		{http.MethodDelete, "/api/playground/presets/missing"},
@@ -2299,6 +2307,27 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		response = playgroundAuthenticatedRequest(t, engine, patRaw, route.method, route.path, input)
 		assert.Equal(t, 403, response.Code, response.Body.String())
 		assert.Contains(t, response.Body.String(), "AUTH_SESSION_REQUIRED")
+	}
+
+	// Global preset maintenance is administrator-only. A personal access
+	// token is admitted by the dashboard authentication layer only with the
+	// option scope, and a common-user session is still rejected by AdminAuth.
+	for _, route := range []struct{ method, path string }{
+		{http.MethodGet, "/api/playground/presets/global"},
+		{http.MethodPost, "/api/playground/presets/global"},
+		{http.MethodPost, "/api/playground/presets/global/import"},
+		{http.MethodGet, "/api/playground/presets/global/missing"},
+		{http.MethodPatch, "/api/playground/presets/global/missing"},
+		{http.MethodDelete, "/api/playground/presets/global/missing"},
+		{http.MethodGet, "/api/playground/presets/global/missing/export"},
+	} {
+		response := playgroundAuthenticatedRequest(t, engine, "", route.method, route.path, input)
+		assert.Equal(t, 401, response.Code, route.method+" "+route.path+": "+response.Body.String())
+		response = playgroundAuthenticatedRequest(t, engine, patRaw, route.method, route.path, input)
+		assert.Equal(t, 403, response.Code, route.method+" "+route.path+": "+response.Body.String())
+		response = playgroundAuthenticatedRequest(t, engine, token, route.method, route.path, input)
+		assert.Equal(t, 403, response.Code, route.method+" "+route.path+": "+response.Body.String())
+		assert.Contains(t, response.Body.String(), "AUTH_INSUFFICIENT_PRIVILEGE")
 	}
 
 	base := "/api/playground/sessions/" + sessionID + "/artifacts"
@@ -3543,19 +3572,27 @@ func TestPlaygroundPresetPersistenceAndOwnership(t *testing.T) {
 				"config":            map[string]any{"model": "test-model", "temperature": 0.2},
 				"parameter_enabled": map[string]bool{"temperature": true},
 				"system_prompt":     "Review code carefully.",
+				"opening_message":   "Welcome aboard.",
+				"suggested_questions": []string{
+					"Explain the diff", "  Find bugs  ", "Explain the diff",
+				},
+				"visibility": "global",
 			}, controller.CreatePlaygroundPreset)
 			require.Equal(t, http.StatusOK, created.Code, created.Body.String())
 			var envelope struct {
 				Success bool
 				Data    struct {
-					ID               string          `json:"id"`
-					Name             string          `json:"name"`
-					Avatar           string          `json:"avatar"`
-					Config           map[string]any  `json:"config"`
-					ParameterEnabled map[string]bool `json:"parameter_enabled"`
-					SystemPrompt     string          `json:"system_prompt"`
-					CreatedAt        int64           `json:"created_at"`
-					UpdatedAt        int64           `json:"updated_at"`
+					ID                 string          `json:"id"`
+					Name               string          `json:"name"`
+					Avatar             string          `json:"avatar"`
+					Config             map[string]any  `json:"config"`
+					ParameterEnabled   map[string]bool `json:"parameter_enabled"`
+					SystemPrompt       string          `json:"system_prompt"`
+					Visibility         string          `json:"visibility"`
+					OpeningMessage     string          `json:"opening_message"`
+					SuggestedQuestions []string        `json:"suggested_questions"`
+					CreatedAt          int64           `json:"created_at"`
+					UpdatedAt          int64           `json:"updated_at"`
 				}
 			}
 			require.NoError(t, common.Unmarshal(created.Body.Bytes(), &envelope))
@@ -3565,6 +3602,9 @@ func TestPlaygroundPresetPersistenceAndOwnership(t *testing.T) {
 			assert.Equal(t, "Code reviewer", envelope.Data.Name)
 			assert.Equal(t, "🧑💻", envelope.Data.Avatar)
 			assert.Equal(t, "Review code carefully.", envelope.Data.SystemPrompt)
+			assert.Equal(t, "Welcome aboard.", envelope.Data.OpeningMessage)
+			assert.Equal(t, []string{"Explain the diff", "Find bugs"}, envelope.Data.SuggestedQuestions)
+			assert.Equal(t, model.PlaygroundPresetVisibilityPrivate, envelope.Data.Visibility, "a user request can never promote a preset")
 			assert.EqualValues(t, 0.2, envelope.Data.Config["temperature"])
 			assert.True(t, envelope.Data.ParameterEnabled["temperature"])
 			assert.NotZero(t, envelope.Data.CreatedAt)
@@ -3602,20 +3642,28 @@ func TestPlaygroundPresetPersistenceAndOwnership(t *testing.T) {
 
 			updated := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/presets/"+id, map[string]any{
 				"name": "Reviewer", "avatar": "https://example.com/avatar.png", "system_prompt": "Review twice.",
+				"opening_message": "Welcome back.", "suggested_questions": []string{"Review again"},
+				"visibility": "global",
 			}, controller.UpdatePlaygroundPreset)
 			require.Equal(t, http.StatusOK, updated.Code, updated.Body.String())
 			var updatedEnvelope struct {
 				Data struct {
-					Name         string         `json:"name"`
-					Avatar       string         `json:"avatar"`
-					SystemPrompt string         `json:"system_prompt"`
-					Config       map[string]any `json:"config"`
+					Name               string         `json:"name"`
+					Avatar             string         `json:"avatar"`
+					SystemPrompt       string         `json:"system_prompt"`
+					Visibility         string         `json:"visibility"`
+					OpeningMessage     string         `json:"opening_message"`
+					SuggestedQuestions []string       `json:"suggested_questions"`
+					Config             map[string]any `json:"config"`
 				}
 			}
 			require.NoError(t, common.Unmarshal(updated.Body.Bytes(), &updatedEnvelope))
 			assert.Equal(t, "Reviewer", updatedEnvelope.Data.Name)
 			assert.Equal(t, "https://example.com/avatar.png", updatedEnvelope.Data.Avatar)
 			assert.Equal(t, "Review twice.", updatedEnvelope.Data.SystemPrompt)
+			assert.Equal(t, "Welcome back.", updatedEnvelope.Data.OpeningMessage)
+			assert.Equal(t, []string{"Review again"}, updatedEnvelope.Data.SuggestedQuestions)
+			assert.Equal(t, model.PlaygroundPresetVisibilityPrivate, updatedEnvelope.Data.Visibility)
 			assert.EqualValues(t, 0.2, updatedEnvelope.Data.Config["temperature"], "unsent fields keep their stored value")
 
 			for name, body := range map[string]map[string]any{
@@ -3624,6 +3672,13 @@ func TestPlaygroundPresetPersistenceAndOwnership(t *testing.T) {
 				"non-http avatar":  {"name": "A", "avatar": "ftp://example.com/a.png"},
 				"long text avatar": {"name": "A", "avatar": strings.Repeat("x", 65)},
 				"invalid config":   {"name": "A", "config": map[string]any{"temperature": "hot"}},
+				"long opening":     {"name": "A", "opening_message": strings.Repeat("x", (8<<10)+1)},
+				"nul opening":      {"name": "A", "opening_message": "a\x00b"},
+				"too many questions": {
+					"name": "A", "suggested_questions": []string{"1", "2", "3", "4", "5", "6", "7"},
+				},
+				"blank question": {"name": "A", "suggested_questions": []string{"ok", "  "}},
+				"long question":  {"name": "A", "suggested_questions": []string{strings.Repeat("q", 201)}},
 			} {
 				response := playgroundRequest(t, 7, http.MethodPost, "/api/playground/presets", body, controller.CreatePlaygroundPreset)
 				assert.Equal(t, http.StatusBadRequest, response.Code, name+": "+response.Body.String())
@@ -3660,7 +3715,151 @@ func TestPlaygroundPresetPersistenceAndOwnership(t *testing.T) {
 	}
 }
 
+// The preset market is administrator-maintained platform content. A global
+// preset is readable by every account, a copy is an independent private row,
+// and the private endpoints never expose or mutate the global row.
+func TestPlaygroundPresetMarketAndGlobalManagement(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+
+			type presetPayload struct {
+				ID                 string          `json:"id"`
+				Name               string          `json:"name"`
+				Visibility         string          `json:"visibility"`
+				OpeningMessage     string          `json:"opening_message"`
+				SuggestedQuestions []string        `json:"suggested_questions"`
+				SystemPrompt       string          `json:"system_prompt"`
+				Config             map[string]any  `json:"config"`
+				ParameterEnabled   map[string]bool `json:"parameter_enabled"`
+			}
+			decode := func(recorder *httptest.ResponseRecorder) presetPayload {
+				t.Helper()
+				var envelope struct {
+					Success bool
+					Data    presetPayload
+				}
+				require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &envelope))
+				require.True(t, envelope.Success, recorder.Body.String())
+				return envelope.Data
+			}
+
+			global := decode(playgroundRequest(t, 9, http.MethodPost, "/api/playground/presets/global", map[string]any{
+				"name": "Market reviewer", "avatar": "🌍",
+				"config":            map[string]any{"model": "market-model"},
+				"parameter_enabled": map[string]bool{"temperature": true},
+				"system_prompt":     "Review for everyone.",
+				"opening_message":   "Welcome to the market.",
+				"suggested_questions": []string{
+					"Start here", "Explain this",
+				},
+			}, controller.CreateGlobalPlaygroundPreset))
+			require.True(t, strings.HasPrefix(global.ID, "pgp_"), global.ID)
+			assert.Equal(t, model.PlaygroundPresetVisibilityGlobal, global.Visibility)
+			assert.Equal(t, "Welcome to the market.", global.OpeningMessage)
+			assert.Equal(t, []string{"Start here", "Explain this"}, global.SuggestedQuestions)
+
+			// Global presets are platform content: they have no owner and do
+			// not consume the administrator's private budget.
+			var stored model.PlaygroundPreset
+			require.NoError(t, db.Where("id = ?", global.ID).First(&stored).Error)
+			assert.Zero(t, stored.UserID)
+			assert.Equal(t, model.PlaygroundPresetVisibilityGlobal, stored.Visibility)
+			privateList := playgroundRequest(t, 9, http.MethodGet, "/api/playground/presets", nil, controller.ListPlaygroundPresets)
+			assert.Contains(t, privateList.Body.String(), `"total":0`)
+
+			// Every account sees the same row in the market.
+			market := playgroundRequest(t, 7, http.MethodGet, "/api/playground/presets/market", nil, controller.ListPlaygroundPresetMarket)
+			require.Equal(t, http.StatusOK, market.Code, market.Body.String())
+			assert.Contains(t, market.Body.String(), `"total":1`)
+			assert.Contains(t, market.Body.String(), `"visibility":"global"`)
+			adminMarket := playgroundRequest(t, 9, http.MethodGet, "/api/playground/presets/global", nil, controller.ListGlobalPlaygroundPresets)
+			assert.Contains(t, adminMarket.Body.String(), global.ID)
+
+			// The private endpoints are owner-scoped: a global id behaves
+			// exactly like an id the caller does not own.
+			for name, response := range map[string]*httptest.ResponseRecorder{
+				"read":   playgroundRequest(t, 7, http.MethodGet, "/api/playground/presets/"+global.ID, nil, controller.GetPlaygroundPreset),
+				"update": playgroundRequest(t, 7, http.MethodPatch, "/api/playground/presets/"+global.ID, map[string]any{"name": "Hijacked"}, controller.UpdatePlaygroundPreset),
+				"delete": playgroundRequest(t, 7, http.MethodDelete, "/api/playground/presets/"+global.ID, nil, controller.DeletePlaygroundPreset),
+			} {
+				assert.Equal(t, http.StatusNotFound, response.Code, name+": "+response.Body.String())
+			}
+
+			// Copying creates an independent private row for the caller.
+			copied := decode(playgroundRequest(t, 7, http.MethodPost, "/api/playground/presets/market/"+global.ID+"/copy", nil, controller.CopyPlaygroundPresetFromMarket))
+			assert.NotEqual(t, global.ID, copied.ID)
+			assert.Equal(t, model.PlaygroundPresetVisibilityPrivate, copied.Visibility)
+			assert.Equal(t, global.Name, copied.Name)
+			assert.Equal(t, global.OpeningMessage, copied.OpeningMessage)
+			assert.Equal(t, global.SuggestedQuestions, copied.SuggestedQuestions)
+			assert.Equal(t, global.SystemPrompt, copied.SystemPrompt)
+			var copiedRow model.PlaygroundPreset
+			require.NoError(t, db.Where("id = ?", copied.ID).First(&copiedRow).Error)
+			assert.Equal(t, 7, copiedRow.UserID)
+			assert.Equal(t, model.PlaygroundPresetVisibilityPrivate, copiedRow.Visibility)
+
+			// JSON export carries the portable fields; importing it into
+			// another account runs the ordinary validation and creates a
+			// private copy owned by that account.
+			exported := playgroundRequest(t, 9, http.MethodGet, "/api/playground/presets/global/"+global.ID+"/export", nil, controller.ExportGlobalPlaygroundPreset)
+			require.Equal(t, http.StatusOK, exported.Code, exported.Body.String())
+			var exportEnvelope struct {
+				Data struct {
+					Format      string `json:"format"`
+					Filename    string `json:"filename"`
+					ContentType string `json:"content_type"`
+					Content     string `json:"content"`
+				}
+			}
+			require.NoError(t, common.Unmarshal(exported.Body.Bytes(), &exportEnvelope))
+			assert.Equal(t, "application/json; charset=utf-8", exportEnvelope.Data.ContentType)
+			assert.True(t, strings.HasSuffix(exportEnvelope.Data.Filename, ".json"))
+			imported := decode(playgroundRequest(t, 8, http.MethodPost, "/api/playground/presets/import", []byte(exportEnvelope.Data.Content), controller.ImportPlaygroundPreset))
+			assert.Equal(t, model.PlaygroundPresetVisibilityPrivate, imported.Visibility)
+			assert.Equal(t, global.Name, imported.Name)
+			assert.Equal(t, global.OpeningMessage, imported.OpeningMessage)
+			assert.Equal(t, global.SuggestedQuestions, imported.SuggestedQuestions)
+			var importedRow model.PlaygroundPreset
+			require.NoError(t, db.Where("id = ?", imported.ID).First(&importedRow).Error)
+			assert.Equal(t, 8, importedRow.UserID)
+
+			// The administrator updates and deletes the global row without
+			// touching the copies users already made.
+			updated := decode(playgroundRequest(t, 9, http.MethodPatch, "/api/playground/presets/global/"+global.ID, map[string]any{
+				"name": "Market reviewer v2", "opening_message": "Updated greeting.",
+				"suggested_questions": []string{"Only question"},
+			}, controller.UpdateGlobalPlaygroundPreset))
+			assert.Equal(t, "Market reviewer v2", updated.Name)
+			assert.Equal(t, "Updated greeting.", updated.OpeningMessage)
+			assert.Equal(t, []string{"Only question"}, updated.SuggestedQuestions)
+			deleted := playgroundRequest(t, 9, http.MethodDelete, "/api/playground/presets/global/"+global.ID, nil, controller.DeleteGlobalPlaygroundPreset)
+			require.Equal(t, http.StatusOK, deleted.Code, deleted.Body.String())
+			emptyMarket := playgroundRequest(t, 7, http.MethodGet, "/api/playground/presets/market", nil, controller.ListPlaygroundPresetMarket)
+			assert.Contains(t, emptyMarket.Body.String(), `"total":0`)
+			var privateCount int64
+			require.NoError(t, db.Model(&model.PlaygroundPreset{}).Where("user_id = ?", 7).Count(&privateCount).Error)
+			assert.EqualValues(t, 1, privateCount)
+			require.NoError(t, db.Where("id = ?", copied.ID).First(&copiedRow).Error)
+			assert.Equal(t, "Market reviewer", copiedRow.Name, "a copy is independent of later global edits")
+
+			// The copy path uses the same per-account budget as a direct
+			// create, so a full account cannot grow through the market.
+			usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+				policy.PresetUserMaxCount = 1
+			})
+			overflow := playgroundRequest(t, 7, http.MethodPost, "/api/playground/presets/market/"+global.ID+"/copy", nil, controller.CopyPlaygroundPresetFromMarket)
+			assert.Equal(t, http.StatusNotFound, overflow.Code, overflow.Body.String(), "the deleted global id is no longer copyable")
+			second := decode(playgroundRequest(t, 9, http.MethodPost, "/api/playground/presets/global", map[string]any{"name": "Second global"}, controller.CreateGlobalPlaygroundPreset))
+			overflow = playgroundRequest(t, 7, http.MethodPost, "/api/playground/presets/market/"+second.ID+"/copy", nil, controller.CopyPlaygroundPresetFromMarket)
+			assert.Equal(t, http.StatusUnprocessableEntity, overflow.Code, overflow.Body.String())
+			assert.Contains(t, overflow.Body.String(), "PLAYGROUND_PRESET_LIMIT_EXCEEDED")
+		})
+	}
+}
+
 // Prompt snippets are owner-scoped server resources: another account can
+
 // neither list nor mutate them, every field is validated on write, and the
 // per-account budget and per-snippet text bound come from the shared resource
 // quota policy.
@@ -3784,33 +3983,46 @@ func TestPlaygroundSessionSystemPrompt(t *testing.T) {
 			created := playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions", map[string]any{
 				"title": "Prompted", "client_id": "prompt-session",
 				"config": map[string]any{"model": "test-model"}, "parameter_enabled": map[string]bool{},
-				"system_prompt": "Answer in French.",
+				"system_prompt": "Answer in French.", "opening_message": "Hello!",
+				"suggested_questions": []string{"Explain this", "  Find bugs  ", "Explain this"},
 			}, controller.CreatePlaygroundSession)
 			require.Equal(t, http.StatusOK, created.Code, created.Body.String())
 			var envelope struct {
 				Success bool
 				Data    struct {
-					ID           string `json:"id"`
-					SystemPrompt string `json:"system_prompt"`
+					ID                 string   `json:"id"`
+					SystemPrompt       string   `json:"system_prompt"`
+					OpeningMessage     string   `json:"opening_message"`
+					SuggestedQuestions []string `json:"suggested_questions"`
 				}
 			}
 			require.NoError(t, common.Unmarshal(created.Body.Bytes(), &envelope))
 			require.True(t, envelope.Success, created.Body.String())
 			id := envelope.Data.ID
 			assert.Equal(t, "Answer in French.", envelope.Data.SystemPrompt)
+			assert.Equal(t, "Hello!", envelope.Data.OpeningMessage)
+			assert.Equal(t, []string{"Explain this", "Find bugs"}, envelope.Data.SuggestedQuestions)
 
 			read := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+id, nil, controller.GetPlaygroundSession)
 			require.Equal(t, http.StatusOK, read.Code, read.Body.String())
 			assert.Contains(t, read.Body.String(), `"system_prompt":"Answer in French."`)
+			assert.Contains(t, read.Body.String(), `"opening_message":"Hello!"`)
+			assert.Contains(t, read.Body.String(), `"suggested_questions":["Explain this","Find bugs"]`)
 
 			// An update that does not send the prompt keeps it; an explicit
-			// value replaces it.
+			// value replaces it. The intro fields follow the same rule.
 			renamed := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+id, map[string]any{"revision": 0, "title": "Renamed"}, controller.UpdatePlaygroundSession)
 			require.Equal(t, http.StatusOK, renamed.Code, renamed.Body.String())
 			assert.Contains(t, renamed.Body.String(), `"system_prompt":"Answer in French."`)
-			replaced := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+id, map[string]any{"revision": 1, "system_prompt": "Answer in English."}, controller.UpdatePlaygroundSession)
+			assert.Contains(t, renamed.Body.String(), `"opening_message":"Hello!"`)
+			replaced := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+id, map[string]any{
+				"revision": 1, "system_prompt": "Answer in English.",
+				"opening_message": "Bonjour!", "suggested_questions": []string{"Continuer"},
+			}, controller.UpdatePlaygroundSession)
 			require.Equal(t, http.StatusOK, replaced.Code, replaced.Body.String())
 			assert.Contains(t, replaced.Body.String(), `"system_prompt":"Answer in English."`)
+			assert.Contains(t, replaced.Body.String(), `"opening_message":"Bonjour!"`)
+			assert.Contains(t, replaced.Body.String(), `"suggested_questions":["Continuer"]`)
 
 			usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
 				policy.SystemPromptMaxBytes = 8
@@ -3823,12 +4035,27 @@ func TestPlaygroundSessionSystemPrompt(t *testing.T) {
 			// instead of the capacity error above.
 			nul := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+id, map[string]any{"revision": 2, "system_prompt": "a\x00b"}, controller.UpdatePlaygroundSession)
 			assert.Equal(t, http.StatusBadRequest, nul.Code, nul.Body.String())
+			nulIntro := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+id, map[string]any{"revision": 2, "opening_message": "a\x00b"}, controller.UpdatePlaygroundSession)
+			assert.Equal(t, http.StatusBadRequest, nulIntro.Code, nulIntro.Body.String())
+			tooMany := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+id, map[string]any{
+				"revision": 2, "suggested_questions": []string{"1", "2", "3", "4", "5", "6", "7"},
+			}, controller.UpdatePlaygroundSession)
+			assert.Equal(t, http.StatusBadRequest, tooMany.Code, tooMany.Body.String())
 
-			// A legacy row without the column reads back as an empty prompt.
-			require.NoError(t, db.Model(&model.PlaygroundSession{}).Where("id = ? AND user_id = ?", id, 7).Update("system_prompt", gorm.Expr("NULL")).Error)
+			// A legacy row without the columns reads back as an empty prompt
+			// and intro instead of failing the request.
+			require.NoError(t, db.Model(&model.PlaygroundSession{}).Where("id = ? AND user_id = ?", id, 7).Updates(map[string]any{
+				"system_prompt": gorm.Expr("NULL"), "opening_message": gorm.Expr("NULL"), "suggested_questions": gorm.Expr("NULL"),
+			}).Error)
 			reloaded, err := model.GetPlaygroundSession(7, id)
 			require.NoError(t, err)
 			assert.Empty(t, reloaded.SystemPrompt)
+			assert.Empty(t, reloaded.OpeningMessage)
+			assert.Empty(t, reloaded.SuggestedQuestions)
+			legacyRead := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+id, nil, controller.GetPlaygroundSession)
+			require.Equal(t, http.StatusOK, legacyRead.Code, legacyRead.Body.String())
+			assert.Contains(t, legacyRead.Body.String(), `"opening_message":""`)
+			assert.Contains(t, legacyRead.Body.String(), `"suggested_questions":[]`)
 		})
 	}
 }

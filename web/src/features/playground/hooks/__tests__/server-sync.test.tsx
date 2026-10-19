@@ -60,6 +60,8 @@ const localDraft: PlaygroundSession = {
   config: DEFAULT_CONFIG,
   parameterEnabled: DEFAULT_PARAMETER_ENABLED,
   systemPrompt: '',
+  openingMessage: '',
+  suggestedQuestions: [],
   context: { ...DEFAULT_CONTEXT_SETTINGS },
   contextSummary: null,
   messages: [{ ...message, versions: [{ id: 'v', content: 'Local history' }] }],

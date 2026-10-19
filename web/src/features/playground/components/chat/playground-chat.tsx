@@ -91,6 +91,10 @@ interface PlaygroundChatProps {
   messageLayoutMode?: PlaygroundMessageLayoutMode
   /** Compression node that replaces older messages in the next request. */
   contextSummary?: PlaygroundContextSummary | null
+  /** Display-only greeting of a preset-started conversation. */
+  openingMessage?: string
+  /** Starter questions of a preset-started conversation. */
+  suggestedQuestions?: string[]
   /** Undo the compression: the stored messages stay, the node is removed. */
   onRemoveContextSummary?: () => void
 }
@@ -119,6 +123,8 @@ export function PlaygroundChat({
   onSaveEditAndSubmit,
   messageLayoutMode = 'alternating',
   contextSummary,
+  openingMessage,
+  suggestedQuestions,
   onRemoveContextSummary,
 }: PlaygroundChatProps) {
   const { t } = useTranslation()
@@ -281,7 +287,12 @@ export function PlaygroundChat({
 
   if (visibleMessages.length === 0 && onSelectPrompt) {
     chatContent = [
-      <PlaygroundEmptyState key='empty' onSelectPrompt={onSelectPrompt} />,
+      <PlaygroundEmptyState
+        key='empty'
+        onSelectPrompt={onSelectPrompt}
+        openingMessage={openingMessage}
+        suggestedQuestions={suggestedQuestions}
+      />,
     ]
   }
 
