@@ -341,22 +341,35 @@ func RollbackPlaygroundSnippet(userID int, id string, version int) (*PlaygroundS
 // row and all of its versions are written inside a single transaction after
 // the same per-account snippet and version budgets the create path applies.
 // The caller has already validated the name and every version content.
-func ImportPlaygroundSnippet(userID int, name string, contents []string, productionVersion int) (*PlaygroundSnippet, error) {
+//
+// versionCreatedAt carries the exported creation time of each revision. A
+// missing, non-positive or future value falls back to the import time, so a
+// hand-written document cannot invent a future history; valid timestamps are
+// kept exactly, which makes export -> import -> export stable.
+func ImportPlaygroundSnippet(userID int, name string, contents []string, versionCreatedAt []int64, productionVersion int) (*PlaygroundSnippet, []PlaygroundSnippetVersion, error) {
 	if userID <= 0 || len(contents) == 0 {
-		return nil, errors.New("invalid playground snippet")
+		return nil, nil, errors.New("invalid playground snippet")
 	}
 	if productionVersion <= 0 || productionVersion > len(contents) {
 		productionVersion = len(contents)
 	}
 	key, err := common.GenerateRandomCharsKey(24)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	now := common.GetTimestamp()
+	createdAt := make([]int64, len(contents))
+	for index := range contents {
+		createdAt[index] = now
+		if index < len(versionCreatedAt) && versionCreatedAt[index] > 0 && versionCreatedAt[index] <= now {
+			createdAt[index] = versionCreatedAt[index]
+		}
+	}
 	snippet := &PlaygroundSnippet{
 		ID: "pgs_" + key, UserID: userID, Name: name, Content: LongText(contents[productionVersion-1]),
-		CurrentVersion: len(contents), ProductionVersion: productionVersion, CreatedAt: now, UpdatedAt: now,
+		CurrentVersion: len(contents), ProductionVersion: productionVersion, CreatedAt: createdAt[0], UpdatedAt: now,
 	}
+	rows := make([]PlaygroundSnippetVersion, 0, len(contents))
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		policy, err := playgroundPolicyForUser(tx, userID)
 		if err != nil {
@@ -375,7 +388,6 @@ func ImportPlaygroundSnippet(userID int, name string, contents []string, product
 		if err := tx.Create(snippet).Error; err != nil {
 			return err
 		}
-		rows := make([]PlaygroundSnippetVersion, 0, len(contents))
 		for index, content := range contents {
 			versionID, err := newPlaygroundSnippetVersionID()
 			if err != nil {
@@ -383,7 +395,7 @@ func ImportPlaygroundSnippet(userID int, name string, contents []string, product
 			}
 			rows = append(rows, PlaygroundSnippetVersion{
 				ID: versionID, SnippetID: snippet.ID, UserID: userID, Version: index + 1,
-				Content: LongText(content), ByteSize: int64(len(content)), CreatedAt: now,
+				Content: LongText(content), ByteSize: int64(len(content)), CreatedAt: createdAt[index],
 			})
 		}
 		if err := tx.Create(&rows).Error; err != nil {
@@ -393,9 +405,9 @@ func ImportPlaygroundSnippet(userID int, name string, contents []string, product
 		return savePlaygroundUserUsage(tx, usage)
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return snippet, nil
+	return snippet, rows, nil
 }
 
 func DeletePlaygroundSnippet(userID int, id string) error {
