@@ -97,6 +97,15 @@ const (
 	// summary is rejected instead of truncated so the stored node always
 	// matches what the model produced.
 	playgroundContextSummaryMaxBytes = 32 << 10
+	// Developer options bounds: request-shape limits the client mirrors, not
+	// resource quotas. They only bound what a stored conversation may inject
+	// into its next request.
+	playgroundDeveloperOptionsMaxBytes         = 256 << 10
+	playgroundDeveloperToolMaxCount            = 32
+	playgroundDeveloperSchemaMaxBytes          = 64 << 10
+	playgroundDeveloperNameMaxLength           = 64
+	playgroundDeveloperDescriptionMaxBytes     = 1024
+	playgroundDeveloperJSONSchemaNameMaxLength = 64
 	// Conversation tags are a compact client-side organizing aid: a bounded
 	// number of short labels stored as one JSON array.
 	playgroundSessionTagMaxCount  = 10
@@ -109,6 +118,12 @@ const (
 // rejects any other value, so a stored configuration only ever carries one a
 // request can send.
 var playgroundReasoningEffortValues = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+
+// playgroundDeveloperToolChoiceValues and playgroundDeveloperResponseFormatTypes
+// list the accepted developer-settings enums. They mirror the OpenAI wire shape
+// the client injects unchanged into a relay request.
+var playgroundDeveloperToolChoiceValues = []string{"auto", "none", "required"}
+var playgroundDeveloperResponseFormatTypes = []string{"text", "json_object", "json_schema"}
 
 type playgroundSessionRequest struct {
 	Title            *string         `json:"title"`
@@ -126,6 +141,10 @@ type playgroundSessionRequest struct {
 	KnowledgeBaseIDs *[]string       `json:"knowledge_base_ids"`
 	Context          json.RawMessage `json:"context"`
 	ContextSummary   json.RawMessage `json:"context_summary"`
+	// DeveloperOptions is the complete request-side developer settings object
+	// (enabled flag, function tools, response format). An explicit null clears
+	// the stored value; an absent field keeps it.
+	DeveloperOptions json.RawMessage `json:"developer_options"`
 	// Pinned and Archived are explicit state switches: absent keeps the stored
 	// value, while a boolean sets it. Tags is the complete replacement list.
 	Pinned   *bool                    `json:"pinned"`
@@ -149,17 +168,22 @@ type playgroundSessionResponse struct {
 	// Context is the conversation's context management settings; an absent or
 	// legacy NULL column reads back as an empty object and the client picks
 	// its defaults. ContextSummary is the persisted compression node or null.
-	Context         map[string]any  `json:"context"`
-	ContextSummary  json.RawMessage `json:"context_summary"`
-	PinnedAt        int64           `json:"pinned_at"`
-	ArchivedAt      int64           `json:"archived_at"`
-	Pinned          bool            `json:"pinned"`
-	Archived        bool            `json:"archived"`
-	Tags            []string        `json:"tags"`
-	Revision        int64           `json:"revision"`
-	MessageRevision int64           `json:"message_revision"`
-	CreatedAt       int64           `json:"created_at"`
-	UpdatedAt       int64           `json:"updated_at"`
+	Context        map[string]any  `json:"context"`
+	ContextSummary json.RawMessage `json:"context_summary"`
+	// DeveloperOptions is the conversation's stored request-side developer
+	// settings — enabled switch, function tool definitions and response
+	// format — or an empty object when the conversation never stored any.
+	// The client turns the empty object into its disabled defaults.
+	DeveloperOptions map[string]any `json:"developer_options"`
+	PinnedAt         int64          `json:"pinned_at"`
+	ArchivedAt       int64          `json:"archived_at"`
+	Pinned           bool           `json:"pinned"`
+	Archived         bool           `json:"archived"`
+	Tags             []string       `json:"tags"`
+	Revision         int64          `json:"revision"`
+	MessageRevision  int64          `json:"message_revision"`
+	CreatedAt        int64          `json:"created_at"`
+	UpdatedAt        int64          `json:"updated_at"`
 }
 
 type playgroundMessageInput struct {
@@ -385,6 +409,16 @@ func writePlaygroundError(c *gin.Context, err error) {
 		code = "PLAYGROUND_NOT_FOUND"
 		err = common.NewMessage(err.Error())
 	}
+	if errors.Is(err, model.ErrPlaygroundCanvasTemplateNotFound) {
+		status = http.StatusNotFound
+		code = "PLAYGROUND_NOT_FOUND"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundCanvasTemplateInvalid) {
+		status = http.StatusBadRequest
+		code = "PLAYGROUND_INVALID_REQUEST"
+		err = common.NewMessage(err.Error())
+	}
 	if errors.Is(err, model.ErrPlaygroundSnippetNotFound) {
 		status = http.StatusNotFound
 		code = "PLAYGROUND_NOT_FOUND"
@@ -427,6 +461,11 @@ func writePlaygroundError(c *gin.Context, err error) {
 		code = "PLAYGROUND_PRESET_LIMIT_EXCEEDED"
 		err = common.NewMessage(err.Error())
 	}
+	if errors.Is(err, model.ErrPlaygroundCanvasTemplateLimit) {
+		status = http.StatusUnprocessableEntity
+		code = "PLAYGROUND_CANVAS_TEMPLATE_LIMIT_EXCEEDED"
+		err = common.NewMessage(err.Error())
+	}
 	if errors.Is(err, model.ErrPlaygroundSnippetLimit) {
 		status = http.StatusUnprocessableEntity
 		code = "PLAYGROUND_SNIPPET_LIMIT_EXCEEDED"
@@ -455,6 +494,11 @@ func writePlaygroundError(c *gin.Context, err error) {
 	if errors.Is(err, model.ErrPlaygroundContextSummaryLimit) {
 		status = http.StatusUnprocessableEntity
 		code = "PLAYGROUND_CONTEXT_SUMMARY_LIMIT_EXCEEDED"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundDeveloperOptionsLimit) {
+		status = http.StatusUnprocessableEntity
+		code = "PLAYGROUND_DEVELOPER_OPTIONS_LIMIT_EXCEEDED"
 		err = common.NewMessage(err.Error())
 	}
 	if errors.Is(err, model.ErrPlaygroundSessionArchived) {
@@ -504,7 +548,8 @@ func playgroundDecodeSession(session *model.PlaygroundSession) (playgroundSessio
 	response := playgroundSessionResponse{ID: session.ID, ClientID: session.ClientID, Created: session.CreatedNow, Title: session.Title, Revision: session.Revision, MessageRevision: session.MessageRevision,
 		SystemPrompt: session.SystemPrompt, OpeningMessage: string(session.OpeningMessage), SuggestedQuestions: []string{}, KnowledgeBaseIDs: []string{},
 		Context: map[string]any{}, ContextSummary: json.RawMessage("null"),
-		PinnedAt: session.PinnedAt, ArchivedAt: session.ArchivedAt,
+		DeveloperOptions: map[string]any{},
+		PinnedAt:         session.PinnedAt, ArchivedAt: session.ArchivedAt,
 		Pinned: session.PinnedAt > 0, Archived: session.ArchivedAt > 0, Tags: []string{},
 		CreatedAt: session.CreatedAt, UpdatedAt: session.UpdatedAt, Config: map[string]any{}, ParameterEnabled: map[string]bool{}}
 	if err := common.Unmarshal([]byte(session.Config), &response.Config); err != nil {
@@ -544,6 +589,14 @@ func playgroundDecodeSession(session *model.PlaygroundSession) (playgroundSessio
 	}
 	if stored := strings.TrimSpace(session.ContextSummary); stored != "" && stored != "null" {
 		response.ContextSummary = json.RawMessage(stored)
+	}
+	// Developer options were validated on write. A NULL or legacy value reads
+	// back as an empty object instead of failing the conversation; the client
+	// applies its disabled defaults.
+	if stored := strings.TrimSpace(session.DeveloperOptions); stored != "" && stored != "null" {
+		if err := common.UnmarshalJsonStr(stored, &response.DeveloperOptions); err != nil {
+			return response, err
+		}
 	}
 	return response, nil
 }
@@ -637,6 +690,244 @@ func encodePlaygroundContextSummary(raw json.RawMessage) (encoded string, clear 
 	payload, err := common.Marshal(summary)
 	if err != nil {
 		return "", false, err
+	}
+	return string(payload), false, nil
+}
+
+// playgroundDeveloperOptions is the stored request-side developer settings of
+// one conversation, kept in the OpenAI wire shape so the client injects the
+// stored value into a request unchanged. Only `type: "function"` tools are
+// accepted: the gateway never executes anything, so a hosted tool type
+// (code_interpreter, web_search, ...) would describe work nothing performs.
+type playgroundDeveloperOptions struct {
+	Enabled    bool             `json:"enabled"`
+	Tools      []map[string]any `json:"tools,omitempty"`
+	ToolChoice string           `json:"tool_choice,omitempty"`
+	// ResponseFormat and the schema bodies are raw JSON so a stored JSON
+	// Schema is injected verbatim: the gateway validates its shape and size
+	// but never rewrites keywords the provider defines.
+	ResponseFormat map[string]any `json:"response_format,omitempty"`
+}
+
+// playgroundDeveloperDecodeObject parses one JSON object and rejects every key
+// outside the allowed set, so a stored developer setting never carries a field
+// the server did not validate.
+func playgroundDeveloperDecodeObject(raw json.RawMessage, allowed ...string) (map[string]json.RawMessage, error) {
+	var values map[string]json.RawMessage
+	if err := common.Unmarshal(raw, &values); err != nil || values == nil {
+		return nil, common.NewMessage("Invalid Playground configuration.")
+	}
+	for key := range values {
+		if !slices.Contains(allowed, key) {
+			return nil, common.NewMessage("Invalid Playground configuration.")
+		}
+	}
+	return values, nil
+}
+
+// playgroundDeveloperText reads one bounded string field. NUL bytes are
+// rejected because PostgreSQL refuses them inside text columns.
+func playgroundDeveloperText(raw json.RawMessage, maxBytes int) (string, error) {
+	var text string
+	if err := common.Unmarshal(raw, &text); err != nil || len(text) > maxBytes || strings.ContainsRune(text, 0) {
+		return "", common.NewMessage("Invalid Playground configuration.")
+	}
+	return text, nil
+}
+
+// playgroundDeveloperSchema keeps one JSON Schema verbatim: it must be a JSON
+// object and stay inside the per-schema budget, and a longer one is rejected
+// with the stable capacity error instead of being truncated.
+func playgroundDeveloperSchema(raw json.RawMessage) (json.RawMessage, error) {
+	var object map[string]json.RawMessage
+	if err := common.Unmarshal(raw, &object); err != nil || object == nil {
+		return nil, common.NewMessage("Invalid Playground configuration.")
+	}
+	if len(raw) > playgroundDeveloperSchemaMaxBytes {
+		return nil, model.ErrPlaygroundDeveloperOptionsLimit
+	}
+	return raw, nil
+}
+
+// playgroundDeveloperEncodeTool validates one stored function tool and returns
+// its canonical shape. Names must be unique so a client can tell the requested
+// calls apart.
+func playgroundDeveloperEncodeTool(raw json.RawMessage, names map[string]bool) (map[string]any, error) {
+	invalid := common.NewMessage("Invalid Playground configuration.")
+	tool, err := playgroundDeveloperDecodeObject(raw, "type", "function")
+	if err != nil {
+		return nil, err
+	}
+	var toolType string
+	if err := common.Unmarshal(tool["type"], &toolType); err != nil || toolType != "function" {
+		return nil, invalid
+	}
+	rawFunction, ok := tool["function"]
+	if !ok {
+		return nil, invalid
+	}
+	function, err := playgroundDeveloperDecodeObject(rawFunction, "name", "description", "parameters", "strict")
+	if err != nil {
+		return nil, err
+	}
+	name, err := playgroundDeveloperText(function["name"], playgroundDeveloperNameMaxLength)
+	if err != nil || name == "" || names[name] {
+		return nil, invalid
+	}
+	names[name] = true
+	stored := map[string]any{"name": name}
+	if value, ok := function["description"]; ok {
+		description, err := playgroundDeveloperText(value, playgroundDeveloperDescriptionMaxBytes)
+		if err != nil {
+			return nil, err
+		}
+		stored["description"] = description
+	}
+	if value, ok := function["parameters"]; ok {
+		parameters, err := playgroundDeveloperSchema(value)
+		if err != nil {
+			return nil, err
+		}
+		stored["parameters"] = parameters
+	}
+	if value, ok := function["strict"]; ok {
+		var strict bool
+		if err := common.Unmarshal(value, &strict); err != nil {
+			return nil, invalid
+		}
+		stored["strict"] = strict
+	}
+	return map[string]any{"type": "function", "function": stored}, nil
+}
+
+// playgroundDeveloperEncodeResponseFormat validates the response format a
+// conversation asks for. `json_schema` carries a named JSON Schema the client
+// validates answers against; `text` and `json_object` accept no schema.
+func playgroundDeveloperEncodeResponseFormat(raw json.RawMessage) (map[string]any, error) {
+	invalid := common.NewMessage("Invalid Playground configuration.")
+	format, err := playgroundDeveloperDecodeObject(raw, "type", "json_schema")
+	if err != nil {
+		return nil, err
+	}
+	var formatType string
+	if err := common.Unmarshal(format["type"], &formatType); err != nil || !slices.Contains(playgroundDeveloperResponseFormatTypes, formatType) {
+		return nil, invalid
+	}
+	if formatType != "json_schema" {
+		if _, ok := format["json_schema"]; ok {
+			return nil, invalid
+		}
+		return map[string]any{"type": formatType}, nil
+	}
+	rawSchema, ok := format["json_schema"]
+	if !ok {
+		return nil, invalid
+	}
+	schema, err := playgroundDeveloperDecodeObject(rawSchema, "name", "description", "schema", "strict")
+	if err != nil {
+		return nil, err
+	}
+	name, err := playgroundDeveloperText(schema["name"], playgroundDeveloperJSONSchemaNameMaxLength)
+	if err != nil || name == "" {
+		return nil, invalid
+	}
+	stored := map[string]any{"name": name}
+	if value, ok := schema["description"]; ok {
+		description, err := playgroundDeveloperText(value, playgroundDeveloperDescriptionMaxBytes)
+		if err != nil {
+			return nil, err
+		}
+		stored["description"] = description
+	}
+	body, ok := schema["schema"]
+	if !ok {
+		return nil, invalid
+	}
+	body, err = playgroundDeveloperSchema(body)
+	if err != nil {
+		return nil, err
+	}
+	stored["schema"] = body
+	if value, ok := schema["strict"]; ok {
+		var strict bool
+		if err := common.Unmarshal(value, &strict); err != nil {
+			return nil, invalid
+		}
+		stored["strict"] = strict
+	}
+	return map[string]any{"type": "json_schema", "json_schema": stored}, nil
+}
+
+// encodePlaygroundDeveloperOptions validates the request-side developer
+// settings one request may store: the enabled switch, the function tool
+// definitions and the response format. Unknown keys at every level, hosted or
+// executable tool types and a tool choice without a tool are rejected, each
+// schema and the total value are bounded, and the accepted value is stored as
+// compact canonical JSON. An explicit null clears the stored options; an
+// absent value keeps them.
+func encodePlaygroundDeveloperOptions(raw json.RawMessage) (encoded string, clear bool, err error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return "", false, nil
+	}
+	if string(trimmed) == "null" {
+		return "", true, nil
+	}
+	top, err := playgroundDeveloperDecodeObject(trimmed, "enabled", "tools", "tool_choice", "response_format")
+	if err != nil {
+		return "", false, err
+	}
+	invalid := common.NewMessage("Invalid Playground configuration.")
+	options := playgroundDeveloperOptions{}
+	if value, ok := top["enabled"]; ok {
+		if err := common.Unmarshal(value, &options.Enabled); err != nil {
+			return "", false, invalid
+		}
+	}
+	if value, ok := top["tools"]; ok {
+		var rawTools []json.RawMessage
+		if err := common.Unmarshal(value, &rawTools); err != nil {
+			return "", false, invalid
+		}
+		if len(rawTools) > playgroundDeveloperToolMaxCount {
+			return "", false, model.ErrPlaygroundDeveloperOptionsLimit
+		}
+		tools := make([]map[string]any, 0, len(rawTools))
+		names := make(map[string]bool, len(rawTools))
+		for _, rawTool := range rawTools {
+			tool, err := playgroundDeveloperEncodeTool(rawTool, names)
+			if err != nil {
+				return "", false, err
+			}
+			tools = append(tools, tool)
+		}
+		options.Tools = tools
+	}
+	if value, ok := top["tool_choice"]; ok {
+		choice, err := playgroundDeveloperText(value, 16)
+		if err != nil || !slices.Contains(playgroundDeveloperToolChoiceValues, choice) {
+			return "", false, invalid
+		}
+		options.ToolChoice = choice
+	}
+	// A tool choice without any tool is contradictory: it would be injected
+	// into a request that defines nothing to call.
+	if options.ToolChoice != "" && len(options.Tools) == 0 {
+		return "", false, invalid
+	}
+	if value, ok := top["response_format"]; ok {
+		format, err := playgroundDeveloperEncodeResponseFormat(value)
+		if err != nil {
+			return "", false, err
+		}
+		options.ResponseFormat = format
+	}
+	payload, err := common.Marshal(options)
+	if err != nil {
+		return "", false, err
+	}
+	if len(payload) > playgroundDeveloperOptionsMaxBytes {
+		return "", false, model.ErrPlaygroundDeveloperOptionsLimit
 	}
 	return string(payload), false, nil
 }
@@ -742,6 +1033,17 @@ func encodePlaygroundSettings(request playgroundSessionRequest, systemPromptMaxB
 			updates["context_summary"] = ""
 		} else if encoded != "" {
 			updates["context_summary"] = encoded
+		}
+	}
+	if request.DeveloperOptions != nil {
+		encoded, clear, err := encodePlaygroundDeveloperOptions(request.DeveloperOptions)
+		if err != nil {
+			return nil, err
+		}
+		if clear {
+			updates["developer_options"] = ""
+		} else if encoded != "" {
+			updates["developer_options"] = encoded
 		}
 	}
 	if request.Config != nil {
@@ -1176,7 +1478,7 @@ func CreatePlaygroundSession(c *gin.Context) {
 		return
 	}
 	var request playgroundSessionRequest
-	if !decodePlaygroundRequest(c, &request, policy.MessageMaxBytes+(64<<10)+playgroundContextSummaryMaxBytes) {
+	if !decodePlaygroundRequest(c, &request, policy.MessageMaxBytes+(64<<10)+playgroundContextSummaryMaxBytes+playgroundDeveloperOptionsMaxBytes) {
 		return
 	}
 	if len(request.ClientID) > 128 {
@@ -1222,6 +1524,9 @@ func CreatePlaygroundSession(c *gin.Context) {
 	}
 	if contextSummary, ok := updates["context_summary"]; ok {
 		session.ContextSummary = contextSummary.(string)
+	}
+	if developerOptions, ok := updates["developer_options"]; ok {
+		session.DeveloperOptions = developerOptions.(string)
 	}
 	if openingMessage, ok := updates["opening_message"]; ok {
 		session.OpeningMessage = model.LongText(openingMessage.(string))
@@ -1276,7 +1581,7 @@ func UpdatePlaygroundSession(c *gin.Context) {
 		return
 	}
 	var request playgroundSessionRequest
-	if !decodePlaygroundRequest(c, &request, policy.MessageMaxBytes+(64<<10)+playgroundContextSummaryMaxBytes) {
+	if !decodePlaygroundRequest(c, &request, policy.MessageMaxBytes+(64<<10)+playgroundContextSummaryMaxBytes+playgroundDeveloperOptionsMaxBytes) {
 		return
 	}
 	if request.Revision == nil || *request.Revision < 0 {

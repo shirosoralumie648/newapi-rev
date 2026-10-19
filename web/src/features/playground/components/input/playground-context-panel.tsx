@@ -171,7 +171,7 @@ function PlaygroundContextContent(props: PlaygroundContextContentProps) {
             </p>
           ) : (props.knowledgeBases ?? []).length === 0 ? (
             <p className='text-muted-foreground px-1 text-xs'>
-              {t('No knowledge bases yet.')}
+              {t('No knowledge bases yet')}
             </p>
           ) : (
             <div className='grid gap-1'>

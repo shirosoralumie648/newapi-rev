@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { GlobeIcon, Trash2Icon } from 'lucide-react'
+import { Code2, GlobeIcon, Trash2Icon } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -33,7 +33,6 @@ import {
 } from '@/components/ui/tooltip'
 
 import type { KnowledgeBase } from '../../knowledge-api'
-import { getSearchActionNotice } from '../../lib'
 import type { PlaygroundContextPlan } from '../../lib'
 import type {
   ModelOption,
@@ -59,6 +58,10 @@ type PlaygroundInputToolsProps = {
   config: PlaygroundConfig
   disabled?: boolean
   hasMessages?: boolean
+  /** Whether the last send was captured and can be previewed. */
+  hasCapturedRequest?: boolean
+  /** Opens the request viewer of the last captured payload. */
+  onOpenRequestViewer?: () => void
   models: ModelOption[]
   /** Inserts a dictation transcript into the composer. */
   onDictateTranscript?: (text: string) => void
@@ -121,6 +124,8 @@ export function PlaygroundInputTools({
   config,
   disabled,
   hasMessages = false,
+  hasCapturedRequest = false,
+  onOpenRequestViewer,
   models,
   onDictateTranscript,
   compareModels,
@@ -279,6 +284,27 @@ export function PlaygroundInputTools({
           settings={contextSettings}
           summary={contextSummary}
         />
+
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <PromptInputButton
+                aria-label={t('Request preview')}
+                className='text-muted-foreground hover:text-foreground hover:bg-muted/70 font-medium'
+                disabled={
+                  disabled || !hasCapturedRequest || !onOpenRequestViewer
+                }
+                onClick={onOpenRequestViewer}
+                variant='ghost'
+              >
+                <Code2 size={16} />
+              </PromptInputButton>
+            }
+          />
+          <TooltipContent>
+            <p>{t('View the request payload of the last send')}</p>
+          </TooltipContent>
+        </Tooltip>
 
         <Tooltip>
           <TooltipTrigger

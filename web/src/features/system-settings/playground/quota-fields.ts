@@ -63,6 +63,9 @@ export const PLAYGROUND_QUOTA_FIELD_KEYS = [
   'canvas_snapshot_per_canvas_max_count',
   'canvas_snapshot_user_max_count',
   'canvas_snapshot_user_max_bytes',
+  'canvas_template_user_max_count',
+  'canvas_template_max_bytes',
+  'canvas_template_user_max_bytes',
   'knowledge_base_user_max_count',
   'knowledge_base_document_user_max_count',
   'knowledge_base_document_max_count',
@@ -338,6 +341,23 @@ export const PLAYGROUND_QUOTA_FIELDS: readonly PlaygroundQuotaField[] = [
     key: 'canvas_snapshot_user_max_bytes',
     group: 'canvas',
     labelKey: 'Canvas history storage per user',
+    bytes: true,
+  },
+  {
+    key: 'canvas_template_user_max_count',
+    group: 'canvas',
+    labelKey: 'Canvas templates per user',
+  },
+  {
+    key: 'canvas_template_max_bytes',
+    group: 'canvas',
+    labelKey: 'Canvas template size limit',
+    bytes: true,
+  },
+  {
+    key: 'canvas_template_user_max_bytes',
+    group: 'canvas',
+    labelKey: 'Canvas template storage per user',
     bytes: true,
   },
   {

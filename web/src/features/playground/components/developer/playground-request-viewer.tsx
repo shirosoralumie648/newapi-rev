@@ -68,8 +68,8 @@ const REQUEST_CODE_TABS: PlaygroundRequestCodeTabDefinition[] = [
   },
   {
     value: 'node',
-    label: 'Node',
-    copyLabel: 'Copy Node',
+    label: 'Node.js',
+    copyLabel: 'Copy Node.js',
     language: 'javascript',
   },
 ]

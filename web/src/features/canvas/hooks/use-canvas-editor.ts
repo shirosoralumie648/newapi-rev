@@ -105,6 +105,8 @@ interface CanvasEditorOptions {
 
 /** One node a caller adds in a single undoable step. */
 export interface CanvasAddedNode {
+  /** Optional stable id; graph callers use it to remap group parents first. */
+  id?: string
   kind: CanvasNodeKind
   position: { x: number; y: number }
   data?: Partial<CanvasNodeData>
@@ -291,7 +293,7 @@ export function useCanvasEditor(
       if (room <= 0 || entries.length === 0) return 0
       const accepted = entries.slice(0, room)
       const created = accepted.map((entry) =>
-        createCanvasNode(entry.kind, entry.position, entry.data)
+        createCanvasNode(entry.kind, entry.position, entry.data, entry.id)
       )
       commit([...nodesRef.current, ...created], edgesRef.current, {
         record: true,
@@ -321,7 +323,7 @@ export function useCanvasEditor(
         return null
       }
       const created = entries.map((entry) =>
-        createCanvasNode(entry.kind, entry.position, entry.data)
+        createCanvasNode(entry.kind, entry.position, entry.data, entry.id)
       )
       const createdEdges = links.flatMap((link) => {
         const source = created[link.source]

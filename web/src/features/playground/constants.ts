@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import type {
   PlaygroundConfig,
   PlaygroundContextSettings,
+  PlaygroundDeveloperOptions,
   ParameterEnabled,
 } from './types'
 
@@ -165,6 +166,39 @@ export const DEFAULT_CONTEXT_SETTINGS: PlaygroundContextSettings = {
   autoSummarize: false,
   summaryModel: '',
 }
+
+// Developer settings bounds. The server validates the same contract, so a
+// value accepted here is always storable. A stored JSON Schema is injected
+// into a relay request verbatim; the limits mirror the server's per-schema and
+// total budgets.
+export const PLAYGROUND_DEVELOPER_TOOL_MAX_COUNT = 32
+export const PLAYGROUND_DEVELOPER_SCHEMA_MAX_BYTES = 64 * 1024
+export const PLAYGROUND_DEVELOPER_OPTIONS_MAX_BYTES = 256 * 1024
+export const PLAYGROUND_DEVELOPER_NAME_MAX_LENGTH = 64
+export const PLAYGROUND_DEVELOPER_DESCRIPTION_MAX_BYTES = 1024
+
+export const DEFAULT_DEVELOPER_OPTIONS: PlaygroundDeveloperOptions = {
+  enabled: false,
+  tools: [],
+  toolChoice: '',
+  responseFormat: { type: 'text' },
+}
+
+// Editor feedback keys: the values are i18n keys (English source text) that
+// callers pass through t().
+export const PLAYGROUND_DEVELOPER_ERRORS = {
+  INVALID_SCHEMA: 'The JSON Schema must be a valid JSON object.',
+  NAME_REQUIRED: 'Every tool needs a name.',
+  NAME_TOO_LONG: 'Names can contain at most {{count}} characters.',
+  DUPLICATE_NAME: 'Tool names must be unique.',
+  DESCRIPTION_TOO_LONG: 'The description is too long.',
+  SCHEMA_TOO_LARGE:
+    'A single JSON Schema can be at most 64 KiB. Shorten it before saving.',
+  TOO_MANY_TOOLS: 'A conversation can define at most {{count}} tools.',
+  RESPONSE_NAME_REQUIRED: 'The response schema needs a name.',
+  OPTIONS_TOO_LARGE:
+    'The developer settings are too large to save. Shorten the schemas.',
+} as const
 
 // Parallel comparison bounds. The server mirrors the ceiling as the
 // `parallel_compare_max_models` quota default and enforces the owner's policy

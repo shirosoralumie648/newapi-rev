@@ -24,7 +24,11 @@ import { beforeEach, describe, expect, test } from 'vitest'
 
 import en from '@/i18n/locales/en.json'
 
-import type { Message, MessageVersion } from '../../../types'
+import type {
+  Message,
+  MessageKnowledgeSnapshot,
+  MessageVersion,
+} from '../../../types'
 import { PlaygroundMessageContent } from '../playground-message-content'
 
 Object.defineProperty(HTMLElement.prototype, 'getAnimations', {
@@ -49,12 +53,17 @@ const version: MessageVersion = {
   content: 'See the release notes [1].',
 }
 
-function renderContent(message: Message, messageVersion: MessageVersion) {
+function renderContent(
+  message: Message,
+  messageVersion: MessageVersion,
+  knowledge?: MessageKnowledgeSnapshot | null
+) {
   return render(
     <I18nextProvider i18n={testI18n}>
       <PlaygroundMessageContent
         actions={null}
         alignment='left'
+        knowledge={knowledge}
         message={message}
         version={messageVersion}
       />
@@ -104,5 +113,72 @@ describe('web-search citations', () => {
     renderContent(plainMessage, version)
 
     expect(screen.queryByRole('button', { name: /Used .* sources/ })).toBeNull()
+  })
+})
+
+describe('knowledge citations', () => {
+  const knowledge: MessageKnowledgeSnapshot = {
+    query: 'release notes',
+    results: [
+      {
+        knowledgeBaseId: 'kb-1',
+        knowledgeBaseName: 'Handbook',
+        documentId: 'doc-1',
+        filename: 'handbook.txt',
+        chunkId: 'chunk-1',
+        chunkIndex: 0,
+        score: 0.9,
+        text: 'The release notes live here.',
+      },
+      {
+        knowledgeBaseId: 'kb-2',
+        knowledgeBaseName: 'Notes',
+        documentId: 'doc-2',
+        filename: 'notes.txt',
+        chunkId: 'chunk-2',
+        chunkIndex: 1,
+        score: 0.5,
+        text: 'A second source.',
+      },
+    ],
+  }
+
+  test('renders the citation list and links inline [n] markers to it', async () => {
+    const answered: Message = {
+      key: 'assistant-knowledge',
+      from: 'assistant',
+      versions: [version],
+      createdAt: 0,
+      status: 'complete',
+    }
+    const { container } = renderContent(answered, version, knowledge)
+
+    expect(screen.getByRole('button', { name: 'Used 2 sources' })).toBeVisible()
+    expect(
+      await screen.findByText('1. handbook.txt · Handbook')
+    ).toBeInTheDocument()
+    expect(screen.getByText('2. notes.txt · Notes')).toBeInTheDocument()
+
+    const citation = container.querySelector(
+      'a[href="#knowledge-source-assistant-knowledge-1"]'
+    )
+    expect(citation).not.toBeNull()
+    expect(citation).toHaveTextContent('[1]')
+  })
+
+  test('renders no citation list without a knowledge snapshot', () => {
+    const plainMessage: Message = {
+      key: 'assistant-no-knowledge',
+      from: 'assistant',
+      versions: [version],
+      createdAt: 0,
+      status: 'complete',
+    }
+    renderContent(plainMessage, version)
+
+    expect(screen.queryByRole('button', { name: 'Used 2 sources' })).toBeNull()
+    expect(
+      screen.queryByText('1. handbook.txt · Handbook')
+    ).not.toBeInTheDocument()
   })
 })

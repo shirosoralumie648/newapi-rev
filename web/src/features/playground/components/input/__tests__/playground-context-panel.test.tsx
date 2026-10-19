@@ -108,6 +108,13 @@ beforeAll(() => {
     'Show summary': 'Show summary',
     'Hide summary': 'Hide summary',
     'Summarize now': 'Summarize now',
+    'Knowledge bases': 'Knowledge bases',
+    'No knowledge bases yet': 'No knowledge bases yet',
+    'Up to three knowledge bases are searched on every send.':
+      'Up to three knowledge bases are searched on every send.',
+    'Loading knowledge bases...': 'Loading knowledge bases...',
+    '{{count}} knowledge documents need rebuilding before they can be cited: {{files}}':
+      '{{count}} knowledge documents need rebuilding before they can be cited: {{files}}',
   })
 })
 
@@ -272,4 +279,60 @@ test('Summarize now is disabled while nothing is dropped', async () => {
   expect(
     await screen.findByRole('button', { name: 'Summarize now' })
   ).toBeDisabled()
+})
+
+test('a conversation binds at most three knowledge bases', async () => {
+  const user = userEvent.setup()
+  const bases = [1, 2, 3, 4].map((index) => ({
+    id: `kb-${index}`,
+    name: `Handbook ${index}`,
+    embeddingModel: 'text-embedding-3-small',
+    documentCount: 0,
+    chunkCount: 0,
+    byteSize: 0,
+    createdAt: 0,
+    updatedAt: 0,
+  }))
+  const props = mount({
+    knowledgeBases: bases,
+    knowledgeBaseIds: ['kb-1', 'kb-2', 'kb-3'],
+    onKnowledgeBaseIdsChange: vi.fn(),
+  })
+  await openPanel(user)
+
+  expect(
+    await screen.findByRole('checkbox', { name: /Handbook 4/ })
+  ).toBeDisabled()
+  await user.click(screen.getByRole('checkbox', { name: /Handbook 2/ }))
+  expect(props.onKnowledgeBaseIdsChange).toHaveBeenLastCalledWith([
+    'kb-1',
+    'kb-3',
+  ])
+
+  await user.click(screen.getByRole('checkbox', { name: /Handbook 1/ }))
+  expect(props.onKnowledgeBaseIdsChange).toHaveBeenLastCalledWith([
+    'kb-2',
+    'kb-3',
+  ])
+})
+
+test('stale documents from the last retrieval are reported by filename', async () => {
+  const user = userEvent.setup()
+  mount({
+    knowledgeDiagnostics: {
+      staleDocuments: [
+        { id: 'doc-1', filename: 'a.txt', embeddingModel: 'embed-old' },
+        { id: 'doc-2', filename: 'b.txt', embeddingModel: 'embed-new' },
+      ],
+      resultCount: 2,
+      retrievedAt: 1,
+    },
+  })
+  await openPanel(user)
+
+  expect(
+    await screen.findByText(
+      '2 knowledge documents need rebuilding before they can be cited: a.txt, b.txt'
+    )
+  ).toBeInTheDocument()
 })

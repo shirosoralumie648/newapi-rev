@@ -40,6 +40,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import { CanvasEditor } from './components/canvas-editor'
 import { CanvasKnowledgeBaseSheet } from './components/canvas-knowledge-base-sheet'
 import { CanvasProjectList } from './components/canvas-project-list'
+import { CanvasShareDialog } from './components/canvas-share-dialog'
 import { CanvasSnapshotHistory } from './components/canvas-snapshot-history'
 import { CANVAS_DEFAULT_TITLE } from './constants'
 import {
@@ -278,6 +279,7 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
         onGenerationPrefillApplied={props.onGenerationPrefillApplied}
         onImportArchive={handleImportArchive}
         onOpenConversation={handleOpenConversation}
+        onOpenProject={handleSelect}
         onOpenSource={handleOpenSource}
         project={project}
         userId={userId}
@@ -347,6 +349,13 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
             >
               <BookOpen aria-hidden='true' />
             </Button>
+            {project && (
+              <CanvasShareDialog
+                canvasId={project.id}
+                disabled={status === 'loading'}
+                title={displayTitle}
+              />
+            )}
             {project && (
               <Button
                 aria-label={t('Canvas history')}

@@ -72,6 +72,10 @@ interface PlaygroundInputProps {
   compareModels: string[]
   onCompareModelsChange: (models: string[]) => void
   hasMessages?: boolean
+  /** Whether the last send was captured and can be previewed. */
+  hasCapturedRequest?: boolean
+  /** Opens the request viewer of the last captured payload. */
+  onOpenRequestViewer?: () => void
   onConfigChange: <K extends keyof PlaygroundConfig>(
     key: K,
     value: PlaygroundConfig[K]
@@ -139,6 +143,8 @@ export function PlaygroundInput({
   compareModels,
   onCompareModelsChange,
   hasMessages = false,
+  hasCapturedRequest = false,
+  onOpenRequestViewer,
   onConfigChange,
   onClearMessages,
   onParameterEnabledChange,
@@ -252,6 +258,7 @@ export function PlaygroundInput({
                 contextSettings={contextSettings}
                 contextSummary={contextSummary}
                 disabled={disabled}
+                hasCapturedRequest={hasCapturedRequest}
                 hasMessages={hasMessages}
                 isSummarizing={isSummarizing}
                 knowledgeBaseIds={knowledgeBaseIds}
@@ -273,6 +280,7 @@ export function PlaygroundInput({
                 onDictateTranscript={appendText}
                 onInsertText={appendText}
                 onKnowledgeBaseIdsChange={onKnowledgeBaseIdsChange}
+                onOpenRequestViewer={onOpenRequestViewer}
                 onParameterEnabledChange={onParameterEnabledChange}
                 onRemoveContextSummary={onRemoveContextSummary}
                 onSummarizeContext={onSummarizeContext}

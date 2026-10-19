@@ -18,13 +18,13 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute } from '@tanstack/react-router'
 
-import { PlaygroundSharedConversation } from '@/features/playground/components/share/playground-shared-conversation'
+import { PlaygroundSharedPage } from '@/features/playground/components/share/playground-shared-page'
 
 export const Route = createFileRoute('/share/$token')({
-  component: SharedConversationRoute,
+  component: SharedLinkRoute,
 })
 
-function SharedConversationRoute() {
+function SharedLinkRoute() {
   const { token } = Route.useParams()
-  return <PlaygroundSharedConversation token={token} />
+  return <PlaygroundSharedPage token={token} />
 }
