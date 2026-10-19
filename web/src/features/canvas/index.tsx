@@ -278,6 +278,7 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
         onGenerationPrefillApplied={props.onGenerationPrefillApplied}
         onImportArchive={handleImportArchive}
         onOpenConversation={handleOpenConversation}
+        onOpenProject={handleSelect}
         onOpenSource={handleOpenSource}
         project={project}
         userId={userId}

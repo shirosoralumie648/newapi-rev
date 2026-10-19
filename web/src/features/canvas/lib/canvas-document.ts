@@ -136,10 +136,11 @@ export function applyCanvasReferenceStatus(
 export function createCanvasNode(
   kind: CanvasNodeKind,
   position: { x: number; y: number },
-  data: Partial<CanvasNodeData> = {}
+  data: Partial<CanvasNodeData> = {},
+  id?: string
 ): CanvasFlowNode {
   return {
-    id: nanoid(),
+    id: id ?? nanoid(),
     type: kind,
     position,
     data: { kind, ...data },
