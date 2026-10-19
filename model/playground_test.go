@@ -7218,6 +7218,9 @@ func TestPlaygroundLogCapture(t *testing.T) {
 			t.Cleanup(func() {
 				model.LOG_DB = previousLog
 				require.NoError(t, db.Migrator().DropTable(&model.Log{}, &model.PlaygroundLogCapture{}))
+				// The replay audit rows use the unprefixed audit_logs table,
+				// which the shared real-database test instance also uses.
+				require.NoError(t, db.Migrator().DropTable("audit_logs"))
 			})
 			require.NoError(t, db.Create(&[]model.Log{
 				{UserId: 7, Type: model.LogTypeConsume, RequestId: "pg-replay-owner", ModelName: "replay-model", Group: "default", IsStream: true, Quota: 42, PromptTokens: 10, CompletionTokens: 20, CreatedAt: 1000,
