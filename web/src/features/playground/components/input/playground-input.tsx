@@ -71,6 +71,8 @@ interface PlaygroundInputProps {
   /** Models of the next comparison; fewer than two means an ordinary send. */
   compareModels: string[]
   onCompareModelsChange: (models: string[]) => void
+  /** Opens the batch compare-runs workbench. */
+  onOpenCompareRuns?: () => void
   hasMessages?: boolean
   /** Whether the last send was captured and can be previewed. */
   hasCapturedRequest?: boolean
@@ -148,6 +150,7 @@ export function PlaygroundInput({
   onGroupChange,
   compareModels,
   onCompareModelsChange,
+  onOpenCompareRuns,
   hasMessages = false,
   hasCapturedRequest = false,
   onOpenRequestViewer,
@@ -284,6 +287,7 @@ export function PlaygroundInput({
                 onAutoTitleUseDefault={onAutoTitleUseDefault}
                 compareModels={compareModels}
                 onCompareModelsChange={onCompareModelsChange}
+                onOpenCompareRuns={onOpenCompareRuns}
                 onClearMessages={onClearMessages}
                 onConfigChange={onConfigChange}
                 onContextSettingsChange={onContextSettingsChange}

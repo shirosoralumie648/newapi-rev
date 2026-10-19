@@ -37,6 +37,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import { searchPlaygroundWeb } from './api'
 import { PlaygroundArtifactSourceSheet } from './components/artifact/playground-artifact-source-sheet'
 import { PlaygroundChat } from './components/chat/playground-chat'
+import { PlaygroundComparisonDialog } from './components/comparison/playground-comparison-dialog'
 import { PlaygroundRequestViewer } from './components/developer/playground-request-viewer'
 import { PlaygroundContextStatus } from './components/input/playground-context-status'
 import { PlaygroundCostStatus } from './components/input/playground-cost-status'
@@ -69,6 +70,7 @@ import {
   useChatHandler,
   useKnowledgeBases,
   useParallelChat,
+  usePlaygroundComparisonRunner,
   usePlaygroundContext,
   usePlaygroundConversation,
   usePlaygroundKnowledgeRetrieval,
@@ -169,6 +171,8 @@ function PlaygroundContent(props: {
   const [messageSearchOpen, setMessageSearchOpen] = useState(false)
   const appliedSessionRef = useRef<string | null>(null)
   const [compareModels, setCompareModels] = useState<string[]>([])
+  const [compareRunsOpen, setCompareRunsOpen] = useState(false)
+  const comparisonRunner = usePlaygroundComparisonRunner()
   const local = usePlaygroundState()
   const {
     config,
@@ -1253,6 +1257,7 @@ function PlaygroundContent(props: {
           )}
           <PlaygroundSessionUsage
             className='shrink-0 pt-0'
+            costLoggingEnabled={messageCostQuery.data?.enabled}
             costs={messageCosts}
             messages={messages}
           />
@@ -1395,6 +1400,7 @@ function PlaygroundContent(props: {
               models={models}
               compareModels={compareModels}
               onCompareModelsChange={setCompareModels}
+              onOpenCompareRuns={() => setCompareRunsOpen(true)}
               onContextSettingsChange={updateContextSettings}
               onKnowledgeBaseIdsChange={updateKnowledgeBaseIds}
               onGroupChange={(value) => updateConfig('group', value)}
@@ -1438,6 +1444,15 @@ function PlaygroundContent(props: {
         open={requestViewerOpen}
         onOpenChange={setRequestViewerOpen}
         request={capturedRequest}
+      />
+      <PlaygroundComparisonDialog
+        group={config.group}
+        initialModels={compareModels}
+        models={models}
+        onOpenChange={setCompareRunsOpen}
+        open={compareRunsOpen}
+        runner={comparisonRunner}
+        userId={userId}
       />
       <PlaygroundSpeechDialog
         group={config.group}

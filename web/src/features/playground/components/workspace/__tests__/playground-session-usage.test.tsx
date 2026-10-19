@@ -93,11 +93,13 @@ const costs = new Map<string, PlaygroundMessageCost>([
 ])
 
 function renderSummary(
-  costsOverride?: ReadonlyMap<string, PlaygroundMessageCost>
+  costsOverride?: ReadonlyMap<string, PlaygroundMessageCost>,
+  costLoggingEnabled?: boolean
 ) {
   return render(
     <I18nextProvider i18n={testI18n}>
       <PlaygroundSessionUsage
+        costLoggingEnabled={costLoggingEnabled}
         costs={costsOverride ?? costs}
         messages={messages}
       />
@@ -130,5 +132,32 @@ describe('conversation usage summary', () => {
     )
 
     expect(container).toBeEmptyDOMElement()
+  })
+})
+
+describe('consumption-log availability', () => {
+  test('explains a missing settled cost when consumption logs are off', () => {
+    renderSummary(new Map(), false)
+
+    expect(screen.getByText('Tokens: 1,545')).toBeVisible()
+    expect(screen.queryByText(/^Cost: /)).not.toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'Settled cost details are unavailable because consumption logs are turned off.'
+      )
+    ).toBeVisible()
+  })
+
+  test('keeps quiet when every request already has a settled row', () => {
+    renderSummary(costs, false)
+
+    expect(screen.getByText('Cost: $0.002468')).toBeVisible()
+    expect(screen.queryByText(/consumption logs/)).not.toBeInTheDocument()
+  })
+
+  test('does not claim the log is off before the lookup answers', () => {
+    renderSummary(new Map(), undefined)
+
+    expect(screen.queryByText(/consumption logs/)).not.toBeInTheDocument()
   })
 })

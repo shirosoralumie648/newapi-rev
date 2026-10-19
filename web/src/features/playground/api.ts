@@ -1009,6 +1009,13 @@ const playgroundMessageCostSchema = z.object({
   model_name: z.string().optional(),
   created_at: z.number().int().nonnegative(),
   timing: playgroundRequestTimingSchema.optional(),
+  cache_tokens: z.number().int().nonnegative().optional(),
+  cache_ratio: z.number().nonnegative().optional(),
+  model_ratio: z.number().nonnegative().optional(),
+  group_ratio: z.number().nonnegative().optional(),
+  channel_key: z.string().optional(),
+  channel_id: z.number().int().positive().optional(),
+  channel_name: z.string().optional(),
 })
 
 const playgroundMessageCostLookupSchema = z.object({
@@ -1103,6 +1110,13 @@ export async function getPlaygroundMessageCosts(
       modelName: item.model_name ?? '',
       createdAt: item.created_at * 1000,
       timing: item.timing,
+      cacheTokens: item.cache_tokens,
+      cacheRatio: item.cache_ratio,
+      modelRatio: item.model_ratio,
+      groupRatio: item.group_ratio,
+      channelKey: item.channel_key,
+      channelId: item.channel_id,
+      channelName: item.channel_name,
     })
   }
   return { enabled: data.enabled, costs }

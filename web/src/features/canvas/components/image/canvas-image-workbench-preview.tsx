@@ -27,6 +27,7 @@ import {
   canvasImageToolSource,
   type CanvasImageToolSource,
 } from '../../lib/canvas-image-tools'
+import type { CanvasWorkflowImageSource } from '../../lib/canvas-workflow'
 import {
   CanvasWorkflowImageError,
   readCanvasWorkflowImage,
@@ -77,7 +78,8 @@ export function CanvasImageWorkbenchPreview(
   props: CanvasImageWorkbenchPreviewProps
 ) {
   const { t } = useTranslation()
-  const source = props.node ? canvasImageToolSource(props.node.data) : null
+  const node = props.node
+  const source = node ? canvasImageToolSource(node.data) : null
   const key = sourceKey(source)
   const preview = props.preview?.trim() ?? ''
   const [state, setState] = useState<PreviewState>({ status: 'idle' })
@@ -90,13 +92,29 @@ export function CanvasImageWorkbenchPreview(
       setState({ status: 'ready', url: preview })
       return
     }
-    if (!source) {
+    if (!node || !source) {
       setState({ status: 'idle' })
       return
     }
+    // The read path describes a node-owned source; the preview knows the node
+    // it renders, so the reference carries its id like a workflow source does.
+    const reference: CanvasWorkflowImageSource =
+      source.kind === 'attachment'
+        ? {
+            nodeId: node.id,
+            kind: 'attachment',
+            sessionId: source.sessionId,
+            attachmentId: source.attachmentId,
+          }
+        : {
+            nodeId: node.id,
+            kind: 'task-result',
+            taskId: source.taskId,
+            ...(source.artifactKey ? { artifactKey: source.artifactKey } : {}),
+          }
     const controller = new AbortController()
     setState({ status: 'loading' })
-    readCanvasWorkflowImage(source, controller.signal)
+    readCanvasWorkflowImage(reference, controller.signal)
       .then((url) => {
         if (!controller.signal.aborted) setState({ status: 'ready', url })
       })

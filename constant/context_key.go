@@ -111,6 +111,11 @@ const (
 	// canvas step bills against (BL-03). It arrives in a workspace-only header
 	// that the transport consumes, so it never reaches an upstream provider.
 	ContextKeyPlaygroundWorkflowRun ContextKey = "playground_workflow_run"
+	// ContextKeyPlaygroundGenerationParams carries the credential-free
+	// generation request snapshot the Playground bridge validated. The relay
+	// copies it into the durable task's private metadata so a finished result
+	// can show its prompt, model and generation parameters.
+	ContextKeyPlaygroundGenerationParams ContextKey = "playground_generation_params"
 
 	// ContextKeyImageTaskAsync marks an image generation request that runs as
 	// a durable task instead of waiting for the images inside the request. The

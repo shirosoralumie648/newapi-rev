@@ -145,6 +145,7 @@ function canvasProject(
   return {
     id: 'c1',
     title: 'Board',
+    mode: 'infinite',
     nodeCount: project.document.nodes.length,
     edgeCount: project.document.edges.length,
     documentBytes: 0,

@@ -51,6 +51,18 @@ const usage = {
     used_bytes: 12 * 1024,
     limit_bytes: 64 * 1024 * 1024,
   },
+  canvas_templates: {
+    used: 1,
+    limit: 12,
+    used_bytes: 6 * 1024,
+    limit_bytes: 8 * 1024 * 1024,
+  },
+  comparison_runs: {
+    used: 2,
+    limit: 30,
+    used_bytes: 9 * 1024,
+    limit_bytes: 16 * 1024 * 1024,
+  },
   knowledge_bases: { used: 3, limit: 20, used_bytes: 0, limit_bytes: 0 },
   kb_documents: { used: 4, limit: 200, used_bytes: 0, limit_bytes: 0 },
   kb_chunks: {
@@ -147,6 +159,11 @@ test('opening the usage popover lists each resource against its account limit', 
   expect(screen.getByText('Canvas history')).toBeVisible()
   expect(screen.getByText('5 of 200')).toBeVisible()
   expect(screen.getByText('12 KiB of 64 MiB')).toBeVisible()
+  expect(screen.getByText('Canvas templates')).toBeVisible()
+  expect(screen.getByText('1 of 12')).toBeVisible()
+  expect(screen.getByText('Compare runs')).toBeVisible()
+  expect(screen.getByText('2 of 30')).toBeVisible()
+  expect(screen.getByText('9 KiB of 16 MiB')).toBeVisible()
   expect(screen.getByText('Knowledge bases')).toBeVisible()
   expect(screen.getByText('3 of 20')).toBeVisible()
   expect(screen.getByText('Knowledge base documents')).toBeVisible()

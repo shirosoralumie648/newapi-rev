@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { TFunction } from 'i18next'
 import { Fragment, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -26,12 +25,15 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { RequestTimingBreakdown } from '@/features/usage-logs/components/request-timing-breakdown'
 import { toIntlLocale } from '@/i18n/languages'
 import { formatLogQuota, formatNumber } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
-import { getVersionUsage } from '../../lib'
+import {
+  formatMessageDuration,
+  getMessageCacheUsage,
+  getVersionUsage,
+} from '../../lib'
 import type { MessageAlignment } from '../../lib'
 import type {
   Message,
@@ -39,6 +41,7 @@ import type {
   MessageVersion,
   PlaygroundMessageCost,
 } from '../../types'
+import { RequestDiagnosticsPopover } from './request-diagnostics'
 
 type MessageMetadataProps = {
   alignment: MessageAlignment
@@ -59,21 +62,6 @@ function formatMessageTime(timestamp?: number): string | undefined {
     minute: '2-digit',
     second: '2-digit',
   }).format(new Date(timestamp))
-}
-
-function formatDuration(
-  durationMs: number | undefined,
-  t: TFunction
-): string | undefined {
-  if (typeof durationMs !== 'number' || !Number.isFinite(durationMs)) {
-    return undefined
-  }
-
-  if (durationMs < 1000) {
-    return t('{{value}}ms', { value: Math.max(1, Math.round(durationMs)) })
-  }
-
-  return t('{{value}}s', { value: (durationMs / 1000).toFixed(2) })
 }
 
 // The visible text stays the reported total; the breakdown (the prompt and
@@ -121,53 +109,22 @@ function MessageUsageIndicator(props: {
   )
 }
 
-// The trigger shows the server-measured end-to-end first-token latency (or the
-// total when the entry never reported a first token); the phase breakdown is
-// one hover or focus away.
-function MessageTimingIndicator(props: {
-  timing: NonNullable<PlaygroundMessageCost['timing']>
-}) {
-  const { t } = useTranslation()
-  const firstToken = props.timing.first_token_ms
-  const value = firstToken ?? props.timing.total_ms
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return null
-  }
-  const duration = formatDuration(value, t)
-  if (!duration) {
-    return null
-  }
-  const label = firstToken === undefined ? t('Total') : t('First token')
-
-  return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <span
-              className='cursor-help underline decoration-dotted underline-offset-2'
-              tabIndex={0}
-            >
-              {label}: {duration}
-            </span>
-          }
-        />
-        <TooltipContent>
-          <RequestTimingBreakdown timing={props.timing} />
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  )
-}
-
 export function MessageMetadata(props: MessageMetadataProps) {
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const messageTime = formatMessageTime(props.message.createdAt)
-  const duration = formatDuration(props.message.durationMs, t)
+  const duration = formatMessageDuration(props.message.durationMs, t)
   const usage = getVersionUsage(props.version, props.cost)
   const cost = props.cost ? formatLogQuota(props.cost.quota) : undefined
-  const timing = props.cost?.timing
+  const cache = getMessageCacheUsage(props.cost)
+  const groupRatio = props.cost?.groupRatio
+  const hasGroupRatio =
+    typeof groupRatio === 'number' &&
+    Number.isFinite(groupRatio) &&
+    groupRatio !== 1
+  const hasDiagnostics = Boolean(
+    props.cost?.timing || props.cost?.channelKey || cache || hasGroupRatio
+  )
   const details: Array<{ key: string; node: ReactNode }> = []
 
   if (messageTime) {
@@ -191,10 +148,16 @@ export function MessageMetadata(props: MessageMetadataProps) {
       node: <span>{t('Cost: {{cost}}', { cost })}</span>,
     })
   }
-  if (timing) {
+  if (props.cost && hasDiagnostics) {
     details.push({
-      key: 'timing',
-      node: <MessageTimingIndicator timing={timing} />,
+      key: 'diagnostics',
+      node: (
+        <RequestDiagnosticsPopover
+          alignment={props.alignment}
+          cost={props.cost}
+          locale={locale}
+        />
+      ),
     })
   }
 

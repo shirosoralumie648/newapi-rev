@@ -23,7 +23,7 @@ import { toIntlLocale } from '@/i18n/languages'
 import { formatLogQuota, formatNumber } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
-import { sumConversationUsage } from '../../lib'
+import { collectMessageRequestIds, sumConversationUsage } from '../../lib'
 import type { Message, PlaygroundMessageCost } from '../../types'
 
 interface PlaygroundSessionUsageProps {
@@ -31,12 +31,20 @@ interface PlaygroundSessionUsageProps {
   messages: Message[]
   /** Settled cost rows of the conversation's relay requests, by request id. */
   costs?: ReadonlyMap<string, PlaygroundMessageCost>
+  /**
+   * Runtime consume-log switch reported by the cost lookup. `false` means no
+   * further settle row can appear, so a missing amount degrades to a hint
+   * instead of an endless wait; `undefined` means the answer is not loaded.
+   */
+  costLoggingEnabled?: boolean
 }
 
 /**
  * Totals of the conversation's active versions: the tokens the relay reported
  * and the settled cost of every request whose consume row is loaded. Nothing is
- * shown for a conversation that has no generation record yet.
+ * fabricated when a row is missing or consume logs are switched off: the amount
+ * is omitted and, when the log is known to be off, a translated hint explains
+ * why.
  */
 export function PlaygroundSessionUsage(props: PlaygroundSessionUsageProps) {
   const { t, i18n } = useTranslation()
@@ -45,6 +53,14 @@ export function PlaygroundSessionUsage(props: PlaygroundSessionUsageProps) {
     () => sumConversationUsage(props.messages, props.costs),
     [props.messages, props.costs]
   )
+  const missingSettledRows = useMemo(() => {
+    if (props.costLoggingEnabled !== false) return 0
+    let missing = 0
+    for (const requestId of collectMessageRequestIds(props.messages)) {
+      if (!props.costs?.get(requestId)) missing += 1
+    }
+    return missing
+  }, [props.costLoggingEnabled, props.costs, props.messages])
 
   if (!summary.hasUsage && !summary.hasCost) {
     return null
@@ -68,6 +84,13 @@ export function PlaygroundSessionUsage(props: PlaygroundSessionUsageProps) {
       {summary.hasCost && (
         <span>
           {t('Cost: {{cost}}', { cost: formatLogQuota(summary.quota) })}
+        </span>
+      )}
+      {missingSettledRows > 0 && (
+        <span className='text-amber-600 dark:text-amber-400' role='status'>
+          {t(
+            'Settled cost details are unavailable because consumption logs are turned off.'
+          )}
         </span>
       )}
     </div>

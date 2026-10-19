@@ -16,8 +16,29 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { TFunction } from 'i18next'
+
 import { MESSAGE_ROLES } from '../../constants'
 import type { Message } from '../../types'
+
+/**
+ * Human duration of one message or request phase, using the same unit switch
+ * as the request timing breakdown.
+ */
+export function formatMessageDuration(
+  durationMs: number | undefined,
+  t: TFunction
+): string | undefined {
+  if (typeof durationMs !== 'number' || !Number.isFinite(durationMs)) {
+    return undefined
+  }
+
+  if (durationMs < 1000) {
+    return t('{{value}}ms', { value: Math.max(1, Math.round(durationMs)) })
+  }
+
+  return t('{{value}}s', { value: (durationMs / 1000).toFixed(2) })
+}
 
 export function completeAssistantTiming(
   message: Message,

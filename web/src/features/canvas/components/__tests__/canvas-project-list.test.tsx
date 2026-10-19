@@ -35,6 +35,7 @@ const makeProject = (
 ): CanvasProjectSummary => ({
   id,
   title,
+  mode: 'infinite',
   nodeCount: 0,
   edgeCount: 0,
   documentBytes: 0,

@@ -192,7 +192,7 @@ describe('message timing metadata', () => {
     expect(screen.getByText('Total: 1.32s')).toBeVisible()
   })
 
-  test('adds no timing entry for a cost row without a breakdown', () => {
+  test('adds no diagnostics entry for a cost row without diagnostics', () => {
     renderMetadata({
       cost: {
         requestId: 'req-1',
@@ -207,5 +207,79 @@ describe('message timing metadata', () => {
 
     expect(screen.queryByText(/First token:/)).toBeNull()
     expect(screen.queryByText(/Total:/)).toBeNull()
+    expect(screen.queryByText('Request diagnostics')).toBeNull()
+  })
+})
+
+describe('message diagnostics metadata', () => {
+  function costWithDiagnostics(
+    overrides: Partial<PlaygroundMessageCost>
+  ): PlaygroundMessageCost {
+    return {
+      requestId: 'req-1',
+      quota: 1234,
+      promptTokens: 10,
+      completionTokens: 20,
+      totalTokens: 30,
+      modelName: 'test-model',
+      createdAt: 0,
+      ...overrides,
+    }
+  }
+
+  test('estimates the cache saving from the settled ratios', async () => {
+    const user = userEvent.setup()
+    renderMetadata({
+      cost: costWithDiagnostics({
+        cacheTokens: 1_000_000,
+        cacheRatio: 0.25,
+        modelRatio: 2,
+        channelKey: '#4821',
+      }),
+    })
+
+    await user.hover(screen.getByText('Request diagnostics'))
+
+    expect(await screen.findByText('Cached tokens')).toBeVisible()
+    expect(screen.getByText('1,000,000')).toBeVisible()
+    expect(screen.getByText('Cache savings')).toBeVisible()
+    // Input price is 2 × $2/M and the cache price is a quarter of it, so the
+    // million cached tokens saved three dollars compared with uncached input.
+    expect(screen.getByText('$3 (Estimated)')).toBeVisible()
+    expect(screen.getByText('#4821')).toBeVisible()
+    expect(screen.getByText('Settled quota')).toBeVisible()
+    expect(screen.getByText('From the settled consume log')).toBeVisible()
+  })
+
+  test('shows the cached token count without an amount when a price is missing', async () => {
+    const user = userEvent.setup()
+    renderMetadata({
+      cost: costWithDiagnostics({ cacheTokens: 320 }),
+    })
+
+    await user.hover(screen.getByText('Request diagnostics'))
+
+    expect(await screen.findByText('Cached tokens')).toBeVisible()
+    expect(screen.getByText('320')).toBeVisible()
+    expect(screen.queryByText('Cache savings')).toBeNull()
+    expect(screen.queryByText(/Estimated/)).toBeNull()
+  })
+
+  test('shows the complete channel and group ratio of an administrator', async () => {
+    const user = userEvent.setup()
+    renderMetadata({
+      cost: costWithDiagnostics({
+        channelKey: '#3 → #5',
+        channelName: 'Primary relay',
+        channelId: 5,
+        groupRatio: 2,
+      }),
+    })
+
+    await user.hover(screen.getByText('Request diagnostics'))
+
+    expect(await screen.findByText('Primary relay · #3 → #5')).toBeVisible()
+    expect(screen.getByText('Group ratio')).toBeVisible()
+    expect(screen.getByText('×2')).toBeVisible()
   })
 })

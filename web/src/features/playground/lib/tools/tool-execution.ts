@@ -21,11 +21,13 @@ import {
   MESSAGE_ROLES,
   MESSAGE_STATUS,
   PLAYGROUND_TOOL_EXECUTION_ERRORS,
-  TOOL_CALL_STATUS,
 } from '../../constants'
 import type { Message, MessageToolCall, MessageVersion } from '../../types'
 import type { KnowledgeSearchGroup } from '../knowledge/retrieval'
-import { getMessageToolCalls } from '../message/message-tool-call-utils'
+import {
+  getMessageToolCalls,
+  getPendingToolCalls,
+} from '../message/message-tool-call-utils'
 
 /** Tool names the Playground can answer without a manual result. */
 export const EXECUTABLE_TOOL_NAMES = [
@@ -240,10 +242,8 @@ export function buildKnowledgeSearchToolResult(
 export function getPendingExecutableToolCalls(
   message: Message
 ): MessageToolCall[] {
-  return getMessageToolCalls(message).filter(
-    (call) =>
-      call.status === TOOL_CALL_STATUS.PENDING &&
-      getExecutableToolKind(call.name) !== null
+  return getPendingToolCalls(message).filter(
+    (call) => getExecutableToolKind(call.name) !== null
   )
 }
 

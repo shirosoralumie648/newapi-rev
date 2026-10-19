@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql/driver"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -12,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	commonRelay "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"gorm.io/gorm"
 )
 
 type TaskStatus string
@@ -150,6 +152,25 @@ type TaskPrivateData struct {
 	// Playground lifecycle policies (result storage budget, expiry cleanup,
 	// cancellation) can scope themselves to workspace tasks only.
 	PlaygroundOrigin bool `json:"playground_origin,omitempty"`
+	// Generation records the credential-free request that created a Playground
+	// generation task. It is display/search metadata only and never
+	// participates in billing or channel selection.
+	Generation *TaskGenerationParams `json:"generation,omitempty"`
+}
+
+// TaskGenerationParams is the bounded, credential-free request snapshot shown
+// beside a generation result and used by the owner's metadata filters. Prompt
+// text is truncated at capture time so a task row cannot retain an unbounded
+// request body.
+type TaskGenerationParams struct {
+	Kind     string `json:"kind,omitempty"` // image or video
+	Prompt   string `json:"prompt,omitempty"`
+	Model    string `json:"model,omitempty"`
+	Size     string `json:"size,omitempty"`
+	Quality  string `json:"quality,omitempty"`
+	Seed     *int64 `json:"seed,omitempty"`
+	Count    int    `json:"count,omitempty"`
+	Duration int    `json:"duration,omitempty"`
 }
 
 type TaskExecutionSnapshot struct {
@@ -228,7 +249,8 @@ func (p TaskPrivateData) Value() (driver.Value, error) {
 		p.Execution == nil && p.BillingSource == "" && p.SubscriptionId == 0 &&
 		p.TokenId == 0 && p.NodeName == "" && p.BillingContext == nil &&
 		!p.ResponsesBackground && len(p.PluginState) == 0 && p.PollFailures == 0 &&
-		!p.ResultDiscarded && !p.PlaygroundOrigin && len(p.AsyncImageRequest) == 0 {
+		!p.ResultDiscarded && !p.PlaygroundOrigin && len(p.AsyncImageRequest) == 0 &&
+		p.Generation == nil {
 		return nil, nil
 	}
 	// 同 Properties.Value:string 避免 PG simple protocol 的 bytea 编码。
@@ -250,6 +272,67 @@ type SyncTaskQueryParams struct {
 	StartTimestamp int64
 	EndTimestamp   int64
 	UserIDs        []int
+	// GenerationPrompt searches the Playground generation metadata's prompt
+	// case-insensitively; GenerationModel matches it exactly and
+	// GenerationSeed compares the recorded numeric seed.
+	GenerationPrompt string
+	GenerationModel  string
+	GenerationSeed   *int64
+}
+
+// applyTaskGenerationFilters narrows a task query to the Playground generation
+// metadata a result gallery searched for. The generation object lives in the
+// JSON private_data column, so each supported database reads it with its own
+// operator; every branch returns NULL for a missing field, which never
+// matches. Wildcard characters in the prompt are escaped so a literal search
+// term cannot turn into a broader pattern. A prompt search ignores case, which
+// no database applies on its own here: MySQL's JSON extractor yields a
+// binary-collated string and PostgreSQL's LIKE stays case-sensitive even under
+// a non-C collation, so both the extracted value and the escaped pattern are
+// folded to lowercase.
+func applyTaskGenerationFilters(query *gorm.DB, params SyncTaskQueryParams) *gorm.DB {
+	if prompt := strings.TrimSpace(params.GenerationPrompt); prompt != "" {
+		pattern := "%" + escapeTaskGenerationLike(strings.ToLower(prompt)) + "%"
+		query = query.Where("LOWER("+taskGenerationTextExpression("prompt")+") LIKE ? ESCAPE '!'", pattern)
+	}
+	if modelName := strings.TrimSpace(params.GenerationModel); modelName != "" {
+		query = query.Where(taskGenerationTextExpression("model")+" = ?", modelName)
+	}
+	if params.GenerationSeed != nil {
+		query = query.Where(taskGenerationSeedExpression()+" = ?", *params.GenerationSeed)
+	}
+	return query
+}
+
+// taskGenerationTextExpression returns the dialect-specific JSON text
+// extractor for one generation field. Callers pass only the fixed field names
+// declared above, so the expression cannot carry user input.
+func taskGenerationTextExpression(field string) string {
+	switch {
+	case common.UsingMainDatabase(common.DatabaseTypePostgreSQL):
+		return "private_data->'generation'->>'" + field + "'"
+	case common.UsingMainDatabase(common.DatabaseTypeMySQL):
+		return "JSON_UNQUOTE(JSON_EXTRACT(private_data, '$.generation." + field + "'))"
+	default:
+		return "json_extract(private_data, '$.generation." + field + "')"
+	}
+}
+
+// taskGenerationSeedExpression extracts the numeric seed as an integer in
+// every supported database so an exact seed filter stays portable.
+func taskGenerationSeedExpression() string {
+	switch {
+	case common.UsingMainDatabase(common.DatabaseTypePostgreSQL):
+		return "CAST(private_data->'generation'->>'seed' AS BIGINT)"
+	case common.UsingMainDatabase(common.DatabaseTypeMySQL):
+		return "CAST(JSON_UNQUOTE(JSON_EXTRACT(private_data, '$.generation.seed')) AS SIGNED)"
+	default:
+		return "CAST(json_extract(private_data, '$.generation.seed') AS INTEGER)"
+	}
+}
+
+func escapeTaskGenerationLike(value string) string {
+	return strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(value)
 }
 
 func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo) *Task {
@@ -320,6 +403,7 @@ func TaskGetAllUserTask(userId int, startIdx int, num int, queryParams SyncTaskQ
 	if queryParams.EndTimestamp != 0 {
 		query = query.Where("submit_time <= ?", queryParams.EndTimestamp)
 	}
+	query = applyTaskGenerationFilters(query, queryParams)
 
 	// 获取数据
 	// Task lists never render the persisted upstream snapshot; the dashboard
@@ -367,6 +451,7 @@ func TaskGetAllTasks(startIdx int, num int, queryParams SyncTaskQueryParams) []*
 	if queryParams.EndTimestamp != 0 {
 		query = query.Where("submit_time <= ?", queryParams.EndTimestamp)
 	}
+	query = applyTaskGenerationFilters(query, queryParams)
 
 	// 获取数据
 	err = query.Omit("data").Order("id desc").Limit(num).Offset(startIdx).Find(&tasks).Error
@@ -626,6 +711,7 @@ func TaskCountAllTasks(queryParams SyncTaskQueryParams) int64 {
 	if queryParams.EndTimestamp != 0 {
 		query = query.Where("submit_time <= ?", queryParams.EndTimestamp)
 	}
+	query = applyTaskGenerationFilters(query, queryParams)
 	_ = query.Count(&total).Error
 	return total
 }
@@ -652,6 +738,7 @@ func TaskCountAllUserTask(userId int, queryParams SyncTaskQueryParams) int64 {
 	if queryParams.EndTimestamp != 0 {
 		query = query.Where("submit_time <= ?", queryParams.EndTimestamp)
 	}
+	query = applyTaskGenerationFilters(query, queryParams)
 	_ = query.Count(&total).Error
 	return total
 }
