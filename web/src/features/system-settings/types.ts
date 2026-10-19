@@ -39,6 +39,12 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export type PlaygroundWebSearchSettingsRequest = {
+  web_search: string
+  /** Omit to keep the stored credential; an empty string clears it. */
+  api_key?: string
+}
+
 export interface PasskeyDomainChange {
   rp_id: string
   legacy_rp_ids: string
@@ -436,6 +442,7 @@ export type SecuritySettings = {
   'playground_setting.defaults': string
   'playground_setting.group_overrides': string
   'playground_setting.storage_billing': string
+  'playground_setting.web_search': string
   'playground_setting.sandbox_preview_enabled': boolean
 }
 

@@ -62,6 +62,18 @@ export const STATIC_I18N_KEYS = [
   // not start new generation or uploads.
   'Your wallet has unsettled debt. Top up to restore access; reading and exporting data stays available.',
   'Unable to check the account wallet debt.',
+  // Playground web-search admin hints selected by provider.
+  'Leave blank to use https://api.tavily.com.',
+  'Required. Enter the public URL of your self-hosted SearXNG instance.',
+  'Leave blank to use https://api.search.brave.com.',
+  // Playground web-search endpoint messages mapped from stable error codes.
+  'Web search is disabled.',
+  'Web search configuration is incomplete.',
+  'Insufficient wallet quota for this search.',
+  'Web search is temporarily unavailable.',
+  'Enter a web search query.',
+  'Unable to hold or settle the wallet quota for the search.',
+  'Web search settings saved',
   // Playground workflow run budget server messages (BL-03): the endpoints answer
   // with these stable-code messages, so the literal scan cannot see them.
   'Unable to price the workflow steps.',

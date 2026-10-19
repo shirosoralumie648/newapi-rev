@@ -42,7 +42,12 @@ function renderTools(
   onSystemPromptChange = vi.fn(),
   systemPrompt = '',
   config = DEFAULT_CONFIG,
-  onDictateTranscript?: (text: string) => void
+  onDictateTranscript?: (text: string) => void,
+  webSearch?: {
+    available: boolean
+    enabled: boolean
+    onChange: (value: boolean) => void
+  }
 ) {
   // The dictation panel mounts a transcription mutation, which needs the query
   // client the app installs at its root.
@@ -87,6 +92,9 @@ function renderTools(
           onSystemPromptChange={onSystemPromptChange}
           parameterEnabled={DEFAULT_PARAMETER_ENABLED}
           systemPrompt={systemPrompt}
+          webSearchAvailable={webSearch?.available}
+          webSearchEnabled={webSearch?.enabled}
+          onWebSearchChange={webSearch?.onChange}
         />
       </PromptInputProvider>
     </QueryClientProvider>
@@ -105,6 +113,8 @@ beforeAll(() => {
     'Reasoning Effort': 'Reasoning Effort',
     Save: 'Save',
     Search: 'Search',
+    'Search this turn': 'Search this turn',
+    'Search the web with this turn': 'Search the web with this turn',
     'System prompt': 'System prompt',
     'System prompt cleared': 'System prompt cleared',
     'System prompt saved': 'System prompt saved',
@@ -150,6 +160,33 @@ test('clearing the stored system prompt persists an empty value', async () => {
   await user.click(await screen.findByRole('button', { name: 'Clear' }))
 
   expect(onSystemPromptChange).toHaveBeenCalledWith('')
+})
+
+test('hides the web-search toggle when the administrator has not enabled it', () => {
+  renderTools(vi.fn(), vi.fn(), '', DEFAULT_CONFIG, undefined, {
+    available: false,
+    enabled: false,
+    onChange: vi.fn(),
+  })
+
+  expect(screen.queryByRole('button', { name: 'Search this turn' })).toBeNull()
+})
+
+test('toggles the next turn web search and exposes its pressed state', async () => {
+  const user = userEvent.setup()
+  const onChange = vi.fn()
+  renderTools(vi.fn(), vi.fn(), '', DEFAULT_CONFIG, undefined, {
+    available: true,
+    enabled: true,
+    onChange,
+  })
+
+  const toggle = screen.getByRole('button', { name: 'Search this turn' })
+  expect(toggle).toHaveAttribute('aria-pressed', 'true')
+
+  await user.click(toggle)
+
+  expect(onChange).toHaveBeenCalledWith(false)
 })
 
 test('the dictation entry is offered when the composer accepts transcripts', () => {

@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/console_setting"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/playground_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 
@@ -430,4 +431,32 @@ func UpdateOption(c *gin.Context) {
 		"success": true,
 		"message": "",
 	})
+}
+
+// UpdatePlaygroundWebSearch saves the provider configuration and an optional
+// replacement credential in one transaction. The credential is never part of
+// the provider JSON, so GetOptions keeps hiding it by its sensitive suffix.
+func UpdatePlaygroundWebSearch(c *gin.Context) {
+	var request struct {
+		WebSearch string  `json:"web_search"`
+		APIKey    *string `json:"api_key"`
+	}
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil || strings.TrimSpace(request.WebSearch) == "" {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	values := map[string]string{
+		playground_setting.PlaygroundWebSearchOptionKey: request.WebSearch,
+	}
+	if request.APIKey != nil {
+		values[playground_setting.PlaygroundWebSearchAPIKeyOptionKey] = *request.APIKey
+	}
+	if err := model.UpdateOptionsBulk(values); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	for key := range values {
+		recordManageAudit(c, "option.update", map[string]any{"key": key})
+	}
+	common.ApiSuccessT(c, "Web search settings saved", nil)
 }

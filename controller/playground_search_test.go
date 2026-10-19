@@ -163,6 +163,64 @@ func TestPlaygroundWebSearchBilling(t *testing.T) {
 	})
 }
 
+func TestUpdatePlaygroundWebSearchPersistsConfigurationAtomically(t *testing.T) {
+	db, user := setupPlaygroundSearchTest(t)
+	previousMap := common.OptionMap
+	common.OptionMap = make(map[string]string)
+	previousWebSearch := playground_setting.GetPlaygroundSetting().WebSearch
+	previousKey := playground_setting.GetPlaygroundSetting().WebSearchAPIKey
+	t.Cleanup(func() {
+		common.OptionMap = previousMap
+		playground_setting.GetPlaygroundSetting().WebSearch = previousWebSearch
+		playground_setting.GetPlaygroundSetting().WebSearchAPIKey = previousKey
+	})
+
+	router := gin.New()
+	router.PUT("/api/option/playground/web_search", func(c *gin.Context) {
+		c.Set("id", user.Id)
+		c.Set("role", common.RoleAdminUser)
+		c.Next()
+	}, UpdatePlaygroundWebSearch)
+
+	configuration := `{"enabled":true,"provider":"brave","price_usd_per_call":0.02,"group_price_usd_per_call":{"vip":0.01}}`
+	body, err := common.Marshal(map[string]any{
+		"web_search": configuration,
+		"api_key":    "search-secret",
+	})
+	require.NoError(t, err)
+	response := putPlaygroundWebSearch(router, body)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var saved struct {
+		Success bool `json:"success"`
+	}
+	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &saved))
+	require.True(t, saved.Success)
+
+	var configurationOption, credentialOption model.Option
+	require.NoError(t, db.Where("key = ?", playground_setting.PlaygroundWebSearchOptionKey).First(&configurationOption).Error)
+	require.NoError(t, db.Where("key = ?", playground_setting.PlaygroundWebSearchAPIKeyOptionKey).First(&credentialOption).Error)
+	assert.JSONEq(t, configuration, configurationOption.Value)
+	assert.Equal(t, "search-secret", credentialOption.Value)
+	assert.True(t, playground_setting.IsWebSearchEnabled())
+	assert.Equal(t, "search-secret", playground_setting.GetPlaygroundWebSearchAPIKey())
+
+	invalidConfiguration := `{"enabled":true,"provider":"searxng","price_usd_per_call":0.03}`
+	body, err = common.Marshal(map[string]any{
+		"web_search": invalidConfiguration,
+		"api_key":    "replacement-that-must-not-land",
+	})
+	require.NoError(t, err)
+	response = putPlaygroundWebSearch(router, body)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &saved))
+	assert.False(t, saved.Success)
+
+	require.NoError(t, db.Where("key = ?", playground_setting.PlaygroundWebSearchOptionKey).First(&configurationOption).Error)
+	require.NoError(t, db.Where("key = ?", playground_setting.PlaygroundWebSearchAPIKeyOptionKey).First(&credentialOption).Error)
+	assert.JSONEq(t, configuration, configurationOption.Value)
+	assert.Equal(t, "search-secret", credentialOption.Value)
+}
+
 func setupPlaygroundSearchTest(t *testing.T) (*gorm.DB, *model.User) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -191,7 +249,7 @@ func setupPlaygroundSearchTest(t *testing.T) (*gorm.DB, *model.User) {
 	})
 	for _, table := range []any{
 		&model.User{}, &model.WalletHold{}, &model.WalletHoldGrant{}, &model.CreditGrant{},
-		&model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.Log{},
+		&model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.Log{}, &model.Option{}, &model.AuditLog{},
 	} {
 		require.NoError(t, db.AutoMigrate(table))
 	}
@@ -242,6 +300,14 @@ func playgroundSearchTestRouter(user *model.User) *gin.Engine {
 func postPlaygroundSearch(router *gin.Engine, body string) *httptest.ResponseRecorder {
 	response := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/api/playground/search", bytes.NewBufferString(body))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(response, request)
+	return response
+}
+
+func putPlaygroundWebSearch(router *gin.Engine, body []byte) *httptest.ResponseRecorder {
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPut, "/api/option/playground/web_search", bytes.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(response, request)
 	return response
