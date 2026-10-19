@@ -86,3 +86,107 @@ test('discloses the manual fallback and the billed continuation', async () => {
     )
   ).toBeVisible()
 })
+
+test('the MCP section is absent while the administrator leaves the feature off', async () => {
+  const user = userEvent.setup()
+  renderControl()
+
+  await user.click(screen.getByRole('button', { name: 'Tool loop' }))
+
+  expect(
+    await screen.findByRole('switch', {
+      name: 'Run supported tool calls automatically',
+    })
+  ).toBeVisible()
+  expect(screen.queryByRole('switch', { name: 'MCP tools' })).toBeNull()
+})
+
+test('the MCP switch writes the account preference and lists the connections', async () => {
+  const user = userEvent.setup()
+  const onMCPEnabledChange = vi.fn()
+  renderControl({
+    mcp: {
+      enabled: true,
+      failed: false,
+      loading: false,
+      onEnabledChange: onMCPEnabledChange,
+      servers: [
+        { id: 'github', name: 'GitHub', available: true, toolCount: 3 },
+        { id: 'broken', name: 'Broken', available: false, toolCount: 0 },
+      ],
+    },
+  })
+
+  await user.click(screen.getByRole('button', { name: 'Tool loop' }))
+  await user.click(await screen.findByRole('switch', { name: 'MCP tools' }))
+
+  expect(onMCPEnabledChange).toHaveBeenCalledWith(false)
+  expect(screen.getByText('GitHub')).toBeVisible()
+  expect(screen.getByText('3 tools')).toBeVisible()
+  expect(screen.getByText('Broken')).toBeVisible()
+  expect(screen.getByText('Unavailable')).toBeVisible()
+})
+
+test('a switched-off MCP preference keeps the list collapsed', async () => {
+  const user = userEvent.setup()
+  renderControl({
+    mcp: {
+      enabled: false,
+      failed: false,
+      loading: false,
+      onEnabledChange: vi.fn(),
+      servers: [
+        { id: 'github', name: 'GitHub', available: true, toolCount: 3 },
+      ],
+    },
+  })
+
+  await user.click(screen.getByRole('button', { name: 'Tool loop' }))
+
+  expect(await screen.findByRole('switch', { name: 'MCP tools' })).toBeVisible()
+  expect(screen.queryByText('GitHub')).toBeNull()
+})
+
+test('a failed catalog keeps the loaded connections visible with a notice', async () => {
+  const user = userEvent.setup()
+  renderControl({
+    mcp: {
+      enabled: true,
+      failed: true,
+      loading: false,
+      onEnabledChange: vi.fn(),
+      servers: [
+        { id: 'github', name: 'GitHub', available: true, toolCount: 3 },
+      ],
+    },
+  })
+
+  await user.click(screen.getByRole('button', { name: 'Tool loop' }))
+
+  expect(await screen.findByText('GitHub')).toBeVisible()
+  expect(
+    screen.getByText('MCP connections are unavailable right now.')
+  ).toBeVisible()
+})
+
+test('the MCP section points out that the tool loop must be on', async () => {
+  const user = userEvent.setup()
+  renderControl({
+    enabled: false,
+    mcp: {
+      enabled: true,
+      failed: false,
+      loading: false,
+      onEnabledChange: vi.fn(),
+      servers: [
+        { id: 'github', name: 'GitHub', available: true, toolCount: 3 },
+      ],
+    },
+  })
+
+  await user.click(screen.getByRole('button', { name: 'Tool loop' }))
+
+  expect(
+    await screen.findByText('Turn on the tool loop above to offer these tools.')
+  ).toBeVisible()
+})

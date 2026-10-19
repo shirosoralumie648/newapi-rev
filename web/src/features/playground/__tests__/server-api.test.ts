@@ -22,7 +22,9 @@ import { api } from '@/lib/api'
 
 import {
   applyPlaygroundMessagesDelta,
+  callPlaygroundMCPTool,
   exportPlaygroundSession,
+  getPlaygroundMCPServers,
   getPlaygroundMessageCosts,
   getPlaygroundSessions,
   getPlaygroundTrash,
@@ -712,4 +714,94 @@ test('a failed public share read surfaces the server message', async () => {
   await expect(getSharedPlaygroundConversation('share-token')).rejects.toThrow(
     'Shared conversation not found.'
   )
+})
+
+test('the MCP catalog maps wire tool metadata and keeps unreachable connections', async () => {
+  const get = vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        enabled: true,
+        servers: [
+          {
+            id: 'github',
+            name: 'GitHub',
+            available: true,
+            tools: [
+              {
+                name: 'search_repositories',
+                function_name: 'mcp__github__search_repositories',
+                description: 'Find repositories',
+                input_schema: { type: 'object' },
+              },
+            ],
+          },
+          { id: 'broken', name: 'Broken', available: false, tools: [] },
+        ],
+      },
+    },
+  })
+
+  const servers = await getPlaygroundMCPServers()
+
+  expect(get.mock.calls[0][0]).toBe('/api/playground/mcp/servers')
+  expect(servers).toEqual([
+    {
+      id: 'github',
+      name: 'GitHub',
+      available: true,
+      tools: [
+        {
+          name: 'search_repositories',
+          functionName: 'mcp__github__search_repositories',
+          description: 'Find repositories',
+          inputSchema: { type: 'object' },
+        },
+      ],
+    },
+    { id: 'broken', name: 'Broken', available: false, tools: [] },
+  ])
+})
+
+test('an MCP tool call posts the tool name and arguments to the gateway', async () => {
+  const post = vi.spyOn(api, 'post').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        is_error: false,
+        content: [{ type: 'text', text: 'pong' }],
+        structured_content: { ok: true },
+      },
+    },
+  })
+
+  const result = await callPlaygroundMCPTool('github', 'ping', {
+    repo: 'new-api',
+  })
+
+  expect(post.mock.calls[0][0]).toBe('/api/playground/mcp/github/call')
+  expect(post.mock.calls[0][1]).toEqual({
+    tool: 'ping',
+    arguments: { repo: 'new-api' },
+  })
+  expect(result).toEqual({
+    isError: false,
+    content: [{ type: 'text', text: 'pong' }],
+    structuredContent: { ok: true },
+  })
+})
+
+test('an MCP call escapes the connection id and surfaces a gateway refusal', async () => {
+  const post = vi.spyOn(api, 'post').mockResolvedValue({
+    data: {
+      success: false,
+      code: 'PLAYGROUND_MCP_SERVER_DISABLED',
+      message: 'This MCP connection is disabled.',
+    },
+  })
+
+  await expect(callPlaygroundMCPTool('git hub', 'ping', {})).rejects.toThrow(
+    'This MCP connection is disabled.'
+  )
+  expect(post.mock.calls[0][0]).toBe('/api/playground/mcp/git%20hub/call')
 })

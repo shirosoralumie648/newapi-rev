@@ -1084,6 +1084,7 @@ const playgroundUsageSchema = z.object({
 const playgroundSettingsSchema = z.object({
   sandbox_preview_enabled: z.boolean(),
   web_search_enabled: z.boolean().optional(),
+  mcp_enabled: z.boolean().optional(),
   tool_call_result_max_bytes: z.number().int().positive().optional(),
 })
 
@@ -1366,11 +1367,13 @@ export async function getPlaygroundStorageBilling(
  * sandboxed preview; while it is false the browser must keep artifact content
  * inert. `webSearchEnabled` is the administrator opt-in for the
  * search-with-this-turn control; the browser never sees the provider endpoint
- * or credential.
+ * or credential. `mcpEnabled` is the administrator opt-in for the global MCP
+ * connections; while it is false the MCP catalog is not requested at all.
  */
 export interface PlaygroundServerSettings {
   sandboxPreviewEnabled: boolean
   webSearchEnabled: boolean
+  mcpEnabled: boolean
   /**
    * Authoritative byte budget the server validates one tool result against.
    * Older servers omit it; the local default applies until they report it.
@@ -1387,6 +1390,7 @@ export async function getPlaygroundSettings(
   return {
     sandboxPreviewEnabled: settings.sandbox_preview_enabled,
     webSearchEnabled: settings.web_search_enabled === true,
+    mcpEnabled: settings.mcp_enabled === true,
     toolCallResultMaxBytes:
       settings.tool_call_result_max_bytes ??
       PLAYGROUND_TOOL_CALL_RESULT_DEFAULT_MAX_BYTES,
@@ -1441,6 +1445,147 @@ export async function searchPlaygroundWeb(
     query: parsed.query,
     provider: parsed.provider ?? '',
     results: parsed.results,
+  }
+}
+
+/**
+ * One tool exposed by an administrator-configured MCP connection. The wire
+ * names mirror the gateway; `functionName` is the provider-safe
+ * `mcp__<server>__<tool>` name the model calls.
+ */
+export interface PlaygroundMCPServerTool {
+  name: string
+  functionName: string
+  description: string
+  inputSchema?: Record<string, unknown>
+}
+
+/** One administrator-configured MCP connection as the catalog reports it. */
+export interface PlaygroundMCPServer {
+  id: string
+  name: string
+  /** False while the connection is enabled but its catalog is unreachable. */
+  available: boolean
+  tools: PlaygroundMCPServerTool[]
+}
+
+/** One normalized content item of a proxied MCP tool result. */
+export interface PlaygroundMCPContent {
+  type: string
+  text?: string
+  mimeType?: string
+  uri?: string
+  name?: string
+}
+
+/**
+ * The normalized answer of one proxied tools/call. `isError` is the upstream
+ * tool failure flag, not a gateway failure: the model still receives the
+ * content and can react to it.
+ */
+export interface PlaygroundMCPCallResult {
+  isError: boolean
+  content: PlaygroundMCPContent[]
+  structuredContent?: unknown
+}
+
+const playgroundMCPServerToolSchema = z.object({
+  name: z.string().min(1).max(128),
+  function_name: z.string().min(1).max(128),
+  description: z.string().optional(),
+  input_schema: z.unknown().optional(),
+})
+
+const playgroundMCPServerSchema = z.object({
+  id: z.string().min(1).max(64),
+  name: z.string().max(200),
+  available: z.boolean(),
+  tools: z.array(playgroundMCPServerToolSchema),
+})
+
+const playgroundMCPServersResponseSchema = z.object({
+  enabled: z.boolean(),
+  servers: z.array(playgroundMCPServerSchema),
+})
+
+const playgroundMCPContentSchema = z.object({
+  type: z.string().max(32),
+  text: z.string().optional(),
+  mime_type: z.string().max(128).optional(),
+  uri: z.string().max(2048).optional(),
+  name: z.string().max(256).optional(),
+})
+
+const playgroundMCPCallResponseSchema = z.object({
+  is_error: z.boolean(),
+  content: z.array(playgroundMCPContentSchema),
+  structured_content: z.unknown().optional(),
+})
+
+function toInputSchema(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return undefined
+  }
+  return value as Record<string, unknown>
+}
+
+/**
+ * Reads the global MCP catalog: the tools of every connection an administrator
+ * enabled. Endpoints and credentials stay on the gateway, and a connection
+ * whose catalog failed is reported with `available: false` instead of hiding
+ * the other connections.
+ */
+export async function getPlaygroundMCPServers(
+  signal?: AbortSignal
+): Promise<PlaygroundMCPServer[]> {
+  const response = await api.get(API_ENDPOINTS.PLAYGROUND_MCP_SERVERS, {
+    signal,
+  })
+  requireServerSuccess(response.data)
+  const parsed = playgroundMCPServersResponseSchema.parse(response.data.data)
+  return parsed.servers.map((server) => ({
+    id: server.id,
+    name: server.name,
+    available: server.available,
+    tools: server.tools.map((tool) => ({
+      name: tool.name,
+      functionName: tool.function_name,
+      description: tool.description ?? '',
+      inputSchema: toInputSchema(tool.input_schema),
+    })),
+  }))
+}
+
+/**
+ * One tools/call through the gateway. The browser names only a configured
+ * connection and a tool; the gateway fixes the JSON-RPC method, enforces its
+ * time and size budgets and never reveals the endpoint or its credential.
+ */
+export async function callPlaygroundMCPTool(
+  serverId: string,
+  tool: string,
+  args: Record<string, unknown>,
+  signal?: AbortSignal
+): Promise<PlaygroundMCPCallResult> {
+  const response = await api.post(
+    `${API_ENDPOINTS.PLAYGROUND_MCP_CALL}/${encodeURIComponent(serverId)}/call`,
+    { tool, arguments: args },
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  const parsed = playgroundMCPCallResponseSchema.parse(response.data.data)
+  return {
+    isError: parsed.is_error,
+    content: parsed.content.map((item) => ({
+      type: item.type,
+      ...(item.text !== undefined ? { text: item.text } : {}),
+      ...(item.mime_type !== undefined ? { mimeType: item.mime_type } : {}),
+      ...(item.uri !== undefined ? { uri: item.uri } : {}),
+      ...(item.name !== undefined ? { name: item.name } : {}),
+    })),
+    ...(parsed.structured_content !== undefined
+      ? { structuredContent: parsed.structured_content }
+      : {}),
   }
 }
 

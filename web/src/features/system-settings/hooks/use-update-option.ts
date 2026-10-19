@@ -25,10 +25,12 @@ import { requireServerSuccess } from '@/lib/server-error-message'
 
 import {
   updatePasskeyDomains,
+  updatePlaygroundMCP,
   updatePlaygroundWebSearch,
   updateSystemOption,
 } from '../api'
 import type {
+  PlaygroundMCPSettingsRequest,
   PlaygroundWebSearchSettingsRequest,
   UpdateOptionRequest,
   UpdatePasskeyDomainsRequest,
@@ -100,6 +102,21 @@ export function useUpdatePlaygroundWebSearch() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['system-options'] })
       toast.success(i18next.t('Web search settings saved'))
+    },
+    onError: (error: Error) =>
+      handleServerError(error, i18next.t('Failed to update setting')),
+  })
+}
+
+export function useUpdatePlaygroundMCP() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (request: PlaygroundMCPSettingsRequest) =>
+      requireServerSuccess(await updatePlaygroundMCP(request)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['system-options'] })
+      toast.success(i18next.t('MCP settings saved'))
     },
     onError: (error: Error) =>
       handleServerError(error, i18next.t('Failed to update setting')),

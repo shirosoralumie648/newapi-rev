@@ -1442,6 +1442,23 @@ export const STATIC_I18N_KEYS = [
   'Value matches none of the allowed shapes',
   'Value does not match every required shape',
   'Playground developer options limit exceeded.',
+  // Playground MCP client proxy (LB-10): the composer suffix, the admin editor
+  // hints and the validation messages are passed to t() as values from
+  // constants, helpers and field-level results, so the literal scan cannot see
+  // them.
+  'This MCP tool is no longer available.',
+  'The stored token is removed when you save.',
+  'A token is stored on the server.',
+  'Sent to the connection only, never returned to the browser.',
+  'Save MCP settings',
+  'At most 20 MCP connections can be configured.',
+  'Use 1-24 letters, digits, hyphens or underscores, starting with a letter or digit.',
+  'Each MCP connection needs a unique id.',
+  'Enter a name of at most 100 characters.',
+  'Enter a valid HTTP header name.',
+  'This header is reserved by the MCP client.',
+  'The token is invalid.',
+  'Choose a header before storing a token.',
   'cURL',
   'Python',
   'Node.js',

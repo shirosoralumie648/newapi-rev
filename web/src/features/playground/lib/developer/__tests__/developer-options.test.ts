@@ -23,7 +23,11 @@ import {
   DEFAULT_PARAMETER_ENABLED,
   PLAYGROUND_DEVELOPER_ERRORS,
 } from '../../../constants'
-import type { Message, PlaygroundDeveloperOptions } from '../../../types'
+import type {
+  ChatCompletionTool,
+  Message,
+  PlaygroundDeveloperOptions,
+} from '../../../types'
 import { buildChatCompletionPayload } from '../../streaming/payload-builder'
 import {
   buildDeveloperRequestFields,
@@ -267,6 +271,57 @@ describe('request payload injection', () => {
         options({ tools: [], responseFormat: { type: 'text' } })
       )
     ).toEqual({})
+  })
+
+  test('MCP declarations alone add a tool choice of auto so the model may call them', () => {
+    const mcpTools: ChatCompletionTool[] = [
+      {
+        type: 'function',
+        function: { name: 'mcp__github__ping', description: 'Ping.' },
+      },
+    ]
+    const payload = buildChatCompletionPayload(
+      [userMessage('Hello')],
+      DEFAULT_CONFIG,
+      DEFAULT_PARAMETER_ENABLED,
+      '',
+      undefined,
+      '',
+      null,
+      null,
+      mcpTools
+    )
+
+    expect(payload.tools).toEqual(mcpTools)
+    expect(payload.tool_choice).toBe('auto')
+    expect('response_format' in payload).toBe(false)
+  })
+
+  test('MCP declarations follow the developer tools and an explicit choice wins', () => {
+    const mcpTools: ChatCompletionTool[] = [
+      {
+        type: 'function',
+        function: { name: 'mcp__github__ping', description: 'Ping.' },
+      },
+    ]
+    const developer = options({
+      toolChoice: 'required',
+      responseFormat: { type: 'text' },
+    })
+    const payload = buildChatCompletionPayload(
+      [userMessage('Hello')],
+      DEFAULT_CONFIG,
+      DEFAULT_PARAMETER_ENABLED,
+      '',
+      undefined,
+      '',
+      null,
+      developer,
+      mcpTools
+    )
+
+    expect(payload.tools).toEqual([...developer.tools, ...mcpTools])
+    expect(payload.tool_choice).toBe('required')
   })
 })
 

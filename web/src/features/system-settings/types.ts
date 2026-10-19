@@ -45,6 +45,11 @@ export type PlaygroundWebSearchSettingsRequest = {
   api_key?: string
 }
 
+export type PlaygroundMCPSettingsRequest = {
+  /** Serialized administrator-managed MCP connection list. */
+  mcp: string
+}
+
 export interface PasskeyDomainChange {
   rp_id: string
   legacy_rp_ids: string
@@ -443,6 +448,7 @@ export type SecuritySettings = {
   'playground_setting.group_overrides': string
   'playground_setting.storage_billing': string
   'playground_setting.web_search': string
+  'playground_setting.mcp': string
   'playground_setting.sandbox_preview_enabled': boolean
 }
 

@@ -57,7 +57,10 @@ import { PlaygroundParameterPanel } from './playground-parameter-panel'
 import { PlaygroundProtocolSelect } from './playground-protocol-select'
 import { PlaygroundSnippetPanel } from './playground-snippet-panel'
 import { PlaygroundSystemPromptPanel } from './playground-system-prompt-panel'
-import { PlaygroundToolExecutionControl } from './playground-tool-execution-control'
+import {
+  PlaygroundToolExecutionControl,
+  type PlaygroundToolExecutionMCPProps,
+} from './playground-tool-execution-control'
 
 type PlaygroundInputToolsProps = {
   config: PlaygroundConfig
@@ -135,6 +138,8 @@ type PlaygroundInputToolsProps = {
   toolExecutionMaxRounds: number
   onToolExecutionEnabledChange: (value: boolean) => void
   onToolExecutionMaxRoundsChange: (value: number) => void
+  /** Account-level MCP switch and catalog; absent while the server has MCP off. */
+  mcp?: PlaygroundToolExecutionMCPProps
 }
 
 export function PlaygroundInputTools({
@@ -188,6 +193,7 @@ export function PlaygroundInputTools({
   toolExecutionMaxRounds,
   onToolExecutionEnabledChange,
   onToolExecutionMaxRoundsChange,
+  mcp,
 }: PlaygroundInputToolsProps) {
   const { t } = useTranslation()
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
@@ -269,6 +275,7 @@ export function PlaygroundInputTools({
           disabled={disabled}
           enabled={toolExecutionEnabled}
           maxRounds={toolExecutionMaxRounds}
+          mcp={mcp}
           onEnabledChange={onToolExecutionEnabledChange}
           onMaxRoundsChange={onToolExecutionMaxRoundsChange}
         />

@@ -429,6 +429,11 @@ func UpdateOption(c *gin.Context) {
 		}
 		return
 	}
+	// An MCP endpoint or tool catalog change must be visible on the next
+	// request instead of after the short tool cache TTL.
+	if option.Key == playground_setting.PlaygroundMCPOptionKey {
+		service.ResetPlaygroundMCPToolCache()
+	}
 	// 出于安全考虑只记录被修改的配置项名称，不记录配置值（可能含密钥等敏感信息）。
 	recordManageAudit(c, "option.update", map[string]any{
 		"key": option.Key,
