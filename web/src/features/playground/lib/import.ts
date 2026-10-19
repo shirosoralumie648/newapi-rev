@@ -53,6 +53,7 @@ import {
   normalizeContextSummary,
 } from './context/playground-context'
 import {
+  messageSearchSchema,
   messagesSchema,
   parameterEnabledSchema,
   playgroundConfigSchema,
@@ -127,6 +128,9 @@ const exportedMessageSchema = z.object({
   completedAt: z.number().optional(),
   durationMs: z.number().optional(),
   sources: z.array(exportedSourceSchema).max(100).optional(),
+  // The searched snapshot is part of the turn: an imported conversation must
+  // rebuild the same model context and citation list as the exported one.
+  search: messageSearchSchema.optional(),
   reasoning: exportedReasoningSchema.nullish(),
   isReasoningStreaming: z.boolean().optional(),
   isReasoningComplete: z.boolean().optional(),
@@ -302,6 +306,7 @@ function normalizeExportedMessage(value: unknown): Message | null {
     ...(data.sources && data.sources.length > 0
       ? { sources: data.sources }
       : {}),
+    ...(data.search ? { search: data.search } : {}),
     ...(data.reasoning
       ? {
           reasoning: {

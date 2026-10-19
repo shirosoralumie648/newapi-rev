@@ -34,6 +34,7 @@ import { handleServerError } from '@/lib/handle-server-error'
 import { getServerMessage } from '@/lib/server-error-message'
 import { useAuthStore } from '@/stores/auth-store'
 
+import { searchPlaygroundWeb } from './api'
 import { PlaygroundArtifactSourceSheet } from './components/artifact/playground-artifact-source-sheet'
 import { PlaygroundChat } from './components/chat/playground-chat'
 import { PlaygroundContextStatus } from './components/input/playground-context-status'
@@ -68,6 +69,7 @@ import {
   usePlaygroundOptions,
   usePlaygroundArtifacts,
   usePlaygroundPreferences,
+  usePlaygroundSandboxSettings,
   usePlaygroundState,
   usePlaygroundServer,
 } from './hooks'
@@ -93,6 +95,7 @@ import type {
   AssistantPreset,
   Message,
   MessageAttachment,
+  MessageSearchSnapshot,
   PlaygroundMemoryExtractionSettings,
   PlaygroundRouteTarget,
 } from './types'
@@ -205,6 +208,13 @@ function PlaygroundContent(props: {
     summary: contextSummary,
     onSummaryChange: updateContextSummary,
   })
+
+  // The administrator switch is authoritative: a deployment without a search
+  // provider hides the control, and a query that has not answered yet stays
+  // unavailable. The toggle itself only chooses whether this turn searches.
+  const serverSettings = usePlaygroundSandboxSettings(userId)
+  const webSearchAvailable = serverSettings.data?.webSearchEnabled === true
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false)
 
   const preferences = usePlaygroundPreferences(userId)
   // Automatic read-aloud runs after a reply completes. It is fire-and-forget:
@@ -330,20 +340,55 @@ function PlaygroundContent(props: {
 
   const pendingToolCalls = hasPendingToolCalls(messages)
 
+  // One provider call per submitted turn. The server holds the price on the
+  // wallet and settles it only after the provider answers, so a failed search
+  // throws here and the composer keeps the message unsent.
+  const runWebSearch = useCallback(
+    async (text: string): Promise<MessageSearchSnapshot | undefined> => {
+      if (!webSearchEnabled || !webSearchAvailable || !text.trim()) {
+        return undefined
+      }
+      try {
+        const response = await searchPlaygroundWeb(text)
+        if (response.results.length === 0) {
+          toast.info(t('No web search results were found for this turn.'))
+        }
+        return {
+          query: response.query,
+          ...(response.provider ? { provider: response.provider } : {}),
+          results: response.results,
+        }
+      } catch (error) {
+        handleServerError(
+          error,
+          t('Web search failed. The message was not sent.')
+        )
+        throw error
+      }
+    },
+    [t, webSearchAvailable, webSearchEnabled]
+  )
+
   // The composer sends an ordinary reply unless the compare selection holds a
   // comparison; with one, the same turn goes to every selected model as its
   // own request and lands as a comparison group.
   const submitTurn = useCallback(
-    (text: string, attachments?: MessageAttachment[]) => {
+    (
+      text: string,
+      attachments?: MessageAttachment[],
+      search?: MessageSearchSnapshot
+    ) => {
       if (compareModels.length < PLAYGROUND_PARALLEL_MIN_MODELS) {
-        handleSendMessage(text, attachments)
+        handleSendMessage(text, attachments, search)
         return
       }
       const nextMessages = appendParallelMessagePair(
         messagesRef.current,
         text,
         attachments,
-        compareModels
+        compareModels,
+        Date.now(),
+        search
       )
       updateMessages(nextMessages)
       sendParallelChat(nextMessages)
@@ -353,35 +398,49 @@ function PlaygroundContent(props: {
 
   const handleInputSubmit = useCallback(
     async (text: string, files: (FileUIPart & { id?: string })[] = []) => {
-      if (files.length === 0) {
-        submitTurn(text)
-        return
-      }
-      const session = activeSession
-      if (!session) {
-        throw new Error(PLAYGROUND_ATTACHMENT_ERRORS.UPLOAD_FAILED)
-      }
-      let attachments: MessageAttachment[]
-      try {
-        const bound = await sync.ensureServerSession(session.id)
-        if (!bound.server) {
+      let attachments: MessageAttachment[] | undefined
+      if (files.length > 0) {
+        const session = activeSession
+        if (!session) {
           throw new Error(PLAYGROUND_ATTACHMENT_ERRORS.UPLOAD_FAILED)
         }
-        attachments = await uploadPlaygroundAttachments(bound.server.id, files)
-      } catch (error) {
-        const serverMessage = getServerMessage(error)
-        if (serverMessage) {
-          toast.error(t(serverMessage))
-        } else if (error instanceof Error && error.message) {
-          toast.error(t(error.message))
-        } else {
-          toast.error(t(PLAYGROUND_ATTACHMENT_ERRORS.UPLOAD_FAILED))
+        try {
+          const bound = await sync.ensureServerSession(session.id)
+          if (!bound.server) {
+            throw new Error(PLAYGROUND_ATTACHMENT_ERRORS.UPLOAD_FAILED)
+          }
+          attachments = await uploadPlaygroundAttachments(
+            bound.server.id,
+            files
+          )
+        } catch (error) {
+          const serverMessage = getServerMessage(error)
+          if (serverMessage) {
+            toast.error(t(serverMessage))
+          } else if (error instanceof Error && error.message) {
+            toast.error(t(error.message))
+          } else {
+            toast.error(t(PLAYGROUND_ATTACHMENT_ERRORS.UPLOAD_FAILED))
+          }
+          throw error
         }
-        throw error
       }
-      submitTurn(text, attachments)
+      // Attachments are uploaded first: a search failure then leaves the
+      // message and its files in the composer instead of charging for a turn
+      // the user never sent.
+      const search = await runWebSearch(text)
+      submitTurn(text, attachments, search)
     },
-    [activeSession, submitTurn, sync, t]
+    [activeSession, runWebSearch, submitTurn, sync, t]
+  )
+
+  const handleSelectPrompt = useCallback(
+    (prompt: string) => {
+      // Starter questions are ordinary turns: they honor the search toggle and
+      // surface a failed search exactly like the composer.
+      void handleInputSubmit(prompt).catch(() => undefined)
+    },
+    [handleInputSubmit]
   )
 
   const handleStop = useCallback(() => {
@@ -998,7 +1057,7 @@ function PlaygroundContent(props: {
               onEditMessage={handleEditMessage}
               onDeleteMessage={handleDeleteMessage}
               onSelectVersion={handleSelectMessageVersion}
-              onSelectPrompt={submitTurn}
+              onSelectPrompt={handleSelectPrompt}
               onProvideToolResult={handleProvideToolResult}
               onDenyToolCall={handleDenyToolCall}
               onContinueToolCalls={handleContinueToolCalls}
@@ -1102,8 +1161,11 @@ function PlaygroundContent(props: {
               onSubmit={handleInputSubmit}
               onSummarizeContext={handleSummarizeContext}
               onSystemPromptChange={updateSystemPrompt}
+              onWebSearchChange={setWebSearchEnabled}
               parameterEnabled={parameterEnabled}
               systemPrompt={systemPrompt}
+              webSearchAvailable={webSearchAvailable}
+              webSearchEnabled={webSearchEnabled}
               hasMessages={messages.length > 0}
             />
           </div>
