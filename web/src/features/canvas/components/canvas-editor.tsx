@@ -643,6 +643,7 @@ export function CanvasEditor(props: CanvasEditorProps) {
         active
         disabled={props.disabled}
         group={workflowOptions.group}
+        modelCapabilities={workflowOptions.modelCapabilities}
         models={workflowOptions.models}
         onSendToCanvas={handleAddSeeds}
       />

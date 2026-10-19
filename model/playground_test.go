@@ -6910,6 +6910,7 @@ func TestPlaygroundTaskGenerationMetadataRoundTripAndFilters(t *testing.T) {
 		t.Run(dialect, func(t *testing.T) {
 			db := playgroundTestDB(t, dialect)
 			seed11, seed22, seed33 := int64(11), int64(22), int64(33)
+			countOne, countTwo := 1, 2
 			tasks := []model.Task{
 				{
 					TaskID: "generation-image", UserId: 7, Platform: "gpt-image-1", Status: model.TaskStatusSuccess,
@@ -6981,6 +6982,11 @@ func TestPlaygroundTaskGenerationMetadataRoundTripAndFilters(t *testing.T) {
 				{name: "like wildcards stay literal", params: model.SyncTaskQueryParams{GenerationPrompt: "100%_dusk"}, total: 1, ids: []string{"generation-image"}},
 				{name: "model is exact", params: model.SyncTaskQueryParams{GenerationModel: "gpt-image-1"}, total: 2, ids: []string{"generation-reflection", "generation-image"}},
 				{name: "seed is exact", params: model.SyncTaskQueryParams{GenerationSeed: &seed11}, total: 1, ids: []string{"generation-image"}},
+				{name: "size is exact", params: model.SyncTaskQueryParams{GenerationSize: "1280x720"}, total: 1, ids: []string{"generation-video"}},
+				{name: "quality is exact", params: model.SyncTaskQueryParams{GenerationQuality: "high"}, total: 1, ids: []string{"generation-image"}},
+				{name: "count is exact", params: model.SyncTaskQueryParams{GenerationCount: &countTwo}, total: 1, ids: []string{"generation-image"}},
+				{name: "metadata filters combine", params: model.SyncTaskQueryParams{GenerationPrompt: "lighthouse", GenerationModel: "gpt-image-1", GenerationSize: "1024x1024", GenerationQuality: "high", GenerationSeed: &seed11, GenerationCount: &countTwo}, total: 1, ids: []string{"generation-image"}},
+				{name: "count filters exclude other counts", params: model.SyncTaskQueryParams{GenerationCount: &countOne}, total: 2, ids: []string{"generation-wildcard", "generation-reflection"}},
 				{name: "missing metadata never matches", params: model.SyncTaskQueryParams{GenerationSeed: new(int64)}, total: 0},
 				{name: "filters combine", params: model.SyncTaskQueryParams{GenerationPrompt: "lighthouse", GenerationModel: "gpt-image-1", GenerationSeed: &seed33}, total: 1, ids: []string{"generation-reflection"}},
 			}

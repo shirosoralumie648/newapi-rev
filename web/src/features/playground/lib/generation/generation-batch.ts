@@ -102,6 +102,8 @@ export interface GenerationBatchPlan {
   group: string
   requests: GenerationBatchRequest[]
   blocked: GenerationBatchBlockedModel[]
+  /** Why the plan cannot run; absent when `requests` is usable. */
+  errorKey?: string
 }
 
 export interface GenerationBatchPlanInput {
@@ -148,6 +150,19 @@ export function clampGenerationVariationCount(count: number): number {
     return PLAYGROUND_GENERATION_VARIATION_MIN
   }
   return Math.min(whole, max)
+}
+
+/** Trims and de-duplicates a model selection while preserving its order. */
+export function normalizeGenerationModels(models: readonly string[]): string[] {
+  const seen = new Set<string>()
+  const normalized: string[] = []
+  for (const raw of models) {
+    const model = raw.trim()
+    if (!model || seen.has(model)) continue
+    seen.add(model)
+    normalized.push(model)
+  }
+  return normalized
 }
 
 function generationSeedSpan(): number {
@@ -406,10 +421,30 @@ export function buildGenerationBatchPlan(
   input: GenerationBatchPlanInput
 ): GenerationBatchPlan {
   const prompt = input.prompt.trim()
-  const models =
-    input.mode === 'compare'
-      ? input.models.slice(0, PLAYGROUND_GENERATION_COMPARE_MAX)
-      : input.models.slice(0, 1)
+  const models = normalizeGenerationModels(input.models)
+  const emptyPlan = (errorKey: string): GenerationBatchPlan => ({
+    mode: input.mode,
+    kind: input.kind,
+    prompt,
+    group: input.group,
+    requests: [],
+    blocked: [],
+    errorKey,
+  })
+  if (!prompt) {
+    return emptyPlan(PLAYGROUND_GENERATION_BATCH_MESSAGES.PROMPT_REQUIRED)
+  }
+  if (models.length === 0) {
+    return emptyPlan(PLAYGROUND_GENERATION_BATCH_MESSAGES.MODEL_REQUIRED)
+  }
+  if (
+    input.mode === 'compare' &&
+    (models.length < PLAYGROUND_GENERATION_COMPARE_MIN ||
+      models.length > PLAYGROUND_GENERATION_COMPARE_MAX)
+  ) {
+    return emptyPlan(PLAYGROUND_GENERATION_BATCH_MESSAGES.COMPARE_SELECTION)
+  }
+  const selectedModels = input.mode === 'compare' ? models : models.slice(0, 1)
   const seeds =
     input.mode === 'compare'
       ? [normalizeGenerationSeed(input.baseSeed, input.randomSeed)]
@@ -421,7 +456,7 @@ export function buildGenerationBatchPlan(
         })
   const requests: GenerationBatchRequest[] = []
   const blocked: GenerationBatchBlockedModel[] = []
-  for (const model of models) {
+  for (const model of selectedModels) {
     const resolved = resolveGenerationRequestParams({
       kind: input.kind,
       model,
@@ -528,6 +563,22 @@ export function collectGenerationSchemaOptions(
     videoSizes: [...videoSizes],
     qualities: [...qualities],
     durations: [...durations],
+  }
+}
+
+/**
+ * Merges two per-model option sets, preserving first-seen order, so several
+ * compared models offer the union of what any of them accepts.
+ */
+export function mergeGenerationSchemaOptions(
+  target: GenerationSchemaOptions,
+  source: GenerationSchemaOptions
+): GenerationSchemaOptions {
+  return {
+    imageSizes: uniqueStrings([...target.imageSizes, ...source.imageSizes]),
+    videoSizes: uniqueStrings([...target.videoSizes, ...source.videoSizes]),
+    qualities: uniqueStrings([...target.qualities, ...source.qualities]),
+    durations: uniqueNumbers([...target.durations, ...source.durations]),
   }
 }
 
