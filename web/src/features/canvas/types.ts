@@ -55,10 +55,17 @@ export type CanvasWorkflowGenerationKind = 'image' | 'video'
 export type CanvasAssistantMode = 'chat' | 'image' | 'video'
 
 /**
- * Which view the canvas inspector shows: the selected node's details, or the
- * assistant conversation about the selection and its upstream chain.
+ * Which view the canvas inspector shows. The canvas owns the whole creation
+ * domain: node details and the assistant, the media generation form and task
+ * list, the asset library and the artifact browser. The conversation workspace
+ * no longer renders any of these panels.
  */
-export type CanvasInspectorView = 'details' | 'assistant'
+export type CanvasInspectorView =
+  | 'details'
+  | 'assistant'
+  | 'generate'
+  | 'library'
+  | 'artifacts'
 
 /**
  * The workflow configuration and last-run state of one step node. Only

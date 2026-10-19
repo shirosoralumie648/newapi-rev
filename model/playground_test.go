@@ -23,9 +23,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -115,14 +118,14 @@ func playgroundTestDB(t *testing.T, dialect string) *gorm.DB {
 	common.SetDatabaseTypes(common.DatabaseType(dialect), previousLog)
 	model.DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundUserUsage{}, &model.PlaygroundUpload{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMessage{}, &model.PlaygroundSession{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundKnowledgeChunk{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundUserUsage{}, &model.PlaygroundUpload{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMessage{}, &model.PlaygroundSession{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
 		model.DB = previous
 		common.SetDatabaseTypes(previousMain, previousLog)
 	})
-	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUpload{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUpload{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeChunk{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -174,6 +177,12 @@ func playgroundRequest(t *testing.T, user int, method, path string, body any, ha
 		}
 		if parts[3] == "uploads" {
 			c.Params = append(c.Params, gin.Param{Key: "uploadId", Value: parts[4]})
+		}
+		if parts[3] == "knowledge-bases" {
+			c.Params = append(c.Params, gin.Param{Key: "kbId", Value: parts[4]})
+			if len(parts) > 6 {
+				c.Params = append(c.Params, gin.Param{Key: "documentId", Value: parts[6]})
+			}
 		}
 	}
 	if len(parts) > 6 {
@@ -313,6 +322,7 @@ func TestPlaygroundRejectsInvalidSnapshotsWithoutReplacingHistory(t *testing.T) 
 		{"invalid role", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "owner", "versions": []any{map[string]any{"id": "v", "content": "text"}}}}}}},
 		{"oversized body", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "user", "versions": []any{map[string]any{"id": "v", "content": strings.Repeat("x", 2<<20)}}}}}}},
 		{"oversized request id", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "assistant", "versions": []any{map[string]any{"id": "v", "content": "text", "requestId": strings.Repeat("r", 65)}}}}}}},
+		{"oversized finish reason", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "assistant", "versions": []any{map[string]any{"id": "v", "content": "text", "finishReason": strings.Repeat("f", 65)}}}}}}},
 		{"empty request id", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "assistant", "versions": []any{map[string]any{"id": "v", "content": "text", "requestId": ""}}}}}}},
 		{"negative usage", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "assistant", "versions": []any{map[string]any{"id": "v", "content": "text", "usage": map[string]any{"promptTokens": -1, "completionTokens": 0, "totalTokens": 0}}}}}}}},
 		{"fractional usage", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "assistant", "versions": []any{map[string]any{"id": "v", "content": "text", "usage": map[string]any{"promptTokens": 1.5, "completionTokens": 0, "totalTokens": 1.5}}}}}}}},
@@ -2266,6 +2276,18 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodGet, "/api/playground/presets/missing"},
 		{http.MethodPatch, "/api/playground/presets/missing"},
 		{http.MethodDelete, "/api/playground/presets/missing"},
+		{http.MethodGet, "/api/playground/knowledge-bases"},
+		{http.MethodPost, "/api/playground/knowledge-bases"},
+		{http.MethodGet, "/api/playground/knowledge-bases/missing"},
+		{http.MethodPatch, "/api/playground/knowledge-bases/missing"},
+		{http.MethodDelete, "/api/playground/knowledge-bases/missing"},
+		{http.MethodGet, "/api/playground/knowledge-bases/missing/documents"},
+		{http.MethodPost, "/api/playground/knowledge-bases/missing/documents"},
+		{http.MethodGet, "/api/playground/knowledge-bases/missing/documents/missing"},
+		{http.MethodDelete, "/api/playground/knowledge-bases/missing/documents/missing"},
+		{http.MethodPost, "/api/playground/knowledge-bases/missing/documents/missing/reindex"},
+		{http.MethodPost, "/api/playground/knowledge-bases/missing/documents/missing/failure"},
+		{http.MethodPut, "/api/playground/knowledge-bases/missing/documents/missing/chunks"},
 		{http.MethodGet, "/api/playground/snippets"},
 		{http.MethodPost, "/api/playground/snippets"},
 		{http.MethodGet, "/api/playground/snippets/missing"},
@@ -2577,8 +2599,9 @@ func TestPlaygroundMessageVersionBranches(t *testing.T) {
 						"versions": []any{
 							map[string]any{"id": "a1", "content": "First answer"},
 							map[string]any{"id": "a2", "content": "Regenerated answer",
-								"requestId": "req-branch-2",
-								"usage":     map[string]any{"promptTokens": 12, "completionTokens": 34, "totalTokens": 46}},
+								"requestId":    "req-branch-2",
+								"finishReason": "length",
+								"usage":        map[string]any{"promptTokens": 12, "completionTokens": 34, "totalTokens": 46}},
 						},
 					}},
 				},
@@ -2598,6 +2621,9 @@ func TestPlaygroundMessageVersionBranches(t *testing.T) {
 			// The generation record of the selected version round-trips verbatim.
 			assert.Contains(t, string(messages[1].Payload), `"requestId":"req-branch-2"`)
 			assert.Contains(t, string(messages[1].Payload), `"totalTokens":46`)
+			// A truncated reply keeps its provider finish reason so the client
+			// can offer "continue generation" after a reload.
+			assert.Contains(t, string(messages[1].Payload), `"finishReason":"length"`)
 
 			for _, index := range []int{-1, 2} {
 				invalid := map[string]any{
@@ -3263,6 +3289,8 @@ func playgroundUsageCounterValues(usage model.PlaygroundUserUsage) []int64 {
 		usage.AttachmentPendingCount, usage.AttachmentPendingBytes,
 		usage.ArtifactCount, usage.ArtifactBytes,
 		usage.CanvasCount, usage.CanvasBytes,
+		usage.KnowledgeBaseCount, usage.KnowledgeBaseDocumentCount,
+		usage.KnowledgeBaseChunkCount, usage.KnowledgeBaseBytes,
 	}
 }
 
@@ -4958,6 +4986,298 @@ func TestPlaygroundStorageBillingEgressLimits(t *testing.T) {
 			content = playgroundRequest(t, 7, http.MethodGet, contentPath, nil, controller.GetPlaygroundAttachmentContent)
 			require.Equal(t, http.StatusOK, content.Code, content.Body.String())
 			assert.Equal(t, png, content.Body.Bytes())
+		})
+	}
+}
+
+// playgroundKnowledgeEmbedding encodes one vector exactly as the browser sends
+// it: little-endian float32 values, base64-decoded by the handler before the
+// model validates the dimension and finiteness.
+func playgroundKnowledgeEmbedding(values ...float32) []byte {
+	encoded := make([]byte, len(values)*4)
+	for index, value := range values {
+		binary.LittleEndian.PutUint32(encoded[index*4:], math.Float32bits(value))
+	}
+	return encoded
+}
+
+type playgroundKnowledgeDocumentJSON struct {
+	ID              string `json:"id"`
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+	Filename        string `json:"filename"`
+	MediaType       string `json:"media_type"`
+	ByteSize        int64  `json:"byte_size"`
+	TextBytes       int64  `json:"text_bytes"`
+	PageCount       int    `json:"page_count"`
+	Status          string `json:"status"`
+	ErrorMessage    string `json:"error_message"`
+	EmbeddingModel  string `json:"embedding_model"`
+	EmbeddingDims   int    `json:"embedding_dims"`
+	ChunkCount      int    `json:"chunk_count"`
+	Text            string `json:"text"`
+}
+
+func playgroundKnowledgeResponseData(t *testing.T, response *httptest.ResponseRecorder, target any) {
+	t.Helper()
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var envelope struct {
+		Success bool
+		Data    json.RawMessage
+	}
+	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &envelope))
+	require.True(t, envelope.Success, response.Body.String())
+	require.NoError(t, common.Unmarshal(envelope.Data, target))
+}
+
+// TestPlaygroundKnowledgeBaseMatrix covers the LB-07 pipeline end to end on
+// every supported database: base/document quotas, upload plus CH-05 extraction,
+// client-computed embedding storage, reindex/retry, counter and usage figures,
+// object cleanup and owner isolation. Embedding itself runs through the normal
+// relay, so no provider is called here; the test feeds the exact wire shape the
+// browser submits after calling /pg/embeddings.
+func TestPlaygroundKnowledgeBaseMatrix(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+				policy.KnowledgeBaseUserMaxCount = 1
+				policy.KnowledgeBaseDocumentUserMaxCount = 3
+				policy.KnowledgeBaseDocumentMaxCount = 2
+				policy.KnowledgeBaseChunkUserMaxCount = 4
+				policy.KnowledgeBaseChunkMaxCount = 3
+				policy.KnowledgeBaseChunkTextMaxBytes = 8
+				policy.KnowledgeBaseEmbeddingMaxDims = 8
+				policy.KnowledgeBaseUserMaxBytes = 1 << 20
+			})
+			basePath := "/api/playground/knowledge-bases"
+			var baseEnvelope struct {
+				Created       bool `json:"created"`
+				KnowledgeBase struct {
+					ID             string `json:"id"`
+					Name           string `json:"name"`
+					EmbeddingModel string `json:"embedding_model"`
+					DocumentCount  int64  `json:"document_count"`
+					ChunkCount     int64  `json:"chunk_count"`
+					ByteSize       int64  `json:"byte_size"`
+				} `json:"knowledge_base"`
+			}
+			playgroundKnowledgeResponseData(t, playgroundRequest(t, 7, http.MethodPost, basePath, map[string]any{
+				"client_key": "kb-one", "name": "Handbook", "embedding_model": "embedding-3-small",
+			}, controller.CreatePlaygroundKnowledgeBase), &baseEnvelope)
+			require.True(t, baseEnvelope.Created)
+			baseID := baseEnvelope.KnowledgeBase.ID
+			require.NotEmpty(t, baseID)
+			assert.Equal(t, "Handbook", baseEnvelope.KnowledgeBase.Name)
+			assert.Equal(t, "embedding-3-small", baseEnvelope.KnowledgeBase.EmbeddingModel)
+
+			// A replay acknowledges the stored base; a different payload under
+			// the same client key is a conflict, and the account base budget is
+			// enforced.
+			playgroundKnowledgeResponseData(t, playgroundRequest(t, 7, http.MethodPost, basePath, map[string]any{
+				"client_key": "kb-one", "name": "Handbook", "embedding_model": "embedding-3-small",
+			}, controller.CreatePlaygroundKnowledgeBase), &baseEnvelope)
+			assert.False(t, baseEnvelope.Created)
+			assert.Equal(t, baseID, baseEnvelope.KnowledgeBase.ID)
+			conflict := playgroundRequest(t, 7, http.MethodPost, basePath, map[string]any{
+				"client_key": "kb-one", "name": "Other", "embedding_model": "embedding-3-small",
+			}, controller.CreatePlaygroundKnowledgeBase)
+			assert.Equal(t, http.StatusConflict, conflict.Code, conflict.Body.String())
+			secondBase := playgroundRequest(t, 7, http.MethodPost, basePath, map[string]any{
+				"client_key": "kb-two", "name": "Second", "embedding_model": "embedding-3-small",
+			}, controller.CreatePlaygroundKnowledgeBase)
+			assert.Equal(t, http.StatusUnprocessableEntity, secondBase.Code, secondBase.Body.String())
+
+			// A base is always owner-scoped.
+			foreign := playgroundRequest(t, 8, http.MethodGet, basePath+"/"+baseID, nil, controller.GetPlaygroundKnowledgeBase)
+			assert.Equal(t, http.StatusNotFound, foreign.Code, foreign.Body.String())
+
+			documentPath := basePath + "/" + baseID + "/documents"
+			var documentEnvelope struct {
+				Created  bool                            `json:"created"`
+				Document playgroundKnowledgeDocumentJSON `json:"document"`
+			}
+			source := []byte("Alpha paragraph.\r\nBeta paragraph.\r\n")
+			playgroundKnowledgeResponseData(t, playgroundRequest(t, 7, http.MethodPost, documentPath, map[string]any{
+				"client_key": "doc-one", "media_type": "text/plain", "filename": "handbook.txt",
+				"data": base64.StdEncoding.EncodeToString(source),
+			}, controller.CreatePlaygroundKnowledgeDocument), &documentEnvelope)
+			require.True(t, documentEnvelope.Created)
+			documentID := documentEnvelope.Document.ID
+			require.NotEmpty(t, documentID)
+			assert.Equal(t, model.PlaygroundKnowledgeDocumentStatusPending, documentEnvelope.Document.Status)
+			assert.Equal(t, "Alpha paragraph.\nBeta paragraph.\n", documentEnvelope.Document.Text)
+			assert.EqualValues(t, len(source), documentEnvelope.Document.ByteSize)
+			assert.EqualValues(t, len(documentEnvelope.Document.Text), documentEnvelope.Document.TextBytes)
+
+			// The source bytes live in the object store under the documented key.
+			var stored model.PlaygroundKnowledgeDocument
+			require.NoError(t, db.Where("id = ?", documentID).First(&stored).Error)
+			assert.True(t, strings.HasPrefix(stored.ObjectKey, "pg/7/knowledge/"), stored.ObjectKey)
+			store := objectstore.DefaultStore()
+			require.NotNil(t, store)
+			reader, _, err := store.Get(context.Background(), stored.ObjectKey)
+			require.NoError(t, err)
+			objectBytes, err := io.ReadAll(reader)
+			require.NoError(t, err)
+			require.NoError(t, reader.Close())
+			assert.Equal(t, source, objectBytes)
+
+			// Replaying the same client key acknowledges the document, while a
+			// different body is a conflict.
+			playgroundKnowledgeResponseData(t, playgroundRequest(t, 7, http.MethodPost, documentPath, map[string]any{
+				"client_key": "doc-one", "media_type": "text/plain", "filename": "handbook.txt",
+				"data": base64.StdEncoding.EncodeToString(source),
+			}, controller.CreatePlaygroundKnowledgeDocument), &documentEnvelope)
+			assert.False(t, documentEnvelope.Created)
+			assert.Equal(t, documentID, documentEnvelope.Document.ID)
+			docConflict := playgroundRequest(t, 7, http.MethodPost, documentPath, map[string]any{
+				"client_key": "doc-one", "media_type": "text/plain", "filename": "handbook.txt",
+				"data": base64.StdEncoding.EncodeToString([]byte("different")),
+			}, controller.CreatePlaygroundKnowledgeDocument)
+			assert.Equal(t, http.StatusConflict, docConflict.Code, docConflict.Body.String())
+
+			// A client-reported embedding failure keeps the extracted text, and
+			// reindexing resets the chunks so the same text can be tried again.
+			failed := playgroundRequest(t, 7, http.MethodPost, documentPath+"/"+documentID+"/failure", map[string]any{
+				"message": "embedding provider rejected the request",
+			}, controller.FailPlaygroundKnowledgeDocument)
+			require.Equal(t, http.StatusOK, failed.Code, failed.Body.String())
+			var failedDocument playgroundKnowledgeDocumentJSON
+			playgroundKnowledgeResponseData(t, failed, &failedDocument)
+			assert.Equal(t, model.PlaygroundKnowledgeDocumentStatusFailed, failedDocument.Status)
+			assert.Equal(t, "embedding provider rejected the request", failedDocument.ErrorMessage)
+			detail := playgroundRequest(t, 7, http.MethodGet, documentPath+"/"+documentID, nil, controller.GetPlaygroundKnowledgeDocument)
+			var detailDocument playgroundKnowledgeDocumentJSON
+			playgroundKnowledgeResponseData(t, detail, &detailDocument)
+			assert.Equal(t, documentEnvelope.Document.Text, detailDocument.Text)
+			reindexed := playgroundRequest(t, 7, http.MethodPost, documentPath+"/"+documentID+"/reindex", nil, controller.ReindexPlaygroundKnowledgeDocument)
+			var reindexedDocument playgroundKnowledgeDocumentJSON
+			playgroundKnowledgeResponseData(t, reindexed, &reindexedDocument)
+			assert.Equal(t, model.PlaygroundKnowledgeDocumentStatusPending, reindexedDocument.Status)
+			assert.Zero(t, reindexedDocument.ChunkCount)
+			assert.Equal(t, documentEnvelope.Document.Text, reindexedDocument.Text)
+
+			// Store one complete set of client-computed chunks. The wire shape
+			// mirrors the browser after /pg/embeddings: base64 float32 vectors
+			// plus contiguous indexes.
+			chunksPath := documentPath + "/" + documentID + "/chunks"
+			chunksBody := map[string]any{
+				"embedding_model": "embedding-3-small",
+				"dims":            3,
+				"chunks": []map[string]any{
+					{"index": 0, "text": "Alpha", "embedding": base64.StdEncoding.EncodeToString(playgroundKnowledgeEmbedding(0.1, 0.2, 0.3))},
+					{"index": 1, "text": "Beta", "embedding": base64.StdEncoding.EncodeToString(playgroundKnowledgeEmbedding(0.4, 0.5, 0.6))},
+				},
+			}
+			ready := playgroundRequest(t, 7, http.MethodPut, chunksPath, chunksBody, controller.ReplacePlaygroundKnowledgeDocumentChunks)
+			var readyDocument playgroundKnowledgeDocumentJSON
+			playgroundKnowledgeResponseData(t, ready, &readyDocument)
+			assert.Equal(t, model.PlaygroundKnowledgeDocumentStatusReady, readyDocument.Status)
+			assert.Equal(t, 2, readyDocument.ChunkCount)
+			assert.Equal(t, 3, readyDocument.EmbeddingDims)
+			assert.Equal(t, "embedding-3-small", readyDocument.EmbeddingModel)
+
+			counters := playgroundUsageCounters(t, db, 7)
+			assert.EqualValues(t, 1, counters.KnowledgeBaseCount)
+			assert.EqualValues(t, 1, counters.KnowledgeBaseDocumentCount)
+			assert.EqualValues(t, 2, counters.KnowledgeBaseChunkCount)
+			assert.Positive(t, counters.KnowledgeBaseBytes)
+			usage, err := model.PlaygroundUsageForUser(7)
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, usage.KnowledgeBases.Used)
+			assert.EqualValues(t, 1, usage.KnowledgeBases.Limit)
+			assert.EqualValues(t, 1, usage.KnowledgeBaseDocuments.Used)
+			assert.EqualValues(t, 2, usage.KnowledgeBaseChunks.Used)
+			assert.EqualValues(t, counters.KnowledgeBaseBytes, usage.KnowledgeBaseChunks.UsedBytes)
+			assert.EqualValues(t, counters.ObjectBytes, usage.Storage.UsedBytes)
+			footprint, err := model.PlaygroundStorageBillableFootprint(7)
+			require.NoError(t, err)
+			assert.GreaterOrEqual(t, footprint, counters.KnowledgeBaseBytes)
+
+			// Replacing the set adjusts the counters by the difference rather
+			// than accumulating stale chunks.
+			chunksBody["chunks"] = []map[string]any{
+				{"index": 0, "text": "Gamma", "embedding": base64.StdEncoding.EncodeToString(playgroundKnowledgeEmbedding(0.7, 0.8, 0.9))},
+			}
+			playgroundKnowledgeResponseData(t, playgroundRequest(t, 7, http.MethodPut, chunksPath, chunksBody, controller.ReplacePlaygroundKnowledgeDocumentChunks), &readyDocument)
+			assert.Equal(t, 1, readyDocument.ChunkCount)
+			counters = playgroundUsageCounters(t, db, 7)
+			assert.EqualValues(t, 1, counters.KnowledgeBaseChunkCount)
+
+			// Non-contiguous indexes, false dimensions and oversized text are
+			// rejected before anything is stored.
+			badIndex := playgroundRequest(t, 7, http.MethodPut, chunksPath, map[string]any{
+				"embedding_model": "embedding-3-small", "dims": 3,
+				"chunks": []map[string]any{{"index": 1, "text": "Alpha", "embedding": base64.StdEncoding.EncodeToString(playgroundKnowledgeEmbedding(0.1, 0.2, 0.3))}},
+			}, controller.ReplacePlaygroundKnowledgeDocumentChunks)
+			assert.Equal(t, http.StatusBadRequest, badIndex.Code, badIndex.Body.String())
+			badDims := playgroundRequest(t, 7, http.MethodPut, chunksPath, map[string]any{
+				"embedding_model": "embedding-3-small", "dims": 4,
+				"chunks": []map[string]any{{"index": 0, "text": "Alpha", "embedding": base64.StdEncoding.EncodeToString(playgroundKnowledgeEmbedding(0.1, 0.2, 0.3))}},
+			}, controller.ReplacePlaygroundKnowledgeDocumentChunks)
+			assert.Equal(t, http.StatusBadRequest, badDims.Code, badDims.Body.String())
+			oversizedText := playgroundRequest(t, 7, http.MethodPut, chunksPath, map[string]any{
+				"embedding_model": "embedding-3-small", "dims": 3,
+				"chunks": []map[string]any{{"index": 0, "text": "123456789", "embedding": base64.StdEncoding.EncodeToString(playgroundKnowledgeEmbedding(0.1, 0.2, 0.3))}},
+			}, controller.ReplacePlaygroundKnowledgeDocumentChunks)
+			assert.Equal(t, http.StatusUnprocessableEntity, oversizedText.Code, oversizedText.Body.String())
+
+			// Changing the base model makes old chunks stale; the client must
+			// reindex with the new model, and a mismatch is refused.
+			playgroundKnowledgeResponseData(t, playgroundRequest(t, 7, http.MethodPatch, basePath+"/"+baseID, map[string]any{
+				"embedding_model": "embedding-3-large",
+			}, controller.UpdatePlaygroundKnowledgeBase), &baseEnvelope)
+			assert.Equal(t, "embedding-3-large", baseEnvelope.KnowledgeBase.EmbeddingModel)
+			stale := playgroundRequest(t, 7, http.MethodPut, chunksPath, chunksBody, controller.ReplacePlaygroundKnowledgeDocumentChunks)
+			assert.Equal(t, http.StatusBadRequest, stale.Code, stale.Body.String())
+			assert.Contains(t, stale.Body.String(), "PLAYGROUND_KNOWLEDGE_EMBEDDING_MODEL_MISMATCH")
+			playgroundRequest(t, 7, http.MethodPost, documentPath+"/"+documentID+"/reindex", nil, controller.ReindexPlaygroundKnowledgeDocument)
+			chunksBody["embedding_model"] = "embedding-3-large"
+			playgroundKnowledgeResponseData(t, playgroundRequest(t, 7, http.MethodPut, chunksPath, chunksBody, controller.ReplacePlaygroundKnowledgeDocumentChunks), &readyDocument)
+			assert.Equal(t, "embedding-3-large", readyDocument.EmbeddingModel)
+
+			// A second document is allowed; a third crosses the per-base cap.
+			secondSource := []byte("Second document body.")
+			playgroundKnowledgeResponseData(t, playgroundRequest(t, 7, http.MethodPost, documentPath, map[string]any{
+				"client_key": "doc-two", "media_type": "text/plain", "filename": "second.txt",
+				"data": base64.StdEncoding.EncodeToString(secondSource),
+			}, controller.CreatePlaygroundKnowledgeDocument), &documentEnvelope)
+			secondDocumentID := documentEnvelope.Document.ID
+			require.NotEmpty(t, secondDocumentID)
+			thirdDocument := playgroundRequest(t, 7, http.MethodPost, documentPath, map[string]any{
+				"client_key": "doc-three", "media_type": "text/plain", "filename": "third.txt",
+				"data": base64.StdEncoding.EncodeToString([]byte("Third document body.")),
+			}, controller.CreatePlaygroundKnowledgeDocument)
+			assert.Equal(t, http.StatusUnprocessableEntity, thirdDocument.Code, thirdDocument.Body.String())
+			listed := playgroundRequest(t, 7, http.MethodGet, documentPath, nil, controller.ListPlaygroundKnowledgeDocuments)
+			require.Equal(t, http.StatusOK, listed.Code, listed.Body.String())
+			assert.Contains(t, listed.Body.String(), `"total":2`)
+
+			// Deleting one document releases its chunks, bytes and object.
+			var secondStored model.PlaygroundKnowledgeDocument
+			require.NoError(t, db.Where("id = ?", secondDocumentID).First(&secondStored).Error)
+			require.NoError(t, model.DeletePlaygroundKnowledgeDocument(7, baseID, documentID))
+			counters = playgroundUsageCounters(t, db, 7)
+			assert.EqualValues(t, 1, counters.KnowledgeBaseDocumentCount)
+			assert.Zero(t, counters.KnowledgeBaseChunkCount)
+			_, err = store.Head(context.Background(), stored.ObjectKey)
+			assert.ErrorIs(t, err, objectstore.ErrObjectNotFound)
+			foreignDocument := playgroundRequest(t, 8, http.MethodGet, documentPath+"/"+secondDocumentID, nil, controller.GetPlaygroundKnowledgeDocument)
+			assert.Equal(t, http.StatusNotFound, foreignDocument.Code)
+
+			// Deleting the base releases the remaining document and all counters.
+			require.NoError(t, model.DeletePlaygroundKnowledgeBase(7, baseID))
+			counters = playgroundUsageCounters(t, db, 7)
+			assert.Zero(t, counters.KnowledgeBaseCount)
+			assert.Zero(t, counters.KnowledgeBaseDocumentCount)
+			assert.Zero(t, counters.KnowledgeBaseChunkCount)
+			assert.Zero(t, counters.KnowledgeBaseBytes)
+			assert.Zero(t, counters.ObjectBytes)
+			_, err = store.Head(context.Background(), secondStored.ObjectKey)
+			assert.ErrorIs(t, err, objectstore.ErrObjectNotFound)
+			var remaining int64
+			require.NoError(t, db.Model(&model.PlaygroundKnowledgeChunk{}).Where("user_id = ?", 7).Count(&remaining).Error)
+			assert.Zero(t, remaining)
 		})
 	}
 }

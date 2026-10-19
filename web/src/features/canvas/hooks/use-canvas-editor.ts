@@ -259,6 +259,46 @@ export function useCanvasEditor(
     [commit]
   )
 
+  /**
+   * Adds a small graph in one undoable step: the entries become nodes and the
+   * links connect them by entry index. A link that would exceed the edge budget
+   * drops the whole graph instead of saving a partial one, and a graph larger
+   * than the remaining node room is refused for the same reason.
+   */
+  const addGraph = useCallback(
+    (
+      entries: CanvasAddedNode[],
+      links: { source: number; target: number }[]
+    ): string[] | null => {
+      if (entries.length === 0) return null
+      if (
+        nodesRef.current.length + entries.length > CANVAS_MAX_NODES ||
+        edgesRef.current.length + links.length > CANVAS_MAX_EDGES
+      ) {
+        return null
+      }
+      const created = entries.map((entry) =>
+        createCanvasNode(entry.kind, entry.position, entry.data)
+      )
+      const createdEdges = links.flatMap((link) => {
+        const source = created[link.source]
+        const target = created[link.target]
+        if (!source || !target || source.id === target.id) return []
+        return [createCanvasEdge(source.id, target.id)]
+      })
+      commit(
+        [...nodesRef.current, ...created],
+        [...edgesRef.current, ...createdEdges],
+        {
+          record: true,
+          notify: true,
+        }
+      )
+      return created.map((node) => node.id)
+    },
+    [commit]
+  )
+
   const addNode = useCallback(
     (kind: CanvasNodeKind, position?: { x: number; y: number }): boolean => {
       const cascade = CANVAS_NODE_ADD_OFFSET * (nodesRef.current.length % 8)
@@ -486,6 +526,18 @@ export function useCanvasEditor(
     commit(nextNodes, edgesRef.current, { record: false, notify: false })
   }, [commit])
 
+  /** Selects exactly one node (or clears the selection) without a history entry. */
+  const selectNode = useCallback(
+    (id: string | null) => {
+      const nextNodes = nodesRef.current.map((node) => {
+        const selected = node.id === id
+        return node.selected === selected ? node : { ...node, selected }
+      })
+      commit(nextNodes, edgesRef.current, { record: false, notify: false })
+    },
+    [commit]
+  )
+
   const selectedNode = nodes.find((node) => node.selected === true) ?? null
   const canUndo = history.past.length > 0
   const canRedo = history.future.length > 0
@@ -515,6 +567,7 @@ export function useCanvasEditor(
     handleConnect,
     addNode,
     addNodes,
+    addGraph,
     addLinkedNode,
     updateNodeData,
     deleteNode,
@@ -527,5 +580,6 @@ export function useCanvasEditor(
     ungroupSelection,
     replaceDocument,
     clearSelection,
+    selectNode,
   }
 }

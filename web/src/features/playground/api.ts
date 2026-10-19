@@ -946,6 +946,9 @@ const playgroundUsageSchema = z.object({
   artifacts: playgroundUsageMetricSchema,
   canvas: playgroundUsageMetricSchema,
   canvas_snapshots: playgroundUsageMetricSchema,
+  knowledge_bases: playgroundUsageMetricSchema,
+  kb_documents: playgroundUsageMetricSchema,
+  kb_chunks: playgroundUsageMetricSchema,
   storage: playgroundUsageMetricSchema,
   tasks: playgroundUsageMetricSchema,
 })
@@ -972,6 +975,9 @@ export interface PlaygroundResourceUsage {
   artifacts: PlaygroundUsageMetric
   canvas: PlaygroundUsageMetric
   canvasSnapshots: PlaygroundUsageMetric
+  knowledgeBases: PlaygroundUsageMetric
+  knowledgeBaseDocuments: PlaygroundUsageMetric
+  knowledgeBaseChunks: PlaygroundUsageMetric
   storage: PlaygroundUsageMetric
   tasks: PlaygroundUsageMetric
 }
@@ -1038,6 +1044,9 @@ export async function getPlaygroundUsage(
     artifacts: toMetric(metrics.artifacts),
     canvas: toMetric(metrics.canvas),
     canvasSnapshots: toMetric(metrics.canvas_snapshots),
+    knowledgeBases: toMetric(metrics.knowledge_bases),
+    knowledgeBaseDocuments: toMetric(metrics.kb_documents),
+    knowledgeBaseChunks: toMetric(metrics.kb_chunks),
     storage: toMetric(metrics.storage),
     tasks: toMetric(metrics.tasks),
   }

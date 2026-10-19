@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { GlobeIcon, PaperclipIcon, Trash2Icon } from 'lucide-react'
+import { GlobeIcon, Trash2Icon } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -24,7 +24,6 @@ import { toast } from 'sonner'
 import {
   PromptInputButton,
   PromptInputTools,
-  usePromptInputAttachments,
 } from '@/components/ai-elements/prompt-input'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import {
@@ -42,6 +41,8 @@ import type {
   PlaygroundContextSettings,
   PlaygroundContextSummary,
 } from '../../types'
+import { PlaygroundAssetPicker } from './playground-asset-picker'
+import { PlaygroundAutoReadControl } from './playground-auto-read-control'
 import { PlaygroundComparePanel } from './playground-compare-panel'
 import { PlaygroundContextPanel } from './playground-context-panel'
 import { PlaygroundDictationPanel } from './playground-dictation-panel'
@@ -80,6 +81,15 @@ type PlaygroundInputToolsProps = {
   onContextSettingsChange: (settings: PlaygroundContextSettings) => void
   onRemoveContextSummary: () => void
   onSummarizeContext: () => void
+  /** Effective auto read-aloud state of the active conversation. */
+  autoReadEnabled: boolean
+  /** Account default applied to conversations without an override. */
+  autoReadDefaultEnabled: boolean
+  /** Whether the active conversation carries an explicit choice. */
+  autoReadHasOverride: boolean
+  onAutoReadChange: (value: boolean) => void
+  onAutoReadUseDefault: () => void
+  onAutoReadDefaultChange: (value: boolean) => void
 }
 
 export function PlaygroundInputTools({
@@ -104,9 +114,14 @@ export function PlaygroundInputTools({
   onContextSettingsChange,
   onRemoveContextSummary,
   onSummarizeContext,
+  autoReadEnabled,
+  autoReadDefaultEnabled,
+  autoReadHasOverride,
+  onAutoReadChange,
+  onAutoReadUseDefault,
+  onAutoReadDefaultChange,
 }: PlaygroundInputToolsProps) {
   const { t } = useTranslation()
-  const attachments = usePromptInputAttachments()
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
 
   const handleSearchAction = () => {
@@ -123,24 +138,10 @@ export function PlaygroundInputTools({
   return (
     <>
       <PromptInputTools className='bg-background/70 border-border/60 rounded-lg border p-1 shadow-xs'>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <PromptInputButton
-                aria-label={t('Attach')}
-                className='text-muted-foreground hover:text-foreground hover:bg-muted/70 font-medium'
-                disabled={disabled}
-                onClick={() => attachments.openFileDialog()}
-                variant='ghost'
-              >
-                <PaperclipIcon size={16} />
-              </PromptInputButton>
-            }
-          />
-          <TooltipContent>
-            <p>{t('Attach')}</p>
-          </TooltipContent>
-        </Tooltip>
+        <PlaygroundAssetPicker
+          disabled={disabled}
+          onInsertText={onInsertText}
+        />
 
         <Tooltip>
           <TooltipTrigger
@@ -169,6 +170,16 @@ export function PlaygroundInputTools({
             onTranscript={onDictateTranscript}
           />
         ) : null}
+
+        <PlaygroundAutoReadControl
+          defaultEnabled={autoReadDefaultEnabled}
+          disabled={disabled}
+          enabled={autoReadEnabled}
+          hasOverride={autoReadHasOverride}
+          onDefaultChange={onAutoReadDefaultChange}
+          onEnabledChange={onAutoReadChange}
+          onUseDefault={onAutoReadUseDefault}
+        />
 
         <PlaygroundComparePanel
           compareModels={compareModels}

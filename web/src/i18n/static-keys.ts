@@ -41,6 +41,10 @@ export const STATIC_I18N_KEYS = [
   'Attachment is too large.',
   'Attachment data could not be read.',
   'Attachment upload failed. Your message was not sent.',
+  // Conversation import feedback renders from PLAYGROUND_IMPORT_ERRORS.
+  'Invalid conversation export.',
+  'The conversation export is too large.',
+  'Unable to import the conversation.',
   // Playground document text extraction server messages.
   'This file type cannot be read as text.',
   'The document is too large to read as text.',

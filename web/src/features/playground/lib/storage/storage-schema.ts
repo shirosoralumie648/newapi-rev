@@ -111,6 +111,9 @@ const messageVersionSchema = z.object({
   // relay request id (64 characters, the logs.request_id column) and the token
   // usage the relay reported; the settle log stays the billing source.
   requestId: z.string().min(1).max(64).optional(),
+  // Provider finish reason of the version; it only decides whether the reply
+  // offers "continue generation" after a reload.
+  finishReason: z.string().max(64).optional(),
   usage: z
     .object({
       promptTokens: z.number().finite().nonnegative(),

@@ -35,23 +35,26 @@ import {
   getServerMessage,
 } from '@/lib/server-error-message'
 
-import type { PlaygroundAssetItem } from '../../asset-api'
+import type { PlaygroundAssetItem } from '@/features/playground/asset-api'
 import {
   PLAYGROUND_ASSET_PAGE_SIZE,
   PLAYGROUND_ASSET_SEARCH_MAX_LENGTH,
-} from '../../constants'
-import { useDeletePlaygroundAsset, usePlaygroundAssets } from '../../hooks'
-import { PlaygroundTaskList } from '../generation/playground-task-list'
-import { PlaygroundAssetCard } from './playground-asset-card'
-import { PlaygroundAssetPreviewDialog } from './playground-asset-preview-dialog'
+} from '@/features/playground/constants'
+import {
+  useDeletePlaygroundAsset,
+  usePlaygroundAssets,
+} from '@/features/playground/hooks'
+import { CanvasTaskList } from '../generation/canvas-task-list'
+import { CanvasAssetCard } from './canvas-asset-card'
+import { CanvasAssetPreviewDialog } from './canvas-asset-preview-dialog'
 
-type PlaygroundLibraryKind = 'attachment' | 'artifact' | 'task'
+type CanvasLibraryKind = 'attachment' | 'artifact' | 'task'
 
-interface PlaygroundAssetLibraryProps {
+interface CanvasAssetLibraryProps {
   active: boolean
   userId: number | null
-  onSendAttachmentToChat: (asset: PlaygroundAssetItem) => void
-  onSendArtifactToChat: (asset: PlaygroundAssetItem) => void
+  onSendAttachmentToChat?: (asset: PlaygroundAssetItem) => void
+  onSendArtifactToChat?: (asset: PlaygroundAssetItem) => void
   onSendToCanvas: (asset: PlaygroundAssetItem) => void
   onSendSeedsToCanvas: (seeds: CanvasSendSeed[]) => void
   onOpenConversation: (sessionId: string) => void
@@ -63,9 +66,9 @@ interface PlaygroundAssetLibraryProps {
  * same task list as the generation panel, so the workspace has one place to
  * find, preview and reuse everything the account produced.
  */
-export function PlaygroundAssetLibrary(props: PlaygroundAssetLibraryProps) {
+export function CanvasAssetLibrary(props: CanvasAssetLibraryProps) {
   const { t } = useTranslation()
-  const [kind, setKind] = useState<PlaygroundLibraryKind>('attachment')
+  const [kind, setKind] = useState<CanvasLibraryKind>('attachment')
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebounce(search, 250)
   const [page, setPage] = useState(1)
@@ -90,7 +93,7 @@ export function PlaygroundAssetLibrary(props: PlaygroundAssetLibraryProps) {
   const total = assetsQuery.data?.total ?? 0
   const pageCount = Math.max(1, Math.ceil(total / PLAYGROUND_ASSET_PAGE_SIZE))
 
-  const selectKind = (next: PlaygroundLibraryKind) => {
+  const selectKind = (next: CanvasLibraryKind) => {
     setKind(next)
     setPage(1)
   }
@@ -116,7 +119,7 @@ export function PlaygroundAssetLibrary(props: PlaygroundAssetLibraryProps) {
     )
   }
 
-  const kindOptions: { value: PlaygroundLibraryKind; label: string }[] = [
+  const kindOptions: { value: CanvasLibraryKind; label: string }[] = [
     { value: 'attachment', label: t('Attachments') },
     { value: 'artifact', label: t('Artifacts') },
     { value: 'task', label: t('Generation results') },
@@ -125,7 +128,7 @@ export function PlaygroundAssetLibrary(props: PlaygroundAssetLibraryProps) {
   let content: ReactNode
   if (isTaskKind) {
     content = (
-      <PlaygroundTaskList
+      <CanvasTaskList
         active={props.active}
         onSendToCanvas={props.onSendSeedsToCanvas}
         search={debouncedSearch}
@@ -161,7 +164,7 @@ export function PlaygroundAssetLibrary(props: PlaygroundAssetLibraryProps) {
     content = (
       <ul className='grid list-none gap-2 p-0'>
         {items.map((asset) => (
-          <PlaygroundAssetCard
+          <CanvasAssetCard
             asset={asset}
             key={`${asset.kind}-${asset.id}`}
             onDelete={setAssetToDelete}
@@ -170,10 +173,13 @@ export function PlaygroundAssetLibrary(props: PlaygroundAssetLibraryProps) {
             }
             onPreview={setPreviewAsset}
             onSendToCanvas={props.onSendToCanvas}
-            onSendToChat={(item) =>
-              item.kind === 'attachment'
-                ? props.onSendAttachmentToChat(item)
-                : props.onSendArtifactToChat(item)
+            onSendToChat={
+              props.onSendAttachmentToChat || props.onSendArtifactToChat
+                ? (item) =>
+                    item.kind === 'attachment'
+                      ? props.onSendAttachmentToChat?.(item)
+                      : props.onSendArtifactToChat?.(item)
+                : undefined
             }
           />
         ))}
@@ -263,7 +269,7 @@ export function PlaygroundAssetLibrary(props: PlaygroundAssetLibraryProps) {
         open={assetToDelete !== null}
         title={t('Delete asset?')}
       />
-      <PlaygroundAssetPreviewDialog
+      <CanvasAssetPreviewDialog
         asset={previewAsset}
         onOpenChange={(open) => {
           if (!open) setPreviewAsset(null)

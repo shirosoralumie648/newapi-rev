@@ -92,3 +92,34 @@ test('persists active session updates without writing legacy config keys', () =>
   expect(localStorage.getItem(`${STORAGE_KEYS.CONFIG}:9`)).toBeNull()
   expect(localStorage.getItem(`${STORAGE_KEYS.SESSIONS}:9`)).not.toBeNull()
 })
+
+test('a new conversation starts from the account new-session defaults', () => {
+  useAuthStore.getState().auth.setUser({ id: 10, username: 'ten', role: 1 })
+  const first = renderHook(() => usePlaygroundState())
+
+  act(() => {
+    first.result.current.updateConfig('model', 'remembered-model')
+    first.result.current.updateConfig('temperature', 0.2)
+  })
+  act(() => first.result.current.updateSystemPrompt('Remembered prompt'))
+  act(() => first.result.current.updateParameterEnabled('temperature', false))
+  act(() => vi.advanceTimersByTime(1000))
+  first.unmount()
+
+  // Drop the stored conversations but keep the account-level defaults, so the
+  // fresh mount can only restore them from the preference store.
+  localStorage.removeItem(`${STORAGE_KEYS.SESSIONS}:10`)
+
+  const second = renderHook(() => usePlaygroundState())
+  expect(second.result.current.config.model).toBe('remembered-model')
+  expect(second.result.current.systemPrompt).toBe('Remembered prompt')
+  expect(second.result.current.parameterEnabled.temperature).toBe(false)
+
+  act(() => second.result.current.createSession())
+  expect(second.result.current.config).toMatchObject({
+    model: 'remembered-model',
+    temperature: 0.2,
+  })
+  expect(second.result.current.systemPrompt).toBe('Remembered prompt')
+  expect(second.result.current.parameterEnabled.temperature).toBe(false)
+})

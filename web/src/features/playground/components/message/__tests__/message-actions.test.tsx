@@ -58,10 +58,59 @@ test('the read-aloud action reports the message it was used on', async () => {
   expect(onReadAloud).toHaveBeenCalledWith(message)
 })
 
+test('the generate actions hand the message and the media kind to the canvas', async () => {
+  const user = userEvent.setup()
+  const onGenerateMedia = vi.fn()
+
+  render(<MessageActions message={message} onGenerateMedia={onGenerateMedia} />)
+  await user.click(screen.getByRole('button', { name: 'Generate image' }))
+  await user.click(screen.getByRole('button', { name: 'Generate video' }))
+
+  expect(onGenerateMedia).toHaveBeenNthCalledWith(1, message, 'image')
+  expect(onGenerateMedia).toHaveBeenNthCalledWith(2, message, 'video')
+})
+
+test('the generate actions are hidden without a handler', () => {
+  render(<MessageActions message={message} />)
+
+  expect(
+    screen.queryByRole('button', { name: 'Generate image' })
+  ).not.toBeInTheDocument()
+  expect(
+    screen.queryByRole('button', { name: 'Generate video' })
+  ).not.toBeInTheDocument()
+})
+
 test('the read-aloud action is hidden without a handler', () => {
   render(<MessageActions message={message} />)
 
   expect(
     screen.queryByRole('button', { name: 'Read aloud' })
+  ).not.toBeInTheDocument()
+})
+
+test('the continue action reports the truncated assistant reply it continues', async () => {
+  const user = userEvent.setup()
+  const onContinue = vi.fn()
+  const truncated: Message = {
+    key: 'a1',
+    from: 'assistant',
+    status: 'complete',
+    versions: [{ id: 'v1', content: 'Half an answer', finishReason: 'length' }],
+  }
+
+  render(
+    <MessageActions canContinue message={truncated} onContinue={onContinue} />
+  )
+  await user.click(screen.getByRole('button', { name: 'Continue generation' }))
+
+  expect(onContinue).toHaveBeenCalledWith(truncated)
+})
+
+test('the continue action is hidden without a continuable reply', () => {
+  render(<MessageActions message={message} onContinue={() => undefined} />)
+
+  expect(
+    screen.queryByRole('button', { name: 'Continue generation' })
   ).not.toBeInTheDocument()
 })

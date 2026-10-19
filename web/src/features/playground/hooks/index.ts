@@ -17,6 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 export * from './use-playground-state'
+export * from './use-playground-preferences'
+export * from './use-auto-read-aloud'
 export * from './use-stream-request'
 export * from './use-chat-handler'
 export * from './use-parallel-chat'
@@ -28,6 +30,7 @@ export * from './use-playground-server'
 export * from './use-playground-artifacts'
 export * from './use-playground-generation'
 export * from './use-playground-usage'
+export * from './use-knowledge-base'
 export * from './use-playground-storage-billing'
 export * from './use-playground-message-costs'
 export * from './use-playground-assets'

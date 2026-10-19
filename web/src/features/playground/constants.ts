@@ -50,6 +50,20 @@ export const TOOL_CALL_STATUS = {
 export const TOOL_CALL_DENIED_CONTENT = 'The user denied this tool call.'
 export const TOOL_CALL_FAILED_CONTENT = 'The tool call failed.'
 
+// Fallback continue instruction. Channels that do not accept an assistant
+// prefill get one extra user turn with this sentence; it is model input, not
+// user interface text, so it stays untranslated and is never stored as a
+// visible message.
+export const CONTINUE_GENERATION_INSTRUCTION =
+  'Continue from where you left off.'
+
+// Model-facing marker replacing an attachment whose bytes could not be
+// restored during import (for example a conversation exported by another
+// account). The exported file never carries attachment bodies, so the original
+// content is unavailable; the marker keeps the message honest.
+export const PLAYGROUND_IMPORTED_ATTACHMENT_UNAVAILABLE =
+  '[attachment unavailable after import: {{name}}]'
+
 // Model-facing stand-ins for media the next request cannot carry. They replace
 // inline base64 payloads in stored text and images from earlier turns that a
 // text-only model cannot accept. This is protocol content, not user interface
@@ -76,6 +90,7 @@ export const PLAYGROUND_TOOL_CALL_RESULT_MAX_CHARS = 64_000
 // API endpoints
 export const API_ENDPOINTS = {
   CHAT_COMPLETIONS: '/pg/chat/completions',
+  EMBEDDINGS: '/pg/embeddings',
   IMAGE_GENERATIONS: '/pg/images/generations',
   IMAGE_EDITS: '/pg/images/edits',
   VIDEO_GENERATIONS: '/pg/videos',
@@ -89,6 +104,7 @@ export const API_ENDPOINTS = {
   PLAYGROUND_TRASH: '/api/playground/trash',
   PLAYGROUND_PRESETS: '/api/playground/presets',
   PLAYGROUND_SNIPPETS: '/api/playground/snippets',
+  PLAYGROUND_KNOWLEDGE_BASES: '/api/playground/knowledge-bases',
   PLAYGROUND_USAGE: '/api/playground/usage',
   PLAYGROUND_STORAGE_BILLING: '/api/playground/storage/billing',
   PLAYGROUND_SETTINGS: '/api/playground/settings',
@@ -197,7 +213,17 @@ export const STORAGE_KEYS = {
   SESSIONS: 'playground_sessions',
   INPUT_DRAFTS: 'playground_input_drafts',
   INPUT_HISTORY: 'playground_input_history',
+  NEW_SESSION_DEFAULTS: 'playground_new_session_defaults',
+  AUTO_READ_ALOUD: 'playground_auto_read_aloud',
 } as const
+
+// The new-conversation defaults are a client-side preference, not a store: the
+// system prompt copied into a new conversation is bounded by the same byte
+// budget the server accepts for a stored prompt.
+export const PLAYGROUND_NEW_SESSION_PROMPT_MAX_BYTES = 16 << 10
+// Bound the per-account auto read-aloud overrides so a corrupted store cannot
+// grow without limit.
+export const PLAYGROUND_AUTO_READ_OVERRIDE_MAX_ENTRIES = 200
 
 export const DEFAULT_SESSION_TITLE = 'New conversation'
 export const MAX_STORED_SESSIONS = 20
@@ -357,6 +383,16 @@ export const PLAYGROUND_SPEECH_ERRORS = {
   SAVE_FAILED: 'Unable to save the audio to the conversation.',
 } as const
 
+// Conversation import. The file is the JSON export the host renders, so the
+// client only parses it and replays every message through the ordinary
+// create/upload chain; the server enforces the same quotas as a manual send.
+export const PLAYGROUND_IMPORT_MAX_FILE_BYTES = 16 * 1024 * 1024
+export const PLAYGROUND_IMPORT_ERRORS = {
+  INVALID_FILE: 'Invalid conversation export.',
+  TOO_LARGE: 'The conversation export is too large.',
+  FAILED: 'Unable to import the conversation.',
+} as const
+
 // Dictation bounds and errors. A recording is transcribed through the /pg
 // transcription bridge, so it is billed like any other relay request.
 export const PLAYGROUND_DICTATION_MAX_SECONDS = 300
@@ -395,6 +431,8 @@ export const MESSAGE_ACTION_LABELS = {
   EDIT: 'Edit',
   DELETE: 'Delete',
   SEND_TO_CANVAS: 'Send to canvas',
+  GENERATE_IMAGE: 'Generate image',
+  GENERATE_VIDEO: 'Generate video',
   NO_CONTENT: 'No content to copy',
   WAIT_GENERATION: 'Please wait for the current generation to complete',
 } as const

@@ -228,7 +228,14 @@ func TestPlaygroundPresetSchemaMigration(t *testing.T) {
 				definitions[index] = q(name) + " " + presetTypes[index]
 				quoted[index] = q(name)
 			}
-			require.NoError(t, db.Exec("CREATE TABLE "+q(presetTable)+" ("+strings.Join(definitions, ", ")+")").Error)
+			// MySQL 5.7 creates databases with the latin1 default charset, which
+			// cannot store the emoji avatar written below. Declare the fixture
+			// table as utf8mb4 so the migration behavior is what is tested.
+			tableOptions := ""
+			if dialect == "mysql" {
+				tableOptions = " DEFAULT CHARSET=utf8mb4"
+			}
+			require.NoError(t, db.Exec("CREATE TABLE "+q(presetTable)+" ("+strings.Join(definitions, ", ")+")"+tableOptions).Error)
 			require.NoError(t, db.Exec("INSERT INTO "+q(presetTable)+" ("+strings.Join(quoted, ", ")+") VALUES ("+strings.Repeat("?,", len(presetColumns)-1)+"?)",
 				"pgp_legacy", 7, "Legacy preset", "🧩", `{"model":"legacy"}`, `{}`, "Legacy prompt", 111, 111).Error)
 

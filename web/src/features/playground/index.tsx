@@ -25,31 +25,19 @@ import { ErrorState } from '@/components/error-state'
 import { Button } from '@/components/ui/button'
 import { restoreCanvasProject } from '@/features/canvas/api'
 import { CanvasSendDialog } from '@/features/canvas/components/canvas-send-dialog'
+import type { CanvasRouteSearch } from '@/features/canvas/lib/canvas-navigation'
 import {
-  buildArtifactCanvasSeeds,
-  buildAttachmentCanvasSeeds,
   buildMessageCanvasSeeds,
   type CanvasSendSeed,
 } from '@/features/canvas/lib/canvas-send'
-import { handleServerError } from '@/lib/handle-server-error'
 import { getServerMessage } from '@/lib/server-error-message'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { playgroundAttachmentContentUrl } from './api'
-import {
-  getPlaygroundArtifact,
-  type PlaygroundArtifactSummary,
-} from './artifact-api'
-import type { PlaygroundAssetItem } from './asset-api'
-import { PlaygroundArtifactPanel } from './components/artifact/playground-artifact-panel'
 import { PlaygroundArtifactSourceSheet } from './components/artifact/playground-artifact-source-sheet'
-import { PlaygroundAssetLibrary } from './components/asset/playground-asset-library'
 import { PlaygroundChat } from './components/chat/playground-chat'
-import { PlaygroundGenerationPanel } from './components/generation/playground-generation-panel'
 import { PlaygroundContextStatus } from './components/input/playground-context-status'
 import { PlaygroundInput } from './components/input/playground-input'
 import { PlaygroundSpeechDialog } from './components/message/playground-speech-dialog'
-import { PlaygroundCanvasPanel } from './components/workspace/playground-canvas-panel'
 import { PlaygroundPresetPanel } from './components/workspace/playground-preset-panel'
 import { PlaygroundSessionUsage } from './components/workspace/playground-session-usage'
 import { PlaygroundTrashPanel } from './components/workspace/playground-trash-panel'
@@ -59,10 +47,13 @@ import {
   type PlaygroundInspectorView,
 } from './components/workspace/playground-workspace'
 import {
+  PLAYGROUND_IMPORT_ERRORS,
+  PLAYGROUND_IMPORT_MAX_FILE_BYTES,
   PLAYGROUND_PARALLEL_MIN_MODELS,
   PLAYGROUND_SPEECH_ERRORS,
 } from './constants'
 import {
+  useAutoReadAloud,
   useChatHandler,
   useParallelChat,
   usePlaygroundContext,
@@ -70,6 +61,7 @@ import {
   usePlaygroundMessageCosts,
   usePlaygroundOptions,
   usePlaygroundArtifacts,
+  usePlaygroundPreferences,
   usePlaygroundState,
   usePlaygroundServer,
 } from './hooks'
@@ -81,7 +73,8 @@ import {
   getMessageContent,
   getMessageContentState,
   hasPendingToolCalls,
-  loadPlaygroundAttachment,
+  importPlaygroundSessionDocument,
+  parsePlaygroundSessionExport,
   PLAYGROUND_ATTACHMENT_ERRORS,
   presetSessionSettings,
   uploadPlaygroundAttachments,
@@ -96,7 +89,7 @@ import type {
 
 export function Playground(props: {
   target?: PlaygroundRouteTarget
-  onOpenCanvas?: (projectId: string) => void
+  onOpenCanvas?: (search: CanvasRouteSearch) => void
   onOpenUpgrade?: () => void
 }) {
   const userId = useAuthStore((state) => state.auth.user?.id ?? null)
@@ -112,7 +105,7 @@ export function Playground(props: {
 
 function PlaygroundContent(props: {
   target?: PlaygroundRouteTarget
-  onOpenCanvas?: (projectId: string) => void
+  onOpenCanvas?: (search: CanvasRouteSearch) => void
   onOpenUpgrade?: () => void
 }) {
   const { t } = useTranslation()
@@ -131,19 +124,9 @@ function PlaygroundContent(props: {
   const [canvasSendSeeds, setCanvasSendSeeds] = useState<
     CanvasSendSeed[] | null
   >(null)
-  const [canvasOpen, setCanvasOpen] = useState(false)
-  const [generationOpen, setGenerationOpen] = useState(false)
-  const [canvasProjectId, setCanvasProjectId] = useState<string | null>(null)
-  const [canvasRefreshSignal, setCanvasRefreshSignal] = useState(0)
-  const [libraryOpen, setLibraryOpen] = useState(false)
   const [presetsOpen, setPresetsOpen] = useState(false)
   const [trashOpen, setTrashOpen] = useState(false)
-  const [pendingLibraryFiles, setPendingLibraryFiles] = useState<File[]>([])
-  const [pendingLibraryText, setPendingLibraryText] = useState<string | null>(
-    null
-  )
   const appliedSessionRef = useRef<string | null>(null)
-  const appliedArtifactRef = useRef<string | null>(null)
   const [compareModels, setCompareModels] = useState<string[]>([])
   const local = usePlaygroundState()
   const {
@@ -192,15 +175,28 @@ function PlaygroundContent(props: {
     onSummaryChange: updateContextSummary,
   })
 
-  const { sendChat, stopGeneration, isGenerating } = useChatHandler({
-    config,
-    parameterEnabled,
-    systemPrompt,
-    contextSettings: context,
-    prepareContextSummary: contextController.prepareForSend,
-    onMessageUpdate: updateMessages,
+  const preferences = usePlaygroundPreferences(userId)
+  // Automatic read-aloud runs after a reply completes. It is fire-and-forget:
+  // the composer is never disabled and a late take from another conversation is
+  // discarded by the hook's sequence guard.
+  const autoRead = useAutoReadAloud({
+    enabled: preferences.isAutoReadEnabled(activeSessionId),
     sessionId: activeSessionId,
+    model: models[0]?.value ?? '',
+    group: config.group,
   })
+
+  const { sendChat, continueChat, stopGeneration, isGenerating } =
+    useChatHandler({
+      config,
+      parameterEnabled,
+      systemPrompt,
+      contextSettings: context,
+      prepareContextSummary: contextController.prepareForSend,
+      onMessageUpdate: updateMessages,
+      onResponseComplete: (result) => autoRead.read(result.content),
+      sessionId: activeSessionId,
+    })
 
   const {
     sendParallelChat,
@@ -265,10 +261,12 @@ function PlaygroundContent(props: {
     handleProvideToolResult,
     handleDenyToolCall,
     handleContinueToolCalls,
+    handleContinueMessage,
   } = usePlaygroundConversation({
     messages,
     updateMessages,
     sendChat,
+    continueChat,
   })
 
   const pendingToolCalls = hasPendingToolCalls(messages)
@@ -338,14 +336,65 @@ function PlaygroundContent(props: {
   }, [isComparing, isGenerating, stopComparison, stopGeneration])
 
   const handleWorkspaceTransition = useCallback(
-    (action: () => void) => {
+    <Result,>(action: () => Result): Result | undefined => {
       if (artifactController.state.dirty) {
         artifactController.store.getState().requestDiscard(action)
-        return
+        return undefined
       }
-      action()
+      return action()
     },
     [artifactController.state.dirty, artifactController.store]
+  )
+
+  // Rebuild one exported conversation: the parser validates the JSON, the
+  // import helper recreates the session and every message through the ordinary
+  // create/upload chain (so quotas apply), and the workspace adopts the result.
+  // Attachments from another account are unreachable and stay placeholders.
+  const performImportConversation = useCallback(
+    async (file: File) => {
+      if (file.size > PLAYGROUND_IMPORT_MAX_FILE_BYTES) {
+        toast.error(t(PLAYGROUND_IMPORT_ERRORS.TOO_LARGE))
+        return
+      }
+      let document: ReturnType<typeof parsePlaygroundSessionExport>
+      try {
+        document = parsePlaygroundSessionExport(JSON.parse(await file.text()))
+      } catch {
+        toast.error(t(PLAYGROUND_IMPORT_ERRORS.INVALID_FILE))
+        return
+      }
+
+      try {
+        const result = await importPlaygroundSessionDocument(document)
+        stopBeforeSessionChange()
+        handleEditOpenChange(false)
+        setArtifactSource(null)
+        setSpeechSource(null)
+        sync.adoptImportedSession(result.session)
+        toast.success(t('Conversation imported'))
+        if (result.unavailableAttachments > 0) {
+          toast.info(
+            t(
+              '{{count}} attachments could not be restored and were kept as placeholders.',
+              { count: result.unavailableAttachments }
+            )
+          )
+        }
+      } catch (error) {
+        handleServerError(error, t(PLAYGROUND_IMPORT_ERRORS.FAILED))
+      }
+    },
+    [handleEditOpenChange, stopBeforeSessionChange, sync, t]
+  )
+
+  // Importing activates a new conversation, so an unsaved artifact draft must
+  // be confirmed before any server-side import starts (no orphan copy when the
+  // user keeps the draft). The immediate path returns the import promise so the
+  // session-list button keeps its busy state until the rebuild finishes.
+  const handleImportConversation = useCallback(
+    (file: File) =>
+      handleWorkspaceTransition(() => performImportConversation(file)),
+    [handleWorkspaceTransition, performImportConversation]
   )
 
   // The settings a preset contributes to a conversation: its model, sampling
@@ -548,6 +597,39 @@ function PlaygroundContent(props: {
     [canvasSendEnabled, canonicalSessionId]
   )
 
+  // The only generation entry in the conversation: a message action hands the
+  // prompt and its reference images to the canvas editor, where the task node,
+  // run and billing live.
+  const handleGenerateFromMessage = useCallback(
+    (message: Message, kind: 'image' | 'video') => {
+      if (!canvasSendEnabled || !canonicalSessionId) return
+      const visibleContent = getMessageContentState(
+        message,
+        getMessageContent(message)
+      ).displayContent
+      if (!visibleContent.trim()) return
+      const version = getCurrentVersion(message)
+      const attachmentIds = (version.attachments ?? [])
+        .filter(
+          (attachment) =>
+            !attachment.mediaType || attachment.mediaType.startsWith('image/')
+        )
+        .slice(0, 4)
+        .map((attachment) => attachment.id)
+      const search: CanvasRouteSearch = {
+        prompt: visibleContent.slice(0, 4000),
+        generate: kind,
+        session: canonicalSessionId,
+        message: message.key,
+        ...(attachmentIds.length > 0
+          ? { attachment: attachmentIds.join(',') }
+          : {}),
+      }
+      props.onOpenCanvas?.(search)
+    },
+    [canvasSendEnabled, canonicalSessionId, props.onOpenCanvas]
+  )
+
   // Read aloud works for any message with visible text; the audio is generated
   // through the relay and only cached on the conversation when the user saves
   // it, so opening the dialog never changes the workspace.
@@ -598,210 +680,63 @@ function PlaygroundContent(props: {
     [activeSession, speechSource, sync, updateMessages]
   )
 
-  const handleSendArtifactToCanvas = useCallback(
-    (artifact: PlaygroundArtifactSummary) => {
-      setCanvasSendSeeds(
-        buildArtifactCanvasSeeds({
-          sessionId: artifact.session_id,
-          artifactId: artifact.id,
-          title: artifact.title,
-        })
-      )
-    },
-    []
-  )
-
-  const closeArtifactPanel = useCallback(() => {
-    if (artifactController.state.dirty) {
-      artifactController.store
-        .getState()
-        .requestDiscard(() =>
-          artifactController.store.getState().setOpen(false)
-        )
-      return
-    }
-    artifactController.store.getState().setOpen(false)
-  }, [artifactController.state.dirty, artifactController.store])
-
   const closeArtifactSource = useCallback((open: boolean) => {
     if (!open) setArtifactSource(null)
   }, [])
 
-  let inspectorView: PlaygroundInspectorView | null = null
-  if (artifactController.state.isOpen) inspectorView = 'artifacts'
-  else if (canvasOpen) inspectorView = 'canvas'
-  else if (generationOpen) inspectorView = 'generate'
-  else if (libraryOpen) inspectorView = 'library'
-  else if (presetsOpen) inspectorView = 'presets'
-  else if (trashOpen) inspectorView = 'trash'
-
-  const openCanvasInspector = useCallback(
-    (projectId: string | null) => {
-      const action = () => {
-        artifactController.store.getState().setOpen(false)
-        setGenerationOpen(false)
-        setLibraryOpen(false)
-        setPresetsOpen(false)
-        setTrashOpen(false)
-        setCanvasProjectId(projectId)
-        setCanvasOpen(true)
+  // Creating an artifact from a message stays a conversation bridge: the
+  // source sheet picks the reply content, then the saved artifact opens in the
+  // canvas artifact browser where versions, sandbox preview and export live.
+  const handleCreateArtifact = useCallback(
+    async (
+      selection: {
+        kind: 'markdown' | 'code' | 'html' | 'svg'
+        title: string
+        language: string
+        content: string
+        codeBlockIndex?: number
+      },
+      source: CapturedArtifactSource
+    ) => {
+      const created = await artifactController.createFromSource(
+        selection,
+        source
+      )
+      if (!created) return false
+      const artifactId = artifactController.store.getState().selectedArtifactId
+      if (artifactId) {
+        props.onOpenCanvas?.({
+          session: source.sessionId,
+          artifact: artifactId,
+        })
       }
-      if (artifactController.state.dirty) {
-        artifactController.store.getState().requestDiscard(action)
-        return
-      }
-      action()
-    },
-    [artifactController.state.dirty, artifactController.store]
-  )
-
-  const handleToggleInspector = useCallback(
-    (view: PlaygroundInspectorView) => {
-      if (view === 'artifacts') {
-        if (artifactController.state.isOpen) {
-          closeArtifactPanel()
-          return
-        }
-        setCanvasOpen(false)
-        setGenerationOpen(false)
-        setLibraryOpen(false)
-        setPresetsOpen(false)
-        setTrashOpen(false)
-        artifactController.store.getState().setOpen(true)
-        return
-      }
-      if (view === 'canvas') {
-        if (canvasOpen) {
-          setCanvasOpen(false)
-          return
-        }
-        setGenerationOpen(false)
-        openCanvasInspector(canvasProjectId)
-        return
-      }
-      if (view === 'library') {
-        if (libraryOpen) {
-          setLibraryOpen(false)
-          return
-        }
-        const openLibrary = () => {
-          artifactController.store.getState().setOpen(false)
-          setCanvasOpen(false)
-          setGenerationOpen(false)
-          setPresetsOpen(false)
-          setTrashOpen(false)
-          setLibraryOpen(true)
-        }
-        if (artifactController.state.dirty) {
-          artifactController.store.getState().requestDiscard(openLibrary)
-          return
-        }
-        openLibrary()
-        return
-      }
-      if (view === 'presets') {
-        if (presetsOpen) {
-          setPresetsOpen(false)
-          return
-        }
-        const openPresets = () => {
-          artifactController.store.getState().setOpen(false)
-          setCanvasOpen(false)
-          setGenerationOpen(false)
-          setLibraryOpen(false)
-          setTrashOpen(false)
-          setPresetsOpen(true)
-        }
-        if (artifactController.state.dirty) {
-          artifactController.store.getState().requestDiscard(openPresets)
-          return
-        }
-        openPresets()
-        return
-      }
-      if (view === 'trash') {
-        if (trashOpen) {
-          setTrashOpen(false)
-          return
-        }
-        const openTrash = () => {
-          artifactController.store.getState().setOpen(false)
-          setCanvasOpen(false)
-          setGenerationOpen(false)
-          setLibraryOpen(false)
-          setPresetsOpen(false)
-          setTrashOpen(true)
-        }
-        if (artifactController.state.dirty) {
-          artifactController.store.getState().requestDiscard(openTrash)
-          return
-        }
-        openTrash()
-        return
-      }
-      if (generationOpen) {
-        setGenerationOpen(false)
-        return
-      }
-      const action = () => {
-        artifactController.store.getState().setOpen(false)
-        setCanvasOpen(false)
-        setLibraryOpen(false)
-        setPresetsOpen(false)
-        setTrashOpen(false)
-        setGenerationOpen(true)
-      }
-      if (artifactController.state.dirty) {
-        artifactController.store.getState().requestDiscard(action)
-        return
-      }
-      action()
+      return true
     },
     [
-      artifactController.state.dirty,
-      artifactController.state.isOpen,
+      artifactController.createFromSource,
       artifactController.store,
-      canvasOpen,
-      canvasProjectId,
-      closeArtifactPanel,
-      generationOpen,
-      libraryOpen,
-      openCanvasInspector,
-      presetsOpen,
-      trashOpen,
+      props.onOpenCanvas,
     ]
   )
 
-  const handleCloseInspector = useCallback(() => {
-    if (artifactController.state.isOpen) {
-      closeArtifactPanel()
-      return
-    }
-    if (canvasOpen) {
-      setCanvasOpen(false)
-      return
-    }
-    if (generationOpen) {
-      setGenerationOpen(false)
-      return
-    }
-    if (presetsOpen) {
-      setPresetsOpen(false)
-      return
-    }
-    if (trashOpen) {
+  let inspectorView: PlaygroundInspectorView | null = null
+  if (presetsOpen) inspectorView = 'presets'
+  else if (trashOpen) inspectorView = 'trash'
+
+  const handleToggleInspector = useCallback((view: PlaygroundInspectorView) => {
+    if (view === 'presets') {
       setTrashOpen(false)
+      setPresetsOpen((current) => !current)
       return
     }
-    setLibraryOpen(false)
-  }, [
-    artifactController.state.isOpen,
-    canvasOpen,
-    closeArtifactPanel,
-    generationOpen,
-    presetsOpen,
-    trashOpen,
-  ])
+    setPresetsOpen(false)
+    setTrashOpen((current) => !current)
+  }, [])
+
+  const handleCloseInspector = useCallback(() => {
+    setPresetsOpen(false)
+    setTrashOpen(false)
+  }, [])
 
   const handleOpenPresets = useCallback(
     () => handleToggleInspector('presets'),
@@ -813,104 +748,23 @@ function PlaygroundContent(props: {
     [handleToggleInspector]
   )
 
-  // Restoring a trashed canvas remounts the canvas preview against the freshly
-  // restored project; the trash panel already removed the row.
-  const handleRestoreTrashedCanvas = useCallback(async (projectId: string) => {
-    await restoreCanvasProject(projectId)
-    setCanvasRefreshSignal((value) => value + 1)
-  }, [])
+  const handleRestoreTrashedCanvas = useCallback(
+    async (projectId: string) => {
+      await restoreCanvasProject(projectId)
+      toast.success(t('Canvas restored'))
+    },
+    [t]
+  )
 
-  const handleOpenCanvasProject = useCallback(
-    (projectId: string) => {
-      props.onOpenCanvas?.(projectId)
+  const handleCanvasSent = useCallback(
+    (project: { id: string }) => {
+      props.onOpenCanvas?.({ project: project.id })
     },
     [props.onOpenCanvas]
   )
 
-  // After "Send to canvas", preview the canvas the nodes landed in so the user
-  // can jump to the full editor from the chat workspace.
-  const handleCanvasSent = useCallback(
-    (project: { id: string }) => {
-      openCanvasInspector(project.id)
-    },
-    [openCanvasInspector]
-  )
-
-  const clearPendingLibraryFiles = useCallback(() => {
-    setPendingLibraryFiles([])
-  }, [])
-
-  const clearPendingLibraryText = useCallback(() => {
-    setPendingLibraryText(null)
-  }, [])
-
-  // Library sends go through the composer, not a direct upload: the file joins
-  // the normal pending attachments and is validated and uploaded on submit.
-  const handleLibraryAttachmentToChat = useCallback(
-    async (asset: PlaygroundAssetItem) => {
-      try {
-        const entry = await loadPlaygroundAttachment(
-          playgroundAttachmentContentUrl(asset.sessionId, asset.id),
-          asset.id
-        )
-        const blob = entry.blob
-        if (!blob) return
-        const file = new File([blob], asset.title || asset.id, {
-          type: asset.mediaType || blob.type || 'application/octet-stream',
-        })
-        setPendingLibraryFiles((current) => [...current, file])
-      } catch (error) {
-        handleServerError(error, t('Unable to add the asset to your message.'))
-      }
-    },
-    [t]
-  )
-
-  const handleLibraryArtifactToChat = useCallback(
-    async (asset: PlaygroundAssetItem) => {
-      try {
-        const result = await getPlaygroundArtifact(asset.sessionId, asset.id)
-        setPendingLibraryText(result.version.content)
-      } catch (error) {
-        handleServerError(error, t('Unable to add the asset to your message.'))
-      }
-    },
-    [t]
-  )
-
-  const handleLibraryAssetToCanvas = useCallback(
-    (asset: PlaygroundAssetItem) => {
-      if (asset.kind === 'attachment') {
-        setCanvasSendSeeds(
-          buildAttachmentCanvasSeeds({
-            sessionId: asset.sessionId,
-            attachmentId: asset.id,
-            filename: asset.title || undefined,
-            mediaType: asset.mediaType,
-          })
-        )
-        return
-      }
-      setCanvasSendSeeds(
-        buildArtifactCanvasSeeds({
-          sessionId: asset.sessionId,
-          artifactId: asset.id,
-          title: asset.title,
-        })
-      )
-    },
-    []
-  )
-
-  const handleLibraryOpenConversation = useCallback(
-    (sessionId: string) => {
-      const match = sessions.find((session) => session.server?.id === sessionId)
-      if (!match) return
-      if (match.id !== activeSessionId) handleSwitchSession(match.id)
-    },
-    [activeSessionId, handleSwitchSession, sessions]
-  )
-
+  // An old /playground?session=...&artifact=... link now opens the artifact in
+  // the canvas artifact browser. The route paths and deep links stay unchanged.
   const requestedSession = props.target?.session
   useEffect(() => {
     if (!requestedSession || sync.isLoading) return
@@ -931,19 +785,12 @@ function PlaygroundContent(props: {
 
   const requestedArtifact = props.target?.artifact
   useEffect(() => {
-    if (!requestedArtifact || !canonicalSessionId) return
-    if (requestedSession && canonicalSessionId !== requestedSession) return
-    if (appliedArtifactRef.current === requestedArtifact) return
-    appliedArtifactRef.current = requestedArtifact
-    setCanvasOpen(false)
-    artifactController.store.getState().setOpen(true)
-    artifactController.store.getState().selectArtifact(requestedArtifact)
-  }, [
-    canonicalSessionId,
-    requestedArtifact,
-    requestedSession,
-    artifactController.store,
-  ])
+    if (!requestedArtifact || !requestedSession) return
+    props.onOpenCanvas?.({
+      session: requestedSession,
+      artifact: requestedArtifact,
+    })
+  }, [props.onOpenCanvas, requestedArtifact, requestedSession])
 
   const updateLoadedConfig = useCallback<typeof updateConfig>(
     (key, value) => {
@@ -970,6 +817,7 @@ function PlaygroundContent(props: {
         activeSessionId={activeSessionId}
         onCreate={handleCreateSession}
         onDelete={handleDeleteSession}
+        onImportFile={handleImportConversation}
         onOpenPresets={handleOpenPresets}
         onOpenTrash={handleOpenTrash}
         onRename={renameSession}
@@ -984,36 +832,11 @@ function PlaygroundContent(props: {
             />
           ) : undefined
         }
+        syncLabel={syncLabel}
         inspectorView={inspectorView}
-        artifactsDisabled={!canonicalSessionId}
-        onToggleInspector={handleToggleInspector}
         onCloseInspector={handleCloseInspector}
         inspector={
-          inspectorView === 'canvas' ? (
-            <PlaygroundCanvasPanel
-              activeProjectId={canvasProjectId}
-              onOpenProject={handleOpenCanvasProject}
-              refreshSignal={canvasRefreshSignal}
-            />
-          ) : inspectorView === 'generate' ? (
-            <PlaygroundGenerationPanel
-              active
-              disabled={sync.isLoading}
-              group={config.group}
-              models={models}
-              onSendToCanvas={(seeds) => setCanvasSendSeeds(seeds)}
-            />
-          ) : inspectorView === 'library' ? (
-            <PlaygroundAssetLibrary
-              active
-              userId={userId}
-              onOpenConversation={handleLibraryOpenConversation}
-              onSendAttachmentToChat={handleLibraryAttachmentToChat}
-              onSendArtifactToChat={handleLibraryArtifactToChat}
-              onSendSeedsToCanvas={(seeds) => setCanvasSendSeeds(seeds)}
-              onSendToCanvas={handleLibraryAssetToCanvas}
-            />
-          ) : inspectorView === 'presets' ? (
+          inspectorView === 'presets' ? (
             <PlaygroundPresetPanel
               active
               currentConfig={config}
@@ -1030,12 +853,6 @@ function PlaygroundContent(props: {
             <PlaygroundTrashPanel
               onRestoreCanvas={handleRestoreTrashedCanvas}
               onRestoreSession={restoreSession}
-            />
-          ) : canonicalSessionId ? (
-            <PlaygroundArtifactPanel
-              controller={artifactController}
-              onClose={closeArtifactPanel}
-              onSendToCanvas={handleSendArtifactToCanvas}
             />
           ) : null
         }
@@ -1072,12 +889,6 @@ function PlaygroundContent(props: {
               )}
             </p>
           )}
-          <p
-            role='status'
-            className='text-muted-foreground shrink-0 px-4 py-1 text-xs'
-          >
-            {syncLabel}
-          </p>
           <PlaygroundSessionUsage
             className='shrink-0 pt-0'
             costs={messageCosts}
@@ -1085,10 +896,12 @@ function PlaygroundContent(props: {
           />
           <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>
             <PlaygroundChat
+              artifacts={artifactController.artifacts}
               messages={messages}
               costs={messageCosts}
               isLoadingMessages={isLoadingMessages || sync.isLoading}
               onRegenerateMessage={handleRegenerateMessage}
+              onContinueMessage={handleContinueMessage}
               onReadAloud={activeSession ? handleReadAloud : undefined}
               onEditMessage={handleEditMessage}
               onDeleteMessage={handleDeleteMessage}
@@ -1104,6 +917,9 @@ function PlaygroundContent(props: {
               onSendToCanvas={
                 canvasSendEnabled ? handleSendMessageToCanvas : undefined
               }
+              onGenerateMedia={
+                canvasSendEnabled ? handleGenerateFromMessage : undefined
+              }
               isGenerating={isGenerating || isComparing}
               editingKey={editingMessageKey}
               onCancelEdit={handleEditOpenChange}
@@ -1112,6 +928,12 @@ function PlaygroundContent(props: {
               contextSummary={contextSummary}
               openingMessage={openingMessage}
               suggestedQuestions={suggestedQuestions}
+              onOpenArtifact={(artifact) =>
+                props.onOpenCanvas?.({
+                  session: artifact.session_id,
+                  artifact: artifact.id,
+                })
+              }
               onRemoveContextSummary={handleRemoveContextSummary}
             />
           </div>
@@ -1137,6 +959,18 @@ function PlaygroundContent(props: {
               contextSettings={context}
               contextSummary={contextSummary}
               sessionId={activeSession?.id}
+              autoReadDefaultEnabled={preferences.autoReadDefault}
+              autoReadEnabled={preferences.isAutoReadEnabled(activeSessionId)}
+              autoReadHasOverride={preferences.hasSessionAutoReadOverride(
+                activeSessionId
+              )}
+              onAutoReadChange={(value) =>
+                preferences.setSessionAutoRead(activeSessionId, value)
+              }
+              onAutoReadDefaultChange={preferences.setAutoReadDefault}
+              onAutoReadUseDefault={() =>
+                preferences.setSessionAutoRead(activeSessionId, null)
+              }
               disabled={
                 isGenerating ||
                 isComparing ||
@@ -1167,10 +1001,6 @@ function PlaygroundContent(props: {
               parameterEnabled={parameterEnabled}
               systemPrompt={systemPrompt}
               hasMessages={messages.length > 0}
-              pendingFiles={pendingLibraryFiles}
-              onPendingFilesConsumed={clearPendingLibraryFiles}
-              pendingText={pendingLibraryText}
-              onPendingTextConsumed={clearPendingLibraryText}
             />
           </div>
         </div>
@@ -1182,7 +1012,7 @@ function PlaygroundContent(props: {
         hasRetry={artifactController.state.pendingCreate !== null}
         onRetry={artifactController.retryCreate}
         onOpenChange={closeArtifactSource}
-        onCreate={artifactController.createFromSource}
+        onCreate={handleCreateArtifact}
       />
       <PlaygroundSpeechDialog
         group={config.group}
