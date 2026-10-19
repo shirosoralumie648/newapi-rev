@@ -273,11 +273,15 @@ type SyncTaskQueryParams struct {
 	EndTimestamp   int64
 	UserIDs        []int
 	// GenerationPrompt searches the Playground generation metadata's prompt
-	// case-insensitively; GenerationModel matches it exactly and
-	// GenerationSeed compares the recorded numeric seed.
-	GenerationPrompt string
-	GenerationModel  string
-	GenerationSeed   *int64
+	// case-insensitively; the remaining fields match one recorded generation
+	// parameter exactly. They let the result gallery narrow a page by the
+	// metadata shown beside each result without a second result store.
+	GenerationPrompt  string
+	GenerationModel   string
+	GenerationSize    string
+	GenerationQuality string
+	GenerationSeed    *int64
+	GenerationCount   *int
 }
 
 // applyTaskGenerationFilters narrows a task query to the Playground generation
@@ -298,8 +302,17 @@ func applyTaskGenerationFilters(query *gorm.DB, params SyncTaskQueryParams) *gor
 	if modelName := strings.TrimSpace(params.GenerationModel); modelName != "" {
 		query = query.Where(taskGenerationTextExpression("model")+" = ?", modelName)
 	}
+	if size := strings.TrimSpace(params.GenerationSize); size != "" {
+		query = query.Where(taskGenerationTextExpression("size")+" = ?", size)
+	}
+	if quality := strings.TrimSpace(params.GenerationQuality); quality != "" {
+		query = query.Where(taskGenerationTextExpression("quality")+" = ?", quality)
+	}
 	if params.GenerationSeed != nil {
-		query = query.Where(taskGenerationSeedExpression()+" = ?", *params.GenerationSeed)
+		query = query.Where(taskGenerationNumberExpression("seed")+" = ?", *params.GenerationSeed)
+	}
+	if params.GenerationCount != nil {
+		query = query.Where(taskGenerationNumberExpression("count")+" = ?", *params.GenerationCount)
 	}
 	return query
 }
@@ -318,16 +331,16 @@ func taskGenerationTextExpression(field string) string {
 	}
 }
 
-// taskGenerationSeedExpression extracts the numeric seed as an integer in
-// every supported database so an exact seed filter stays portable.
-func taskGenerationSeedExpression() string {
+// taskGenerationNumberExpression extracts one numeric generation field as an
+// integer in every supported database so exact filters stay portable.
+func taskGenerationNumberExpression(field string) string {
 	switch {
 	case common.UsingMainDatabase(common.DatabaseTypePostgreSQL):
-		return "CAST(private_data->'generation'->>'seed' AS BIGINT)"
+		return "CAST(private_data->'generation'->>'" + field + "' AS BIGINT)"
 	case common.UsingMainDatabase(common.DatabaseTypeMySQL):
-		return "CAST(JSON_UNQUOTE(JSON_EXTRACT(private_data, '$.generation.seed')) AS SIGNED)"
+		return "CAST(JSON_UNQUOTE(JSON_EXTRACT(private_data, '$.generation." + field + "')) AS SIGNED)"
 	default:
-		return "CAST(json_extract(private_data, '$.generation.seed') AS INTEGER)"
+		return "CAST(json_extract(private_data, '$.generation." + field + "') AS INTEGER)"
 	}
 }
 

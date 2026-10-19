@@ -126,6 +126,18 @@ func SetRelayRouter(router *gin.Engine) {
 			middleware.Distribute(),
 			controller.PlaygroundEmbeddings,
 		)
+		// The non-chat workbench shares the same bridge and billing path:
+		// only the canonical relay format differs.
+		playgroundMediaRouter.POST("/rerank",
+			middleware.PlaygroundRelayBridge("/v1/rerank"),
+			middleware.Distribute(),
+			controller.PlaygroundRerank,
+		)
+		playgroundMediaRouter.POST("/moderations",
+			middleware.PlaygroundRelayBridge("/v1/moderations"),
+			middleware.Distribute(),
+			controller.PlaygroundModerations,
+		)
 		playgroundMediaRouter.POST("/audio/speech",
 			middleware.PlaygroundRelayBridge("/v1/audio/speech"),
 			middleware.Distribute(),

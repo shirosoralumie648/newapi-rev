@@ -2089,3 +2089,215 @@ func TestPlaygroundCanvasTemplateLibrary(t *testing.T) {
 		})
 	}
 }
+func TestPlaygroundWorkflowRunHistoryMatrix(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			canvas := createCanvasProject(t, 7, "workflow-history")
+			canvasID := canvas["id"].(string)
+
+			type runView struct {
+				ID          string `json:"id"`
+				Status      string `json:"status"`
+				NodeCount   int    `json:"node_count"`
+				CacheHits   int    `json:"cache_hits"`
+				TotalQuota  int    `json:"total_quota"`
+				TotalTokens int64  `json:"total_tokens"`
+				Revision    int64  `json:"revision"`
+				WorkflowRev int64  `json:"workflow_revision"`
+				Estimate    int    `json:"estimate_quota"`
+				BudgetCap   int    `json:"budget_cap"`
+				Nodes       []struct {
+					NodeID      string   `json:"node_id"`
+					Status      string   `json:"status"`
+					Fingerprint string   `json:"fingerprint"`
+					CacheHit    bool     `json:"cache_hit"`
+					Output      string   `json:"output"`
+					TaskID      string   `json:"task_id"`
+					Artifact    []string `json:"artifact_keys"`
+					ResultCount int      `json:"result_count"`
+					TotalTokens int      `json:"total_tokens"`
+					Quota       int      `json:"quota"`
+					DurationMs  int64    `json:"duration_ms"`
+				} `json:"nodes"`
+			}
+			decodeRun := func(response *httptest.ResponseRecorder) runView {
+				t.Helper()
+				require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+				var envelope struct {
+					Success bool    `json:"success"`
+					Data    runView `json:"data"`
+				}
+				require.NoError(t, common.Unmarshal(response.Body.Bytes(), &envelope))
+				require.True(t, envelope.Success, response.Body.String())
+				return envelope.Data
+			}
+
+			// A run starts as a running row with no nodes. The account has no
+			// wallet quota in this fixture, proving run history capacity is
+			// independent of User.Quota.
+			created := decodeRun(playgroundRequest(t, 7, http.MethodPost, "/api/playground/workflows/history", map[string]any{
+				"canvas_id": canvasID, "workflow_revision": 4, "estimate_quota": 90, "budget_cap": 120,
+			}, controller.CreatePlaygroundWorkflowRunHistory))
+			require.True(t, strings.HasPrefix(created.ID, "pgwr_"), created.ID)
+			assert.Equal(t, model.PlaygroundWorkflowRunStatusRunning, created.Status)
+			assert.EqualValues(t, 4, created.WorkflowRev)
+			assert.EqualValues(t, 90, created.Estimate)
+			assert.EqualValues(t, 120, created.BudgetCap)
+			assert.EqualValues(t, 1, created.Revision)
+			assert.Empty(t, created.Nodes)
+
+			nodes := []map[string]any{
+				{
+					"node_id": "m1", "kind": "model", "model": "gpt-4o", "group": "default",
+					"status": "succeeded", "fingerprint": "wf1:model-a", "output": "first output",
+					"total_tokens": 12, "quota": 25, "started_at": 1000, "finished_at": 1200,
+				},
+				{
+					"node_id": "t1", "kind": "task", "model": "video-model", "group": "default",
+					"status": "succeeded", "fingerprint": "wf1:task-a", "task_id": "task_123",
+					"artifact_keys": []string{"key-1"}, "result_count": 1, "quota": 40,
+					"started_at": 1200, "finished_at": 1800,
+				},
+				{"node_id": "m2", "kind": "model", "model": "gpt-4o", "status": "skipped"},
+			}
+			updated := decodeRun(playgroundRequest(t, 7, http.MethodPatch, "/api/playground/workflows/history/"+created.ID, map[string]any{
+				"revision": 1, "status": "completed", "nodes": nodes,
+			}, controller.UpdatePlaygroundWorkflowRunHistory))
+			assert.Equal(t, model.PlaygroundWorkflowRunStatusCompleted, updated.Status)
+			assert.EqualValues(t, 2, updated.Revision)
+			assert.Equal(t, 3, updated.NodeCount)
+			assert.EqualValues(t, 65, updated.TotalQuota)
+			assert.EqualValues(t, 12, updated.TotalTokens)
+			assert.EqualValues(t, 800, updated.Nodes[1].DurationMs)
+			require.Len(t, updated.Nodes[1].Artifact, 1)
+
+			// A stale revision cannot overwrite a newer snapshot, and another
+			// account cannot read, update, delete or cache-read the run.
+			stale := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/workflows/history/"+created.ID, map[string]any{
+				"revision": 1, "status": "failed", "nodes": []any{},
+			}, controller.UpdatePlaygroundWorkflowRunHistory)
+			assert.Equal(t, http.StatusConflict, stale.Code, stale.Body.String())
+			assert.Contains(t, stale.Body.String(), `"PLAYGROUND_CONFLICT"`)
+
+			for _, request := range []struct {
+				method  string
+				path    string
+				body    any
+				handler gin.HandlerFunc
+			}{
+				{http.MethodGet, "/api/playground/workflows/history/" + created.ID, nil, controller.GetPlaygroundWorkflowRunHistory},
+				{http.MethodPatch, "/api/playground/workflows/history/" + created.ID, map[string]any{"revision": 2, "status": "failed"}, controller.UpdatePlaygroundWorkflowRunHistory},
+				{http.MethodDelete, "/api/playground/workflows/history/" + created.ID, nil, controller.DeletePlaygroundWorkflowRunHistory},
+				{http.MethodPost, "/api/playground/workflows/node-cache", map[string]any{"canvas_id": canvasID, "fingerprints": []string{"wf1:model-a"}}, controller.LookupPlaygroundWorkflowNodeCache},
+			} {
+				response := playgroundRequest(t, 8, request.method, request.path, request.body, request.handler)
+				assert.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
+				assert.Contains(t, response.Body.String(), `"PLAYGROUND_WORKFLOW_RUN_NOT_FOUND"`)
+			}
+			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 8, http.MethodPost, "/api/playground/workflows/history", map[string]any{
+				"canvas_id": canvasID,
+			}, controller.CreatePlaygroundWorkflowRunHistory).Code)
+
+			// The list projection never carries the node snapshot and honours
+			// the canvas filter.
+			list := playgroundRequest(t, 7, http.MethodGet, "/api/playground/workflows/history?canvas_id="+canvasID, nil, controller.ListPlaygroundWorkflowRunHistory)
+			require.Equal(t, http.StatusOK, list.Code, list.Body.String())
+			var listed struct {
+				Data struct {
+					Items []struct {
+						ID         string `json:"id"`
+						NodeCount  int    `json:"node_count"`
+						TotalQuota int    `json:"total_quota"`
+					} `json:"items"`
+				} `json:"data"`
+			}
+			require.NoError(t, common.Unmarshal(list.Body.Bytes(), &listed))
+			require.Len(t, listed.Data.Items, 1)
+			assert.Equal(t, created.ID, listed.Data.Items[0].ID)
+			assert.Equal(t, 3, listed.Data.Items[0].NodeCount)
+			assert.EqualValues(t, 65, listed.Data.Items[0].TotalQuota)
+			assert.NotContains(t, list.Body.String(), `"nodes"`)
+
+			// The cache returns the newest succeeded record per fingerprint and
+			// ignores a fingerprint that was never recorded.
+			cache := playgroundRequest(t, 7, http.MethodPost, "/api/playground/workflows/node-cache", map[string]any{
+				"canvas_id": canvasID, "fingerprints": []string{"wf1:model-a", "wf1:task-a", "wf1:missing"},
+			}, controller.LookupPlaygroundWorkflowNodeCache)
+			require.Equal(t, http.StatusOK, cache.Code, cache.Body.String())
+			var cacheEnvelope struct {
+				Data struct {
+					Items []struct {
+						Fingerprint string `json:"fingerprint"`
+						Output      string `json:"output"`
+						TaskID      string `json:"task_id"`
+						RunID       string `json:"run_id"`
+					} `json:"items"`
+				} `json:"data"`
+			}
+			require.NoError(t, common.Unmarshal(cache.Body.Bytes(), &cacheEnvelope))
+			require.Len(t, cacheEnvelope.Data.Items, 2)
+			assert.Equal(t, "first output", cacheEnvelope.Data.Items[0].Output)
+			assert.Equal(t, "task_123", cacheEnvelope.Data.Items[1].TaskID)
+			assert.Equal(t, created.ID, cacheEnvelope.Data.Items[0].RunID)
+
+			// A second run with the same fingerprint supersedes the first one
+			// in the cache, while the first run remains in history.
+			second := decodeRun(playgroundRequest(t, 7, http.MethodPost, "/api/playground/workflows/history", map[string]any{
+				"canvas_id": canvasID,
+			}, controller.CreatePlaygroundWorkflowRunHistory))
+			require.NotEqual(t, created.ID, second.ID)
+			decodeRun(playgroundRequest(t, 7, http.MethodPatch, "/api/playground/workflows/history/"+second.ID, map[string]any{
+				"revision": second.Revision, "status": "failed", "nodes": []map[string]any{{
+					"node_id": "m1", "kind": "model", "model": "gpt-4o", "status": "succeeded",
+					"fingerprint": "wf1:model-a", "output": "newer output", "quota": 30,
+				}},
+			}, controller.UpdatePlaygroundWorkflowRunHistory))
+			cache = playgroundRequest(t, 7, http.MethodPost, "/api/playground/workflows/node-cache", map[string]any{
+				"canvas_id": canvasID, "fingerprints": []string{"wf1:model-a"},
+			}, controller.LookupPlaygroundWorkflowNodeCache)
+			require.NoError(t, common.Unmarshal(cache.Body.Bytes(), &cacheEnvelope))
+			require.Len(t, cacheEnvelope.Data.Items, 1)
+			assert.Equal(t, "newer output", cacheEnvelope.Data.Items[0].Output)
+			assert.Equal(t, second.ID, cacheEnvelope.Data.Items[0].RunID)
+
+			// An oversized fingerprint batch and a missing canvas are rejected
+			// with stable errors instead of scanning unbounded input.
+			tooMany := make([]string, 129)
+			for index := range tooMany {
+				tooMany[index] = "wf1:" + strings.Repeat("x", 8) + fmt.Sprint(index)
+			}
+			invalid := playgroundRequest(t, 7, http.MethodPost, "/api/playground/workflows/node-cache", map[string]any{
+				"canvas_id": canvasID, "fingerprints": tooMany,
+			}, controller.LookupPlaygroundWorkflowNodeCache)
+			assert.Equal(t, http.StatusBadRequest, invalid.Code, invalid.Body.String())
+			assert.Contains(t, invalid.Body.String(), `"PLAYGROUND_WORKFLOW_RUN_INVALID"`)
+			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 7, http.MethodPost, "/api/playground/workflows/node-cache", map[string]any{
+				"canvas_id": "pgc_missing", "fingerprints": []string{"wf1:model-a"},
+			}, controller.LookupPlaygroundWorkflowNodeCache).Code)
+
+			// Deleting a run releases its counters and its cache entries.
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodDelete, "/api/playground/workflows/history/"+second.ID, nil, controller.DeletePlaygroundWorkflowRunHistory).Code)
+			var usage model.PlaygroundUserUsage
+			require.NoError(t, db.Where("user_id = ?", 7).First(&usage).Error)
+			assert.EqualValues(t, 1, usage.WorkflowRunCount)
+			cache = playgroundRequest(t, 7, http.MethodPost, "/api/playground/workflows/node-cache", map[string]any{
+				"canvas_id": canvasID, "fingerprints": []string{"wf1:model-a"},
+			}, controller.LookupPlaygroundWorkflowNodeCache)
+			require.NoError(t, common.Unmarshal(cache.Body.Bytes(), &cacheEnvelope))
+			require.Len(t, cacheEnvelope.Data.Items, 1)
+			assert.Equal(t, "first output", cacheEnvelope.Data.Items[0].Output)
+
+			// Purging the board removes its runs and returns their snapshot
+			// bytes to the account counters in the same transaction.
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodDelete, "/api/playground/canvases/"+canvasID, nil, controller.DeletePlaygroundCanvasProject).Code)
+			require.NoError(t, model.PurgePlaygroundCanvasProject(7, canvasID))
+			require.NoError(t, db.Where("user_id = ?", 7).First(&usage).Error)
+			assert.Zero(t, usage.WorkflowRunCount)
+			assert.Zero(t, usage.WorkflowRunBytes)
+			var runCount int64
+			require.NoError(t, db.Model(&model.PlaygroundWorkflowRun{}).Where("canvas_id = ?", canvasID).Count(&runCount).Error)
+			assert.Zero(t, runCount)
+		})
+	}
+}

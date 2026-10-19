@@ -99,6 +99,8 @@ const serverErrorMessageKeys = {
   PLAYGROUND_DOCUMENT_NO_TEXT: 'The document contains no extractable text.',
   PLAYGROUND_CONTEXT_SUMMARY_LIMIT_EXCEEDED:
     'Playground context summary limit exceeded.',
+  PLAYGROUND_DEVELOPER_OPTIONS_LIMIT_EXCEEDED:
+    'Playground developer options limit exceeded.',
   PLAYGROUND_SESSION_ARCHIVED:
     'Cannot pin an archived Playground conversation.',
   PLAYGROUND_PARALLEL_LIMIT_EXCEEDED:
@@ -125,6 +127,12 @@ const serverErrorMessageKeys = {
   PLAYGROUND_SEARCH_RESERVATION_FAILED:
     'Unable to hold or settle the wallet quota for the search.',
   PLAYGROUND_SHARE_NOT_FOUND: 'Shared conversation not found.',
+  PLAYGROUND_EMBEDDING_LIMIT_EXCEEDED:
+    'Embedding requests accept up to 64 inputs of 16,000 characters each.',
+  PLAYGROUND_RERANK_LIMIT_EXCEEDED:
+    'Rerank requests accept a query of up to 16,000 characters and up to 32 candidates of 16,000 characters each.',
+  PLAYGROUND_MODERATION_LIMIT_EXCEEDED:
+    'Moderation requests accept up to 64 inputs of 16,000 characters each.',
   workflow_budget_exceeded:
     'This workflow run has reached its budget cap; the remaining steps were not started.',
 } as const

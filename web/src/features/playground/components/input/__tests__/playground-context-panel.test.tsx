@@ -302,7 +302,7 @@ test('a conversation binds at most three knowledge bases', async () => {
 
   expect(
     await screen.findByRole('checkbox', { name: /Handbook 4/ })
-  ).toBeDisabled()
+  ).toHaveAttribute('aria-disabled', 'true')
   await user.click(screen.getByRole('checkbox', { name: /Handbook 2/ }))
   expect(props.onKnowledgeBaseIdsChange).toHaveBeenLastCalledWith([
     'kb-1',

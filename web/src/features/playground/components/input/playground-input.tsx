@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -45,6 +45,7 @@ import type {
   PlaygroundConfig,
   PlaygroundContextSettings,
   PlaygroundContextSummary,
+  PlaygroundDeveloperOptions,
 } from '../../types'
 import type { PlaygroundKnowledgeDiagnostics } from './playground-context-panel'
 import { PlaygroundInputControls } from './playground-input-controls'
@@ -54,6 +55,10 @@ interface PlaygroundInputProps {
   config: PlaygroundConfig
   /** Active conversation the draft is stored under. */
   sessionId?: string | null
+  /** Composer text a replay deep link restored; applied exactly once. */
+  prefillText?: string
+  /** Acknowledges the applied prefill so it never overwrites later typing. */
+  onPrefillTextConsumed?: () => void
   onSubmit: (
     text: string,
     files: (FileUIPart & { id?: string })[]
@@ -97,6 +102,10 @@ interface PlaygroundInputProps {
   onContextSettingsChange: (settings: PlaygroundContextSettings) => void
   onRemoveContextSummary: () => void
   onSummarizeContext: () => void
+  /** Request-side developer settings of the active conversation. */
+  developerOptions?: PlaygroundDeveloperOptions
+  /** Stores changed developer settings on the active conversation. */
+  onDeveloperOptionsChange?: (options: PlaygroundDeveloperOptions) => void
   /** Knowledge bases the account may bind to the active conversation. */
   knowledgeBases?: KnowledgeBase[]
   /** Bases bound to the active conversation; at most three. */
@@ -137,6 +146,8 @@ interface PlaygroundInputProps {
 export function PlaygroundInput({
   config,
   sessionId,
+  prefillText,
+  onPrefillTextConsumed,
   onSubmit,
   onStop,
   disabled,
@@ -167,6 +178,8 @@ export function PlaygroundInput({
   onContextSettingsChange,
   onRemoveContextSummary,
   onSummarizeContext,
+  developerOptions,
+  onDeveloperOptionsChange,
   knowledgeBases,
   knowledgeBaseIds,
   onKnowledgeBaseIdsChange,
@@ -196,6 +209,15 @@ export function PlaygroundInput({
   const { text, updateText, appendText, handleKeyDown, rememberSubmittedText } =
     usePlaygroundComposerMemory(sessionId)
   const [submitting, setSubmitting] = useState(false)
+
+  // A replay deep link restores the prompt of the log it reopens. The value is
+  // consumed on arrival so a later render never overwrites what the user typed.
+  useEffect(() => {
+    if (!prefillText) return
+    updateText(prefillText)
+    onPrefillTextConsumed?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onPrefillTextConsumed, prefillText, updateText])
 
   const handleSubmit = async (message: PromptInputMessage) => {
     if (disabled || submitting) return
@@ -270,6 +292,7 @@ export function PlaygroundInput({
                 contextPlan={contextPlan}
                 contextSettings={contextSettings}
                 contextSummary={contextSummary}
+                developerOptions={developerOptions}
                 disabled={disabled}
                 hasCapturedRequest={hasCapturedRequest}
                 hasMessages={hasMessages}
@@ -291,6 +314,7 @@ export function PlaygroundInput({
                 onClearMessages={onClearMessages}
                 onConfigChange={onConfigChange}
                 onContextSettingsChange={onContextSettingsChange}
+                onDeveloperOptionsChange={onDeveloperOptionsChange}
                 onDictateTranscript={appendText}
                 onInsertText={appendText}
                 onKnowledgeBaseIdsChange={onKnowledgeBaseIdsChange}

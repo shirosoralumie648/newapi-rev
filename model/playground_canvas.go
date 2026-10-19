@@ -791,6 +791,17 @@ func purgePlaygroundCanvasProjectTx(tx *gorm.DB, project *PlaygroundCanvasProjec
 	if err := tx.Where("canvas_id = ? AND user_id = ?", project.ID, project.UserID).Delete(&PlaygroundCanvasSnapshot{}).Error; err != nil {
 		return nil, err
 	}
+	// Run history is owned by the board: purge its rows and return their
+	// stored snapshot bytes to the account budget. Deleting the canvas while a
+	// run is still running simply removes the history row; the run's real /pg
+	// calls are unaffected.
+	workflowRuns := make([]PlaygroundWorkflowRun, 0)
+	if err := tx.Select("id, byte_size").Where("canvas_id = ? AND user_id = ?", project.ID, project.UserID).Find(&workflowRuns).Error; err != nil {
+		return nil, err
+	}
+	if err := tx.Where("canvas_id = ? AND user_id = ?", project.ID, project.UserID).Delete(&PlaygroundWorkflowRun{}).Error; err != nil {
+		return nil, err
+	}
 	// Share links are an access mechanism, not content: they are deleted with
 	// the board and their hashes never enter an export.
 	if err := tx.Where("canvas_id = ? AND user_id = ?", project.ID, project.UserID).Delete(&PlaygroundSessionShare{}).Error; err != nil {
@@ -802,9 +813,13 @@ func purgePlaygroundCanvasProjectTx(tx *gorm.DB, project *PlaygroundCanvasProjec
 	removedSnapshots := make([]playgroundStoredObject, 0, len(snapshots))
 	removedDocument := make([]playgroundStoredObject, 0, 1)
 	snapshotBytes := int64(0)
+	workflowRunBytes := int64(0)
 	for index := range snapshots {
 		removedSnapshots = append(removedSnapshots, playgroundStoredObject{ObjectKey: snapshots[index].ObjectKey})
 		snapshotBytes += snapshots[index].ByteSize
+	}
+	for index := range workflowRuns {
+		workflowRunBytes += workflowRuns[index].ByteSize
 	}
 	if project.ObjectKey != "" {
 		removedDocument = append(removedDocument, playgroundStoredObject{ObjectKey: project.ObjectKey})
@@ -822,6 +837,8 @@ func purgePlaygroundCanvasProjectTx(tx *gorm.DB, project *PlaygroundCanvasProjec
 		CanvasBytes:         -project.DocumentBytes,
 		CanvasSnapshotCount: -int64(len(snapshots)),
 		CanvasSnapshotBytes: -snapshotBytes,
+		WorkflowRunCount:    -int64(len(workflowRuns)),
+		WorkflowRunBytes:    -workflowRunBytes,
 	})
 	if err := savePlaygroundUserUsage(tx, usage); err != nil {
 		return nil, err

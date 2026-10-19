@@ -21,9 +21,12 @@ import { afterEach, expect, test, vi } from 'vitest'
 import { api } from '@/lib/api'
 
 import {
+  createCanvasWorkflowRunHistory,
   createGlobalCanvasTemplate,
   exportCanvasArchive,
   importCanvasArchive,
+  lookupCanvasWorkflowNodeCache,
+  updateCanvasWorkflowRunHistory,
 } from '../api'
 
 afterEach(() => vi.restoreAllMocks())
@@ -221,5 +224,161 @@ test('saving a global template posts to the administrator endpoint and maps the 
     assetsInlined: 1,
     resourcesMissing: 2,
     referencesDropped: 1,
+  })
+})
+
+const workflowRunPayload = {
+  id: 'pgwr_1',
+  canvas_id: 'pgc_1',
+  session_id: '',
+  workflow_revision: 4,
+  status: 'running',
+  node_count: 1,
+  cache_hits: 0,
+  total_quota: 25,
+  prompt_tokens: 10,
+  completion_tokens: 2,
+  total_tokens: 12,
+  duration_ms: 200,
+  estimate_quota: 90,
+  budget_cap: 0,
+  byte_size: 128,
+  revision: 1,
+  created_at: 10,
+  updated_at: 20,
+  nodes: [
+    {
+      node_id: 'm1',
+      kind: 'model',
+      model: 'gpt-4o',
+      group: 'default',
+      status: 'succeeded',
+      fingerprint: 'wf1:model-a',
+      cache_hit: false,
+      output: 'answer',
+      task_id: '',
+      artifact_keys: [],
+      result_count: 0,
+      prompt_tokens: 10,
+      completion_tokens: 2,
+      total_tokens: 12,
+      quota: 25,
+      duration_ms: 200,
+      error: '',
+      started_at: 1000,
+      finished_at: 1200,
+    },
+  ],
+}
+
+test('creating run history posts the start metadata and maps the stored run', async () => {
+  const post = vi.spyOn(api, 'post').mockResolvedValue({
+    data: { success: true, data: workflowRunPayload },
+  })
+
+  const created = await createCanvasWorkflowRunHistory({
+    canvasId: 'pgc_1',
+    workflowRevision: 4,
+    estimateQuota: 90,
+    budgetCap: 0,
+  })
+
+  expect(post.mock.calls[0][0]).toBe('/api/playground/workflows/history')
+  expect(post.mock.calls[0][1]).toEqual({
+    canvas_id: 'pgc_1',
+    workflow_revision: 4,
+    estimate_quota: 90,
+    budget_cap: 0,
+  })
+  expect(created).toMatchObject({
+    id: 'pgwr_1',
+    canvasId: 'pgc_1',
+    createdAt: 10000,
+    updatedAt: 20000,
+    nodes: [expect.objectContaining({ nodeId: 'm1', quota: 25 })],
+  })
+})
+
+test('updating run history sends snake_case nodes and the cache lookup maps seconds', async () => {
+  const patch = vi.spyOn(api, 'patch').mockResolvedValue({
+    data: {
+      success: true,
+      data: { ...workflowRunPayload, revision: 2, status: 'completed' },
+    },
+  })
+  await updateCanvasWorkflowRunHistory('pgwr_1', {
+    revision: 1,
+    status: 'completed',
+    nodes: [
+      {
+        nodeId: 'm1',
+        kind: 'model',
+        model: 'gpt-4o',
+        group: 'default',
+        status: 'succeeded',
+        fingerprint: 'wf1:model-a',
+        cacheHit: true,
+        output: 'answer',
+        taskId: '',
+        artifactKeys: [],
+        resultCount: 0,
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        quota: 0,
+        durationMs: 200,
+        error: '',
+        startedAt: 1000,
+        finishedAt: 1200,
+      },
+    ],
+  })
+  expect(patch.mock.calls[0][0]).toBe(
+    '/api/playground/workflows/history/pgwr_1'
+  )
+  expect(patch.mock.calls[0][1]).toMatchObject({
+    revision: 1,
+    status: 'completed',
+    nodes: [
+      expect.objectContaining({
+        node_id: 'm1',
+        cache_hit: true,
+        started_at: 1000,
+      }),
+    ],
+  })
+
+  const post = vi.spyOn(api, 'post').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        items: [
+          {
+            fingerprint: 'wf1:model-a',
+            node_id: 'm1',
+            kind: 'model',
+            model: 'gpt-4o',
+            output: 'answer',
+            task_id: '',
+            artifact_keys: [],
+            result_count: 0,
+            quota: 25,
+            run_id: 'pgwr_1',
+            updated_at: 20,
+          },
+        ],
+      },
+    },
+  })
+  const entries = await lookupCanvasWorkflowNodeCache('pgc_1', ['wf1:model-a'])
+  expect(post.mock.calls[0][0]).toBe('/api/playground/workflows/node-cache')
+  expect(post.mock.calls[0][1]).toEqual({
+    canvas_id: 'pgc_1',
+    fingerprints: ['wf1:model-a'],
+  })
+  expect(entries[0]).toMatchObject({
+    fingerprint: 'wf1:model-a',
+    updatedAt: 20000,
+    runId: 'pgwr_1',
   })
 })

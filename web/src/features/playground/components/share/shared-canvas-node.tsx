@@ -32,14 +32,15 @@ import { CANVAS_NODE_KIND_LABELS } from '@/features/canvas/constants'
 import type { CanvasNodeData, CanvasNodeKind } from '@/features/canvas/types'
 import { cn } from '@/lib/utils'
 
-function sharedNodePreview(data: CanvasNodeData): string {
-  return (
+function sharedNodePreview(data: CanvasNodeData, mediaKind: boolean): string {
+  const text =
     data.text?.trim() ||
     data.snapshot?.text?.trim() ||
     data.workflow?.output?.trim() ||
-    data.label?.trim() ||
     ''
-  )
+  // A media node already renders `data.label` in its placeholder block; using
+  // it as the preview too would print the filename twice.
+  return text || (mediaKind ? '' : (data.label?.trim() ?? ''))
 }
 
 const MEDIA_KINDS: CanvasNodeKind[] = [
@@ -61,7 +62,8 @@ export function SharedCanvasNodeView(props: NodeProps) {
   const { t } = useTranslation()
   const data = props.data as CanvasNodeData
   const kind = data.kind ?? 'text'
-  const preview = sharedNodePreview(data)
+  const mediaKind = MEDIA_KINDS.includes(kind)
+  const preview = sharedNodePreview(data, mediaKind)
   const workflow = data.workflow
 
   if (kind === 'group') {
@@ -74,7 +76,6 @@ export function SharedCanvasNodeView(props: NodeProps) {
     )
   }
 
-  const mediaKind = MEDIA_KINDS.includes(kind)
   return (
     <CanvasNodeCard
       className='h-auto w-64 gap-0 p-0'

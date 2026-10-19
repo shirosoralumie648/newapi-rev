@@ -90,6 +90,12 @@ func GetOptions(c *gin.Context) {
 			continue
 		}
 		value := common.Interface2String(v)
+		// The MCP configuration keeps its per-connection credentials inside
+		// one JSON object. Redact them in place so the console can edit the
+		// server list without ever receiving a stored token.
+		if k == playground_setting.PlaygroundMCPOptionKey {
+			value = playground_setting.RedactPlaygroundMCPJSON(value)
+		}
 		isSensitiveKey := strings.HasSuffix(k, "Token") ||
 			strings.HasSuffix(k, "Secret") ||
 			strings.HasSuffix(k, "Key") ||

@@ -142,6 +142,7 @@ func GetPlaygroundSettings(c *gin.Context) {
 	common.ApiSuccess(c, gin.H{
 		"sandbox_preview_enabled":    playground_setting.IsSandboxPreviewEnabled(),
 		"web_search_enabled":         playground_setting.IsWebSearchEnabled(),
+		"mcp_enabled":                playground_setting.IsPlaygroundMCPEnabled(),
 		"tool_call_result_max_bytes": policy.ToolCallResultMaxBytes,
 	})
 }

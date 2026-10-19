@@ -475,6 +475,38 @@ func writePlaygroundError(c *gin.Context, err error) {
 		code = "PLAYGROUND_COMPARISON_UNAVAILABLE"
 		err = common.NewMessage(err.Error())
 	}
+	// Workflow history has its own stable codes so the canvas can tell a full
+	// history from a malformed snapshot or a stale revision.
+	if errors.Is(err, model.ErrPlaygroundWorkflowRunNotFound) {
+		status = http.StatusNotFound
+		code = "PLAYGROUND_WORKFLOW_RUN_NOT_FOUND"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundWorkflowRunConflict) {
+		status = http.StatusConflict
+		code = "PLAYGROUND_CONFLICT"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundWorkflowRunInvalid) {
+		status = http.StatusBadRequest
+		code = "PLAYGROUND_WORKFLOW_RUN_INVALID"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundWorkflowRunLimit) {
+		status = http.StatusUnprocessableEntity
+		code = "PLAYGROUND_WORKFLOW_RUN_LIMIT_EXCEEDED"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundWorkflowRunStorageLimit) {
+		status = http.StatusUnprocessableEntity
+		code = "PLAYGROUND_WORKFLOW_RUN_STORAGE_LIMIT_EXCEEDED"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundWorkflowRunUnavailable) {
+		status = http.StatusInternalServerError
+		code = "PLAYGROUND_WORKFLOW_RUN_UNAVAILABLE"
+		err = common.NewMessage(err.Error())
+	}
 	// The resource quota policy returns stable capacity errors so the client can
 	// tell a full workspace from a malformed request.
 	if errors.Is(err, model.ErrPlaygroundSessionLimit) {

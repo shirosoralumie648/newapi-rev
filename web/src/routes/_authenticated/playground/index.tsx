@@ -28,6 +28,8 @@ const playgroundSearchSchema = z.object({
   session: z.string().optional(),
   message: z.string().optional(),
   artifact: z.string().optional(),
+  replay: z.string().optional(),
+  replayUser: z.string().optional(),
 })
 
 export const Route = createFileRoute('/_authenticated/playground/')({

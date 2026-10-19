@@ -216,7 +216,8 @@ describe('export', () => {
 
     expect(downloaded).toBe('My-compare.csv')
     const [blob] = vi.mocked(URL.createObjectURL).mock.calls[0]
-    expect(blob.type).toBe('text/csv;charset=utf-8')
+    expect(blob).toBeInstanceOf(Blob)
+    expect((blob as Blob).type).toBe('text/csv;charset=utf-8')
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:comparison')
   })
 })
