@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Bot, Plus, Search, Trash2 } from 'lucide-react'
+import { Archive, Bot, ChevronDown, Plus, Search, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -24,10 +24,31 @@ import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { cn } from '@/lib/utils'
 
-import type { PlaygroundSession } from '../../types'
+import type {
+  PlaygroundSession,
+  PlaygroundSessionOrganization,
+} from '../../types'
 import { PlaygroundSessionImportButton } from './playground-session-import'
 import { PlaygroundSessionItem } from './playground-session-item'
+import { PlaygroundSessionTagsDialog } from './playground-session-tags-dialog'
+
+type PlaygroundSessionTagFilter =
+  | { kind: 'all' }
+  | { kind: 'untagged' }
+  | { kind: 'tag'; tag: string }
+
+const ALL_TAG_FILTER: PlaygroundSessionTagFilter = { kind: 'all' }
+
+function matchesTagFilter(
+  session: PlaygroundSession,
+  filter: PlaygroundSessionTagFilter
+) {
+  if (filter.kind === 'all') return true
+  if (filter.kind === 'untagged') return session.tags.length === 0
+  return session.tags.includes(filter.tag)
+}
 
 interface PlaygroundSessionListProps {
   disabled?: boolean
@@ -36,6 +57,10 @@ interface PlaygroundSessionListProps {
   onCreate: () => void
   onSwitch: (sessionId: string) => void
   onRename: (sessionId: string, title: string) => void
+  onOrganize: (
+    sessionId: string,
+    organization: PlaygroundSessionOrganization
+  ) => void
   onDelete: (sessionId: string) => void
   onOpenTrash?: () => void
   /** Opens the cross-session message search dialog. */
@@ -49,19 +74,49 @@ interface PlaygroundSessionListProps {
 export function PlaygroundSessionList(props: PlaygroundSessionListProps) {
   const { t } = useTranslation()
   const [query, setQuery] = useState('')
+  const [tagFilter, setTagFilter] =
+    useState<PlaygroundSessionTagFilter>(ALL_TAG_FILTER)
+  const [archivedOpen, setArchivedOpen] = useState(false)
   const [sessionToDelete, setSessionToDelete] =
     useState<PlaygroundSession | null>(null)
+  const [sessionToTag, setSessionToTag] = useState<PlaygroundSession | null>(
+    null
+  )
 
-  const visibleSessions = useMemo(() => {
+  const availableTags = useMemo(
+    () =>
+      [...new Set(props.sessions.flatMap((session) => session.tags))].sort(
+        (first, second) => first.localeCompare(second)
+      ),
+    [props.sessions]
+  )
+
+  const effectiveTagFilter =
+    tagFilter.kind === 'tag' && !availableTags.includes(tagFilter.tag)
+      ? ALL_TAG_FILTER
+      : tagFilter
+
+  const matchingSessions = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase()
     return [...props.sessions]
       .sort((first, second) => second.updatedAt - first.updatedAt)
+      .filter((session) => matchesTagFilter(session, effectiveTagFilter))
       .filter((session) =>
         normalizedQuery
           ? session.title.toLocaleLowerCase().includes(normalizedQuery)
           : true
       )
-  }, [props.sessions, query])
+  }, [props.sessions, query, effectiveTagFilter])
+
+  const pinnedSessions = matchingSessions.filter(
+    (session) => session.pinned && !session.archived
+  )
+  const regularSessions = matchingSessions.filter(
+    (session) => !session.pinned && !session.archived
+  )
+  const archivedSessions = matchingSessions.filter(
+    (session) => session.archived
+  )
 
   const handleDelete = () => {
     if (!sessionToDelete) return
@@ -74,6 +129,23 @@ export function PlaygroundSessionList(props: PlaygroundSessionListProps) {
   // recoverable until the retention window ends; a local-only draft is removed
   // from this browser for good.
   const trashing = sessionToDelete?.server != null
+
+  const renderSession = (session: PlaygroundSession) => (
+    <PlaygroundSessionItem
+      disabled={props.disabled}
+      isActive={session.id === props.activeSessionId}
+      key={session.id}
+      onDelete={() => setSessionToDelete(session)}
+      onManageTags={() => setSessionToTag(session)}
+      onOrganize={(organization) => props.onOrganize(session.id, organization)}
+      onRename={(title) => props.onRename(session.id, title)}
+      onSelect={() => {
+        props.onSwitch(session.id)
+        props.onAction?.()
+      }}
+      session={session}
+    />
+  )
 
   return (
     <div className='flex min-h-0 flex-1 flex-col gap-3'>
@@ -111,23 +183,107 @@ export function PlaygroundSessionList(props: PlaygroundSessionListProps) {
         ) : null}
       </div>
 
+      <div
+        aria-label={t('Filter conversations by tag')}
+        className='flex gap-1 overflow-x-auto pb-1'
+        role='group'
+      >
+        <Button
+          aria-pressed={effectiveTagFilter.kind === 'all'}
+          className='shrink-0'
+          onClick={() => setTagFilter(ALL_TAG_FILTER)}
+          size='xs'
+          type='button'
+          variant={effectiveTagFilter.kind === 'all' ? 'secondary' : 'ghost'}
+        >
+          {t('All')}
+        </Button>
+        <Button
+          aria-pressed={effectiveTagFilter.kind === 'untagged'}
+          className='shrink-0'
+          onClick={() => setTagFilter({ kind: 'untagged' })}
+          size='xs'
+          type='button'
+          variant={
+            effectiveTagFilter.kind === 'untagged' ? 'secondary' : 'ghost'
+          }
+        >
+          {t('Untagged')}
+        </Button>
+        {availableTags.map((tag) => (
+          <Button
+            aria-label={t('Filter by tag {{tag}}', { tag })}
+            aria-pressed={
+              effectiveTagFilter.kind === 'tag' &&
+              effectiveTagFilter.tag === tag
+            }
+            className='max-w-32 shrink-0'
+            key={tag}
+            title={tag}
+            onClick={() => setTagFilter({ kind: 'tag', tag })}
+            size='xs'
+            type='button'
+            variant={
+              effectiveTagFilter.kind === 'tag' &&
+              effectiveTagFilter.tag === tag
+                ? 'secondary'
+                : 'ghost'
+            }
+          >
+            <span className='truncate'>{tag}</span>
+          </Button>
+        ))}
+      </div>
+
       <ScrollArea className='min-h-0 flex-1'>
-        <div className='grid gap-1 pr-2'>
-          {visibleSessions.map((session) => (
-            <PlaygroundSessionItem
-              disabled={props.disabled}
-              isActive={session.id === props.activeSessionId}
-              key={session.id}
-              onDelete={() => setSessionToDelete(session)}
-              onRename={(title) => props.onRename(session.id, title)}
-              onSelect={() => {
-                props.onSwitch(session.id)
-                props.onAction?.()
-              }}
-              session={session}
-            />
-          ))}
-          {visibleSessions.length === 0 && (
+        <div className='grid gap-2 pr-2'>
+          {pinnedSessions.length > 0 && (
+            <section className='grid gap-1'>
+              <h3 className='text-muted-foreground px-1 text-xs font-medium'>
+                {t('Pinned')}
+              </h3>
+              {pinnedSessions.map(renderSession)}
+            </section>
+          )}
+          <section className='grid gap-1'>
+            {pinnedSessions.length > 0 && regularSessions.length > 0 && (
+              <h3 className='text-muted-foreground px-1 text-xs font-medium'>
+                {t('General')}
+              </h3>
+            )}
+            {regularSessions.map(renderSession)}
+          </section>
+          {archivedSessions.length > 0 && (
+            <section className='grid gap-1'>
+              <Button
+                aria-expanded={archivedOpen}
+                className='w-full justify-start'
+                onClick={() => setArchivedOpen((open) => !open)}
+                size='sm'
+                type='button'
+                variant='ghost'
+              >
+                <Archive aria-hidden='true' />
+                {t('Archived')}
+                <span className='text-muted-foreground ml-auto text-xs'>
+                  {archivedSessions.length}
+                </span>
+                <ChevronDown
+                  aria-hidden='true'
+                  className={cn(
+                    'transition-transform',
+                    archivedOpen && 'rotate-180'
+                  )}
+                />
+              </Button>
+              {archivedOpen && (
+                <div className='grid gap-1'>
+                  {archivedSessions.map(renderSession)}
+                </div>
+              )}
+            </section>
+          )}
+          {matchingSessions.length === 0 && (
             <p className='text-muted-foreground px-2 py-6 text-center text-sm'>
               {t('No conversations found')}
             </p>
@@ -204,6 +360,16 @@ export function PlaygroundSessionList(props: PlaygroundSessionListProps) {
           trashing ? 'Move conversation to trash?' : 'Delete conversation?'
         )}
       />
+
+      {sessionToTag && (
+        <PlaygroundSessionTagsDialog
+          onOpenChange={(open) => {
+            if (!open) setSessionToTag(null)
+          }}
+          onSave={(tags) => props.onOrganize(sessionToTag.id, { tags })}
+          session={sessionToTag}
+        />
+      )}
     </div>
   )
 }

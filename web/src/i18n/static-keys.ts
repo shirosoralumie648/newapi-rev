@@ -27,6 +27,10 @@ export const STATIC_I18N_KEYS = [
   'Playground request ID was already used for a different operation.',
   'Unable to load or save Playground artifacts.',
   'Playground artifact or conversation not found.',
+  // Public Playground share links (LB-05): the API returns these messages from
+  // Go, so the literal scan cannot see them.
+  'Share link expiration must be between 0 and 365 days.',
+  'Shared conversation not found.',
   // Playground attachment server messages and client upload feedback.
   'Invalid Playground attachment.',
   'Playground attachment not found.',
@@ -124,6 +128,8 @@ export const STATIC_I18N_KEYS = [
   'Playground conversation name must contain 1 to 200 characters.',
   'Playground conversation not found.',
   'Playground conversation limit exceeded.',
+  'Invalid Playground conversation tags.',
+  'Cannot pin an archived Playground conversation.',
   'Playground message limit exceeded.',
   'Playground request is too large.',
   'Playground changed on another device. Reload before saving.',

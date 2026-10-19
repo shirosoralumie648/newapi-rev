@@ -24,6 +24,7 @@ import {
   DEFAULT_CONFIG,
   DEFAULT_CONTEXT_SETTINGS,
   DEFAULT_PARAMETER_ENABLED,
+  MAX_SESSION_TAG_LENGTH,
   STORAGE_KEYS,
 } from '../constants'
 import { loadLegacyPlaygroundState } from '../lib/storage/storage'
@@ -42,6 +43,9 @@ const session = (id: string, title = id): PlaygroundSession => ({
   suggestedQuestions: [],
   context: { ...DEFAULT_CONTEXT_SETTINGS },
   contextSummary: null,
+  pinned: false,
+  archived: false,
+  tags: [],
   messages: [],
 })
 
@@ -192,6 +196,70 @@ test('keeps a stored system prompt and defaults a session written before the fie
   })
   expect(legacy.sessions[0].systemPrompt).toBe('')
   expect(legacy.sessions[0].id).toBe('with-prompt')
+})
+
+test('organization fields survive storage while corrupt values degrade to the neutral state', () => {
+  useAuthStore
+    .getState()
+    .auth.setUser({ id: 13, username: 'thirteen', role: 1 })
+  saveSessionsState({
+    activeSessionId: 'organized',
+    sessions: [
+      {
+        ...session('organized'),
+        pinned: true,
+        tags: [
+          ' work ',
+          'work',
+          'ideas',
+          'x'.repeat(MAX_SESSION_TAG_LENGTH + 1),
+        ],
+      },
+    ],
+  })
+
+  const loaded = loadSessionsState({
+    config: DEFAULT_CONFIG,
+    parameterEnabled: DEFAULT_PARAMETER_ENABLED,
+    messages: [],
+  })
+  expect(loaded.sessions[0]).toMatchObject({
+    pinned: true,
+    archived: false,
+    tags: ['work', 'ideas'],
+  })
+
+  const key = `${STORAGE_KEYS.SESSIONS}:13`
+  const stored = JSON.parse(localStorage.getItem(key) ?? '{}')
+  stored.data.sessions[0].pinned = true
+  stored.data.sessions[0].archived = true
+  localStorage.setItem(key, JSON.stringify(stored))
+
+  const contradictory = loadSessionsState({
+    config: DEFAULT_CONFIG,
+    parameterEnabled: DEFAULT_PARAMETER_ENABLED,
+    messages: [],
+  })
+  expect(contradictory.sessions[0]).toMatchObject({
+    pinned: false,
+    archived: true,
+  })
+
+  stored.data.sessions[0].pinned = 'yes'
+  stored.data.sessions[0].archived = 1
+  stored.data.sessions[0].tags = [1, 'work']
+  localStorage.setItem(key, JSON.stringify(stored))
+
+  const corrupt = loadSessionsState({
+    config: DEFAULT_CONFIG,
+    parameterEnabled: DEFAULT_PARAMETER_ENABLED,
+    messages: [],
+  })
+  expect(corrupt.sessions[0]).toMatchObject({
+    pinned: false,
+    archived: false,
+    tags: [],
+  })
 })
 
 test('reads user-scoped legacy data without deleting it before session migration', () => {

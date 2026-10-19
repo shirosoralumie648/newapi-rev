@@ -470,6 +470,7 @@ func migrateDB() error {
 		&AuthzRole{},
 		&UserAccessToken{},
 		&PlaygroundSession{},
+		&PlaygroundSessionShare{},
 		&PlaygroundMessage{},
 		&PlaygroundPreset{},
 		&PlaygroundSnippet{},

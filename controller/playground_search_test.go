@@ -83,7 +83,7 @@ func TestPlaygroundWebSearchBilling(t *testing.T) {
 		require.True(t, payload.Success)
 		assert.Equal(t, "golang testing", payload.Data.Query)
 		assert.Equal(t, playground_setting.PlaygroundWebSearchProviderSearXNG, payload.Data.Provider)
-		require.Len(t, payload.Data.Results, 2)
+		require.Len(t, payload.Data.Results, 5)
 		assert.Equal(t, "Alpha", payload.Data.Results[0].Title)
 		assert.Equal(t, "Bold & snippet", payload.Data.Results[1].Title)
 		assert.Equal(t, "https://b.example/2", payload.Data.Results[1].URL)

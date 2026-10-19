@@ -112,6 +112,7 @@ export const API_ENDPOINTS = {
   PLAYGROUND_SEARCH: '/api/playground/search',
   PLAYGROUND_MESSAGE_COSTS: '/api/playground/message-costs',
   PLAYGROUND_ASSETS: '/api/playground/assets',
+  PLAYGROUND_SHARED: '/api/playground/shared',
   PLAYGROUND_TASKS: '/api/playground/tasks',
   PLAYGROUND_WORKFLOW_ESTIMATE: '/api/playground/workflows/estimate',
   PLAYGROUND_WORKFLOW_RUNS: '/api/playground/workflows/runs',
@@ -247,6 +248,10 @@ export const PLAYGROUND_AUTO_TITLE_MAX_TOKENS = 64
 export const PLAYGROUND_AUTO_TITLE_SYSTEM_PROMPT = `Write a short title for the following conversation. Use the language of the conversation, keep it at most ${PLAYGROUND_AUTO_TITLE_MAX_LENGTH} characters, and reply with the title only, without quotes or ending punctuation.`
 
 export const MAX_STORED_SESSIONS = 20
+// Conversation tags are a client-side organizing aid. The server enforces the
+// same bounds and stays authoritative.
+export const MAX_SESSION_TAGS = 10
+export const MAX_SESSION_TAG_LENGTH = 24
 // Mirrors the server's stored-title bound: a longer title is refused instead of
 // stored trimmed, so a fork title is cut to the same rune count.
 export const PLAYGROUND_SESSION_TITLE_MAX_LENGTH = 200
