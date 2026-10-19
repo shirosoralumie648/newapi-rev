@@ -168,11 +168,12 @@ function countMessageImages(message: Message): number {
 }
 
 /**
- * Estimated tokens of one stored message: its active version text and tool
- * call arguments, plus a fixed allowance per image attachment. Inline base64
- * media is measured after scrubbing, because the placeholder is what the
- * model actually receives. The data URL length is irrelevant for planning
- * because vision pricing is per image, not per encoded byte.
+ * Estimated tokens of one stored message: its active version text, tool call
+ * arguments and the content of every answered call, plus a fixed allowance per
+ * image attachment. Inline base64 media is measured after scrubbing, because
+ * the placeholder is what the model actually receives. The data URL length is
+ * irrelevant for planning because vision pricing is per image, not per
+ * encoded byte.
  */
 export function estimateMessageTokens(message: Message): number {
   const version = getCurrentVersion(message)
@@ -189,6 +190,9 @@ export function estimateMessageTokens(message: Message): number {
   }
   for (const call of version.toolCalls ?? []) {
     tokens += estimateTextTokens(call.arguments)
+    if (call.status !== TOOL_CALL_STATUS.PENDING) {
+      tokens += estimateTextTokens(getToolCallResponseContent(call))
+    }
   }
   return tokens
 }

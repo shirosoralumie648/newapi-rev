@@ -30,6 +30,7 @@ import {
   ConfirmationRequest,
   ConfirmationTitle,
 } from '@/components/ai-elements/confirmation'
+import { Loader } from '@/components/ai-elements/loader'
 import {
   Tool,
   ToolContent,
@@ -54,6 +55,7 @@ import {
   TOOL_CALL_STATUS,
 } from '../../constants'
 import { canContinueToolCalls, getCurrentVersion } from '../../lib'
+import { toolCallExecutionKey } from '../../lib/tools/tool-execution'
 import type {
   Message,
   MessageToolCall,
@@ -64,6 +66,7 @@ import type {
 type ToolCallUiState =
   | 'approval-requested'
   | 'approval-responded'
+  | 'input-available'
   | 'output-denied'
   | 'output-available'
   | 'output-error'
@@ -88,6 +91,10 @@ function parseToolCallArguments(rawArguments: string): unknown {
 }
 
 type MessageToolCallsProps = {
+  /** Calls being answered by the automatic tool loop right now. */
+  executingToolCallKeys?: ReadonlySet<string>
+  /** Calls the automatic tool loop answered during this mount. */
+  autoFilledToolCallKeys?: ReadonlySet<string>
   isGenerating?: boolean
   isLastMessage?: boolean
   message: Message
@@ -136,9 +143,23 @@ export function MessageToolCalls(props: MessageToolCallsProps) {
   return (
     <div className='flex flex-col gap-3 pb-2'>
       {toolCalls.map((call) => {
-        const state = TOOL_CALL_UI_STATES[call.status]
+        const executionKey = toolCallExecutionKey(
+          props.message,
+          props.version,
+          call.id
+        )
+        const isExecuting =
+          props.executingToolCallKeys?.has(executionKey) ?? false
+        const isAutoFilled =
+          props.autoFilledToolCallKeys?.has(executionKey) ?? false
+        const state = isExecuting
+          ? 'input-available'
+          : TOOL_CALL_UI_STATES[call.status]
         return (
-          <Tool defaultOpen={state === 'approval-requested'} key={call.id}>
+          <Tool
+            defaultOpen={state === 'approval-requested' || isExecuting}
+            key={call.id}
+          >
             <ToolHeader
               state={state}
               title={call.name}
@@ -152,11 +173,20 @@ export function MessageToolCalls(props: MessageToolCallsProps) {
                 )}
               {call.status === TOOL_CALL_STATUS.ERROR && (
                 <ToolOutput
-                  errorText={call.errorMessage ?? t(TOOL_CALL_FAILED_CONTENT)}
+                  errorText={t(call.errorMessage ?? TOOL_CALL_FAILED_CONTENT)}
                   output={undefined}
                 />
               )}
-              {call.status !== TOOL_CALL_STATUS.ERROR && (
+              {isExecuting && (
+                <div
+                  className='text-muted-foreground mx-4 mb-4 flex items-center gap-2 text-sm'
+                  role='status'
+                >
+                  <Loader className='size-4' />
+                  {t('Running the tool call automatically...')}
+                </div>
+              )}
+              {!isExecuting && call.status !== TOOL_CALL_STATUS.ERROR && (
                 <Confirmation
                   approval={{
                     approved: call.status !== TOOL_CALL_STATUS.DENIED,
@@ -185,7 +215,9 @@ export function MessageToolCalls(props: MessageToolCallsProps) {
                     </ConfirmationAction>
                   </ConfirmationActions>
                   <ConfirmationAccepted>
-                    {t('Result provided')}
+                    {isAutoFilled
+                      ? t('Result auto-filled')
+                      : t('Result provided')}
                   </ConfirmationAccepted>
                   <ConfirmationRejected>
                     {t('Tool call denied')}

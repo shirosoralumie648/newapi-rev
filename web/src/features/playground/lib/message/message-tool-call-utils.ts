@@ -164,6 +164,31 @@ export function applyResponseToolCalls(
   }
 }
 
+function updateVersionToolCall(
+  version: MessageVersion,
+  toolCallId: string,
+  status: MessageToolCallStatus,
+  result: string | undefined,
+  errorMessage: string | undefined
+): MessageVersion {
+  const completedAt = Date.now()
+  return {
+    ...version,
+    toolCalls: getVersionToolCalls(version).map((call) =>
+      call.id === toolCallId
+        ? {
+            ...call,
+            status,
+            result,
+            errorMessage:
+              status === TOOL_CALL_STATUS.ERROR ? errorMessage : undefined,
+            completedAt,
+          }
+        : call
+    ),
+  }
+}
+
 export function setToolCallStatus(
   message: Message,
   toolCallId: string,
@@ -172,27 +197,19 @@ export function setToolCallStatus(
   errorMessage?: string
 ): Message {
   const activeIndex = getActiveVersionIndex(message)
-  const completedAt = Date.now()
   return {
     ...message,
-    versions: message.versions.map((version, index) => {
-      if (index !== activeIndex) return version
-      return {
-        ...version,
-        toolCalls: getVersionToolCalls(version).map((call) =>
-          call.id === toolCallId
-            ? {
-                ...call,
-                status,
-                result,
-                errorMessage:
-                  status === TOOL_CALL_STATUS.ERROR ? errorMessage : undefined,
-                completedAt,
-              }
-            : call
-        ),
-      }
-    }),
+    versions: message.versions.map((version, index) =>
+      index === activeIndex
+        ? updateVersionToolCall(
+            version,
+            toolCallId,
+            status,
+            result,
+            errorMessage
+          )
+        : version
+    ),
   }
 }
 
@@ -212,6 +229,40 @@ export function updateMessageToolCallStatus(
       ? setToolCallStatus(message, toolCallId, status, result, errorMessage)
       : message
   )
+}
+
+/**
+ * Update one tool call of an explicitly named version. Automatic execution
+ * writes through this helper because the active version can change while a
+ * request is in flight; the outcome still belongs to the version that
+ * requested the call.
+ */
+export function updateVersionToolCallStatus(
+  messages: Message[],
+  messageKey: string,
+  versionId: string,
+  toolCallId: string,
+  status: MessageToolCallStatus,
+  result?: string,
+  errorMessage?: string
+): Message[] {
+  return messages.map((message) => {
+    if (message.key !== messageKey) return message
+    return {
+      ...message,
+      versions: message.versions.map((version) =>
+        version.id === versionId
+          ? updateVersionToolCall(
+              version,
+              toolCallId,
+              status,
+              result,
+              errorMessage
+            )
+          : version
+      ),
+    }
+  })
 }
 
 /**

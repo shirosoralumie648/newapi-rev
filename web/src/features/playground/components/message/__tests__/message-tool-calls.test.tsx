@@ -37,6 +37,8 @@ const pendingCall: MessageToolCall = {
 
 type RenderOptions = {
   toolCalls: MessageToolCall[]
+  autoFilledToolCallKeys?: ReadonlySet<string>
+  executingToolCallKeys?: ReadonlySet<string>
   isLastMessage?: boolean
   onContinue?: (message: Message) => void
   onDeny?: (message: Message, toolCallId: string) => void
@@ -58,6 +60,8 @@ function renderToolCalls(options: RenderOptions) {
 
   const view = render(
     <MessageToolCalls
+      autoFilledToolCallKeys={options.autoFilledToolCallKeys}
+      executingToolCallKeys={options.executingToolCallKeys}
       isGenerating={false}
       isLastMessage={options.isLastMessage ?? true}
       message={message}
@@ -129,6 +133,55 @@ test('a completed call shows that a result was provided', async () => {
   await user.click(screen.getByRole('button', { name: /get_weather/ }))
 
   expect(await screen.findByText('Result provided')).toBeVisible()
+})
+
+test('an automatically answered call reports the auto-filled result', async () => {
+  const user = userEvent.setup()
+  renderToolCalls({
+    toolCalls: [{ ...pendingCall, status: 'completed', result: 'Sunny' }],
+    autoFilledToolCallKeys: new Set(['assistant-1:a1:call_weather']),
+  })
+
+  await user.click(screen.getByRole('button', { name: /get_weather/ }))
+
+  expect(await screen.findByText('Result auto-filled')).toBeVisible()
+  expect(screen.queryByText('Result provided')).toBeNull()
+})
+
+test('an executing call shows the running state and hides the manual actions', () => {
+  renderToolCalls({
+    toolCalls: [pendingCall],
+    executingToolCallKeys: new Set(['assistant-1:a1:call_weather']),
+  })
+
+  expect(screen.getByText('Running')).toBeVisible()
+  expect(
+    screen.getByText('Running the tool call automatically...')
+  ).toBeVisible()
+  expect(
+    screen.queryByText('This tool call is waiting for a result.')
+  ).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Deny' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Provide result' })).toBeNull()
+})
+
+test('a failed call shows its stored error sentence', async () => {
+  const user = userEvent.setup()
+  renderToolCalls({
+    toolCalls: [
+      {
+        ...pendingCall,
+        status: 'error',
+        errorMessage: 'The tool call could not be executed.',
+      },
+    ],
+  })
+
+  await user.click(screen.getByRole('button', { name: /get_weather/ }))
+
+  expect(
+    await screen.findByText('The tool call could not be executed.')
+  ).toBeVisible()
 })
 
 test('continue generation appears for the last answered reply only', async () => {

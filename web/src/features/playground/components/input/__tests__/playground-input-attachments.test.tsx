@@ -75,8 +75,12 @@ function buildInputElement(
     onSubmit,
     onSummarizeContext: () => undefined,
     onSystemPromptChange: () => undefined,
+    onToolExecutionEnabledChange: () => undefined,
+    onToolExecutionMaxRoundsChange: () => undefined,
     parameterEnabled: DEFAULT_PARAMETER_ENABLED,
     systemPrompt: '',
+    toolExecutionEnabled: false,
+    toolExecutionMaxRounds: 5,
     ...overrides,
   }
   return <PlaygroundInput {...props} />

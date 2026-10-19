@@ -65,6 +65,10 @@ import { MessageToolCalls } from './message-tool-calls'
 type PlaygroundMessageContentProps = {
   actions: ReactNode
   alignment: MessageAlignment
+  /** Calls being answered by the automatic tool loop right now. */
+  executingToolCallKeys?: ReadonlySet<string>
+  /** Calls the automatic tool loop answered during this mount. */
+  autoFilledToolCallKeys?: ReadonlySet<string>
   /** Settled consume row of this version's request, when it is loaded. */
   cost?: PlaygroundMessageCost
   errorActions?: ReactNode
@@ -87,8 +91,10 @@ type PlaygroundMessageContentProps = {
 export function PlaygroundMessageContent({
   actions,
   alignment,
+  autoFilledToolCallKeys,
   cost,
   errorActions,
+  executingToolCallKeys,
   isGenerating = false,
   isLastMessage = false,
   isSourceVisible = false,
@@ -221,6 +227,8 @@ export function PlaygroundMessageContent({
             </>
           )}
           <MessageToolCalls
+            autoFilledToolCallKeys={autoFilledToolCallKeys}
+            executingToolCallKeys={executingToolCallKeys}
             isGenerating={isGenerating}
             isLastMessage={isLastMessage}
             message={message}

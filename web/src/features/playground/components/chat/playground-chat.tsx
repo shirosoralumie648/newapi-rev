@@ -69,6 +69,10 @@ interface PlaygroundChatProps {
   messages: MessageType[]
   /** Settled cost rows of the conversation's relay requests, by request id. */
   costs?: ReadonlyMap<string, PlaygroundMessageCost>
+  /** Calls being answered by the automatic tool loop right now. */
+  executingToolCallKeys?: ReadonlySet<string>
+  /** Calls the automatic tool loop answered during this mount. */
+  autoFilledToolCallKeys?: ReadonlySet<string>
   onCopyMessage?: (message: MessageType) => void
   /** Sets the message as the quote of the next composer turn. */
   onQuoteMessage?: (message: MessageType) => void
@@ -119,6 +123,8 @@ interface PlaygroundChatProps {
 export function PlaygroundChat({
   messages,
   costs,
+  autoFilledToolCallKeys,
+  executingToolCallKeys,
   onCopyMessage,
   onQuoteMessage,
   onForkMessage,
@@ -271,7 +277,9 @@ export function PlaygroundChat({
     // reply keeps the ordinary branch renderer.
     const answerView = isParallelMessage(message) ? (
       <PlaygroundParallelCompare
+        autoFilledToolCallKeys={autoFilledToolCallKeys}
         costs={costs}
+        executingToolCallKeys={executingToolCallKeys}
         isGenerating={isGenerating}
         isLastMessage={isLastMessage}
         knowledge={knowledge}
@@ -295,10 +303,12 @@ export function PlaygroundChat({
             <PlaygroundMessageContent
               actions={messageActions}
               alignment={alignment}
+              autoFilledToolCallKeys={autoFilledToolCallKeys}
               cost={
                 version.requestId ? costs?.get(version.requestId) : undefined
               }
               errorActions={errorActions}
+              executingToolCallKeys={executingToolCallKeys}
               isGenerating={isGenerating}
               isLastMessage={isLastMessage}
               isSourceVisible={isSourceVisible}

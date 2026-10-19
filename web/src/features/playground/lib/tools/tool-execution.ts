@@ -25,10 +25,7 @@ import {
 } from '../../constants'
 import type { Message, MessageToolCall, MessageVersion } from '../../types'
 import type { KnowledgeSearchGroup } from '../knowledge/retrieval'
-import {
-  getMessageToolCalls,
-  getPendingToolCalls,
-} from '../message/message-tool-call-utils'
+import { getMessageToolCalls } from '../message/message-tool-call-utils'
 
 /** Tool names the Playground can answer without a manual result. */
 export const EXECUTABLE_TOOL_NAMES = [
@@ -250,12 +247,6 @@ export function getPendingExecutableToolCalls(
   )
 }
 
-export function getPendingToolCalls(message: Message): MessageToolCall[] {
-  return getMessageToolCalls(message).filter(
-    (call) => call.status === TOOL_CALL_STATUS.PENDING
-  )
-}
-
 /**
  * Number of assistant tool-call rounds since the newest user turn. A manual
  * continuation adds a new assistant reply, so the bounded loop counts every
@@ -304,4 +295,13 @@ export function toolCallVersionKey(
   version: MessageVersion
 ): string {
   return `${message.key}:${version.id}`
+}
+
+/** Identifies one call of one version for transient execution state. */
+export function toolCallExecutionKey(
+  message: Message,
+  version: MessageVersion,
+  toolCallId: string
+): string {
+  return `${toolCallVersionKey(message, version)}:${toolCallId}`
 }
