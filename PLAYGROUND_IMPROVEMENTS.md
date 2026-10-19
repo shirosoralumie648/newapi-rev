@@ -180,7 +180,7 @@ Playground
 ### Phase 7：跨设备、协作和分享 — 延期/另行设计
 
 - [ ] 跨设备恢复会话、附件、Artifact 和画布；
-- [ ] 设计分享链接、只读权限、编辑权限和撤销机制；（只读分享链接的轻量版已由 LB-05 交付，见 14.3 验收；编辑权限与多人协作仍顺延本项）；
+- [ ] 设计分享链接、只读权限、编辑权限和撤销机制；（只读分享链接的轻量版已由 LB-05（会话）与 CV-12（画布）交付，见 14.3/15.3 验收；编辑权限与多人协作仍顺延本项）；
 - [ ] 设计协作冲突和版本合并；
 - [ ] 设计资源导出、删除、保留期和隐私审计（CH-04 已落地导出、删除与保留期：会话可导出 Markdown/JSON，会话与画布移入回收站后可在保留期内恢复、到期由后台清扫清除；跨设备/协作语境下的隐私审计仍待 Phase 7 专项设计）；
 - [ ] 完成安全评审和三数据库验证后再实施。
@@ -920,7 +920,7 @@ Step 进度：
 - 结构缺口：无专门图片/视频工作台（LB-14 后全部创作汇入无限画布，临时用户被迫节点图思维）。
 - 流程复用：无画布模板（常用链一键铺点、画布存为模板）。
 - 组织：无节点颜色标注/标签、无画布内节点搜索、无批量跑选中子图。
-- 分享：无画布只读分享（与 LB-05 会话分享不对称）。
+- 分享：**CV-12 已补齐画布只读分享**，与 LB-05 会话分享共用 share 表、匿名端点、哈希 token 与撤销/过期契约。
 
 ### 15.2 新增 Step
 
@@ -932,7 +932,7 @@ Step 进度：
 | CV-09 | 图片工作台：项目模式落地 + 单图聚焦编辑器（大预览/工具栏/参数侧栏/版本变体条/钉回画布） | CV-07、CV-08 | P0 |
 | CV-10 | 视频工作台：播放器 + 参数侧栏 + 版本条 + 抽帧（前端取帧进图片工作台反哺 i2v）+ 队列/取消 | CV-09（复用项目模式） | P1 |
 | CV-11 | 画布模板：画布存为模板（结构级，含是否内联素材选项）+ 模板库（个人/全局，对齐 LB-11 模式）+ 常用链模板一键铺点（翻译/总结/风格平行对比） | 无 | P1 |
-| CV-12 | 画布只读分享：对齐 LB-05 token 机制（share 表复用/扩展、匿名只读渲染页、撤销） | LB-05 | P1 |
+| CV-12 | 画布只读分享：对齐 LB-05 token 机制（share 表复用/扩展、匿名只读渲染页、撤销）（已完成，见 15.3 CV-12 进展；CI-only） | LB-05 | P1 |
 | CV-13 | 组织与查找：节点颜色标注/标签、画布内节点搜索（Cmd+P 面板）、批量跑选中子图 | 无 | P1 |
 
 - 批次一（P0）= CV-06 → CV-07 → CV-08 → CV-09（工作台收敛 P0 批次，吃尽 CV-07/08 成果）。
@@ -953,7 +953,13 @@ Step 进度：
 - **CV-09 图片工作台**——`playground_canvases` 新增 `mode` 列（infinite/image/video，默认 infinite，AutoMigrate 三库加列验证 + legacy 读回默认）；建项入口按模式选择；图片工作台为单图聚焦布局：大预览 + 工具栏（裁剪/放大/遮罩重绘/CV-08 工具）+ 参数侧栏（CV-07 全量参数含 seed/batch/尺寸）+ **版本/变体条**（同一血线 task 历史，来源于 task-result 节点的重试参数记录，点击切换主图）+ 「钉回画布」（在工作区把当前血线落成 image/task-result 节点 affixed 到无限画布）+ 参考图快速挂载；同一计费/预算/配额链路不变。
 - **CV-10 视频工作台**——同 `mode` 体系：播放器（受控内容流）+ 参数侧栏（时长/尺寸档位/模型）+ 版本条 + 抽帧：前端 `<video>` seek 后离屏截帧并经既有上传链路落为附件，可直接送图片工作台或画布 image 节点（反哺 i2v / 视频改图链）；队列视图（进行中任务 + 进度 + 取消退款沿用既有）。
 - **CV-11 画布模板**——把当前画布存为模板（结构级：节点/边/参数，二选一是否内联素材），模板库个人 + 全局（管理员维护，对齐 LB-11 的 visibility 机制）；常用链模板（翻译/总结/多风格平行对比/图生视频链）以官方模板预置；模板一键铺到当前画布或新建画布；导入导出沿用 zip 归档。
-- **CV-12 画布只读分享**——绘 share 机制与 LB-05 对齐：token 哈希存储、匿名只读渲染页（画布文档只读视图 + 节点结果预览，不代理素材）、撤销/过期、CriticalRateLimit 与不可枚举 404；入口在画布菜单。
+- **CV-12 画布只读分享**——与 LB-05 对齐：token 哈希存储、匿名只读渲染页（画布文档只读视图 + 节点结果预览，不代理素材）、撤销/过期、CriticalRateLimit 与不可枚举 404；入口在画布菜单。
+  **CV-12 进展（2026-10-19，已完成，CI-only，本地未运行测试/typecheck/lint/build）**：
+  - [x] share 表复用/扩展：`playground_session_shares` 新增 `canvas_id`（会话链接 `session_id` 非空、画布链接 `canvas_id` 非空；`TestPlaygroundShareCanvasColumnMigration` 覆盖 SQLite/MySQL/PostgreSQL 升级与重复 AutoMigrate 幂等），`CreatePlaygroundCanvasShare`/`RevokePlaygroundCanvasShare` 走 owner 过滤、事务内轮换旧链接、SHA-256 哈希存储与一次性明文 token（`TestPlaygroundCanvasShares`）。
+  - [x] 匿名只读渲染页：`GET /api/playground/shared/:token` 按 `kind` 返回会话或画布快照，画布只保留布局、节点类型/文本/label/snapshot/媒体类型与受限 workflow 状态，剥离 ref id、provider URL、task id、输入与错误，绝不代理附件/制品字节（`TestPlaygroundCanvasShares` 的泄漏断言）；前端 `/share/$token` 复用 `PlaygroundSharedPage` 分发，`playground-shared-canvas.tsx` + `shared-canvas-node.tsx` 渲染只读 ReactFlow 画布与节点结果/媒体占位，`shared-conversation.test.tsx` 覆盖非空画布只读渲染与“只请求一次快照、不请求素材”。
+  - [x] 撤销/过期：画布顶栏 `CanvasShareDialog`（复用 `ShareLinkDialog`），支持 0/1/7/30/90/365 天、一次性 URL、复制与撤销；创建轮换旧链接、撤销幂等、进入回收站即撤销、恢复不复活、永久清除删除 share 行，过期/撤销/未知统一同体 404；`canvas-share-dialog.test.tsx` 覆盖创建携带过期天数、创建后撤销、未创建时撤销既有链接。
+  - [x] 路由与安全：匿名端点 `CriticalRateLimit` + `DisableCache`，输出 `X-Robots-Tag: noindex, nofollow, noarchive`、`Referrer-Policy: no-referrer`、`X-Content-Type-Options: nosniff`；画布分享创建/撤销登记为访问令牌会话级规则。`TestPlaygroundCanvasShares`（SQLite/MySQL/PostgreSQL + MySQL 5.7 CI job）覆盖 owner/跨账号、哈希、128-bit token、轮换、过期、撤销、回收站/清除与响应体不泄漏；`TestPlaygroundRealRouterAuthentication` 覆盖画布分享 401/PAT 403、真实 router 创建→匿名读取→撤销→404。
+  - [x] 无新依赖、无 Relay/计费改动；本地未运行测试/typecheck/lint/build（CI-only，未运行三数据库矩阵）。
 - **CV-13 组织与查找**——节点颜色标注/标签（本地展示 + 文档序列化，导出/导入兼容）；Cmd+P 节点搜索面板（本画布内按类型/名称/内容过滤，键盘直达）；批处理：多选节点作为子图一键按拓扑序运行（预算核算沿用 BL-03）。
   **CV-13 进展（2026-10-19，已完成，CI-only，本地未运行测试/typecheck/lint/build）**：纯前端实现，无后端、数据库 schema、Relay 或路由改动；颜色与标签只写入服务端原样保存的节点 `data`（64 KiB 上限不变），因此保存、导出与导入继续复用既有画布文档链路，localStorage 不是最终数据源。
   - [x] 节点颜色：新增稳定调色板 `red/orange/amber/green/teal/blue/violet/pink`（`CANVAS_NODE_COLORS`），未选颜色即字段缺省；节点标题与组框显示颜色点/彩色虚线边框，Inspector 提供 8 色圆点与 `No color` 清除，颜色变更以 `color:<id>` 合并键进入既有撤销历史。读取文档时只接受当前调色板键，未知颜色被丢弃。
@@ -1203,3 +1209,4 @@ Step 进度：
 | 2026-10-19 | CV-13：组织与查找（CI-only，本地未运行测试）——纯前端、无后端/schema/路由改动。节点颜色使用稳定调色板 red/orange/amber/green/teal/blue/violet/pink（未选即缺省），节点标题/组框显示色点或彩色虚线边框，Inspector 提供色板与 No color；标签复用共享 TagInput（最多 10 个、每个 ≤24 码点，trim/去重/拒绝空值/NUL/超长），节点与组框以 Badge 展示，颜色/标签变更分别以 `color:<id>`/`tags:<id>` 合并进既有撤销历史。两者只写入服务端原样保存的节点 data，保存/导出/导入沿用既有文档链路，读取时丢弃未知颜色与非法标签。新增 Cmd+P/Ctrl+P 节点搜索面板（排除 Alt/Shift，工具栏按钮同入口）：关闭 cmdk 内建过滤，由 `canvasSearchNodes` 按名称/类型标签/标签/正文/快照输出/错误文本做大小写不敏感匹配并支持类型下拉，最多 50 条；选择后调用既有 selectNode 并经 fitView 居中。批量运行采用“选中节点 + 选中 group 后代 + 全部上游祖先”子图，仅保留内部边；`canvasWorkflowSelectionScope` 负责作用域，runner 新增 `estimateSelection`/`runSelection` 与 workflow/selection scope，沿用 validate/order 按拓扑序执行、子图内估价并复用 BL-03 的 CanvasRunBudgetDialog/run id，结果仍写回完整画布；空选择与无步骤各有提示。测试：新增 `canvas-organization.test.ts`、`canvas-node-search.test.tsx`，扩展画布文档/节点/Inspector/工具栏/工作流/runner 测试；20 个新键七语言（`i18n:sync` missingCount=0、extrasCount=0，untranslated 基线 zh 3/ja 4/ru 5），10 个常量键登记 static-keys；无新依赖、无 go.mod/package.json 变更，本地未运行测试/typecheck/lint/build。 |
 | 2026-10-19 | LB-05：只读分享链接（CI-only，本地未运行测试）——复核并补齐已合入实现：`playground_session_shares` 以 owner `user_id`/`session_id`、唯一 `token_hash`、`expires_at`/`revoked_at` 保存可撤销链接，明文 token（crypto/rand 16 字节 RawURLEncoding）只在创建响应返回一次，库中仅存 SHA-256；创建自动轮换旧链接、撤销幂等、进入回收站即撤销、恢复不复活、永久清除连带删除。`POST/DELETE /api/playground/sessions/:id/share` 走 `UserAuth`+owner 过滤，匿名 `GET /api/playground/shared/:token` 走 `CriticalRateLimit`+`DisableCache`，撤销/过期/未知统一 404 `PLAYGROUND_SHARE_NOT_FOUND` 与相同响应体，并输出 noindex/no-referrer/nosniff 头。公开快照仅保留 user/assistant 当前 active version 的文本、工具名+状态与附件文件名/媒体类型占位，跳过 system/损坏/空/越界消息，绝不输出 owner、session id、附件 id/字节、推理、来源、usage 或 request id。前端 `/share/$token` 公开页以 React 文本安全渲染（不执行 HTML/Markdown）、复用共享状态组件并适配暗色；新增 `robots`/`referrer` 元信息与分享标题，不请求附件内容；会话条目新增 Share 对话框（无过期/1/7/30/90/365 天、一次性 URL、复制、撤销）。测试：`TestPlaygroundSessionShares`（SQLite/MySQL/PostgreSQL：hash-only、128-bit、owner/轮换/有效期/撤销/404 同体/回收站/清除/超长 token/损坏与系统消息过滤/导出不含 token，已加入 CI real-database 与 MySQL 5.7 job）、`TestPlaygroundRealRouterAuthentication`（分享路由 401/PAT 403、匿名 200/404）、前端 `shared-conversation.test.tsx`、`share-dialog.test.tsx`、`server-api.test.ts` 与 session list 用例；七语言 `i18n:sync` missingCount=0、extrasCount=0（untranslated 基线 zh 3/ja 4/ru 5）；无新依赖、无 Relay/计费改动。本地未运行测试/typecheck/lint/build（CI-only）。 |
 | 2026-10-19 | CV-12：画布只读分享（CI-only，本地未运行测试）——对齐 LB-05：`playground_session_shares` 扩展 `canvas_id`（三库迁移幂等），画布分享创建/撤销走 owner 过滤与哈希 token（明文一次性返回）、创建轮换旧链接、进入回收站即撤销，匿名 `GET /api/playground/shared/:token` 走 `CriticalRateLimit`+`DisableCache`、撤销/过期/未知同体 404 与 noindex/no-referrer/nosniff 头；公开快照只保留布局与文本/媒体类型/受限 workflow 预览，不代理素材；修正节点媒体类型契约 `media_type` → `mediaType`。前端 `/share/$token` 改为按响应分发（旧会话链接兼容），新增只读画布 ReactFlow 视图与节点卡、画布顶栏共享入口（复用 `ShareLinkDialog`）；补 13 键七语言（`i18n:sync` missingCount=0、extrasCount=0）、`TestPlaygroundCanvasShares`、`shared-conversation.test.tsx`、`canvas-share-dialog.test.tsx` 与 `server-api.test.ts` 用例；无新依赖、无 Relay/计费改动。 |
+| 2026-10-19 | CV-12：收尾核对（CI-only，本地未运行测试）——已合入生产实现无改动；本次补齐路线与页面级回归覆盖：`TestPlaygroundRealRouterAuthentication` 增加画布分享 `POST/DELETE` 路由的 401/PAT 403 断言，并通过真实 router 完成创建画布→创建分享→匿名读取（`kind:"canvas"`、no-store/noindex/no-referrer）→撤销→同体 404；`shared-conversation.test.tsx` 增加非空共享画布渲染节点文本/媒体占位，断言只请求一次公开快照、不请求附件或制品字节；`canvas-share-dialog.test.tsx` 增加未在本地持有链接时直接撤销既有链接；同步更新 Phase 7、15.1、15.2 与 15.3 状态；无新依赖、无数据库/Relay/计费改动，本地未运行测试/typecheck/lint/build（CI-only）。 |
