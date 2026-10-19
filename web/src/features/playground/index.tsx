@@ -822,6 +822,7 @@ function PlaygroundContent(props: {
           />
           <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>
             <PlaygroundChat
+              artifacts={artifactController.artifacts}
               messages={messages}
               costs={messageCosts}
               isLoadingMessages={isLoadingMessages || sync.isLoading}
@@ -850,6 +851,12 @@ function PlaygroundContent(props: {
               onSaveEdit={(newContent) => applyEdit(newContent, false)}
               onSaveEditAndSubmit={(newContent) => applyEdit(newContent, true)}
               contextSummary={contextSummary}
+              onOpenArtifact={(artifact) =>
+                props.onOpenCanvas?.({
+                  session: artifact.session_id,
+                  artifact: artifact.id,
+                })
+              }
               onRemoveContextSummary={handleRemoveContextSummary}
             />
           </div>
