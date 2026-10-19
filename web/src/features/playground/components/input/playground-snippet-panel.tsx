@@ -16,8 +16,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { BookMarkedIcon, Pencil, Plus, Trash2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import {
+  BookMarkedIcon,
+  Download,
+  HistoryIcon,
+  MessageSquareTextIcon,
+  Pencil,
+  Plus,
+  Trash2,
+  Upload,
+} from 'lucide-react'
+import { useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -27,6 +36,7 @@ import { Dialog } from '@/components/dialog'
 import { EmptyState } from '@/components/empty-state'
 import { ErrorState } from '@/components/error-state'
 import { LoadingState } from '@/components/loading-state'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -56,7 +66,10 @@ import { getServerMessage } from '@/lib/server-error-message'
 import {
   createPlaygroundSnippet,
   deletePlaygroundSnippet,
+  getPlaygroundSnippet,
   getPlaygroundSnippets,
+  importPlaygroundSnippet,
+  rollbackPlaygroundSnippet,
   updatePlaygroundSnippet,
 } from '../../api'
 import type { PlaygroundSnippetInput } from '../../api'
@@ -64,29 +77,65 @@ import {
   PLAYGROUND_SNIPPET_ERRORS,
   PLAYGROUND_SNIPPET_NAME_MAX_LENGTH,
 } from '../../constants'
-import type { PromptSnippet } from '../../types'
+import { exportPlaygroundSnippetFile } from '../../lib/export'
+import { parsePromptTemplateVariables } from '../../lib/input/prompt-template'
+import {
+  parsePromptSnippetFile,
+  PROMPT_SNIPPET_FILE_ERROR,
+} from '../../lib/input/prompt-template-file'
+import type { PromptSnippet, PromptSnippetDetail } from '../../types'
+import { PlaygroundSnippetFillDialog } from './playground-snippet-fill-dialog'
+import type { PromptSnippetTarget } from './playground-snippet-fill-dialog'
+import { PlaygroundSnippetHistoryDialog } from './playground-snippet-history-dialog'
 
 interface PlaygroundSnippetPanelProps {
   disabled?: boolean
-  /** Appends the snippet text to the composer draft. */
+  /** Appends the rendered snippet text to the composer draft. */
   onInsertSnippet: (content: string) => void
+  /** Current published system prompt of the active conversation. */
+  systemPrompt?: string
+  /** Persists a prompt applied to the active conversation. */
+  onSystemPromptChange?: (value: string) => void
 }
 
 type LoadStatus = 'loading' | 'ready' | 'error'
+type HistoryStatus = 'loading' | 'ready' | 'error'
 
 type SnippetDraft = {
   name: string
   content: string
 }
 
+type FillTarget = {
+  name: string
+  content: string
+  target: PromptSnippetTarget
+}
+
 function toError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value))
 }
 
+function snippetSummary(detail: PromptSnippetDetail): PromptSnippet {
+  return {
+    id: detail.id,
+    name: detail.name,
+    content: detail.content,
+    currentVersion: detail.currentVersion,
+    productionVersion: detail.productionVersion,
+    versionCount: detail.versionCount,
+    createdAt: detail.createdAt,
+    updatedAt: detail.updatedAt,
+  }
+}
+
 /**
- * The account's prompt snippet library inside the Composer. A snippet is a
- * reusable fragment: inserting it only fills the composer, while every write
- * goes through the owner-checked `/api/playground/snippets` endpoints.
+ * The account's prompt template library inside the Composer. A snippet is a
+ * reusable fragment that may declare `{{variable}}` placeholders; inserting
+ * one only fills the composer or the system prompt, while every write goes
+ * through the owner-checked `/api/playground/snippets` endpoints. Each content
+ * save appends an immutable version, and the history dialog can move the
+ * production pointer back without rewriting stored revisions.
  */
 export function PlaygroundSnippetPanel(props: PlaygroundSnippetPanelProps) {
   const { t } = useTranslation()
@@ -105,6 +154,18 @@ export function PlaygroundSnippetPanel(props: PlaygroundSnippetPanelProps) {
   const [deleteTarget, setDeleteTarget] = useState<PromptSnippet | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [draft, setDraft] = useState<SnippetDraft>({ name: '', content: '' })
+  const [importing, setImporting] = useState(false)
+  const [exportingId, setExportingId] = useState<string | null>(null)
+  const [fillTarget, setFillTarget] = useState<FillTarget | null>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historySnippet, setHistorySnippet] =
+    useState<PromptSnippetDetail | null>(null)
+  const [historyStatus, setHistoryStatus] = useState<HistoryStatus>('loading')
+  const [historyError, setHistoryError] = useState<Error | null>(null)
+  const [rollingBackVersion, setRollingBackVersion] = useState<number | null>(
+    null
+  )
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!open) return
@@ -134,10 +195,73 @@ export function PlaygroundSnippetPanel(props: PlaygroundSnippetPanelProps) {
     if (!next) setQuery('')
   }
 
-  const insertSnippet = (snippet: PromptSnippet) => {
-    props.onInsertSnippet(snippet.content)
+  const applyContent = (content: string, target: PromptSnippetTarget) => {
+    if (target === 'system') {
+      if (!props.onSystemPromptChange) return
+      const existing = (props.systemPrompt ?? '').trimEnd()
+      props.onSystemPromptChange(
+        existing ? `${existing}\n\n${content}` : content
+      )
+      toast.success(t('Prompt snippet inserted into the system prompt'))
+    } else {
+      props.onInsertSnippet(content)
+      toast.success(t('Prompt snippet inserted'))
+    }
     handleOpenChange(false)
-    toast.success(t('Prompt snippet inserted'))
+    setFillTarget(null)
+  }
+
+  const requestApply = (
+    snippet: PromptSnippet,
+    target: PromptSnippetTarget
+  ) => {
+    if (parsePromptTemplateVariables(snippet.content).length === 0) {
+      applyContent(snippet.content, target)
+      return
+    }
+    setFillTarget({
+      name: snippet.name,
+      content: snippet.content,
+      target,
+    })
+  }
+
+  const loadHistory = async (snippetId: string) => {
+    setHistoryStatus('loading')
+    setHistoryError(null)
+    try {
+      const detail = await getPlaygroundSnippet(snippetId)
+      setHistorySnippet(detail)
+      setHistoryStatus('ready')
+    } catch (error) {
+      setHistoryError(toError(error))
+      setHistoryStatus('error')
+    }
+  }
+
+  const openHistory = (snippet: PromptSnippet) => {
+    setHistorySnippet(null)
+    setHistoryOpen(true)
+    void loadHistory(snippet.id)
+  }
+
+  const rollbackTo = async (version: number) => {
+    if (!historySnippet) return
+    setRollingBackVersion(version)
+    try {
+      const detail = await rollbackPlaygroundSnippet(historySnippet.id, version)
+      setHistorySnippet(detail)
+      setSnippets((current) =>
+        current.map((item) =>
+          item.id === detail.id ? snippetSummary(detail) : item
+        )
+      )
+      toast.success(t('Prompt snippet rolled back'))
+    } catch (error) {
+      handleServerError(error, t(PLAYGROUND_SNIPPET_ERRORS.ROLLBACK_FAILED))
+    } finally {
+      setRollingBackVersion(null)
+    }
   }
 
   const openCreate = () => {
@@ -204,7 +328,47 @@ export function PlaygroundSnippetPanel(props: PlaygroundSnippetPanelProps) {
     }
   }
 
+  const exportSnippet = async (snippet: PromptSnippet) => {
+    setExportingId(snippet.id)
+    try {
+      await exportPlaygroundSnippetFile(snippet.id)
+      toast.success(t('Prompt snippet exported'))
+    } catch (error) {
+      handleServerError(error, t(PLAYGROUND_SNIPPET_ERRORS.EXPORT_FAILED))
+    } finally {
+      setExportingId(null)
+    }
+  }
+
+  const importSnippet = async (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget
+    const file = input.files?.[0]
+    if (!file) return
+    setImporting(true)
+    try {
+      const content = await file.text()
+      parsePromptSnippetFile(content)
+      const imported = await importPlaygroundSnippet(content)
+      setSnippets((current) => [snippetSummary(imported), ...current])
+      setTotal((current) => current + 1)
+      toast.success(t('Prompt snippet imported'))
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message === PROMPT_SNIPPET_FILE_ERROR
+      ) {
+        toast.error(t(PROMPT_SNIPPET_FILE_ERROR))
+      } else {
+        handleServerError(error, t(PLAYGROUND_SNIPPET_ERRORS.IMPORT_FAILED))
+      }
+    } finally {
+      setImporting(false)
+      input.value = ''
+    }
+  }
+
   const canCreate = limit <= 0 || total < limit
+  const canApplySystemPrompt = Boolean(props.onSystemPromptChange)
   const normalizedQuery = query.trim().toLowerCase()
   const visibleSnippets = normalizedQuery
     ? snippets.filter(
@@ -241,6 +405,25 @@ export function PlaygroundSnippetPanel(props: PlaygroundSnippetPanelProps) {
           placeholder={t('Search prompt snippets')}
           value={query}
         />
+        <input
+          accept='.json,application/json'
+          aria-label={t('Prompt snippet file')}
+          className='hidden'
+          onChange={(event) => void importSnippet(event)}
+          ref={fileInputRef}
+          type='file'
+        />
+        <Button
+          aria-label={t('Import')}
+          disabled={props.disabled || importing || !canCreate}
+          onClick={() => fileInputRef.current?.click()}
+          size='icon-sm'
+          title={t('Import')}
+          type='button'
+          variant='outline'
+        >
+          <Upload aria-hidden='true' />
+        </Button>
         <Button
           disabled={props.disabled || !canCreate}
           onClick={openCreate}
@@ -286,23 +469,67 @@ export function PlaygroundSnippetPanel(props: PlaygroundSnippetPanelProps) {
             {status === 'loading' && <LoadingState className='min-h-24' />}
             {visibleSnippets.map((snippet) => (
               <li className='rounded-md border p-2' key={snippet.id}>
-                <div className='min-w-0'>
-                  <p className='truncate text-sm font-medium'>{snippet.name}</p>
-                  <p className='text-muted-foreground mt-1 line-clamp-2 text-xs break-words whitespace-pre-wrap'>
-                    {snippet.content}
+                <div className='flex min-w-0 items-start justify-between gap-2'>
+                  <p className='min-w-0 truncate text-sm font-medium'>
+                    {snippet.name}
                   </p>
+                  <Badge className='shrink-0' variant='secondary'>
+                    v{snippet.productionVersion}
+                  </Badge>
                 </div>
-                <div className='mt-2 flex items-center justify-between gap-1'>
-                  <Button
-                    disabled={props.disabled}
-                    onClick={() => insertSnippet(snippet)}
-                    size='sm'
-                    type='button'
-                    variant='secondary'
-                  >
-                    {t('Insert')}
-                  </Button>
+                <p className='text-muted-foreground mt-1 line-clamp-2 text-xs break-words whitespace-pre-wrap'>
+                  {snippet.content}
+                </p>
+                <div className='mt-2 flex flex-wrap items-center justify-between gap-1'>
+                  <div className='flex items-center gap-2'>
+                    <Button
+                      disabled={props.disabled}
+                      onClick={() => requestApply(snippet, 'composer')}
+                      size='sm'
+                      type='button'
+                      variant='secondary'
+                    >
+                      {t('Insert')}
+                    </Button>
+                    <span className='text-muted-foreground text-[11px]'>
+                      {t('{{count}} versions', {
+                        count: snippet.versionCount,
+                      })}
+                    </span>
+                  </div>
                   <div className='flex items-center gap-1'>
+                    {canApplySystemPrompt ? (
+                      <Button
+                        aria-label={t('Insert into system prompt')}
+                        disabled={props.disabled}
+                        onClick={() => requestApply(snippet, 'system')}
+                        size='icon-sm'
+                        type='button'
+                        variant='ghost'
+                      >
+                        <MessageSquareTextIcon aria-hidden='true' />
+                      </Button>
+                    ) : null}
+                    <Button
+                      aria-label={t('Version history')}
+                      disabled={props.disabled}
+                      onClick={() => openHistory(snippet)}
+                      size='icon-sm'
+                      type='button'
+                      variant='ghost'
+                    >
+                      <HistoryIcon aria-hidden='true' />
+                    </Button>
+                    <Button
+                      aria-label={t('Export snippet')}
+                      disabled={props.disabled || exportingId === snippet.id}
+                      onClick={() => void exportSnippet(snippet)}
+                      size='icon-sm'
+                      type='button'
+                      variant='ghost'
+                    >
+                      <Download aria-hidden='true' />
+                    </Button>
                     <Button
                       aria-label={t('Edit snippet')}
                       disabled={props.disabled}
@@ -393,7 +620,9 @@ export function PlaygroundSnippetPanel(props: PlaygroundSnippetPanelProps) {
                   content: event.target.value,
                 }))
               }
-              placeholder={t('e.g. Review this change for regressions.')}
+              placeholder={t(
+                'e.g. Review this change for regressions. Variables use {{name}} or {{name:default}}.'
+              )}
               value={draft.content}
             />
           </div>
@@ -413,6 +642,38 @@ export function PlaygroundSnippetPanel(props: PlaygroundSnippetPanelProps) {
       />
     </>
   )
+
+  const overlays = (
+    <>
+      {dialogs}
+      <PlaygroundSnippetFillDialog
+        content={fillTarget?.content ?? ''}
+        onConfirm={(rendered) => {
+          if (fillTarget) applyContent(rendered, fillTarget.target)
+        }}
+        onOpenChange={(next) => {
+          if (!next) setFillTarget(null)
+        }}
+        open={fillTarget !== null}
+        target={fillTarget?.target ?? 'composer'}
+      />
+      <PlaygroundSnippetHistoryDialog
+        error={historyError}
+        onOpenChange={setHistoryOpen}
+        onRetry={() => {
+          if (historySnippet) void loadHistory(historySnippet.id)
+        }}
+        onRollback={(version) => void rollbackTo(version)}
+        open={historyOpen}
+        rollingBackVersion={rollingBackVersion}
+        snippet={historySnippet}
+        status={historyStatus}
+      />
+    </>
+  )
+
+  const title = t('Prompt snippets')
+  void title
 
   if (isMobile) {
     return (
@@ -434,7 +695,7 @@ export function PlaygroundSnippetPanel(props: PlaygroundSnippetPanelProps) {
             {content}
           </SheetContent>
         </Sheet>
-        {dialogs}
+        {overlays}
       </>
     )
   }
@@ -458,7 +719,7 @@ export function PlaygroundSnippetPanel(props: PlaygroundSnippetPanelProps) {
           {content}
         </PopoverContent>
       </Popover>
-      {dialogs}
+      {overlays}
     </>
   )
 }

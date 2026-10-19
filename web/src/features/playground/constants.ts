@@ -464,11 +464,20 @@ export const PLAYGROUND_PRESET_ERRORS = {
 // Prompt snippet display bounds and client-side failure messages. The server
 // validates the same values and owns the authoritative per-account quota.
 export const PLAYGROUND_SNIPPET_NAME_MAX_LENGTH = 100
+// The portable import/export document the host renders. The format and schema
+// markers let the import panel reject an unrelated JSON file before uploading.
+export const PLAYGROUND_SNIPPET_FILE_FORMAT =
+  'new-api-playground-prompt-template'
+export const PLAYGROUND_SNIPPET_FILE_VERSION = 1
 
 export const PLAYGROUND_SNIPPET_ERRORS = {
   LOAD_FAILED: 'Failed to load prompt snippets',
   SAVE_FAILED: 'Failed to save the prompt snippet',
   DELETE_FAILED: 'Failed to delete the prompt snippet',
+  VERSIONS_FAILED: 'Failed to load the prompt snippet versions',
+  ROLLBACK_FAILED: 'Failed to roll back the prompt snippet',
+  EXPORT_FAILED: 'Failed to export the prompt snippet',
+  IMPORT_FAILED: 'Failed to import the prompt snippet',
 } as const
 
 // Cross-session memory bounds and copy. The server owns the authoritative

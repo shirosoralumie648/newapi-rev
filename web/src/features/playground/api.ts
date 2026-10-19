@@ -62,8 +62,11 @@ import type {
   PlaygroundServerSession,
   PlaygroundPresetExport,
   PlaygroundSessionExport,
+  PlaygroundSnippetExport,
   PlaygroundTrashListing,
   PromptSnippet,
+  PromptSnippetDetail,
+  PromptSnippetVersion,
 } from './types'
 
 /** One non-streaming completion plus the relay request id it was recorded as. */
@@ -1833,12 +1836,26 @@ export async function importPlaygroundPreset(
   return mapServerPreset(response.data.data)
 }
 
+const serverSnippetVersionSchema = z.object({
+  version: z.number().int().positive(),
+  content: z.string(),
+  byte_size: z.number().int().nonnegative(),
+  created_at: z.number().int().nonnegative(),
+})
+
 const serverSnippetSchema = z.object({
   id: z.string().min(1),
   name: z.string(),
   content: z.string(),
+  current_version: z.number().int().nonnegative(),
+  production_version: z.number().int().nonnegative(),
+  version_count: z.number().int().nonnegative(),
   created_at: z.number().int().nonnegative(),
   updated_at: z.number().int().nonnegative(),
+})
+
+const serverSnippetDetailSchema = serverSnippetSchema.extend({
+  versions: z.array(serverSnippetVersionSchema),
 })
 
 export interface PlaygroundSnippetInput {
@@ -1855,14 +1872,35 @@ export interface PlaygroundSnippetListing {
   limit: number
 }
 
+function mapServerSnippetVersion(value: unknown): PromptSnippetVersion {
+  const version = serverSnippetVersionSchema.parse(value)
+  return {
+    version: version.version,
+    content: version.content,
+    byteSize: version.byte_size,
+    createdAt: version.created_at * 1000,
+  }
+}
+
 function mapServerSnippet(value: unknown): PromptSnippet {
   const snippet = serverSnippetSchema.parse(value)
   return {
     id: snippet.id,
     name: snippet.name,
     content: snippet.content,
+    currentVersion: snippet.current_version,
+    productionVersion: snippet.production_version,
+    versionCount: snippet.version_count,
     createdAt: snippet.created_at * 1000,
     updatedAt: snippet.updated_at * 1000,
+  }
+}
+
+function mapServerSnippetDetail(value: unknown): PromptSnippetDetail {
+  const detail = serverSnippetDetailSchema.parse(value)
+  return {
+    ...mapServerSnippet(detail),
+    versions: detail.versions.map(mapServerSnippetVersion),
   }
 }
 
@@ -1919,6 +1957,88 @@ export async function deletePlaygroundSnippet(
     { signal }
   )
   requireServerSuccess(response.data)
+}
+
+/**
+ * Read one owned snippet with its immutable revisions. The list endpoint omits
+ * the revision bodies on purpose; the history dialog fetches them only when it
+ * opens.
+ */
+export async function getPlaygroundSnippet(
+  snippetId: string,
+  signal?: AbortSignal
+): Promise<PromptSnippetDetail> {
+  const response = await api.get(
+    `${API_ENDPOINTS.PLAYGROUND_SNIPPETS}/${encodeURIComponent(snippetId)}`,
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  return mapServerSnippetDetail(response.data.data)
+}
+
+/**
+ * Move the production pointer of one snippet to a stored revision. History is
+ * append-only, so this is reversible by choosing a later version again.
+ */
+export async function rollbackPlaygroundSnippet(
+  snippetId: string,
+  version: number,
+  signal?: AbortSignal
+): Promise<PromptSnippetDetail> {
+  const response = await api.post(
+    `${API_ENDPOINTS.PLAYGROUND_SNIPPETS}/${encodeURIComponent(snippetId)}/rollback`,
+    { version },
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  return mapServerSnippetDetail(response.data.data)
+}
+
+/** Render the JSON document that the snippet import endpoint accepts. */
+export async function exportPlaygroundSnippet(
+  snippetId: string,
+  signal?: AbortSignal
+): Promise<PlaygroundSnippetExport> {
+  const response = await api.get(
+    `${API_ENDPOINTS.PLAYGROUND_SNIPPETS}/${encodeURIComponent(snippetId)}/export`,
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  const data = z
+    .object({
+      format: z.literal('json'),
+      filename: z.string().min(1),
+      content_type: z.string().min(1),
+      content: z.string(),
+    })
+    .parse(response.data.data)
+  return {
+    format: data.format,
+    filename: data.filename,
+    contentType: data.content_type,
+    content: data.content,
+  }
+}
+
+/**
+ * Store one exported template document for the caller. The server validates the
+ * format, schema version, revision sequence and the effective quotas before it
+ * writes anything.
+ */
+export async function importPlaygroundSnippet(
+  content: string,
+  signal?: AbortSignal
+): Promise<PromptSnippetDetail> {
+  const response = await api.post(
+    `${API_ENDPOINTS.PLAYGROUND_SNIPPETS}/import`,
+    content,
+    {
+      headers: { 'Content-Type': 'application/json' },
+      signal,
+    }
+  )
+  requireServerSuccess(response.data)
+  return mapServerSnippetDetail(response.data.data)
 }
 
 const serverMemorySchema = z.object({
