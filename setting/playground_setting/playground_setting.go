@@ -558,7 +558,18 @@ func GetPlaygroundWebSearchSetting() *PlaygroundWebSearchSetting {
 // IsWebSearchEnabled reports whether the search-with-this-turn control should
 // be offered to users. An unanswered or incomplete configuration stays off.
 func IsWebSearchEnabled() bool {
-	return GetPlaygroundWebSearchSetting().IsEnabled()
+	setting := GetPlaygroundWebSearchSetting()
+	if !setting.IsEnabled() {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(setting.Provider)) {
+	case PlaygroundWebSearchProviderTavily, PlaygroundWebSearchProviderBrave:
+		return GetPlaygroundWebSearchAPIKey() != ""
+	case PlaygroundWebSearchProviderSearXNG:
+		return strings.TrimSpace(setting.BaseURL) != ""
+	default:
+		return false
+	}
 }
 
 // GetPlaygroundWebSearchAPIKey returns the server-side provider credential.

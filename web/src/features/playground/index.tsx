@@ -64,9 +64,11 @@ import {
   useAutoReadAloud,
   useAutoSessionTitle,
   useChatHandler,
+  useKnowledgeBases,
   useParallelChat,
   usePlaygroundContext,
   usePlaygroundConversation,
+  usePlaygroundKnowledgeRetrieval,
   usePlaygroundMessageCosts,
   usePlaygroundMemories,
   usePlaygroundMemoryExtraction,
@@ -180,6 +182,7 @@ function PlaygroundContent(props: {
     updateSystemPrompt,
     updateContextSettings,
     updateContextSummary,
+    updateKnowledgeBaseIds,
     applySessionSettings,
     clearMessages,
     sessions,
@@ -197,9 +200,28 @@ function PlaygroundContent(props: {
   const messagesRef = useRef(messages)
   messagesRef.current = messages
 
+  const activeSession = sessions.find(
+    (session) => session.id === activeSessionId
+  )
+  const knowledgeBaseIds = activeSession?.knowledgeBaseIds ?? []
+  const {
+    retrieve: retrieveKnowledge,
+    diagnostics: knowledgeDiagnostics,
+    isRetrieving: isRetrievingKnowledge,
+  } = usePlaygroundKnowledgeRetrieval()
+  const prepareKnowledge = useCallback(
+    (nextMessages: Message[]) =>
+      retrieveKnowledge(nextMessages, knowledgeBaseIds, config.group),
+    [config.group, knowledgeBaseIds, retrieveKnowledge]
+  )
+
   // Cross-session memory: every enabled note of the account is injected after
   // the system prompt, and extraction is opt-in per account.
   const memoriesQuery = usePlaygroundMemories(userId)
+  // Knowledge bases the account may bind to the conversation. The list is
+  // shared with the canvas knowledge manager through the query cache.
+  const knowledgeBasesQuery = useKnowledgeBases(userId)
+  const knowledgeBases = knowledgeBasesQuery.data ?? []
   const memoryBlock = useMemo(
     () => formatMemoryBlock(memoriesQuery.data?.items ?? []),
     [memoriesQuery.data]
@@ -253,6 +275,7 @@ function PlaygroundContent(props: {
       memoryBlock,
       contextSettings: context,
       prepareContextSummary: contextController.prepareForSend,
+      prepareKnowledge,
       onMessageUpdate: updateMessages,
       onResponseComplete: (result) => autoRead.read(result.content),
       sessionId: activeSessionId,
@@ -271,6 +294,7 @@ function PlaygroundContent(props: {
     contextSettings: context,
     messages,
     prepareContextSummary: contextController.prepareForSend,
+    prepareKnowledge,
     onMessageUpdate: updateMessages,
     sessionId: activeSessionId,
   })
@@ -289,9 +313,6 @@ function PlaygroundContent(props: {
   const sync = usePlaygroundServer(local, isGenerating || isComparing)
   const deleteSession = sync.deleteSession
   const restoreSession = sync.restoreSession
-  const activeSession = sessions.find(
-    (session) => session.id === activeSessionId
-  )
   // Automatic naming runs after a reply or comparison completes. It is silent,
   // only replaces the untouched default title and writes through the ordinary
   // rename/autosave chain.
@@ -1242,6 +1263,14 @@ function PlaygroundContent(props: {
                 {t('Answer or deny the requested tool calls to continue.')}
               </p>
             )}
+            {isRetrievingKnowledge && (
+              <p
+                role='status'
+                className='text-muted-foreground px-1 pb-1 text-xs'
+              >
+                {t('Searching knowledge bases...')}
+              </p>
+            )}
             <PlaygroundContextStatus
               className='pb-1'
               isSummarizing={contextController.isSummarizing}
@@ -1290,11 +1319,16 @@ function PlaygroundContent(props: {
               isGenerating={isGenerating || isComparing}
               isModelLoading={isLoadingModels}
               isSummarizing={contextController.isSummarizing}
+              knowledgeBaseIds={knowledgeBaseIds}
+              knowledgeBases={knowledgeBases}
+              knowledgeDiagnostics={knowledgeDiagnostics}
+              knowledgeLoading={knowledgeBasesQuery.isLoading}
               modelValue={config.model}
               models={models}
               compareModels={compareModels}
               onCompareModelsChange={setCompareModels}
               onContextSettingsChange={updateContextSettings}
+              onKnowledgeBaseIdsChange={updateKnowledgeBaseIds}
               onGroupChange={(value) => updateConfig('group', value)}
               onConfigChange={updateConfig}
               onClearMessages={handleClearMessages}

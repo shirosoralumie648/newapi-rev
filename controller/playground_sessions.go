@@ -66,6 +66,18 @@ const (
 	playgroundMessageSearchMaxURLBytes        = 4096
 	playgroundMessageSearchMaxProviderBytes   = 32
 	playgroundMessageSearchMaxResultListBytes = 24 << 10
+	// playgroundMessageKnowledge* bound the retrieval snapshot of one user
+	// turn. The merged server response already caps hits and text, but the
+	// stored payload is still validated because clients can write it.
+	playgroundMessageKnowledgeMaxQueryRunes      = 8_000
+	playgroundMessageKnowledgeMaxResults         = 12
+	playgroundMessageKnowledgeMaxIDBytes         = 200
+	playgroundMessageKnowledgeMaxBaseNameBytes   = 200
+	playgroundMessageKnowledgeMaxFilenameBytes   = 255
+	playgroundMessageKnowledgeMaxChunkTextBytes  = 32 << 10
+	playgroundMessageKnowledgeMaxResultListBytes = 64 << 10
+	playgroundSessionKnowledgeBaseMax            = 3
+	playgroundSessionKnowledgeBaseIDMaxBytes     = 128
 	// playgroundParallelMinVersions is the smallest group that actually
 	// compares models: a single reply already has the ordinary message path.
 	playgroundParallelMinVersions = 2
@@ -107,9 +119,13 @@ type playgroundSessionRequest struct {
 	OpeningMessage   *string         `json:"opening_message"`
 	// SuggestedQuestions is a pointer so an update can distinguish "keep the
 	// stored questions" from an explicit empty list that clears them.
-	SuggestedQuestions *[]string       `json:"suggested_questions"`
-	Context            json.RawMessage `json:"context"`
-	ContextSummary     json.RawMessage `json:"context_summary"`
+	SuggestedQuestions *[]string `json:"suggested_questions"`
+	// KnowledgeBaseIDs binds up to three owner-scoped bases to the
+	// conversation. A second pointer level is unnecessary because an empty
+	// list explicitly clears the binding.
+	KnowledgeBaseIDs *[]string       `json:"knowledge_base_ids"`
+	Context          json.RawMessage `json:"context"`
+	ContextSummary   json.RawMessage `json:"context_summary"`
 	// Pinned and Archived are explicit state switches: absent keeps the stored
 	// value, while a boolean sets it. Tags is the complete replacement list.
 	Pinned   *bool                    `json:"pinned"`
@@ -129,6 +145,7 @@ type playgroundSessionResponse struct {
 	SystemPrompt       string          `json:"system_prompt"`
 	OpeningMessage     string          `json:"opening_message"`
 	SuggestedQuestions []string        `json:"suggested_questions"`
+	KnowledgeBaseIDs   []string        `json:"knowledge_base_ids"`
 	// Context is the conversation's context management settings; an absent or
 	// legacy NULL column reads back as an empty object and the client picks
 	// its defaults. ContextSummary is the persisted compression node or null.
@@ -214,7 +231,12 @@ type playgroundMessagePayload struct {
 	// request. Persisting it lets a replay rebuild the exact same prompt and
 	// lets the assistant reply show its citations after a reload. The provider
 	// name labels the snapshot; no credential or raw payload is stored.
-	Search    *playgroundMessageSearch `json:"search,omitempty"`
+	Search *playgroundMessageSearch `json:"search,omitempty"`
+	// Knowledge is the retrieval snapshot of one user turn: the merged hits
+	// injected into the request. The assistant reply derives its [n] citation
+	// list from the preceding user message, so citations survive a reload
+	// without duplicating chunk text on every version.
+	Knowledge *playgroundMessageKnowledge `json:"knowledge,omitempty"`
 	Reasoning *struct {
 		Content     string   `json:"content"`
 		Duration    float64  `json:"duration"`
@@ -241,6 +263,26 @@ type playgroundMessageSearchResult struct {
 	Title   string `json:"title"`
 	URL     string `json:"url"`
 	Snippet string `json:"snippet"`
+}
+
+// playgroundMessageKnowledge is the stored retrieval snapshot of one user
+// turn. Results are ordered: the assistant cites the first hit as [1].
+type playgroundMessageKnowledge struct {
+	Query   string                             `json:"query"`
+	Results []playgroundMessageKnowledgeResult `json:"results"`
+}
+
+// playgroundMessageKnowledgeResult is one merged knowledge chunk.
+type playgroundMessageKnowledgeResult struct {
+	KnowledgeBaseID   string  `json:"knowledge_base_id"`
+	KnowledgeBaseName string  `json:"knowledge_base_name"`
+	DocumentID        string  `json:"document_id"`
+	Filename          string  `json:"filename"`
+	ChunkID           string  `json:"chunk_id"`
+	ChunkIndex        int     `json:"chunk_index"`
+	Score             float64 `json:"score"`
+	Text              string  `json:"text"`
+	Truncated         *bool   `json:"truncated,omitempty"`
 }
 
 // playgroundMessageToolCall is one requested tool call plus the result the user
@@ -475,7 +517,7 @@ func decodePlaygroundRequest(c *gin.Context, target any, maxBytes int64) bool {
 
 func playgroundDecodeSession(session *model.PlaygroundSession) (playgroundSessionResponse, error) {
 	response := playgroundSessionResponse{ID: session.ID, ClientID: session.ClientID, Created: session.CreatedNow, Title: session.Title, Revision: session.Revision, MessageRevision: session.MessageRevision,
-		SystemPrompt: session.SystemPrompt, OpeningMessage: string(session.OpeningMessage), SuggestedQuestions: []string{},
+		SystemPrompt: session.SystemPrompt, OpeningMessage: string(session.OpeningMessage), SuggestedQuestions: []string{}, KnowledgeBaseIDs: []string{},
 		Context: map[string]any{}, ContextSummary: json.RawMessage("null"),
 		PinnedAt: session.PinnedAt, ArchivedAt: session.ArchivedAt,
 		Pinned: session.PinnedAt > 0, Archived: session.ArchivedAt > 0, Tags: []string{},
@@ -492,6 +534,14 @@ func playgroundDecodeSession(session *model.PlaygroundSession) (playgroundSessio
 		}
 		if response.SuggestedQuestions == nil {
 			response.SuggestedQuestions = []string{}
+		}
+	}
+	if stored := strings.TrimSpace(session.KnowledgeBaseIDs); stored != "" && stored != "null" {
+		if err := common.UnmarshalJsonStr(stored, &response.KnowledgeBaseIDs); err != nil {
+			return response, err
+		}
+		if response.KnowledgeBaseIDs == nil {
+			response.KnowledgeBaseIDs = []string{}
 		}
 	}
 	// Tags were validated on write. A NULL or legacy value reads back as no
@@ -754,6 +804,36 @@ func encodePlaygroundSettings(request playgroundSessionRequest, systemPromptMaxB
 	return updates, nil
 }
 
+// encodePlaygroundKnowledgeBaseIDs validates the conversation binding. The
+// list is owner-scoped, capped at three distinct ids, and stored as compact
+// JSON so the response can round-trip an explicit empty list.
+func encodePlaygroundKnowledgeBaseIDs(userID int, knowledgeBaseIDs []string) (string, error) {
+	if len(knowledgeBaseIDs) > playgroundSessionKnowledgeBaseMax {
+		return "", common.NewMessage("A conversation can bind at most three knowledge bases.")
+	}
+	normalized := make([]string, 0, len(knowledgeBaseIDs))
+	seen := make(map[string]bool, len(knowledgeBaseIDs))
+	for _, knowledgeBaseID := range knowledgeBaseIDs {
+		if knowledgeBaseID == "" || len(knowledgeBaseID) > playgroundSessionKnowledgeBaseIDMaxBytes ||
+			strings.ContainsRune(knowledgeBaseID, 0) || seen[knowledgeBaseID] {
+			return "", common.NewMessage("Invalid Playground knowledge base binding.")
+		}
+		seen[knowledgeBaseID] = true
+		normalized = append(normalized, knowledgeBaseID)
+	}
+	if err := model.ValidatePlaygroundKnowledgeBaseIDs(userID, normalized); err != nil {
+		if errors.Is(err, model.ErrPlaygroundKnowledgeBaseNotFound) {
+			return "", common.NewMessage("Playground knowledge base not found.")
+		}
+		return "", err
+	}
+	encoded, err := common.Marshal(normalized)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
+}
+
 // validatePlaygroundToolCalls bounds the persisted tool call state of one
 // message version. Arguments and results are opaque text here; the gateway
 // only checks who may carry calls, their identity, size and status, and never
@@ -927,6 +1007,11 @@ func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroun
 				return nil, err
 			}
 		}
+		if payload.Knowledge != nil {
+			if err := validatePlaygroundMessageKnowledge(payload.From, payload.Knowledge); err != nil {
+				return nil, err
+			}
+		}
 		payloads = append(payloads, payload)
 	}
 
@@ -1019,6 +1104,47 @@ func validatePlaygroundMessageSearch(from string, search *playgroundMessageSearc
 	return nil
 }
 
+// validatePlaygroundMessageKnowledge bounds the retrieval snapshot a stored
+// user message keeps. The client sends the merged top-k result it injected;
+// the server only checks shape, ownership-agnostic metadata bounds and total
+// size, because retrieval was authorized when it ran.
+func validatePlaygroundMessageKnowledge(from string, knowledge *playgroundMessageKnowledge) error {
+	if from != "user" || knowledge == nil {
+		return common.NewMessage("Invalid Playground message.")
+	}
+	if strings.TrimSpace(knowledge.Query) == "" || utf8.RuneCountInString(knowledge.Query) > playgroundMessageKnowledgeMaxQueryRunes {
+		return common.NewMessage("Invalid Playground message.")
+	}
+	if len(knowledge.Results) > playgroundMessageKnowledgeMaxResults {
+		return common.NewMessage("Invalid Playground message.")
+	}
+	seen := make(map[string]bool, len(knowledge.Results))
+	totalBytes := len(knowledge.Query)
+	for _, result := range knowledge.Results {
+		for _, value := range []string{result.KnowledgeBaseID, result.DocumentID, result.Filename, result.ChunkID} {
+			if value == "" || len(value) > playgroundMessageKnowledgeMaxIDBytes || strings.ContainsRune(value, 0) {
+				return common.NewMessage("Invalid Playground message.")
+			}
+		}
+		if len(result.KnowledgeBaseName) > playgroundMessageKnowledgeMaxBaseNameBytes ||
+			len(result.Filename) > playgroundMessageKnowledgeMaxFilenameBytes ||
+			result.ChunkIndex < 0 ||
+			len(result.Text) > playgroundMessageKnowledgeMaxChunkTextBytes ||
+			math.IsNaN(result.Score) || math.IsInf(result.Score, 0) {
+			return common.NewMessage("Invalid Playground message.")
+		}
+		if seen[result.ChunkID] {
+			return common.NewMessage("Invalid Playground message.")
+		}
+		seen[result.ChunkID] = true
+		totalBytes += len(result.KnowledgeBaseName) + len(result.DocumentID) + len(result.Filename) + len(result.ChunkID) + len(result.Text)
+		if totalBytes > playgroundMessageKnowledgeMaxResultListBytes {
+			return common.NewMessage("Invalid Playground message.")
+		}
+	}
+	return nil
+}
+
 // validatePlaygroundMessageDeletes bounds the client keys one delta removes.
 // Removing an already absent key is allowed so a retried delta stays replayable.
 func validatePlaygroundMessageDeletes(keys []string) ([]string, error) {
@@ -1077,12 +1203,23 @@ func CreatePlaygroundSession(c *gin.Context) {
 		writePlaygroundError(c, err)
 		return
 	}
+	if request.KnowledgeBaseIDs != nil {
+		encoded, err := encodePlaygroundKnowledgeBaseIDs(c.GetInt("id"), *request.KnowledgeBaseIDs)
+		if err != nil {
+			writePlaygroundError(c, err)
+			return
+		}
+		updates["knowledge_base_ids"] = encoded
+	}
 	messages, err := validatePlaygroundMessages(c.GetInt("id"), "", request.Messages, false, policy)
 	if err != nil {
 		writePlaygroundError(c, err)
 		return
 	}
 	session := &model.PlaygroundSession{Title: "New conversation", Config: "{}", ParameterEnabled: "{}", ContextConfig: "{}"}
+	if knowledgeBaseIDs, ok := updates["knowledge_base_ids"]; ok {
+		session.KnowledgeBaseIDs = knowledgeBaseIDs.(string)
+	}
 	if title, ok := updates["title"]; ok {
 		session.Title = title.(string)
 	}
@@ -1165,6 +1302,14 @@ func UpdatePlaygroundSession(c *gin.Context) {
 	if err != nil {
 		writePlaygroundError(c, err)
 		return
+	}
+	if request.KnowledgeBaseIDs != nil {
+		encoded, err := encodePlaygroundKnowledgeBaseIDs(c.GetInt("id"), *request.KnowledgeBaseIDs)
+		if err != nil {
+			writePlaygroundError(c, err)
+			return
+		}
+		updates["knowledge_base_ids"] = encoded
 	}
 	session, err := model.UpdatePlaygroundSessionFields(c.GetInt("id"), c.Param("id"), *request.Revision, updates, model.PlaygroundSessionOrganization{
 		Pinned: request.Pinned, Archived: request.Archived,

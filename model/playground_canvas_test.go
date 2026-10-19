@@ -23,7 +23,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -1106,6 +1108,247 @@ func TestPlaygroundCanvasTrashLifecycle(t *testing.T) {
 			assert.EqualValues(t, 1, after.AttachmentCount)
 			assert.Empty(t, playgroundTrashListingFixture(t, 7).Items)
 			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 7, http.MethodPost, canvasPath+"/restore", nil, controller.RestorePlaygroundCanvasProject).Code)
+		})
+	}
+}
+
+// A canvas link uses the same hash-only, revocable token contract as a
+// conversation link, but the anonymous snapshot is a sanitized drawing: local
+// layout and previews survive while every resource reference, task id,
+// generation parameter and provider-facing field is removed.
+func TestPlaygroundCanvasShares(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			// The column addition is idempotent and keeps the existing session
+			// links usable.
+			for range 2 {
+				require.NoError(t, db.AutoMigrate(&model.PlaygroundSessionShare{}))
+			}
+			assert.True(t, db.Migrator().HasColumn(&model.PlaygroundSessionShare{}, "canvas_id"))
+
+			session := createPlayground(t, 7, "canvas-share-session")
+			sessionID := session["id"].(string)
+			secretSessionID := sessionID
+			created := canvasEnvelope(t, playgroundRequest(t, 7, http.MethodPost, "/api/playground/canvases", map[string]any{
+				"title": "Share board",
+				"document": canvasDocument([]any{
+					map[string]any{
+						"id": "n-text", "type": "text", "position": map[string]any{"x": 10, "y": 20},
+						"data": map[string]any{"kind": "text", "text": "Visible prompt preview"},
+					},
+					map[string]any{
+						"id": "n-message", "type": "message", "position": map[string]any{"x": 30, "y": 40},
+						"data": map[string]any{
+							"kind": "message",
+							"snapshot": map[string]any{
+								"sessionId": secretSessionID, "messageKey": "secret-message-key",
+								"role": "assistant", "text": "Visible snapshot preview",
+							},
+							"ref": map[string]any{"sessionId": secretSessionID, "messageKey": "secret-message-key"},
+						},
+					},
+					map[string]any{
+						"id": "n-artifact", "type": "artifact", "position": map[string]any{"x": 50, "y": 60},
+						"data": map[string]any{
+							"kind": "artifact", "label": "chart.png", "media_type": "image/png",
+							"ref": map[string]any{
+								"sessionId": secretSessionID, "attachmentId": "pgf_secret_attachment",
+								"artifactId": "pga_secret_artifact", "taskId": "task_secret_identifier",
+								"taskArtifactKey": "secret-artifact-key",
+							},
+						},
+					},
+					map[string]any{
+						"id": "n-model", "type": "model", "position": map[string]any{"x": 70, "y": 80},
+						"data": map[string]any{
+							"kind": "model", "text": "Visible step label",
+							"workflow": map[string]any{
+								"status": "failed", "model": "gpt-secret-model", "generation": "image",
+								"size": "4096x4096", "quality": "ultra-secret", "group": "secret-group",
+								"inputText": "secret input text", "inputImageCount": 2,
+								"output": "Visible workflow output", "taskId": "task_secret_identifier",
+								"sourceNodeId": "n-text", "error": "secret upstream failure",
+								"attempts": 2, "updatedAt": 123,
+							},
+						},
+					},
+					map[string]any{
+						"id": "n-result", "type": "task-result", "position": map[string]any{"x": 90, "y": 100},
+						"data": map[string]any{
+							"kind": "task-result",
+							"workflow": map[string]any{
+								"status": "succeeded", "generation": "image", "resultImageCount": 3,
+								"attempts": 1, "updatedAt": 456,
+								"taskId": "task_secret_identifier", "taskArtifactKey": "secret-artifact-key",
+							},
+						},
+					},
+					map[string]any{
+						"id": "n-group", "type": "group", "position": map[string]any{"x": 0, "y": 0},
+						"data": map[string]any{"kind": "group", "text": "Scene"},
+					},
+					map[string]any{
+						"id": "n-child", "type": "text", "position": map[string]any{"x": 5, "y": 5},
+						"data": map[string]any{"kind": "text", "text": "grouped child", "parentId": "n-group"},
+					},
+				}, []any{
+					map[string]any{"id": "e1", "source": "n-text", "target": "n-model"},
+					map[string]any{"id": "e2", "source": "n-model", "target": "n-result"},
+				}),
+			}, controller.CreatePlaygroundCanvasProject).Body.Bytes())
+			canvasID := created["id"].(string)
+			canvasPath := "/api/playground/canvases/" + canvasID
+			sharePath := canvasPath + "/share"
+			readShared := func(token string) *httptest.ResponseRecorder {
+				return playgroundRequest(t, 0, http.MethodGet, "/api/playground/shared/"+token, nil, controller.GetSharedPlaygroundSession)
+			}
+			missing := playgroundRequest(t, 0, http.MethodGet, "/api/playground/shared/does-not-exist", nil, controller.GetSharedPlaygroundSession)
+			require.Equal(t, http.StatusNotFound, missing.Code)
+			assert.Contains(t, missing.Body.String(), "PLAYGROUND_SHARE_NOT_FOUND")
+			notFoundBody := missing.Body.String()
+
+			foreignCreate := playgroundRequest(t, 8, http.MethodPost, sharePath, map[string]any{"expires_in_days": 7}, controller.CreatePlaygroundCanvasShare)
+			assert.Equal(t, http.StatusNotFound, foreignCreate.Code, foreignCreate.Body.String())
+			foreignDelete := playgroundRequest(t, 8, http.MethodDelete, sharePath, nil, controller.DeletePlaygroundCanvasShare)
+			assert.Equal(t, http.StatusNotFound, foreignDelete.Code, foreignDelete.Body.String())
+			var shareCount int64
+			require.NoError(t, db.Model(&model.PlaygroundSessionShare{}).Where("canvas_id = ?", canvasID).Count(&shareCount).Error)
+			assert.Zero(t, shareCount)
+
+			createShare := func(expiresInDays int) (string, int64, int64) {
+				response := playgroundRequest(t, 7, http.MethodPost, sharePath, map[string]any{"expires_in_days": expiresInDays}, controller.CreatePlaygroundCanvasShare)
+				require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+				data := canvasEnvelope(t, response.Body.Bytes())
+				token, _ := data["token"].(string)
+				require.NotEmpty(t, token)
+				assert.Equal(t, "/share/"+token, data["url_path"])
+				return token, int64(data["expires_at"].(float64)), int64(data["created_at"].(float64))
+			}
+
+			now := common.GetTimestamp()
+			firstToken, firstExpiry, _ := createShare(7)
+			assert.GreaterOrEqual(t, firstExpiry, now+7*24*60*60)
+			decodedToken, decodeErr := base64.RawURLEncoding.DecodeString(firstToken)
+			require.NoError(t, decodeErr)
+			assert.Len(t, decodedToken, 16)
+			var storedShare model.PlaygroundSessionShare
+			require.NoError(t, db.Where("canvas_id = ? AND revoked_at = 0", canvasID).First(&storedShare).Error)
+			hash := sha256.Sum256([]byte(firstToken))
+			assert.Equal(t, hex.EncodeToString(hash[:]), storedShare.TokenHash)
+			assert.Empty(t, storedShare.SessionID)
+			assert.Equal(t, canvasID, storedShare.CanvasID)
+			assert.NotContains(t, storedShare.TokenHash, firstToken)
+
+			read := readShared(firstToken)
+			require.Equal(t, http.StatusOK, read.Code, read.Body.String())
+			assert.Equal(t, "noindex, nofollow, noarchive", read.Header().Get("X-Robots-Tag"))
+			assert.Equal(t, "no-referrer", read.Header().Get("Referrer-Policy"))
+			assert.Equal(t, "nosniff", read.Header().Get("X-Content-Type-Options"))
+			snapshot := canvasEnvelope(t, read.Body.Bytes())
+			assert.Equal(t, "canvas", snapshot["kind"])
+			assert.Equal(t, "Share board", snapshot["title"])
+			document := snapshot["document"].(map[string]any)
+			assert.EqualValues(t, 1.25, document["viewport"].(map[string]any)["zoom"])
+			nodes := document["nodes"].([]any)
+			require.Len(t, nodes, 7)
+			edges := document["edges"].([]any)
+			require.Len(t, edges, 2)
+			nodeByID := func(id string) map[string]any {
+				for _, item := range nodes {
+					node := item.(map[string]any)
+					if node["id"] == id {
+						return node
+					}
+				}
+				t.Fatalf("node %s missing from the shared document", id)
+				return nil
+			}
+			assert.Equal(t, "Visible prompt preview", nodeByID("n-text")["data"].(map[string]any)["text"])
+			messageData := nodeByID("n-message")["data"].(map[string]any)
+			messageSnapshot := messageData["snapshot"].(map[string]any)
+			assert.Equal(t, "assistant", messageSnapshot["role"])
+			assert.Equal(t, "Visible snapshot preview", messageSnapshot["text"])
+			assert.NotContains(t, messageData, "ref")
+			artifactData := nodeByID("n-artifact")["data"].(map[string]any)
+			assert.Equal(t, "chart.png", artifactData["label"])
+			assert.Equal(t, "image/png", artifactData["media_type"])
+			modelWorkflow := nodeByID("n-model")["data"].(map[string]any)["workflow"].(map[string]any)
+			assert.Equal(t, "failed", modelWorkflow["status"])
+			assert.Equal(t, "image", modelWorkflow["generation"])
+			assert.Equal(t, "Visible workflow output", modelWorkflow["output"])
+			assert.EqualValues(t, 2, modelWorkflow["attempts"])
+			assert.EqualValues(t, 123, modelWorkflow["updatedAt"])
+			resultWorkflow := nodeByID("n-result")["data"].(map[string]any)["workflow"].(map[string]any)
+			assert.EqualValues(t, 3, resultWorkflow["resultImageCount"])
+			assert.EqualValues(t, 456, resultWorkflow["updatedAt"])
+			assert.Equal(t, "n-group", nodeByID("n-child")["data"].(map[string]any)["parentId"])
+
+			for _, secret := range []string{
+				secretSessionID, "secret-message-key", "pgf_secret_attachment", "pga_secret_artifact",
+				"task_secret_identifier", "secret-artifact-key", "gpt-secret-model", "4096x4096",
+				"ultra-secret", "secret-group", "secret input text", "secret upstream failure",
+				"provider.example", firstToken, storedShare.TokenHash, canvasID,
+			} {
+				assert.NotContains(t, read.Body.String(), secret)
+			}
+			for _, forbiddenKey := range []string{
+				`"ref"`, `"sessionId"`, `"messageKey"`, `"attachmentId"`, `"artifactId"`,
+				`"taskId"`, `"taskArtifactKey"`, `"inputText"`, `"inputImageCount"`, `"error"`,
+				`"model"`, `"size"`, `"quality"`, `"group"`, `"sourceNodeId"`, `"content_url"`,
+				`"token"`, `"user_id"`,
+			} {
+				assert.NotContains(t, read.Body.String(), forbiddenKey)
+			}
+
+			// Rotation, expiry and revocation use the identical non-enumerable
+			// response as an unknown token.
+			secondToken, _, _ := createShare(0)
+			assert.NotEqual(t, firstToken, secondToken)
+			rotated := readShared(firstToken)
+			assert.Equal(t, http.StatusNotFound, rotated.Code)
+			assert.Equal(t, notFoundBody, rotated.Body.String())
+			require.Equal(t, http.StatusOK, readShared(secondToken).Code)
+			for _, invalid := range []int{-1, 366} {
+				response := playgroundRequest(t, 7, http.MethodPost, sharePath, map[string]any{"expires_in_days": invalid}, controller.CreatePlaygroundCanvasShare)
+				assert.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+			}
+			expiredToken, _, _ := createShare(1)
+			expiredHash := sha256.Sum256([]byte(expiredToken))
+			require.NoError(t, db.Model(&model.PlaygroundSessionShare{}).
+				Where("token_hash = ?", hex.EncodeToString(expiredHash[:])).
+				Update("expires_at", common.GetTimestamp()-1).Error)
+			expired := readShared(expiredToken)
+			assert.Equal(t, http.StatusNotFound, expired.Code)
+			assert.Equal(t, notFoundBody, expired.Body.String())
+			for range 2 {
+				response := playgroundRequest(t, 7, http.MethodDelete, sharePath, nil, controller.DeletePlaygroundCanvasShare)
+				require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+				assert.Contains(t, response.Body.String(), `"revoked":true`)
+			}
+			revoked := readShared(secondToken)
+			assert.Equal(t, http.StatusNotFound, revoked.Code)
+			assert.Equal(t, notFoundBody, revoked.Body.String())
+
+			// Trash revokes the current link, restore does not resurrect it,
+			// and purge removes the remaining share rows.
+			trashToken, _, _ := createShare(30)
+			require.Equal(t, http.StatusOK, readShared(trashToken).Code)
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodDelete, canvasPath, nil, controller.DeletePlaygroundCanvasProject).Code)
+			trashedRead := readShared(trashToken)
+			assert.Equal(t, http.StatusNotFound, trashedRead.Code)
+			assert.Equal(t, notFoundBody, trashedRead.Body.String())
+			trashedCreate := playgroundRequest(t, 7, http.MethodPost, sharePath, nil, controller.CreatePlaygroundCanvasShare)
+			assert.Equal(t, http.StatusNotFound, trashedCreate.Code)
+			trashedRevoke := playgroundRequest(t, 7, http.MethodDelete, sharePath, nil, controller.DeletePlaygroundCanvasShare)
+			assert.Equal(t, http.StatusOK, trashedRevoke.Code, trashedRevoke.Body.String())
+			_, err := model.RestorePlaygroundCanvasProject(7, canvasID)
+			require.NoError(t, err)
+			assert.Equal(t, http.StatusNotFound, readShared(trashToken).Code)
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodDelete, canvasPath, nil, controller.DeletePlaygroundCanvasProject).Code)
+			require.NoError(t, model.PurgePlaygroundCanvasProject(7, canvasID))
+			require.NoError(t, db.Model(&model.PlaygroundSessionShare{}).Where("canvas_id = ?", canvasID).Count(&shareCount).Error)
+			assert.Zero(t, shareCount)
 		})
 	}
 }

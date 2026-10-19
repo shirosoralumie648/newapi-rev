@@ -34,6 +34,7 @@ import { cn } from '@/lib/utils'
 import { getSharedPlaygroundConversation } from '../../share-api'
 import type {
   MessageToolCallStatus,
+  PlaygroundSharedConversation as PlaygroundSharedConversationData,
   PlaygroundSharedMessage,
 } from '../../types'
 
@@ -43,10 +44,8 @@ interface PlaygroundSharedConversationProps {
 }
 
 /**
- * Anonymous read-only view of one shared conversation. The server already
- * stripped private fields; this component renders text, tool-call summaries and
- * attachment placeholders as plain React text. It never renders markdown HTML
- * and never requests attachment bytes.
+ * Anonymous read-only page of one shared conversation. The server already
+ * stripped private fields; the query only accepts the sanitized payload.
  */
 export function PlaygroundSharedConversation(
   props: PlaygroundSharedConversationProps
@@ -97,7 +96,25 @@ export function PlaygroundSharedConversation(
     )
   }
 
-  const data = conversation.data
+  return <PlaygroundSharedConversationView conversation={conversation.data} />
+}
+
+interface PlaygroundSharedConversationViewProps {
+  /** Sanitized conversation payload returned by the public endpoint. */
+  conversation: PlaygroundSharedConversationData
+}
+
+/**
+ * Anonymous read-only view of one shared conversation. The server already
+ * stripped private fields; this component renders text, tool-call summaries and
+ * attachment placeholders as plain React text. It never renders markdown HTML
+ * and never requests attachment bytes.
+ */
+export function PlaygroundSharedConversationView(
+  props: PlaygroundSharedConversationViewProps
+) {
+  const { t } = useTranslation()
+  const data = props.conversation
   return (
     <>
       {/* A share link is unlisted: keep it out of search indexes and prevent

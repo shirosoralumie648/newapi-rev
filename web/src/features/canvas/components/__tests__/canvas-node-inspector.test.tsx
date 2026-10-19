@@ -356,6 +356,173 @@ test('configures the generation parameters and group of a task step', async () =
   expect(screen.queryByRole('combobox', { name: 'Quality' })).toBeNull()
 })
 
+test('commits an explicit seed and reuses the last seed', async () => {
+  const user = userEvent.setup()
+  const onUpdateData = vi.fn()
+  render(
+    <CanvasNodeInspectorHarness
+      models={[{ label: 'gpt-image-1', value: 'gpt-image-1' }]}
+      node={makeNode({
+        kind: 'task',
+        workflow: {
+          model: 'gpt-image-1',
+          generation: 'image',
+          lastSeed: 1234,
+        },
+      })}
+      onDelete={vi.fn()}
+      onRetry={vi.fn()}
+      onUpdateData={onUpdateData}
+      runPhase='idle'
+    />
+  )
+
+  const seed = screen.getByRole('textbox', { name: 'Seed' })
+  expect(seed).toHaveAttribute('placeholder', 'Random')
+  await user.type(seed, '42{Enter}')
+  expect(onUpdateData).toHaveBeenLastCalledWith('n1', expect.any(Function), {
+    mergeKey: 'workflow:n1',
+  })
+  const patch = onUpdateData.mock.calls.at(-1)?.[1] as (
+    data: CanvasNodeData
+  ) => Partial<CanvasNodeData>
+  expect(
+    patch({
+      kind: 'task',
+      workflow: {
+        model: 'gpt-image-1',
+        generation: 'image',
+        lastSeed: 1234,
+      },
+    })
+  ).toEqual({
+    workflow: {
+      model: 'gpt-image-1',
+      generation: 'image',
+      lastSeed: 1234,
+      seed: 42,
+    },
+  })
+
+  await user.click(screen.getByRole('button', { name: 'Use last result' }))
+  expect(screen.getByRole('textbox', { name: 'Seed' })).toHaveValue('1234')
+})
+
+test('applies a bounded custom size and rejects one outside the range', async () => {
+  const user = userEvent.setup()
+  const onUpdateData = vi.fn()
+  render(
+    <CanvasNodeInspectorHarness
+      models={[{ label: 'gpt-image-1', value: 'gpt-image-1' }]}
+      node={makeNode({
+        kind: 'task',
+        workflow: { model: 'gpt-image-1', generation: 'image' },
+      })}
+      onDelete={vi.fn()}
+      onRetry={vi.fn()}
+      onUpdateData={onUpdateData}
+      runPhase='idle'
+    />
+  )
+
+  await user.selectOptions(
+    screen.getByRole('combobox', { name: 'Size' }),
+    'custom'
+  )
+  const customSize = screen.getByRole('textbox', {
+    name: 'Size (WIDTHxHEIGHT)',
+  })
+  await user.type(customSize, '640x480')
+  await user.click(screen.getByRole('button', { name: 'Apply' }))
+
+  expect(onUpdateData).toHaveBeenLastCalledWith('n1', expect.any(Function), {
+    mergeKey: 'workflow:n1',
+  })
+  const patch = onUpdateData.mock.calls.at(-1)?.[1] as (
+    data: CanvasNodeData
+  ) => Partial<CanvasNodeData>
+  expect(
+    patch({
+      kind: 'task',
+      workflow: { model: 'gpt-image-1', generation: 'image' },
+    })
+  ).toEqual({
+    workflow: {
+      model: 'gpt-image-1',
+      generation: 'image',
+      size: '640x480',
+    },
+  })
+
+  await user.clear(customSize)
+  await user.type(customSize, '9000x9000')
+  await user.click(screen.getByRole('button', { name: 'Apply' }))
+
+  expect(
+    screen.getByText(
+      'The size must use WIDTHxHEIGHT with each side between 64 and 8192 pixels.'
+    )
+  ).toBeInTheDocument()
+  expect(onUpdateData).toHaveBeenCalledTimes(1)
+})
+
+test('shows why channel metadata disables an unavailable media type', () => {
+  render(
+    <CanvasNodeInspector
+      modelCapabilities={{
+        'gpt-image-1': { endpointTypes: ['openai-video'], usageFields: [] },
+      }}
+      models={[{ label: 'gpt-image-1', value: 'gpt-image-1' }]}
+      node={makeNode({
+        kind: 'task',
+        workflow: { model: 'gpt-image-1', generation: 'image' },
+      })}
+      onDelete={vi.fn()}
+      onRetry={vi.fn()}
+      onUpdateData={vi.fn()}
+      runPhase='idle'
+    />
+  )
+
+  expect(
+    screen.getByText(
+      "This model's channel metadata does not list image generation."
+    )
+  ).toBeInTheDocument()
+  expect(screen.getByRole('combobox', { name: 'Quality' })).toBeDisabled()
+  expect(screen.getByRole('textbox', { name: 'Seed' })).toBeDisabled()
+})
+
+test('selects a preferred result from its batch', async () => {
+  const user = userEvent.setup()
+  const onPreferResult = vi.fn()
+  render(
+    <CanvasNodeInspector
+      canPreferResult
+      node={makeNode({
+        kind: 'task-result',
+        workflow: {
+          status: 'succeeded',
+          model: 'gpt-image-1',
+          generation: 'image',
+          sourceNodeId: 't1',
+          preferred: false,
+        },
+      })}
+      onDelete={vi.fn()}
+      onPreferResult={onPreferResult}
+      onRetry={vi.fn()}
+      onUpdateData={vi.fn()}
+      runPhase='idle'
+    />
+  )
+
+  await user.click(
+    screen.getByRole('button', { name: 'Set as preferred result' })
+  )
+  expect(onPreferResult).toHaveBeenCalledWith('n1')
+})
+
 test('shows the generation record of a result node and retries it', async () => {
   const user = userEvent.setup()
   const onRetry = vi.fn()
@@ -470,4 +637,71 @@ test('hides the image tools for a node that carries no image', () => {
   )
 
   expect(screen.queryByText('Image tools')).toBeNull()
+})
+
+test('sets and clears the node color under one history merge key', async () => {
+  const user = userEvent.setup()
+  const onUpdateData = vi.fn()
+  render(
+    <CanvasNodeInspector
+      node={makeNode({ kind: 'text', text: 'note', color: 'blue' })}
+      onDelete={vi.fn()}
+      onUpdateData={onUpdateData}
+    />
+  )
+
+  expect(screen.getByRole('button', { name: 'Blue' })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  )
+
+  await user.click(screen.getByRole('button', { name: 'Red' }))
+  expect(onUpdateData).toHaveBeenLastCalledWith(
+    'n1',
+    { color: 'red' },
+    { mergeKey: 'color:n1' }
+  )
+
+  await user.click(screen.getByRole('button', { name: 'No color' }))
+  expect(onUpdateData).toHaveBeenLastCalledWith(
+    'n1',
+    { color: undefined },
+    { mergeKey: 'color:n1' }
+  )
+})
+
+test('adds and removes node tags through the bounded tag input', async () => {
+  const user = userEvent.setup()
+  const onUpdateData = vi.fn()
+  const { rerender } = render(
+    <CanvasNodeInspector
+      node={makeNode({ kind: 'text', text: 'note', tags: ['draft'] })}
+      onDelete={vi.fn()}
+      onUpdateData={onUpdateData}
+    />
+  )
+
+  await user.type(
+    screen.getByRole('textbox', { name: 'Add a tag...' }),
+    'scene{Enter}'
+  )
+  expect(onUpdateData).toHaveBeenLastCalledWith(
+    'n1',
+    { tags: ['draft', 'scene'] },
+    { mergeKey: 'tags:n1' }
+  )
+
+  rerender(
+    <CanvasNodeInspector
+      node={makeNode({ kind: 'text', text: 'note', tags: ['draft', 'scene'] })}
+      onDelete={vi.fn()}
+      onUpdateData={onUpdateData}
+    />
+  )
+  await user.click(screen.getAllByRole('button', { name: 'Remove tag' })[0])
+  expect(onUpdateData).toHaveBeenLastCalledWith(
+    'n1',
+    { tags: ['scene'] },
+    { mergeKey: 'tags:n1' }
+  )
 })

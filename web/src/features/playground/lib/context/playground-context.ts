@@ -50,6 +50,7 @@ import {
 } from '../message/message-usage-utils'
 import {
   formatMessageForAPI,
+  formatMessageKnowledgeContext,
   formatMessageSearchContext,
   getCurrentVersion,
   isValidMessage,
@@ -100,7 +101,15 @@ export function formatMessageForRequest(
   const searchContext = message.search
     ? formatMessageSearchContext(message.search)
     : ''
-  const formatted = formatMessageForAPI(message, documentContext, searchContext)
+  const knowledgeContext = message.knowledge
+    ? formatMessageKnowledgeContext(message.knowledge)
+    : ''
+  const formatted = formatMessageForAPI(
+    message,
+    documentContext,
+    searchContext,
+    knowledgeContext
+  )
   if (message.from !== MESSAGE_ROLES.ASSISTANT) {
     return [formatted]
   }
@@ -172,6 +181,11 @@ export function estimateMessageTokens(message: Message): number {
     countMessageImages(message) * PLAYGROUND_CONTEXT_IMAGE_TOKEN_ESTIMATE
   if (message.search) {
     tokens += estimateTextTokens(formatMessageSearchContext(message.search))
+  }
+  if (message.knowledge) {
+    tokens += estimateTextTokens(
+      formatMessageKnowledgeContext(message.knowledge)
+    )
   }
   for (const call of version.toolCalls ?? []) {
     tokens += estimateTextTokens(call.arguments)

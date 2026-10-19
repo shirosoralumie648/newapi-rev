@@ -17,14 +17,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { getUserGroups, getUserModels } from '@/features/playground/api'
 import { DEFAULT_GROUP } from '@/features/playground/constants'
 import { getGroupFallback } from '@/features/playground/lib'
 import type { GroupOption, ModelOption } from '@/features/playground/types'
+import { usePricingData } from '@/features/pricing/hooks/use-pricing-data'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { useAuthStore } from '@/stores/auth-store'
+
+import type { CanvasWorkflowModelCapability } from '../lib/canvas-workflow'
 
 /**
  * Group and model options of a canvas workflow run. The queries reuse the
@@ -46,6 +49,27 @@ export function useCanvasWorkflowOptions() {
     enabled: group !== '',
   })
 
+  // `/api/pricing` is the public catalog of model endpoints and task usage
+  // schemas. It can be disabled for a deployment, so an empty map means
+  // "capability unknown" and the panel leaves every control enabled.
+  const pricing = usePricingData(userId !== null)
+  const modelCapabilities = useMemo(() => {
+    const capabilities: Record<string, CanvasWorkflowModelCapability> = {}
+    for (const model of pricing.models) {
+      const usageFields = new Set(Object.keys(model.billing_usage_schema ?? {}))
+      for (const variant of model.billing_plugin_variants ?? []) {
+        for (const field of Object.keys(variant.billing_usage_schema ?? {})) {
+          usageFields.add(field)
+        }
+      }
+      capabilities[model.model_name] = {
+        endpointTypes: model.supported_endpoint_types ?? [],
+        usageFields: [...usageFields],
+      }
+    }
+    return capabilities
+  }, [pricing.models])
+
   useEffect(() => {
     const groups = groupsQuery.data
     if (!groups) return
@@ -58,5 +82,6 @@ export function useCanvasWorkflowOptions() {
     setGroup,
     groups: (groupsQuery.data ?? []) as GroupOption[],
     models: (modelsQuery.data ?? []) as ModelOption[],
+    modelCapabilities,
   }
 }

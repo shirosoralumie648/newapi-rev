@@ -44,7 +44,7 @@ import {
   isAssistantMessageFinal,
   isAssistantMessagePending,
 } from '../lib'
-import type { ToolCallDelta } from '../lib'
+import type { PlaygroundCapturedRequest, ToolCallDelta } from '../lib'
 import type {
   Message,
   MessageUsage,
@@ -74,6 +74,12 @@ interface UseChatHandlerOptions {
   prepareContextSummary?: (
     messages: Message[]
   ) => Promise<PlaygroundContextSummary | null>
+  /**
+   * Retrieves knowledge-base context for the newest user turn and returns the
+   * messages with the snapshot attached. A failure is expected to resolve with
+   * the original messages so a turn still sends without knowledge context.
+   */
+  prepareKnowledge?: (messages: Message[]) => Promise<Message[]>
   onMessageUpdate: (
     updater: (prev: Message[]) => Message[],
     sessionId?: string | null
@@ -123,6 +129,7 @@ export function useChatHandler({
   memoryBlock,
   contextSettings,
   prepareContextSummary,
+  prepareKnowledge,
   onMessageUpdate,
   onResponseComplete,
   sessionId,
@@ -130,6 +137,10 @@ export function useChatHandler({
   const { t } = useTranslation()
   const { sendStreamRequest, stopStream, isStreaming } = useStreamRequest()
   const [isRequesting, setIsRequesting] = useState(false)
+  // Final payload of the most recent send, kept in memory only for the request
+  // viewer. Nothing is persisted and a reload clears it.
+  const [capturedRequest, setCapturedRequest] =
+    useState<PlaygroundCapturedRequest | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   const requestGenerationRef = useRef(0)
   const pendingStreamChunksRef = useRef<PendingStreamChunks>({
@@ -485,6 +496,7 @@ export function useChatHandler({
         memoryBlock,
         quote
       )
+      setCapturedRequest({ payload, capturedAt: Date.now() })
       void sendStreamRequest(payload, {
         onUpdate: (type, chunk) => handleStreamUpdate(generation, type, chunk),
         onToolCalls: (deltas) => handleToolCallDeltas(generation, deltas),
@@ -540,6 +552,7 @@ export function useChatHandler({
         memoryBlock,
         quote
       )
+      setCapturedRequest({ payload, capturedAt: Date.now() })
       const generation = requestGenerationRef.current + 1
       const abortController = new AbortController()
 
@@ -668,24 +681,38 @@ export function useChatHandler({
         ensurePlaygroundMessageAttachments(messages),
         ensurePlaygroundDocumentTexts(messages),
       ]).then(async () => {
+        let prepared = messages
+        if (prepareKnowledge) {
+          try {
+            prepared = await prepareKnowledge(messages)
+          } catch {
+            prepared = messages
+          }
+          if (prepared !== messages) {
+            onMessageUpdate(() => prepared, sessionId)
+          }
+        }
         let contextSummary: PlaygroundContextSummary | null = null
         try {
-          contextSummary = (await prepareContextSummary?.(messages)) ?? null
+          contextSummary = (await prepareContextSummary?.(prepared)) ?? null
         } catch {
           contextSummary = null
         }
         if (config.stream) {
-          sendStreamingChat(messages, contextSummary, quote)
+          sendStreamingChat(prepared, contextSummary, quote)
         } else {
-          void sendNonStreamingChat(messages, contextSummary, undefined, quote)
+          void sendNonStreamingChat(prepared, contextSummary, undefined, quote)
         }
       })
     },
     [
       config.stream,
+      onMessageUpdate,
       prepareContextSummary,
+      prepareKnowledge,
       sendStreamingChat,
       sendNonStreamingChat,
+      sessionId,
     ]
   )
 

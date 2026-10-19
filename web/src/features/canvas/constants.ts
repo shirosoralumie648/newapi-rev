@@ -16,8 +16,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import {
+  PLAYGROUND_GENERATION_SEED_MAX,
+  PLAYGROUND_GENERATION_SEED_MIN,
+  PLAYGROUND_GENERATION_SIZE_MAX,
+  PLAYGROUND_GENERATION_SIZE_MIN,
+} from '@/features/playground/constants'
+
 import type {
   CanvasAssistantMode,
+  CanvasNodeColor,
   CanvasNodeKind,
   CanvasWorkflowGenerationKind,
 } from './types'
@@ -83,6 +91,64 @@ export const CANVAS_NODE_KINDS = [
   'audio',
   'group',
 ] as const
+
+// Stable organization palette. A node stores only the color key; these class
+// maps keep the rendered swatch theme-aware and are shared by the node header,
+// the group outline and the inspector swatches.
+export const CANVAS_NODE_COLORS = [
+  'red',
+  'orange',
+  'amber',
+  'green',
+  'teal',
+  'blue',
+  'violet',
+  'pink',
+] as const
+
+export const CANVAS_NODE_COLOR_LABELS: Record<CanvasNodeColor, string> = {
+  red: 'Red',
+  orange: 'Orange',
+  amber: 'Amber',
+  green: 'Green',
+  teal: 'Teal',
+  blue: 'Blue',
+  violet: 'Violet',
+  pink: 'Pink',
+}
+
+export const CANVAS_NODE_COLOR_DOT_CLASSES: Record<CanvasNodeColor, string> = {
+  red: 'bg-red-500',
+  orange: 'bg-orange-500',
+  amber: 'bg-amber-500',
+  green: 'bg-green-500',
+  teal: 'bg-teal-500',
+  blue: 'bg-blue-500',
+  violet: 'bg-violet-500',
+  pink: 'bg-pink-500',
+}
+
+export const CANVAS_NODE_COLOR_BORDER_CLASSES: Record<CanvasNodeColor, string> =
+  {
+    red: 'border-red-500/70',
+    orange: 'border-orange-500/70',
+    amber: 'border-amber-500/70',
+    green: 'border-green-500/70',
+    teal: 'border-teal-500/70',
+    blue: 'border-blue-500/70',
+    violet: 'border-violet-500/70',
+    pink: 'border-pink-500/70',
+  }
+
+// Node tags use the same bounds as conversation tags: a short, deduplicated
+// list is a navigation aid, not a second content field. The import path drops
+// anything outside these bounds instead of failing the whole board.
+export const CANVAS_NODE_TAG_MAX_COUNT = 10
+export const CANVAS_NODE_TAG_MAX_LENGTH = 24
+
+// The in-canvas search panel lists at most this many matches; the query and
+// kind filter run in the client over the current board only.
+export const CANVAS_NODE_SEARCH_MAX_RESULTS = 50
 
 // Translation keys for the node kinds. The values double as English source
 // text and as i18n keys, so the node header always follows the interface
@@ -182,6 +248,22 @@ export const CANVAS_WORKFLOW_VIDEO_SIZE_RATIOS: Record<string, string> = {
   '1024x1024': '1:1',
 }
 
+// Seed zero is reserved by several providers for "random"; the canvas always
+// sends an explicit positive seed so "inherit last result" has a value to
+// reuse. A seed is a request parameter only and never a billing multiplier.
+export const CANVAS_WORKFLOW_SEED_MIN = PLAYGROUND_GENERATION_SEED_MIN
+export const CANVAS_WORKFLOW_SEED_MAX = PLAYGROUND_GENERATION_SEED_MAX
+
+// Custom sizes are WIDTHxHEIGHT and mirror the server-side bound. A selected
+// preset is sent unchanged; only explicit dimension strings are bounded.
+export const CANVAS_WORKFLOW_SIZE_MIN = PLAYGROUND_GENERATION_SIZE_MIN
+export const CANVAS_WORKFLOW_SIZE_MAX = PLAYGROUND_GENERATION_SIZE_MAX
+export const CANVAS_WORKFLOW_CUSTOM_SIZE = 'custom'
+
+// Batch artifacts are laid out vertically so one settled task with several
+// images reads as a visible variant stack.
+export const CANVAS_WORKFLOW_RESULT_NODE_OFFSET_Y = 220
+
 // Reference images read from connected upstream nodes. The bytes travel inside
 // the request body, so the count and each image's size stay bounded; the relay
 // reads and forwards the body under its own request-size limit.
@@ -259,6 +341,24 @@ export const CANVAS_WORKFLOW_MESSAGES = {
   IMAGE_UNAVAILABLE: 'A connected reference image could not be read.',
   IMAGE_TOO_LARGE:
     'A connected reference image is larger than the 8 MiB limit.',
+  SELECTION_EMPTY: 'Select at least one node to run.',
+  SELECTION_NO_STEPS: 'The selection contains no workflow step to run.',
+  IMAGE_INPUT_LIMIT: 'Too many reference images are connected to this step.',
+  SIZE_INVALID:
+    'The size must use WIDTHxHEIGHT with each side between 64 and 8192 pixels.',
+  SEED_INVALID: 'The seed must be an integer between 1 and 2147483647.',
+} as const
+
+// Readable reasons shown when the selected model's channel metadata does not
+// advertise the chosen media endpoint. The fields stay visible but disabled so
+// the capability gap is explicit instead of silently changing a request.
+export const CANVAS_WORKFLOW_CAPABILITY_MESSAGES = {
+  IMAGE_UNSUPPORTED:
+    "This model's channel metadata does not list image generation.",
+  VIDEO_UNSUPPORTED:
+    "This model's channel metadata does not list video generation.",
+  NO_MEDIA:
+    "This model's channel metadata lists neither image nor video generation.",
 } as const
 
 // Run budget feedback keys the estimate dialog reports. The strings double as
