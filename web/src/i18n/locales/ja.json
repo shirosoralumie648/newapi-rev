@@ -9007,6 +9007,23 @@
     "Unable to price the comparison run.": "比較実行の価格を見積もれません。",
     "You can run up to {{count}} prompts at once": "一度に最大 {{count}} 件のプロンプトを実行できます",
     "{{count}} of {{limit}} prompts": "{{limit}} 件中 {{count}} 件のプロンプト",
-    "{{models}} models x {{prompts}} prompts": "{{models}} モデル × {{prompts}} プロンプト"
+    "{{models}} models x {{prompts}} prompts": "{{models}} モデル × {{prompts}} プロンプト",
+    "Frame": "フレーム",
+    "Sticky note": "付箋",
+    "Align left": "左揃え",
+    "Align center": "中央揃え",
+    "Align right": "右揃え",
+    "Align top": "上揃え",
+    "Align middle": "上下中央揃え",
+    "Align bottom": "下揃え",
+    "Auto layout horizontally": "横方向に自動レイアウト",
+    "Auto layout vertically": "縦方向に自動レイアウト",
+    "Collapse selection": "選択範囲を折りたたむ",
+    "Expand selection": "選択範囲を展開",
+    "Collapse group": "グループを折りたたむ",
+    "Expand group": "グループを展開",
+    "Collapsed": "折りたたみ済み",
+    "Preview frame": "フレームをプレビュー",
+    "Export frame": "フレームをエクスポート"
   }
 }

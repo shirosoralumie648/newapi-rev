@@ -9007,6 +9007,23 @@
     "Unable to price the comparison run.": "無法為對比執行估價。",
     "You can run up to {{count}} prompts at once": "一次最多可執行 {{count}} 個提示詞",
     "{{count}} of {{limit}} prompts": "{{count}} / {{limit}} 個提示詞",
-    "{{models}} models x {{prompts}} prompts": "{{models}} 個模型 × {{prompts}} 個提示詞"
+    "{{models}} models x {{prompts}} prompts": "{{models}} 個模型 × {{prompts}} 個提示詞",
+    "Frame": "框架",
+    "Sticky note": "便籤",
+    "Align left": "靠左對齊",
+    "Align center": "置中對齊",
+    "Align right": "靠右對齊",
+    "Align top": "頂端對齊",
+    "Align middle": "垂直置中",
+    "Align bottom": "底端對齊",
+    "Auto layout horizontally": "水平自動排版",
+    "Auto layout vertically": "垂直自動排版",
+    "Collapse selection": "收合選取範圍",
+    "Expand selection": "展開選取範圍",
+    "Collapse group": "收合群組",
+    "Expand group": "展開群組",
+    "Collapsed": "已收合",
+    "Preview frame": "預覽框架",
+    "Export frame": "匯出框架"
   }
 }

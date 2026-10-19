@@ -29,6 +29,7 @@ import {
 } from '../constants'
 import type { CanvasFlowEdge, CanvasFlowNode } from '../types'
 import {
+  canvasApplyCollapsedVisibility,
   canvasNodeDataWithParent,
   orderCanvasNodesForFlow,
 } from './canvas-document'
@@ -171,12 +172,22 @@ export function canvasPasteClipboard(
   }
 }
 
-/** Selects every node; a later drag or press replaces the selection again. */
+/**
+ * Selects every visible node; a later drag or press replaces the selection
+ * again. Hidden children of a collapsed group stay out, so a command can never
+ * operate on a node the user cannot see.
+ */
 export function canvasSelectAll(nodes: CanvasFlowNode[]): CanvasFlowNode[] {
-  if (nodes.every((node) => node.selected === true)) return nodes
-  return nodes.map((node) =>
-    node.selected === true ? node : { ...node, selected: true }
+  if (nodes.every((node) => node.selected === (node.hidden !== true))) {
+    return nodes
+  }
+  const visibleIds = new Set(
+    nodes.filter((node) => node.hidden !== true).map((node) => node.id)
   )
+  return nodes.map((node) => {
+    const selected = visibleIds.has(node.id)
+    return node.selected === selected ? node : { ...node, selected }
+  })
 }
 
 /**
@@ -192,7 +203,14 @@ export function canvasGroupSelection(
 ): (CanvasGraph & { groupId: string }) | null {
   const selected = nodes.filter((node) => node.selected === true)
   if (selected.length === 0) return null
-  if (selected.some((node) => canvasNodeKind(node) === 'group')) return null
+  if (
+    selected.some((node) => {
+      const kind = canvasNodeKind(node)
+      return kind === 'group' || kind === 'frame'
+    })
+  ) {
+    return null
+  }
   if (nodes.length >= CANVAS_MAX_NODES) return null
   const selectedIds = new Set(selected.map((node) => node.id))
   const byId = new Map(nodes.map((node) => [node.id, node]))
@@ -252,6 +270,80 @@ export function canvasGroupSelection(
   }
   if (!inserted) grouped.push(group)
   return { nodes: grouped, edges, groupId }
+}
+
+/**
+ * Wraps the current selection into a collapsed group. The group box stays
+ * visible while its descendants and incident edges are hidden, so a dense
+ * subgraph can be folded without adding an execution or document concept.
+ */
+export function canvasCollapseSelection(
+  nodes: CanvasFlowNode[],
+  edges: CanvasFlowEdge[]
+): (CanvasGraph & { groupId: string }) | null {
+  const grouped = canvasGroupSelection(nodes, edges)
+  if (!grouped) return null
+  const collapsedNodes = grouped.nodes.map((node) =>
+    node.id === grouped.groupId
+      ? { ...node, data: { ...node.data, collapsed: true } }
+      : node
+  )
+  const visible = canvasApplyCollapsedVisibility(collapsedNodes, grouped.edges)
+  return { ...visible, groupId: grouped.groupId }
+}
+
+/**
+ * Flips the stored `collapsed` flag of one group and re-derives the visibility
+ * of its descendants and their edges. Returns null when the id is not a group.
+ */
+export function canvasToggleGroupCollapsed(
+  nodes: CanvasFlowNode[],
+  edges: CanvasFlowEdge[],
+  groupId: string
+): CanvasGraph | null {
+  const group = nodes.find(
+    (node) => node.id === groupId && canvasNodeKind(node) === 'group'
+  )
+  if (!group) return null
+  const collapsed = group.data.collapsed !== true
+  const nextNodes = nodes.map((node) => {
+    if (node.id !== groupId) return node
+    const data = { ...node.data }
+    if (collapsed) {
+      data.collapsed = true
+    } else {
+      delete data.collapsed
+    }
+    return { ...node, data }
+  })
+  return canvasApplyCollapsedVisibility(nextNodes, edges)
+}
+
+/**
+ * Expands every selected collapsed group. A collapsed group's hidden children
+ * are not selectable, so this is the toolbar counterpart of the group header
+ * toggle and never needs to discover a hidden group.
+ */
+export function canvasExpandSelection(
+  nodes: CanvasFlowNode[],
+  edges: CanvasFlowEdge[]
+): CanvasGraph | null {
+  let changed = false
+  const nextNodes = nodes.map((node) => {
+    if (
+      node.selected !== true ||
+      canvasNodeKind(node) !== 'group' ||
+      node.data.collapsed !== true
+    ) {
+      return node
+    }
+    changed = true
+    const data = { ...node.data }
+    delete data.collapsed
+    return { ...node, data }
+  })
+  if (!changed) return null
+  return canvasApplyCollapsedVisibility(nextNodes, edges)
 }
 
 /**

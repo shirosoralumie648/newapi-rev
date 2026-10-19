@@ -9007,6 +9007,23 @@
     "Unable to price the comparison run.": "Unable to price the comparison run.",
     "You can run up to {{count}} prompts at once": "You can run up to {{count}} prompts at once",
     "{{count}} of {{limit}} prompts": "{{count}} of {{limit}} prompts",
-    "{{models}} models x {{prompts}} prompts": "{{models}} models x {{prompts}} prompts"
+    "{{models}} models x {{prompts}} prompts": "{{models}} models x {{prompts}} prompts",
+    "Frame": "Frame",
+    "Sticky note": "Sticky note",
+    "Align left": "Align left",
+    "Align center": "Align center",
+    "Align right": "Align right",
+    "Align top": "Align top",
+    "Align middle": "Align middle",
+    "Align bottom": "Align bottom",
+    "Auto layout horizontally": "Auto layout horizontally",
+    "Auto layout vertically": "Auto layout vertically",
+    "Collapse selection": "Collapse selection",
+    "Expand selection": "Expand selection",
+    "Collapse group": "Collapse group",
+    "Expand group": "Expand group",
+    "Collapsed": "Collapsed",
+    "Preview frame": "Preview frame",
+    "Export frame": "Export frame"
   }
 }

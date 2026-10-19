@@ -9007,6 +9007,23 @@
     "Unable to price the comparison run.": "Не удалось оценить стоимость сравнительного запуска.",
     "You can run up to {{count}} prompts at once": "За один раз можно выполнить до {{count}} запросов",
     "{{count}} of {{limit}} prompts": "{{count}} из {{limit}} запросов",
-    "{{models}} models x {{prompts}} prompts": "{{models}} моделей × {{prompts}} запросов"
+    "{{models}} models x {{prompts}} prompts": "{{models}} моделей × {{prompts}} запросов",
+    "Frame": "Фрейм",
+    "Sticky note": "Стикер",
+    "Align left": "Выровнять по левому краю",
+    "Align center": "Выровнять по центру",
+    "Align right": "Выровнять по правому краю",
+    "Align top": "Выровнять по верху",
+    "Align middle": "Выровнять по середине",
+    "Align bottom": "Выровнять по низу",
+    "Auto layout horizontally": "Горизонтальная авторазметка",
+    "Auto layout vertically": "Вертикальная авторазметка",
+    "Collapse selection": "Свернуть выделение",
+    "Expand selection": "Развернуть выделение",
+    "Collapse group": "Свернуть группу",
+    "Expand group": "Развернуть группу",
+    "Collapsed": "Свернуто",
+    "Preview frame": "Просмотр фрейма",
+    "Export frame": "Экспортировать фрейм"
   }
 }

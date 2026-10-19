@@ -9007,6 +9007,23 @@
     "Unable to price the comparison run.": "无法为对比运行估价。",
     "You can run up to {{count}} prompts at once": "一次最多可运行 {{count}} 个提示词",
     "{{count}} of {{limit}} prompts": "{{count}} / {{limit}} 个提示词",
-    "{{models}} models x {{prompts}} prompts": "{{models}} 个模型 × {{prompts}} 个提示词"
+    "{{models}} models x {{prompts}} prompts": "{{models}} 个模型 × {{prompts}} 个提示词",
+    "Frame": "框架",
+    "Sticky note": "便签",
+    "Align left": "左对齐",
+    "Align center": "居中对齐",
+    "Align right": "右对齐",
+    "Align top": "顶部对齐",
+    "Align middle": "垂直居中",
+    "Align bottom": "底部对齐",
+    "Auto layout horizontally": "水平自动布局",
+    "Auto layout vertically": "垂直自动布局",
+    "Collapse selection": "折叠所选内容",
+    "Expand selection": "展开所选内容",
+    "Collapse group": "折叠分组",
+    "Expand group": "展开分组",
+    "Collapsed": "已折叠",
+    "Preview frame": "预览框架",
+    "Export frame": "导出框架"
   }
 }

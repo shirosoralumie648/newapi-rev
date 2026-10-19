@@ -60,6 +60,7 @@ import { useCanvasTemplateActions } from '../hooks/use-canvas-template-actions'
 import { useCanvasWorkflowOptions } from '../hooks/use-canvas-workflow-options'
 import { useCanvasWorkflowRunner } from '../hooks/use-canvas-workflow-runner'
 import type { CanvasWorkflowRunPlan } from '../hooks/use-canvas-workflow-runner'
+import { canvasSelectionExportIds } from '../lib/canvas-align'
 import {
   CANVAS_ERRORS,
   parseCanvasImport,
@@ -107,7 +108,13 @@ import { CanvasDropZone } from './canvas-drop-zone'
 import { CanvasFlowEdgeView } from './canvas-edge'
 import { CanvasImageToolsDialog } from './canvas-image-tools-dialog'
 import { CanvasInspectorViewToggle } from './canvas-inspector-view-toggle'
-import { CanvasFlowNodeView, CanvasGroupNodeView } from './canvas-node'
+import {
+  CanvasFlowNodeView,
+  CanvasFrameNodeView,
+  CanvasGroupNodeView,
+  CanvasNodeActionsContext,
+  CanvasStickyNodeView,
+} from './canvas-node'
 import { CanvasNodeInspector } from './canvas-node-inspector'
 import { CanvasNodeSearch } from './canvas-node-search'
 import { CanvasPngExportDialog } from './canvas-png-export-dialog'
@@ -133,6 +140,8 @@ const canvasNodeTypes: NodeTypes = {
   video: CanvasFlowNodeView,
   audio: CanvasFlowNodeView,
   group: CanvasGroupNodeView,
+  frame: CanvasFrameNodeView,
+  sticky: CanvasStickyNodeView,
 }
 
 // `toServerDocument` persists only server-known edge fields, so the custom edge
@@ -500,7 +509,7 @@ export function CanvasEditor(props: CanvasEditorProps) {
   }, [editor.edges, editor.nodes, props.project.title])
 
   const handleExportPng = useCallback(
-    async (scope: CanvasPngExportScope) => {
+    async (scope: CanvasPngExportScope, rootNodeIds?: string[]) => {
       setPngBusy(true)
       try {
         const kindLabels = Object.fromEntries(
@@ -519,6 +528,7 @@ export function CanvasEditor(props: CanvasEditorProps) {
               ? 'dark'
               : 'light',
             kindLabels,
+            rootNodeIds,
           }
         )
         setPngExport(result)
@@ -581,6 +591,25 @@ export function CanvasEditor(props: CanvasEditorProps) {
       }
     },
     [props.onBeforeExportArchive, props.project.id, t]
+  )
+
+  // A frame preview uses the regular selection pipeline with the frame as the
+  // root, so it works without changing the live selection. The archive export
+  // sends the same expanded ids to the server.
+  const handlePreviewFrame = useCallback(
+    (nodeId: string) => {
+      void handleExportPng('selection', [nodeId])
+    },
+    [handleExportPng]
+  )
+
+  const handleExportFrame = useCallback(
+    (nodeId: string) => {
+      void handleExportArchive([
+        ...canvasSelectionExportIds(editor.nodes, [nodeId]),
+      ])
+    },
+    [editor.nodes, handleExportArchive]
   )
 
   const handleImportFile = useCallback(
@@ -718,10 +747,12 @@ export function CanvasEditor(props: CanvasEditorProps) {
         models={workflowOptions.models}
         node={editor.selectedNode}
         onDelete={editor.deleteNode}
+        onExportFrame={handleExportFrame}
         onOpenImageTools={imageTools.open}
         onOpenArtifact={handleOpenArtifact}
         onOpenSource={props.onOpenSource}
         onPreferResult={editor.setWorkflowPreferredResult}
+        onPreviewFrame={handlePreviewFrame}
         onRetry={workflow.retry}
         onUpdateData={editor.updateNodeData}
         preferredResult={
@@ -738,6 +769,11 @@ export function CanvasEditor(props: CanvasEditorProps) {
       />
     )
   }
+
+  const nodeActions = useMemo(
+    () => ({ onToggleGroupCollapsed: editor.toggleGroupCollapsed }),
+    [editor.toggleGroupCollapsed]
+  )
 
   const inspector = (
     <div className='bg-muted/10 flex h-full min-h-0 w-full flex-col overflow-hidden border-l'>
@@ -771,94 +807,104 @@ export function CanvasEditor(props: CanvasEditorProps) {
                 void handleDropFiles(files, position)
               }
             >
-              <Canvas
-                defaultViewport={props.project.document.viewport}
-                deleteKeyCode={null}
-                edgeTypes={canvasEdgeTypes}
-                edges={editor.edges}
-                fitView={!props.project.document.viewport}
-                nodeTypes={canvasNodeTypes}
-                nodes={editor.nodes}
-                onConnect={editor.handleConnect}
-                onEdgesChange={editor.handleEdgesChange}
-                onMoveEnd={handleMoveEnd}
-                onNodeDrag={editor.handleNodeDrag}
-                onNodeDragStart={editor.handleNodeDragStart}
-                onNodeDragStop={editor.handleNodeDragStop}
-                onNodesChange={editor.handleNodesChange}
-                onReconnect={(edge, connection) =>
-                  editor.handleReconnect(edge as CanvasFlowEdge, connection)
-                }
-                showControls={false}
-              >
-                <CanvasAlignmentGuides guides={editor.alignmentGuides} />
-                <Panel position='top-left'>
-                  <CanvasToolbar
-                    canCopy={editor.selectedCount > 0}
-                    canDistribute={editor.canDistribute}
-                    canExportSelection={editor.selectedCount > 0}
-                    canGroup={editor.canGroup}
-                    canPaste={editor.hasClipboard}
-                    canRedo={editor.canRedo}
-                    canRunSelection={
-                      editor.selectedCount > 0 && workflow.phase !== 'running'
-                    }
-                    canSelectAll={editor.nodes.length > 0}
-                    canUngroup={editor.canUngroup}
-                    canUndo={editor.canUndo}
-                    disabled={props.disabled}
-                    exportingPng={pngBusy}
-                    group={workflowOptions.group}
-                    groups={workflowOptions.groups}
-                    inspectorView={inspectorView}
-                    onAddNode={handleAddNode}
-                    onCancelRun={() => void workflow.cancel()}
-                    onCopy={() => void editor.copySelection()}
-                    onDistributeHorizontal={() =>
-                      editor.distributeSelection('horizontal')
-                    }
-                    onDistributeVertical={() =>
-                      editor.distributeSelection('vertical')
-                    }
-                    onExport={handleExport}
-                    onExportArchive={() => void handleExportArchive()}
-                    onExportPng={() => void handleExportPng('canvas')}
-                    onExportSelectionArchive={() =>
-                      void handleExportArchive(
-                        editor.nodes
-                          .filter((node) => node.selected === true)
-                          .map((node) => node.id)
-                      )
-                    }
-                    onExportSelectionPng={() =>
-                      void handleExportPng('selection')
-                    }
-                    onGroupChange={workflowOptions.setGroup}
-                    onOpenTemplates={() => setTemplatesOpen(true)}
-                    onGroupSelection={() => void editor.groupSelection()}
-                    onImportArchiveFile={(file) => props.onImportArchive(file)}
-                    onImportFile={handleImportFile}
-                    onPaste={handlePaste}
-                    onRedo={editor.redo}
-                    onRunWorkflow={() => setRunPlan(workflow.estimate())}
-                    onRunSelection={() =>
-                      setRunPlan(workflow.estimateSelection())
-                    }
-                    onSearchNodes={() => setNodeSearchOpen(true)}
-                    onSelectAll={editor.selectAll}
-                    onToggleInspectorView={handleToggleInspectorView}
-                    onUndo={editor.undo}
-                    onUngroupSelection={() => void editor.ungroupSelection()}
-                    runPhase={workflow.phase}
-                  />
-                </Panel>
-                <Panel position='bottom-left'>
-                  <div className='bg-card rounded-md border shadow-sm'>
-                    <CanvasViewportControls />
-                  </div>
-                </Panel>
-                <MiniMap className='bg-card!' pannable zoomable />
-              </Canvas>
+              <CanvasNodeActionsContext.Provider value={nodeActions}>
+                <Canvas
+                  defaultViewport={props.project.document.viewport}
+                  deleteKeyCode={null}
+                  edgeTypes={canvasEdgeTypes}
+                  edges={editor.edges}
+                  fitView={!props.project.document.viewport}
+                  nodeTypes={canvasNodeTypes}
+                  nodes={editor.nodes}
+                  onConnect={editor.handleConnect}
+                  onEdgesChange={editor.handleEdgesChange}
+                  onMoveEnd={handleMoveEnd}
+                  onNodeDrag={editor.handleNodeDrag}
+                  onNodeDragStart={editor.handleNodeDragStart}
+                  onNodeDragStop={editor.handleNodeDragStop}
+                  onNodesChange={editor.handleNodesChange}
+                  onReconnect={(edge, connection) =>
+                    editor.handleReconnect(edge as CanvasFlowEdge, connection)
+                  }
+                  showControls={false}
+                >
+                  <CanvasAlignmentGuides guides={editor.alignmentGuides} />
+                  <Panel position='top-left'>
+                    <CanvasToolbar
+                      canAlign={editor.canAlign}
+                      canAutoLayout={editor.canAutoLayout}
+                      canCollapse={editor.canCollapse}
+                      canCopy={editor.selectedCount > 0}
+                      canDistribute={editor.canDistribute}
+                      canExpand={editor.canExpand}
+                      canExportSelection={editor.selectedCount > 0}
+                      canGroup={editor.canGroup}
+                      canPaste={editor.hasClipboard}
+                      canRedo={editor.canRedo}
+                      canRunSelection={
+                        editor.selectedCount > 0 && workflow.phase !== 'running'
+                      }
+                      canSelectAll={editor.nodes.length > 0}
+                      canUngroup={editor.canUngroup}
+                      canUndo={editor.canUndo}
+                      disabled={props.disabled}
+                      exportingPng={pngBusy}
+                      group={workflowOptions.group}
+                      groups={workflowOptions.groups}
+                      inspectorView={inspectorView}
+                      onAddNode={handleAddNode}
+                      onAlign={editor.alignSelection}
+                      onAutoLayout={editor.autoLayout}
+                      onCancelRun={() => void workflow.cancel()}
+                      onCollapseSelection={editor.collapseSelection}
+                      onCopy={() => void editor.copySelection()}
+                      onDistributeHorizontal={() =>
+                        editor.distributeSelection('horizontal')
+                      }
+                      onDistributeVertical={() =>
+                        editor.distributeSelection('vertical')
+                      }
+                      onExpandSelection={editor.expandSelection}
+                      onExport={handleExport}
+                      onExportArchive={() => void handleExportArchive()}
+                      onExportPng={() => void handleExportPng('canvas')}
+                      onExportSelectionArchive={() =>
+                        void handleExportArchive([
+                          ...canvasSelectionExportIds(editor.nodes),
+                        ])
+                      }
+                      onExportSelectionPng={() =>
+                        void handleExportPng('selection')
+                      }
+                      onGroupChange={workflowOptions.setGroup}
+                      onOpenTemplates={() => setTemplatesOpen(true)}
+                      onGroupSelection={() => void editor.groupSelection()}
+                      onImportArchiveFile={(file) =>
+                        props.onImportArchive(file)
+                      }
+                      onImportFile={handleImportFile}
+                      onPaste={handlePaste}
+                      onRedo={editor.redo}
+                      onRunWorkflow={() => setRunPlan(workflow.estimate())}
+                      onRunSelection={() =>
+                        setRunPlan(workflow.estimateSelection())
+                      }
+                      onSearchNodes={() => setNodeSearchOpen(true)}
+                      onSelectAll={editor.selectAll}
+                      onToggleInspectorView={handleToggleInspectorView}
+                      onUndo={editor.undo}
+                      onUngroupSelection={() => void editor.ungroupSelection()}
+                      runPhase={workflow.phase}
+                    />
+                  </Panel>
+                  <Panel position='bottom-left'>
+                    <div className='bg-card rounded-md border shadow-sm'>
+                      <CanvasViewportControls />
+                    </div>
+                  </Panel>
+                  <MiniMap className='bg-card!' pannable zoomable />
+                </Canvas>
+              </CanvasNodeActionsContext.Provider>
             </CanvasDropZone>
             <CanvasNodeSearch
               nodes={editor.nodes}

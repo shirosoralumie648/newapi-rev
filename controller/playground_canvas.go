@@ -41,9 +41,9 @@ const playgroundCanvasRequestMaxBytes = 2 << 20
 // workflow board chains a producer (prompt/message/attachment/artifact/image or
 // a text/note) into a step (`model` chat call, `task` generation submission)
 // and out to a result node (`task-result` for images, `video` and `audio` for
-// media artifacts). `group` is a purely visual container. None of these kinds
-// carries executable code; the data payload is display configuration plus ID
-// references only.
+// media artifacts). `group` and `frame` are purely visual containers, and
+// `sticky` is a text annotation. None of these kinds carries executable code;
+// the data payload is display configuration plus ID references only.
 var playgroundCanvasNodeTypes = map[string]bool{
 	"text":        true,
 	"note":        true,
@@ -58,6 +58,8 @@ var playgroundCanvasNodeTypes = map[string]bool{
 	"video":       true,
 	"audio":       true,
 	"group":       true,
+	"frame":       true,
+	"sticky":      true,
 }
 
 type playgroundCanvasViewport struct {

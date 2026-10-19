@@ -19,11 +19,22 @@ For commercial licensing, please contact support@quantumnous.com
 import {
   CANVAS_ALIGN_MIN_GAP,
   CANVAS_ALIGN_SNAP_THRESHOLD,
+  CANVAS_AUTO_LAYOUT_GAP_X,
+  CANVAS_AUTO_LAYOUT_GAP_Y,
+  CANVAS_FRAME_HEADER_HEIGHT,
+  CANVAS_FRAME_MIN_HEIGHT,
+  CANVAS_FRAME_MIN_WIDTH,
+  CANVAS_FRAME_PADDING,
   CANVAS_NODE_ESTIMATED_HEIGHT,
   CANVAS_NODE_ESTIMATED_WIDTH,
 } from '../constants'
 import type { CanvasFlowNode } from '../types'
-import { canvasAbsolutePosition, canvasSelectedTopLevel } from './canvas-edit'
+import {
+  canvasAbsolutePosition,
+  canvasDescendantIds,
+  canvasNodeKind,
+  canvasSelectedTopLevel,
+} from './canvas-edit'
 
 /** An axis-aligned rectangle in canvas coordinates. */
 export interface CanvasRect {
@@ -411,5 +422,332 @@ export function canvasDistributeSelection(
           : { ...node.position, y: absolute - parentPosition.y },
     }
   })
+  return changed ? nextNodes : null
+}
+
+export type CanvasAlignAxis =
+  | 'left'
+  | 'center'
+  | 'right'
+  | 'top'
+  | 'middle'
+  | 'bottom'
+
+export type CanvasAutoLayoutDirection = 'horizontal' | 'vertical'
+
+/**
+ * Aligns two or more selected top-level nodes inside their combined bounds.
+ * Groups and frames move as one unit; the cross axis is left untouched.
+ */
+export function canvasAlignSelection(
+  nodes: CanvasFlowNode[],
+  alignment: CanvasAlignAxis
+): CanvasFlowNode[] | null {
+  const selected = canvasSelectedTopLevel(nodes).filter(
+    (node) => node.hidden !== true
+  )
+  if (selected.length < 2) return null
+  const byId = new Map(nodes.map((node) => [node.id, node]))
+  const entries = selected.map((node) => ({
+    node,
+    rect: canvasNodeRect(node, byId),
+  }))
+  const bounds = canvasUnionRect(entries.map((entry) => entry.rect))
+  if (!bounds) return null
+  const desired = new Map<string, { x?: number; y?: number }>()
+  for (const entry of entries) {
+    const target: { x?: number; y?: number } = {}
+    if (alignment === 'left') target.x = bounds.x
+    else if (alignment === 'right') {
+      target.x = bounds.x + bounds.width - entry.rect.width
+    } else if (alignment === 'center') {
+      target.x = bounds.x + (bounds.width - entry.rect.width) / 2
+    } else if (alignment === 'top') target.y = bounds.y
+    else if (alignment === 'bottom') {
+      target.y = bounds.y + bounds.height - entry.rect.height
+    } else {
+      target.y = bounds.y + (bounds.height - entry.rect.height) / 2
+    }
+    desired.set(entry.node.id, target)
+  }
+  let changed = false
+  const nextNodes = nodes.map((node) => {
+    const target = desired.get(node.id)
+    if (!target) return node
+    const parent = node.parentId ? byId.get(node.parentId) : undefined
+    const parentPosition = parent
+      ? canvasAbsolutePosition(parent, byId)
+      : { x: 0, y: 0 }
+    const x =
+      target.x === undefined ? node.position.x : target.x - parentPosition.x
+    const y =
+      target.y === undefined ? node.position.y : target.y - parentPosition.y
+    if (Math.abs(node.position.x - x) < 0.01 && Math.abs(node.position.y - y) < 0.01) {
+      return node
+    }
+    changed = true
+    return { ...node, position: { x, y } }
+  })
+  return changed ? nextNodes : null
+}
+
+/**
+ * Nodes geometrically contained by the named frames. A frame is a visual
+ * region rather than a parent, so membership is derived from the live
+ * rectangles and never stored on a node.
+ */
+export function canvasFrameMemberIds(
+  nodes: CanvasFlowNode[],
+  frameIds: Iterable<string>
+): Set<string> {
+  const requested = new Set(frameIds)
+  const members = new Set<string>()
+  if (requested.size === 0) return members
+  const byId = new Map(nodes.map((node) => [node.id, node]))
+  const frames = nodes
+    .filter(
+      (node) =>
+        requested.has(node.id) &&
+        node.hidden !== true &&
+        canvasNodeKind(node) === 'frame'
+    )
+    .map((node) => canvasNodeRect(node, byId))
+  if (frames.length === 0) return members
+  for (const node of nodes) {
+    if (
+      node.hidden === true ||
+      requested.has(node.id) ||
+      canvasNodeKind(node) === 'frame'
+    ) {
+      continue
+    }
+    const rect = canvasNodeRect(node, byId)
+    const contained = frames.some(
+      (frame) =>
+        rect.x >= frame.x - 0.5 &&
+        rect.y >= frame.y - 0.5 &&
+        rect.x + rect.width <= frame.x + frame.width + 0.5 &&
+        rect.y + rect.height <= frame.y + frame.height + 0.5
+    )
+    if (contained) members.add(node.id)
+  }
+  return members
+}
+
+/**
+ * Expands a set of selected roots for export: descendants of a group travel
+ * with the group, and a selected frame carries every node geometrically inside
+ * it. A frame therefore never exports as an empty outline. This is the shared
+ * id contract for PNG preview and the server archive export.
+ */
+export function canvasSelectionExportIds(
+  nodes: CanvasFlowNode[],
+  roots?: Iterable<string>
+): Set<string> {
+  const byId = new Map(nodes.map((node) => [node.id, node]))
+  const rootIds = roots
+    ? [...roots].filter((id) => byId.get(id)?.hidden !== true)
+    : nodes
+        .filter((node) => node.selected === true && node.hidden !== true)
+        .map((node) => node.id)
+  if (rootIds.length === 0) return new Set()
+  let ids = canvasDescendantIds(nodes, rootIds)
+  const frameIds = nodes
+    .filter(
+      (node) =>
+        ids.has(node.id) &&
+        node.hidden !== true &&
+        canvasNodeKind(node) === 'frame'
+    )
+    .map((node) => node.id)
+  if (frameIds.length > 0) {
+    const members = canvasFrameMemberIds(nodes, frameIds)
+    for (const member of members) ids.add(member)
+    ids = canvasDescendantIds(nodes, ids)
+  }
+  return ids
+}
+
+interface AutoLayoutUnit {
+  node: CanvasFlowNode
+  rect: CanvasRect
+}
+
+/**
+ * Layered auto layout along the existing edges. The graph is a DAG by contract,
+ * but an imported board may contain a cycle: nodes in an unresolved cycle keep
+ * their existing order and share one layer instead of making layout fail.
+ * Groups are single units (their children keep relative coordinates), frames
+ * are excluded from the ranking and re-fitted around their members afterwards.
+ */
+export function canvasAutoLayout(
+  nodes: CanvasFlowNode[],
+  edges: { source: string; target: string }[],
+  direction: CanvasAutoLayoutDirection,
+  scopeIds?: Iterable<string>
+): CanvasFlowNode[] | null {
+  const scope = scopeIds ? new Set(scopeIds) : null
+  const eligible = nodes.filter(
+    (node) =>
+      node.hidden !== true &&
+      !node.parentId &&
+      canvasNodeKind(node) !== 'frame' &&
+      (!scope || scope.has(node.id))
+  )
+  if (eligible.length < 2) return null
+  const byId = new Map(nodes.map((node) => [node.id, node]))
+  const unitById = new Map<string, AutoLayoutUnit>()
+  for (const node of eligible) {
+    unitById.set(node.id, { node, rect: canvasNodeRect(node, byId) })
+  }
+  const outgoing = new Map<string, string[]>()
+  const indegree = new Map<string, number>()
+  for (const id of unitById.keys()) {
+    outgoing.set(id, [])
+    indegree.set(id, 0)
+  }
+  for (const edge of edges) {
+    if (!unitById.has(edge.source) || !unitById.has(edge.target)) continue
+    if (edge.source === edge.target) continue
+    outgoing.get(edge.source)?.push(edge.target)
+    indegree.set(edge.target, (indegree.get(edge.target) ?? 0) + 1)
+  }
+  const crossAxis = direction === 'horizontal' ? 'y' : 'x'
+  const orderByCross = (a: string, b: string) =>
+    axisStart(unitById.get(a)!.rect, crossAxis) -
+      axisStart(unitById.get(b)!.rect, crossAxis) || a.localeCompare(b)
+  const rank = new Map<string, number>()
+  const queued = eligible
+    .map((node) => node.id)
+    .filter((id) => (indegree.get(id) ?? 0) === 0)
+    .sort(orderByCross)
+  while (queued.length > 0) {
+    const id = queued.shift() as string
+    for (const target of outgoing.get(id) ?? []) {
+      rank.set(
+        target,
+        Math.max(rank.get(target) ?? 0, (rank.get(id) ?? 0) + 1)
+      )
+      indegree.set(target, (indegree.get(target) ?? 1) - 1)
+      if ((indegree.get(target) ?? 0) === 0) {
+        queued.push(target)
+        queued.sort(orderByCross)
+      }
+    }
+  }
+  // A cycle that survived the topological pass shares the layer after the
+  // deepest resolved layer, keeping its nodes visible in one row.
+  const unresolved = [...unitById.keys()].filter((id) => !rank.has(id))
+  if (unresolved.length > 0) {
+    const deepest = Math.max(-1, ...rank.values())
+    for (const id of unresolved) rank.set(id, deepest + 1)
+  }
+  const layers = new Map<number, AutoLayoutUnit[]>()
+  for (const id of unitById.keys()) {
+    const value = rank.get(id) ?? 0
+    const layer = layers.get(value) ?? []
+    layer.push(unitById.get(id) as AutoLayoutUnit)
+    layers.set(value, layer)
+  }
+  const orderedLayers = [...layers.entries()].sort((a, b) => a[0] - b[0])
+  for (const [, layer] of orderedLayers) {
+    layer.sort(
+      (a, b) =>
+        axisStart(a.rect, crossAxis) - axisStart(b.rect, crossAxis) ||
+        a.node.id.localeCompare(b.node.id)
+    )
+  }
+  const origin = canvasUnionRect(eligible.map((node) => unitById.get(node.id)!.rect))
+  if (!origin) return null
+  const positions = new Map<string, { x: number; y: number }>()
+  if (direction === 'horizontal') {
+    let x = origin.x
+    for (const [, layer] of orderedLayers) {
+      const layerWidth = Math.max(
+        ...layer.map((unit) => unit.rect.width)
+      )
+      let y = origin.y
+      for (const unit of layer) {
+        positions.set(unit.node.id, {
+          x: x + (layerWidth - unit.rect.width) / 2,
+          y,
+        })
+        y += unit.rect.height + CANVAS_AUTO_LAYOUT_GAP_Y
+      }
+      x += layerWidth + CANVAS_AUTO_LAYOUT_GAP_X
+    }
+  } else {
+    let y = origin.y
+    for (const [, layer] of orderedLayers) {
+      const layerHeight = Math.max(
+        ...layer.map((unit) => unit.rect.height)
+      )
+      let x = origin.x
+      for (const unit of layer) {
+        positions.set(unit.node.id, {
+          x,
+          y: y + (layerHeight - unit.rect.height) / 2,
+        })
+        x += unit.rect.width + CANVAS_AUTO_LAYOUT_GAP_X
+      }
+      y += layerHeight + CANVAS_AUTO_LAYOUT_GAP_Y
+    }
+  }
+  let changed = false
+  let nextNodes = nodes.map((node) => {
+    const position = positions.get(node.id)
+    if (!position) return node
+    if (
+      Math.abs(node.position.x - position.x) < 0.01 &&
+      Math.abs(node.position.y - position.y) < 0.01
+    ) {
+      return node
+    }
+    changed = true
+    return { ...node, position }
+  })
+  const nextById = new Map(nextNodes.map((node) => [node.id, node]))
+  const frameNodes = nodes.filter(
+    (node) =>
+      node.hidden !== true &&
+      canvasNodeKind(node) === 'frame' &&
+      (!scope || scope.has(node.id))
+  )
+  for (const frame of frameNodes) {
+    const members = [...canvasFrameMemberIds(nodes, [frame.id])].filter((id) =>
+      positions.has(id)
+    )
+    if (members.length === 0) continue
+    const bounds = canvasUnionRect(
+      members.map((id) => canvasNodeRect(nextById.get(id) as CanvasFlowNode, nextById))
+    )
+    if (!bounds) continue
+    const position = {
+      x: bounds.x - CANVAS_FRAME_PADDING,
+      y: bounds.y - CANVAS_FRAME_PADDING - CANVAS_FRAME_HEADER_HEIGHT,
+    }
+    const width = Math.max(
+      CANVAS_FRAME_MIN_WIDTH,
+      bounds.width + CANVAS_FRAME_PADDING * 2
+    )
+    const height = Math.max(
+      CANVAS_FRAME_MIN_HEIGHT,
+      bounds.height + CANVAS_FRAME_PADDING * 2 + CANVAS_FRAME_HEADER_HEIGHT
+    )
+    if (
+      Math.abs(frame.position.x - position.x) < 0.01 &&
+      Math.abs(frame.position.y - position.y) < 0.01 &&
+      Math.abs((frame.width ?? 0) - width) < 0.01 &&
+      Math.abs((frame.height ?? 0) - height) < 0.01
+    ) {
+      continue
+    }
+    changed = true
+    const resized = { ...frame, position, width, height }
+    nextNodes = nextNodes.map((node) =>
+      node.id === frame.id ? resized : node
+    )
+    nextById.set(frame.id, resized)
+  }
   return changed ? nextNodes : null
 }

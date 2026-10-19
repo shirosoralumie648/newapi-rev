@@ -9007,6 +9007,23 @@
     "Unable to price the comparison run.": "Impossible d'estimer l'exécution comparative.",
     "You can run up to {{count}} prompts at once": "Vous pouvez exécuter jusqu'à {{count}} invites à la fois",
     "{{count}} of {{limit}} prompts": "{{count}} sur {{limit}} invites",
-    "{{models}} models x {{prompts}} prompts": "{{models}} modèles × {{prompts}} invites"
+    "{{models}} models x {{prompts}} prompts": "{{models}} modèles × {{prompts}} invites",
+    "Frame": "Cadre",
+    "Sticky note": "Note autocollante",
+    "Align left": "Aligner à gauche",
+    "Align center": "Aligner au centre",
+    "Align right": "Aligner à droite",
+    "Align top": "Aligner en haut",
+    "Align middle": "Aligner au milieu",
+    "Align bottom": "Aligner en bas",
+    "Auto layout horizontally": "Disposition automatique horizontale",
+    "Auto layout vertically": "Disposition automatique verticale",
+    "Collapse selection": "Réduire la sélection",
+    "Expand selection": "Développer la sélection",
+    "Collapse group": "Réduire le groupe",
+    "Expand group": "Développer le groupe",
+    "Collapsed": "Réduit",
+    "Preview frame": "Aperçu du cadre",
+    "Export frame": "Exporter le cadre"
   }
 }

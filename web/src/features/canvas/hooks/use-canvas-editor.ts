@@ -37,12 +37,16 @@ import {
   CANVAS_NUDGE_STEP,
 } from '../constants'
 import {
+  canvasAlignSelection,
   canvasAlignmentSnap,
+  canvasAutoLayout,
   canvasDistributeSelection,
   canvasNodeRect,
   canvasNudgeSelection,
   canvasUnionRect,
+  type CanvasAlignAxis,
   type CanvasAlignmentGuide,
+  type CanvasAutoLayoutDirection,
   type CanvasDistributeAxis,
   type CanvasRect,
 } from '../lib/canvas-align'
@@ -52,14 +56,17 @@ import {
   fromServerDocument,
 } from '../lib/canvas-document'
 import {
+  canvasCollapseSelection,
   canvasCopySelection,
   canvasDescendantIds,
   canvasExpandRemovedNodes,
+  canvasExpandSelection,
   canvasGroupSelection,
   canvasNodeKind,
   canvasPasteClipboard,
   canvasSelectAll,
   canvasSelectedTopLevel,
+  canvasToggleGroupCollapsed,
   canvasUngroupSelection,
   type CanvasClipboard,
 } from '../lib/canvas-edit'
@@ -232,12 +239,19 @@ export function useCanvasEditor(
       const removesNodes = removedIds.size > 0
       // The drag stop callback records the final position once; xyflow sends
       // its own `dragging: false` position change just before that callback.
+      // A resize reports intermediate dimension changes with `resizing: true`;
+      // the final change joins them under one merge key, so one undo restores
+      // the pre-drag size and autosave persists the final dimensions.
+      const dimensionChanges = changes.filter(
+        (change) => change.type === 'dimensions'
+      )
       const recordsHistory =
         dragRef.current === null &&
         changes.some(
           (change) =>
             change.type === 'remove' ||
-            (change.type === 'position' && change.dragging === false)
+            (change.type === 'position' && change.dragging === false) ||
+            (change.type === 'dimensions' && change.resizing !== true)
         )
       let committedNodes = nextNodes
       let nextEdges = edgesRef.current
@@ -251,9 +265,17 @@ export function useCanvasEditor(
           (edge) => present.has(edge.source) && present.has(edge.target)
         )
       }
+      const mergeKey =
+        dimensionChanges.length > 0
+          ? `resize:${dimensionChanges
+              .map((change) => change.id)
+              .sort()
+              .join(',')}`
+          : undefined
       commit(committedNodes, nextEdges, {
         record: recordsHistory,
         notify: recordsHistory,
+        mergeKey,
       })
     },
     [commit]
@@ -552,6 +574,71 @@ export function useCanvasEditor(
       const nextNodes = canvasDistributeSelection(nodesRef.current, axis)
       if (!nextNodes) return false
       commit(nextNodes, edgesRef.current, { record: true, notify: true })
+      return true
+    },
+    [commit]
+  )
+
+  const alignSelection = useCallback(
+    (alignment: CanvasAlignAxis): boolean => {
+      const nextNodes = canvasAlignSelection(nodesRef.current, alignment)
+      if (!nextNodes) return false
+      commit(nextNodes, edgesRef.current, { record: true, notify: true })
+      return true
+    },
+    [commit]
+  )
+
+  const autoLayout = useCallback(
+    (direction: CanvasAutoLayoutDirection): boolean => {
+      // Two or more selected top-level cards lay out as one cluster; without a
+      // real selection the whole board is arranged. Frames are containers and
+      // stay out of the ranking either way.
+      const selected = canvasSelectedTopLevel(
+        nodesRef.current.filter((node) => node.hidden !== true)
+      ).filter((node) => canvasNodeKind(node) !== 'frame')
+      const nextNodes =
+        selected.length >= 2
+          ? canvasAutoLayout(
+              nodesRef.current,
+              edgesRef.current,
+              direction,
+              selected.map((node) => node.id)
+            )
+          : canvasAutoLayout(nodesRef.current, edgesRef.current, direction)
+      if (!nextNodes) return false
+      commit(nextNodes, edgesRef.current, { record: true, notify: true })
+      return true
+    },
+    [commit]
+  )
+
+  const collapseSelection = useCallback((): boolean => {
+    const collapsed = canvasCollapseSelection(
+      nodesRef.current,
+      edgesRef.current
+    )
+    if (!collapsed) return false
+    commit(collapsed.nodes, collapsed.edges, { record: true, notify: true })
+    return true
+  }, [commit])
+
+  const expandSelection = useCallback((): boolean => {
+    const expanded = canvasExpandSelection(nodesRef.current, edgesRef.current)
+    if (!expanded) return false
+    commit(expanded.nodes, expanded.edges, { record: true, notify: true })
+    return true
+  }, [commit])
+
+  const toggleGroupCollapsed = useCallback(
+    (groupId: string): boolean => {
+      const toggled = canvasToggleGroupCollapsed(
+        nodesRef.current,
+        edgesRef.current,
+        groupId
+      )
+      if (!toggled) return false
+      commit(toggled.nodes, toggled.edges, { record: true, notify: true })
       return true
     },
     [commit]
@@ -909,17 +996,34 @@ export function useCanvasEditor(
   const selectedNode = nodes.find((node) => node.selected === true) ?? null
   const canUndo = history.past.length > 0
   const canRedo = history.future.length > 0
+  const visibleNodes = nodes.filter((node) => node.hidden !== true)
   const selectedCount = nodes.filter((node) => node.selected === true).length
   const hasClipboard = (clipboard?.nodes.length ?? 0) > 0
-  const canGroup = nodes.some(
-    (node) => node.selected === true && canvasNodeKind(node) !== 'group'
-  )
-  const canUngroup = nodes.some(
+  const selectedTopLevel = canvasSelectedTopLevel(visibleNodes)
+  const canGroup =
+    selectedTopLevel.length > 0 &&
+    selectedTopLevel.every((node) => {
+      const kind = canvasNodeKind(node)
+      return kind !== 'group' && kind !== 'frame'
+    })
+  const canUngroup = visibleNodes.some(
     (node) =>
       node.selected === true &&
       (Boolean(node.parentId) || canvasNodeKind(node) === 'group')
   )
-  const canDistribute = canvasSelectedTopLevel(nodes).length >= 3
+  const canDistribute = selectedTopLevel.length >= 3
+  const canAlign = selectedTopLevel.length >= 2
+  const canAutoLayout =
+    visibleNodes.filter(
+      (node) => !node.parentId && canvasNodeKind(node) !== 'frame'
+    ).length >= 2
+  const canCollapse = canGroup
+  const canExpand = visibleNodes.some(
+    (node) =>
+      node.selected === true &&
+      canvasNodeKind(node) === 'group' &&
+      node.data.collapsed === true
+  )
 
   return {
     nodes,
@@ -931,6 +1035,10 @@ export function useCanvasEditor(
     canGroup,
     canUngroup,
     canDistribute,
+    canAlign,
+    canAutoLayout,
+    canCollapse,
+    canExpand,
     hasClipboard,
     alignmentGuides,
     handleNodesChange,
@@ -951,6 +1059,11 @@ export function useCanvasEditor(
     deleteSelection,
     nudgeSelection,
     distributeSelection,
+    alignSelection,
+    autoLayout,
+    collapseSelection,
+    expandSelection,
+    toggleGroupCollapsed,
     undo,
     redo,
     copySelection,

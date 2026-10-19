@@ -29,8 +29,8 @@ import {
   CANVAS_PNG_EXPORT_SCOPES,
 } from '../constants'
 import type { CanvasFlowNode } from '../types'
-import type { CanvasRect } from './canvas-align'
-import { canvasAbsolutePosition, canvasDescendantIds } from './canvas-edit'
+import { canvasSelectionExportIds, type CanvasRect } from './canvas-align'
+import { canvasAbsolutePosition } from './canvas-edit'
 
 export type CanvasPngExportScope = (typeof CANVAS_PNG_EXPORT_SCOPES)[number]
 
@@ -47,6 +47,8 @@ export interface CanvasPngExportLayoutNode {
   status?: string
   rect: CanvasRect
   group: boolean
+  frame: boolean
+  sticky: boolean
   image?: CanvasPngExportImageRef
 }
 
@@ -68,6 +70,11 @@ export interface CanvasPngExportOptions {
   theme?: 'light' | 'dark'
   /** Localized node-kind labels used when a node has no custom label. */
   kindLabels?: Partial<Record<string, string>>
+  /**
+   * Explicit selection roots. The frame preview uses one frame id without
+   * changing the live selection; omitted, the selected nodes are exported.
+   */
+  rootNodeIds?: string[]
   /** Test seam for environments without a 2D canvas implementation. */
   createCanvas?: () => HTMLCanvasElement
   /** Test seam for image bytes; the default reads the attachment cache. */
@@ -87,6 +94,11 @@ const EXPORT_COLORS = {
     edge: '#94a3b8',
     group: '#94a3b8',
     groupFill: 'rgba(148, 163, 184, 0.08)',
+    frame: '#64748b',
+    frameFill: 'rgba(100, 116, 139, 0.06)',
+    sticky: '#f59e0b',
+    stickyFill: '#fef3c7',
+    stickyText: '#78350f',
   },
   dark: {
     background: '#0b1120',
@@ -98,6 +110,11 @@ const EXPORT_COLORS = {
     edge: '#64748b',
     group: '#475569',
     groupFill: 'rgba(148, 163, 184, 0.08)',
+    frame: '#64748b',
+    frameFill: 'rgba(100, 116, 139, 0.12)',
+    sticky: '#b45309',
+    stickyFill: '#451a03',
+    stickyText: '#fef3c7',
   },
 } as const
 
@@ -143,22 +160,23 @@ function nodeImage(node: CanvasFlowNode): CanvasPngExportImageRef | null {
 }
 
 /**
- * The node ids a PNG export contains. A selection expands a selected group to
- * its descendants, so a group can never be exported as an empty box; selecting
- * a child without its group exports only that child.
+ * The node ids a PNG export contains. A canvas export skips nodes hidden by a
+ * collapsed group; a selection expands a selected group to its descendants and
+ * a selected frame to its geometric members, so neither can be exported as an
+ * empty outline. Selecting a child without its group exports only that child.
  */
 export function canvasPngExportNodeIds(
   nodes: CanvasFlowNode[],
-  scope: CanvasPngExportScope
+  scope: CanvasPngExportScope,
+  rootNodeIds?: string[]
 ): Set<string> | null {
   if (scope === 'canvas') {
-    return new Set(nodes.map((node) => node.id))
+    return new Set(
+      nodes.filter((node) => node.hidden !== true).map((node) => node.id)
+    )
   }
-  const selected = nodes
-    .filter((node) => node.selected === true)
-    .map((node) => node.id)
-  if (selected.length === 0) return null
-  return canvasDescendantIds(nodes, selected)
+  const ids = canvasSelectionExportIds(nodes, rootNodeIds)
+  return ids.size === 0 ? null : ids
 }
 
 /** Renders the included nodes into a flat layout in canvas coordinates. */
@@ -176,14 +194,17 @@ export function canvasPngExportLayout(
     const absolute = canvasAbsolutePosition(node, byId)
     const size = nodeSize(node)
     const image = nodeImage(node)
+    const body = nodeBody(node)
+    const kind = node.data.kind
     layoutNodes.push({
       id: node.id,
-      kind: node.data.kind,
+      kind,
       title:
+        (kind === 'frame' || kind === 'group' ? body : '') ||
         node.data.label?.trim() ||
-        options.kindLabels?.[node.data.kind] ||
-        node.data.kind,
-      body: nodeBody(node),
+        options.kindLabels?.[kind] ||
+        kind,
+      body,
       ...(node.data.workflow?.status
         ? { status: node.data.workflow.status }
         : {}),
@@ -193,7 +214,9 @@ export function canvasPngExportLayout(
         width: size.width,
         height: size.height,
       },
-      group: node.data.kind === 'group',
+      group: kind === 'group',
+      frame: kind === 'frame',
+      sticky: kind === 'sticky',
       ...(image ? { image } : {}),
     })
   }
@@ -229,7 +252,9 @@ export function canvasPngExportLayout(
         ids.has(edge.source) &&
         ids.has(edge.target) &&
         !layoutById.get(edge.source)?.group &&
-        !layoutById.get(edge.target)?.group
+        !layoutById.get(edge.target)?.group &&
+        !layoutById.get(edge.source)?.frame &&
+        !layoutById.get(edge.target)?.frame
     )
     .map((edge) => ({
       id: edge.id,
@@ -389,6 +414,47 @@ function drawNode(
   colors: CanvasExportColors,
   image: CanvasImageSource | null
 ) {
+  if (entry.frame) {
+    roundedRect(ctx, entry.rect, 12)
+    ctx.fillStyle = colors.frameFill
+    ctx.fill()
+    ctx.strokeStyle = colors.frame
+    ctx.lineWidth = 1
+    ctx.stroke()
+    ctx.fillStyle = colors.muted
+    ctx.font = '600 12px sans-serif'
+    ctx.textBaseline = 'top'
+    ctx.fillText(
+      entry.title,
+      entry.rect.x + NODE_PADDING,
+      entry.rect.y + NODE_PADDING / 2,
+      entry.rect.width - NODE_PADDING * 2
+    )
+    return
+  }
+  if (entry.sticky) {
+    roundedRect(ctx, entry.rect, 8)
+    ctx.fillStyle = colors.stickyFill
+    ctx.fill()
+    ctx.strokeStyle = colors.sticky
+    ctx.lineWidth = 1
+    ctx.stroke()
+    const width = entry.rect.width - NODE_PADDING * 2
+    if (!entry.body || width <= 0) return
+    ctx.fillStyle = colors.stickyText
+    ctx.font = '12px sans-serif'
+    ctx.textBaseline = 'top'
+    const lines = wrapCanvasExportText(ctx, entry.body, width, MAX_BODY_LINES)
+    lines.forEach((line, index) => {
+      ctx.fillText(
+        line,
+        entry.rect.x + NODE_PADDING,
+        entry.rect.y + NODE_PADDING + index * 16,
+        width
+      )
+    })
+    return
+  }
   if (entry.group) {
     ctx.setLineDash([6, 4])
     roundedRect(ctx, entry.rect, 8)
@@ -507,10 +573,13 @@ export function paintCanvasPngExport(
     drawEdge(ctx, edge.source, edge.target, colors.edge)
   }
   for (const entry of layout.nodes) {
+    if (entry.frame) drawNode(ctx, entry, colors, null)
+  }
+  for (const entry of layout.nodes) {
     if (entry.group) drawNode(ctx, entry, colors, null)
   }
   for (const entry of layout.nodes) {
-    if (entry.group) continue
+    if (entry.group || entry.frame) continue
     drawNode(ctx, entry, colors, images.get(entry.id) ?? null)
   }
   ctx.restore()
@@ -566,7 +635,7 @@ export async function renderCanvasPng(
   title: string,
   options: CanvasPngExportOptions = {}
 ): Promise<CanvasPngExportResult> {
-  const ids = canvasPngExportNodeIds(nodes, scope)
+  const ids = canvasPngExportNodeIds(nodes, scope, options.rootNodeIds)
   if (!ids || ids.size === 0) {
     throw new CanvasPngExportError(
       scope === 'selection'

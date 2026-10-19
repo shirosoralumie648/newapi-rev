@@ -1190,6 +1190,8 @@ export const STATIC_I18N_KEYS = [
   'Video',
   'Audio',
   'Group',
+  'Frame',
+  'Sticky note',
   // Canvas assistant: the mode labels and the one reply action per mode render
   // through t(label) from CANVAS_ASSISTANT_MODE_LABELS /
   // CANVAS_ASSISTANT_REPLY_LABELS, and the problem messages come from

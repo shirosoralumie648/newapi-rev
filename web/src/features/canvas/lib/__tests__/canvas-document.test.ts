@@ -279,6 +279,64 @@ test('a group round-trips through the server contract in parent-first order', ()
   expect(dangling.nodes[0].parentId).toBeUndefined()
 })
 
+test('frames and sticky notes round-trip sizes and collapsed visibility', () => {
+  const document = toServerDocument(
+    [
+      {
+        id: 'frame',
+        type: 'frame',
+        position: { x: 20, y: 30 },
+        width: 480,
+        height: 320,
+        data: { kind: 'frame', text: 'Scene' },
+      },
+      {
+        id: 'sticky',
+        type: 'sticky',
+        position: { x: 60, y: 80 },
+        width: 224,
+        height: 160,
+        data: { kind: 'sticky', text: 'Draft' },
+      },
+      {
+        id: 'group',
+        type: 'group',
+        position: { x: 600, y: 0 },
+        width: 240,
+        height: 160,
+        data: { kind: 'group', collapsed: true },
+      },
+      {
+        id: 'child',
+        type: 'text',
+        position: { x: 20, y: 20 },
+        parentId: 'group',
+        data: { kind: 'text', text: 'hidden' },
+      },
+    ],
+    [{ id: 'edge', source: 'sticky', target: 'child' }]
+  )
+
+  expect(document.nodes.find((node) => node.id === 'frame')?.width).toBe(480)
+  expect(document.nodes.find((node) => node.id === 'sticky')?.height).toBe(160)
+  expect(document.nodes.find((node) => node.id === 'child')?.data).toEqual({
+    kind: 'text',
+    text: 'hidden',
+    parentId: 'group',
+  })
+
+  const restored = fromServerDocument(document)
+  const frameZIndex = restored.nodes.find((node) => node.id === 'frame')?.zIndex
+  const stickyZIndex = restored.nodes.find(
+    (node) => node.id === 'sticky'
+  )?.zIndex
+  expect(frameZIndex).toBeDefined()
+  expect(stickyZIndex).toBeDefined()
+  expect(frameZIndex!).toBeLessThan(stickyZIndex!)
+  expect(restored.nodes.find((node) => node.id === 'child')?.hidden).toBe(true)
+  expect(restored.edges[0]?.hidden).toBe(true)
+})
+
 test('normalizes node color and tags when a document is read back', () => {
   const document = toServerDocument(
     [

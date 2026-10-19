@@ -16,7 +16,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Ban, FileText, Info, MessageSquare, Trash2 } from 'lucide-react'
+import {
+  Ban,
+  Download,
+  Eye,
+  FileText,
+  Info,
+  MessageSquare,
+  Trash2,
+} from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -98,6 +106,10 @@ interface CanvasNodeInspectorProps {
   onOpenArtifact?: (target: CanvasSourceTarget) => void
   /** Opens one browser-side image tool on an image-carrying node. */
   onOpenImageTools?: (node: CanvasFlowNode, tool: CanvasImageToolKind) => void
+  /** Previews a frame through the CV-05 PNG pipeline. */
+  onPreviewFrame?: (nodeId: string) => void
+  /** Exports a frame and its geometric members as an archive. */
+  onExportFrame?: (nodeId: string) => void
 }
 
 export function CanvasNodeInspector(props: CanvasNodeInspectorProps) {
@@ -136,7 +148,9 @@ export function CanvasNodeInspector(props: CanvasNodeInspectorProps) {
     node.data.kind === 'text' ||
     node.data.kind === 'prompt' ||
     node.data.kind === 'note' ||
-    node.data.kind === 'group'
+    node.data.kind === 'group' ||
+    node.data.kind === 'frame' ||
+    node.data.kind === 'sticky'
 
   const commitDraft = (value: string) => {
     setDraft(value)
@@ -267,6 +281,34 @@ export function CanvasNodeInspector(props: CanvasNodeInspectorProps) {
             value={draft}
           />
         </label>
+      ) : null}
+
+      {node.data.kind === 'frame' ? (
+        <div className='grid gap-2'>
+          <span className='text-muted-foreground text-xs'>{t('Frame')}</span>
+          <div className='flex flex-wrap gap-2'>
+            <Button
+              disabled={props.disabled || !props.onPreviewFrame}
+              onClick={() => props.onPreviewFrame?.(node.id)}
+              size='sm'
+              type='button'
+              variant='outline'
+            >
+              <Eye aria-hidden='true' />
+              {t('Preview frame')}
+            </Button>
+            <Button
+              disabled={props.disabled || !props.onExportFrame}
+              onClick={() => props.onExportFrame?.(node.id)}
+              size='sm'
+              type='button'
+              variant='outline'
+            >
+              <Download aria-hidden='true' />
+              {t('Export frame')}
+            </Button>
+          </div>
+        </div>
       ) : null}
 
       {snapshot ? (

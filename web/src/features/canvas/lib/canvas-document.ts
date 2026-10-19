@@ -20,10 +20,14 @@ import { nanoid } from 'nanoid'
 import { z } from 'zod'
 
 import {
+  CANVAS_CONTENT_Z_INDEX,
   CANVAS_DOCUMENT_MAX_BYTES,
+  CANVAS_FRAME_Z_INDEX,
+  CANVAS_GROUP_MAX_DEPTH,
   CANVAS_MAX_EDGES,
   CANVAS_MAX_NODES,
   CANVAS_NODE_DATA_MAX_BYTES,
+  CANVAS_NODE_DEFAULT_SIZES,
   CANVAS_NODE_KINDS,
 } from '../constants'
 import type {
@@ -139,12 +143,57 @@ export function createCanvasNode(
   data: Partial<CanvasNodeData> = {},
   id?: string
 ): CanvasFlowNode {
+  const size = CANVAS_NODE_DEFAULT_SIZES[kind]
   return {
     id: id ?? nanoid(),
     type: kind,
     position,
+    ...(size ? { width: size.width, height: size.height } : {}),
+    zIndex: kind === 'frame' ? CANVAS_FRAME_Z_INDEX : CANVAS_CONTENT_Z_INDEX,
     data: { kind, ...data },
   }
+}
+
+/**
+ * Applies the stored `collapsed` flag of a group to the live graph. A collapsed
+ * group keeps its own box visible while every descendant and every edge that
+ * touches a hidden node is marked hidden. The flags are runtime-only, so the
+ * next save persists the group flag and never the derived visibility.
+ */
+export function canvasApplyCollapsedVisibility(
+  nodes: CanvasFlowNode[],
+  edges: CanvasFlowEdge[]
+): { nodes: CanvasFlowNode[]; edges: CanvasFlowEdge[] } {
+  const byId = new Map(nodes.map((node) => [node.id, node]))
+  const collapsed = new Set(
+    nodes
+      .filter(
+        (node) => node.data.kind === 'group' && node.data.collapsed === true
+      )
+      .map((node) => node.id)
+  )
+  const hiddenIds = new Set<string>()
+  for (const node of nodes) {
+    let parentId = node.parentId
+    for (let depth = 0; parentId && depth < CANVAS_GROUP_MAX_DEPTH; depth++) {
+      if (collapsed.has(parentId)) {
+        hiddenIds.add(node.id)
+        break
+      }
+      parentId = byId.get(parentId)?.parentId
+    }
+  }
+  const nextNodes = nodes.map((node) => {
+    const hidden = hiddenIds.has(node.id)
+    const selected = hidden ? false : node.selected
+    if (node.hidden === hidden && node.selected === selected) return node
+    return { ...node, hidden, selected }
+  })
+  const nextEdges = edges.map((edge) => {
+    const hidden = hiddenIds.has(edge.source) || hiddenIds.has(edge.target)
+    return edge.hidden === hidden ? edge : { ...edge, hidden }
+  })
+  return { nodes: nextNodes, edges: nextEdges }
 }
 
 // A grouped node stores its parent in `data.parentId`, which is the only place
@@ -272,23 +321,30 @@ export function fromServerDocument(document: CanvasServerDocument): {
       position: { ...node.position },
       ...(node.width ? { width: node.width } : {}),
       ...(node.height ? { height: node.height } : {}),
+      zIndex:
+        node.type === 'frame' ? CANVAS_FRAME_Z_INDEX : CANVAS_CONTENT_Z_INDEX,
       ...(parentId
         ? { parentId, extent: 'parent' as const, expandParent: true }
         : {}),
       data,
     }
   })
-  return {
-    viewport: document.viewport,
-    nodes: orderCanvasNodesForFlow(nodes),
-    edges: document.edges.map((edge) => ({
+  const ordered = orderCanvasNodesForFlow(nodes)
+  const visible = canvasApplyCollapsedVisibility(
+    ordered,
+    document.edges.map((edge) => ({
       id: edge.id,
       source: edge.source,
       target: edge.target,
       ...(edge.source_handle ? { sourceHandle: edge.source_handle } : {}),
       ...(edge.target_handle ? { targetHandle: edge.target_handle } : {}),
       ...(edge.label ? { label: edge.label } : {}),
-    })),
+    }))
+  )
+  return {
+    viewport: document.viewport,
+    nodes: visible.nodes,
+    edges: visible.edges,
   }
 }
 

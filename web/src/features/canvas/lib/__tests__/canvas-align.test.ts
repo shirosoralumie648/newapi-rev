@@ -20,9 +20,13 @@ import { expect, test } from 'vitest'
 
 import type { CanvasFlowNode, CanvasNodeKind } from '../../types'
 import {
+  canvasAlignSelection,
   canvasAlignmentSnap,
+  canvasAutoLayout,
   canvasDistributeSelection,
+  canvasFrameMemberIds,
   canvasNudgeSelection,
+  canvasSelectionExportIds,
 } from '../canvas-align'
 
 function node(
@@ -115,4 +119,103 @@ test('distribution needs three top-level selected nodes', () => {
     node('right', 500, 0, 100, 50, { selected: true }),
   ]
   expect(canvasDistributeSelection(nodes, 'horizontal')).toBeNull()
+})
+
+test('aligns selected cards without changing the cross axis', () => {
+  const nodes = [
+    node('left', 0, 0, 100, 50, { selected: true }),
+    node('right', 300, 100, 50, 50, { selected: true }),
+  ]
+  const next = canvasAlignSelection(nodes, 'left')
+  expect(next?.find((entry) => entry.id === 'left')?.position).toEqual({
+    x: 0,
+    y: 0,
+  })
+  expect(next?.find((entry) => entry.id === 'right')?.position).toEqual({
+    x: 0,
+    y: 100,
+  })
+})
+
+test('aligns the vertical centers of selected cards', () => {
+  const nodes = [
+    node('left', 0, 0, 100, 50, { selected: true }),
+    node('right', 300, 100, 50, 50, { selected: true }),
+  ]
+  const next = canvasAlignSelection(nodes, 'middle')
+  expect(next?.find((entry) => entry.id === 'left')?.position.y).toBe(50)
+  expect(next?.find((entry) => entry.id === 'right')?.position.y).toBe(50)
+})
+
+test('alignment needs two selected top-level nodes', () => {
+  const nodes = [node('only', 0, 0, 100, 50, { selected: true })]
+  expect(canvasAlignSelection(nodes, 'left')).toBeNull()
+})
+
+test('lays connected cards out in ranked columns', () => {
+  const nodes = [
+    node('source', 500, 500, 100, 50),
+    node('result', 0, 0, 100, 50),
+  ]
+  const next = canvasAutoLayout(
+    nodes,
+    [{ source: 'source', target: 'result' }],
+    'horizontal'
+  )
+  expect(next?.find((entry) => entry.id === 'source')?.position).toEqual({
+    x: 0,
+    y: 0,
+  })
+  expect(next?.find((entry) => entry.id === 'result')?.position).toEqual({
+    x: 196,
+    y: 0,
+  })
+})
+
+test('lays connected cards out in ranked rows in vertical mode', () => {
+  const nodes = [
+    node('source', 500, 500, 100, 50),
+    node('result', 0, 0, 100, 50),
+  ]
+  const next = canvasAutoLayout(
+    nodes,
+    [{ source: 'source', target: 'result' }],
+    'vertical'
+  )
+  expect(next?.find((entry) => entry.id === 'source')?.position).toEqual({
+    x: 0,
+    y: 0,
+  })
+  expect(next?.find((entry) => entry.id === 'result')?.position).toEqual({
+    x: 0,
+    y: 114,
+  })
+})
+
+test('a frame carries its contained nodes into a selection export', () => {
+  const nodes = [
+    node('frame', 0, 0, 500, 400, { kind: 'frame', selected: true }),
+    node('inside', 40, 40, 100, 50),
+    node('outside', 700, 40, 100, 50),
+  ]
+  const members = canvasFrameMemberIds(nodes, ['frame'])
+  expect([...members]).toEqual(['inside'])
+
+  const exported = canvasSelectionExportIds(nodes)
+  expect(exported.has('frame')).toBe(true)
+  expect(exported.has('inside')).toBe(true)
+  expect(exported.has('outside')).toBe(false)
+})
+
+test('a selected collapsed group exports its hidden descendants with it', () => {
+  const nodes = [
+    node('group', 0, 0, 300, 200, { kind: 'group', selected: true }),
+    {
+      ...node('child', 10, 10, 100, 50, { parentId: 'group' }),
+      hidden: true,
+    },
+  ]
+  const exported = canvasSelectionExportIds(nodes)
+  expect(exported.has('group')).toBe(true)
+  expect(exported.has('child')).toBe(true)
 })

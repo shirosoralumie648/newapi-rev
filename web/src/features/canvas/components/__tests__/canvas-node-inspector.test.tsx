@@ -127,6 +127,27 @@ test('offers both the conversation and the artifact for artifact nodes', async (
   })
 })
 
+test('previews and exports a selected frame', async () => {
+  const user = userEvent.setup()
+  const onExportFrame = vi.fn()
+  const onPreviewFrame = vi.fn()
+  render(
+    <CanvasNodeInspector
+      node={makeNode({ kind: 'frame', text: 'Scene' })}
+      onDelete={vi.fn()}
+      onExportFrame={onExportFrame}
+      onPreviewFrame={onPreviewFrame}
+      onUpdateData={vi.fn()}
+    />
+  )
+
+  await user.click(screen.getByRole('button', { name: 'Preview frame' }))
+  expect(onPreviewFrame).toHaveBeenCalledWith('n1')
+
+  await user.click(screen.getByRole('button', { name: 'Export frame' }))
+  expect(onExportFrame).toHaveBeenCalledWith('n1')
+})
+
 test('does not offer source navigation for a content-only node', () => {
   render(
     <CanvasNodeInspector

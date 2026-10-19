@@ -42,6 +42,8 @@ const sharedNodeTypes: NodeTypes = {
   video: SharedCanvasNodeView,
   audio: SharedCanvasNodeView,
   group: SharedCanvasNodeView,
+  frame: SharedCanvasNodeView,
+  sticky: SharedCanvasNodeView,
 }
 
 interface PlaygroundSharedCanvasViewProps {
