@@ -4881,6 +4881,185 @@ func TestPlaygroundSessionContextManagement(t *testing.T) {
 	}
 }
 
+// Developer options are the request-side structured-output settings of one
+// conversation: the enabled switch, the function tool definitions and the
+// response format. The gateway validates and stores them but never executes a
+// tool, so the stored contract accepts only `type: "function"` tools and
+// rejects unknown keys, hosted tool types and oversized schemas.
+func TestPlaygroundSessionDeveloperOptions(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			created := playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions", map[string]any{
+				"title": "Developer", "client_id": "developer-session",
+				"config": map[string]any{"model": "test-model"}, "parameter_enabled": map[string]bool{},
+			}, controller.CreatePlaygroundSession)
+			require.Equal(t, http.StatusOK, created.Code, created.Body.String())
+
+			type sessionView struct {
+				ID               string         `json:"id"`
+				DeveloperOptions map[string]any `json:"developer_options"`
+			}
+			decode := func(t *testing.T, body []byte) sessionView {
+				t.Helper()
+				var envelope struct {
+					Success bool        `json:"success"`
+					Data    sessionView `json:"data"`
+				}
+				require.NoError(t, common.Unmarshal(body, &envelope))
+				require.True(t, envelope.Success, string(body))
+				return envelope.Data
+			}
+			session := decode(t, created.Body.Bytes())
+			createdID := session.ID
+			assert.Empty(t, session.DeveloperOptions)
+			readSession := func(t *testing.T) sessionView {
+				t.Helper()
+				response := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+createdID, nil, controller.GetPlaygroundSession)
+				require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+				return decode(t, response.Body.Bytes())
+			}
+
+			// A complete settings object is stored in the OpenAI wire shape and
+			// round-trips: the tool schema and the named JSON Schema survive.
+			stored := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+createdID, map[string]any{
+				"revision": 0,
+				"developer_options": map[string]any{
+					"enabled": true,
+					"tools": []any{map[string]any{
+						"type": "function",
+						"function": map[string]any{
+							"name":        "get_weather",
+							"description": "Look up the weather",
+							"parameters": map[string]any{
+								"type":       "object",
+								"properties": map[string]any{"city": map[string]any{"type": "string"}},
+								"required":   []string{"city"},
+							},
+							"strict": true,
+						},
+					}},
+					"tool_choice": "auto",
+					"response_format": map[string]any{
+						"type": "json_schema",
+						"json_schema": map[string]any{
+							"name": "weather_report",
+							"schema": map[string]any{
+								"type":       "object",
+								"properties": map[string]any{"summary": map[string]any{"type": "string"}},
+							},
+							"strict": true,
+						},
+					},
+				},
+			}, controller.UpdatePlaygroundSession)
+			require.Equal(t, http.StatusOK, stored.Code, stored.Body.String())
+			options := decode(t, stored.Body.Bytes()).DeveloperOptions
+			assert.Equal(t, true, options["enabled"])
+			assert.Equal(t, "auto", options["tool_choice"])
+			tools, ok := options["tools"].([]any)
+			require.True(t, ok, "%#v", options["tools"])
+			require.Len(t, tools, 1)
+			function := tools[0].(map[string]any)["function"].(map[string]any)
+			assert.Equal(t, "get_weather", function["name"])
+			assert.Equal(t, true, function["strict"])
+			parameters := function["parameters"].(map[string]any)
+			assert.Equal(t, "object", parameters["type"])
+			assert.Equal(t, []any{"city"}, parameters["required"])
+			format := options["response_format"].(map[string]any)
+			assert.Equal(t, "json_schema", format["type"])
+			assert.Equal(t, "weather_report", format["json_schema"].(map[string]any)["name"])
+
+			// A request that does not carry the object keeps the stored value.
+			renamed := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+createdID, map[string]any{"revision": 1, "title": "Renamed"}, controller.UpdatePlaygroundSession)
+			require.Equal(t, http.StatusOK, renamed.Code, renamed.Body.String())
+			assert.Equal(t, true, decode(t, renamed.Body.Bytes()).DeveloperOptions["enabled"])
+
+			// Invalid writes leave the stored snapshot untouched.
+			validTool := func(name string) map[string]any {
+				return map[string]any{"type": "function", "function": map[string]any{"name": name}}
+			}
+			manyTools := make([]any, 0, 40)
+			for index := range 33 {
+				manyTools = append(manyTools, validTool(fmt.Sprintf("tool_%d", index)))
+			}
+			largeSchema := func() map[string]any {
+				return map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"blob": map[string]any{"type": "string", "description": strings.Repeat("y", 40<<10)},
+					},
+				}
+			}
+			oversizedTools := make([]any, 0, 8)
+			for index := range 8 {
+				oversizedTools = append(oversizedTools, map[string]any{
+					"type":     "function",
+					"function": map[string]any{"name": fmt.Sprintf("big_%d", index), "parameters": largeSchema()},
+				})
+			}
+			rejected := []struct {
+				name   string
+				body   map[string]any
+				status int
+			}{
+				{"unknown top-level key", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "temperature": 1}}, http.StatusBadRequest},
+				{"non-boolean enabled", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": "yes"}}, http.StatusBadRequest},
+				{"hosted tool type", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "tools": []any{map[string]any{"type": "web_search"}}}}, http.StatusBadRequest},
+				{"unknown tool key", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "tools": []any{map[string]any{"type": "function", "function": map[string]any{"name": "t", "executor": "node"}}}}}, http.StatusBadRequest},
+				{"missing function object", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "tools": []any{map[string]any{"type": "function"}}}}, http.StatusBadRequest},
+				{"missing tool name", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "tools": []any{map[string]any{"type": "function", "function": map[string]any{"description": "nameless"}}}}}, http.StatusBadRequest},
+				{"duplicate tool names", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "tools": []any{validTool("same"), validTool("same")}}}, http.StatusBadRequest},
+				{"nul tool name", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "tools": []any{validTool("bad\x00name")}}}, http.StatusBadRequest},
+				{"unknown tool choice", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "tools": []any{validTool("t")}, "tool_choice": "sometimes"}}, http.StatusBadRequest},
+				{"tool choice without tools", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "tool_choice": "required"}}, http.StatusBadRequest},
+				{"schema on text format", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "response_format": map[string]any{"type": "text", "json_schema": map[string]any{"name": "x"}}}}, http.StatusBadRequest},
+				{"unnamed response schema", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "response_format": map[string]any{"type": "json_schema", "json_schema": map[string]any{"schema": map[string]any{"type": "object"}}}}}, http.StatusBadRequest},
+				{"non-object response schema", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "response_format": map[string]any{"type": "json_schema", "json_schema": map[string]any{"name": "x", "schema": "text"}}}}, http.StatusBadRequest},
+				{"unknown response format key", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "response_format": map[string]any{"type": "json_object", "mode": "fast"}}}, http.StatusBadRequest},
+				{"too many tools", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "tools": manyTools}}, http.StatusUnprocessableEntity},
+				{"oversized schema", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "tools": []any{map[string]any{"type": "function", "function": map[string]any{"name": "big", "parameters": largeSchema()}}}}}, http.StatusUnprocessableEntity},
+				{"oversized total", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "tools": oversizedTools}}, http.StatusUnprocessableEntity},
+			}
+			for _, test := range rejected {
+				response := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+createdID, test.body, controller.UpdatePlaygroundSession)
+				assert.Equal(t, test.status, response.Code, test.name+": "+response.Body.String())
+				if test.status == http.StatusUnprocessableEntity {
+					assert.Contains(t, response.Body.String(), "PLAYGROUND_DEVELOPER_OPTIONS_LIMIT_EXCEEDED", test.name)
+				}
+			}
+			still := readSession(t)
+			assert.Equal(t, "auto", still.DeveloperOptions["tool_choice"])
+			stillTools := still.DeveloperOptions["tools"].([]any)
+			assert.Equal(t, "get_weather", stillTools[0].(map[string]any)["function"].(map[string]any)["name"])
+
+			// The stored object is the complete replacement: disabling keeps
+			// only the switch, and an explicit null removes it altogether.
+			disabled := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+createdID, map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": false}}, controller.UpdatePlaygroundSession)
+			require.Equal(t, http.StatusOK, disabled.Code, disabled.Body.String())
+			disabledState := decode(t, disabled.Body.Bytes()).DeveloperOptions
+			assert.Equal(t, false, disabledState["enabled"])
+			assert.NotContains(t, disabledState, "tools")
+			cleared := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+createdID, map[string]any{"revision": 3, "developer_options": nil}, controller.UpdatePlaygroundSession)
+			require.Equal(t, http.StatusOK, cleared.Code, cleared.Body.String())
+			assert.Empty(t, decode(t, cleared.Body.Bytes()).DeveloperOptions)
+			assert.Empty(t, readSession(t).DeveloperOptions)
+
+			// Another account cannot write to the conversation at all.
+			foreign := playgroundRequest(t, 8, http.MethodPatch, "/api/playground/sessions/"+createdID, map[string]any{"revision": 4, "developer_options": map[string]any{"enabled": true}}, controller.UpdatePlaygroundSession)
+			assert.Equal(t, http.StatusNotFound, foreign.Code, foreign.Body.String())
+
+			// A legacy row without the column reads back as empty defaults.
+			require.NoError(t, db.Model(&model.PlaygroundSession{}).Where("id = ? AND user_id = ?", createdID, 7).
+				Updates(map[string]any{"developer_options": gorm.Expr("NULL")}).Error)
+			legacy, err := model.GetPlaygroundSession(7, createdID)
+			require.NoError(t, err)
+			assert.Empty(t, legacy.DeveloperOptions)
+			assert.Empty(t, readSession(t).DeveloperOptions)
+		})
+	}
+}
+
 // Message costs are read back from the owner's settled consume rows. The
 // lookup is owner- and type-scoped, so another account's request id, a
 // non-consume row and an unknown id all yield nothing, and a malformed query

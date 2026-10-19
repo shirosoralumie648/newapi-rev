@@ -23,6 +23,7 @@ import type {
   PlaygroundConfig,
   PlaygroundContextSettings,
   PlaygroundContextSummary,
+  PlaygroundDeveloperOptions,
   PlaygroundPendingQuote,
   ParameterEnabled,
 } from '../../types'
@@ -30,6 +31,7 @@ import {
   formatMessageForRequest,
   planPlaygroundContext,
 } from '../context/playground-context'
+import { buildDeveloperRequestFields } from '../developer/developer-options'
 import { applyModelMediaPolicy } from '../message/message-media-utils'
 import { isValidMessage } from '../message/message-utils'
 import { buildQuoteRequestMessage } from '../message/quote-utils'
@@ -55,7 +57,10 @@ export interface ChatCompletionPayloadContext {
  * adds nothing. With context management enabled the request carries only the
  * messages the plan keeps, prefixed by the compression node when one applies.
  * A pending composer quote leads the request as its own `user` message; the
- * stored history is unaffected.
+ * stored history is unaffected. With developer settings enabled the request
+ * also carries the defined function tools and the structured response format;
+ * disabled settings add no field at all, so the request is byte-identical to a
+ * conversation without them.
  */
 export function buildChatCompletionPayload(
   messages: Message[],
@@ -64,7 +69,8 @@ export function buildChatCompletionPayload(
   systemPrompt = '',
   context?: ChatCompletionPayloadContext,
   memoryBlock = '',
-  quote?: PlaygroundPendingQuote | null
+  quote?: PlaygroundPendingQuote | null,
+  developerOptions?: PlaygroundDeveloperOptions | null
 ): ChatCompletionRequest {
   // Filter and format valid messages; the plan applies the limits and the
   // compression node, the plain path sends the history unchanged.
@@ -143,6 +149,19 @@ export function buildChatCompletionPayload(
     if (effort) {
       payload.reasoning_effort = effort
     }
+  }
+
+  // Tools and the structured response format travel only while the developer
+  // settings are enabled and define something to send.
+  const developer = buildDeveloperRequestFields(developerOptions)
+  if (developer.tools) {
+    payload.tools = developer.tools
+  }
+  if (developer.tool_choice) {
+    payload.tool_choice = developer.tool_choice
+  }
+  if (developer.response_format) {
+    payload.response_format = developer.response_format
   }
 
   return payload

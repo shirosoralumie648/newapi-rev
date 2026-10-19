@@ -51,6 +51,7 @@ import type {
   PlaygroundConfig,
   PlaygroundContextSettings,
   PlaygroundContextSummary,
+  PlaygroundDeveloperOptions,
   PlaygroundPendingQuote,
   ParameterEnabled,
 } from '../types'
@@ -65,6 +66,11 @@ interface UseChatHandlerOptions {
   memoryBlock?: string
   /** Context limits and summary model applied when the payload is built. */
   contextSettings: PlaygroundContextSettings
+  /**
+   * Request-side developer settings (function tools and response format)
+   * injected into every send while enabled. Absent keeps the request unchanged.
+   */
+  developerOptions?: PlaygroundDeveloperOptions | null
   /**
    * Resolves the compression node the send should carry, summarizing the
    * messages a limit leaves out first when automatic summary is enabled. The
@@ -128,6 +134,7 @@ export function useChatHandler({
   systemPrompt,
   memoryBlock,
   contextSettings,
+  developerOptions,
   prepareContextSummary,
   prepareKnowledge,
   onMessageUpdate,
@@ -494,7 +501,8 @@ export function useChatHandler({
         systemPrompt,
         { settings: contextSettings, summary: contextSummary },
         memoryBlock,
-        quote
+        quote,
+        developerOptions
       )
       setCapturedRequest({ payload, capturedAt: Date.now() })
       void sendStreamRequest(payload, {
@@ -516,6 +524,7 @@ export function useChatHandler({
       systemPrompt,
       memoryBlock,
       contextSettings,
+      developerOptions,
       sendStreamRequest,
       discardPendingStreamUpdates,
       handleStreamUpdate,
@@ -550,7 +559,8 @@ export function useChatHandler({
         systemPrompt,
         { settings: contextSettings, summary: contextSummary },
         memoryBlock,
-        quote
+        quote,
+        developerOptions
       )
       setCapturedRequest({ payload, capturedAt: Date.now() })
       const generation = requestGenerationRef.current + 1
@@ -659,6 +669,7 @@ export function useChatHandler({
       systemPrompt,
       memoryBlock,
       contextSettings,
+      developerOptions,
       stopStream,
       discardPendingStreamUpdates,
       onMessageUpdate,
