@@ -347,6 +347,22 @@ export interface MidjourneyLog {
 // Task Logs Types
 // ============================================================================
 
+/**
+ * The Playground generation snapshot a task recorded when it was submitted.
+ * It is a projection of the task's private data, so it only carries request
+ * parameters and never exposes channel or upstream credentials.
+ */
+export interface TaskGenerationInfo {
+  kind?: string
+  prompt?: string
+  model?: string
+  size?: string
+  quality?: string
+  seed?: number
+  count?: number
+  duration?: number
+}
+
 export interface TaskLog {
   id: number
   user_id: number
@@ -379,6 +395,8 @@ export interface TaskLog {
     request_path?: string
     task_plugin?: TaskPluginInfo
   }
+  /** Playground generation parameters captured at task submission. */
+  generation?: TaskGenerationInfo
   root_info?: {
     task_plugin?: TaskPluginRuntimeInfo
     upstream_task_id?: string
@@ -532,6 +550,12 @@ export interface GetTaskLogsParams {
   task_id?: string
   start_timestamp?: number
   end_timestamp?: number
+  generation_prompt?: string
+  generation_model?: string
+  generation_size?: string
+  generation_quality?: string
+  generation_seed?: number
+  generation_count?: number
 }
 
 // ============================================================================

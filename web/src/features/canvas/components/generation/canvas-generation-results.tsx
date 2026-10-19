@@ -20,6 +20,7 @@ import { useTranslation } from 'react-i18next'
 
 import { StatusBadge } from '@/components/status-badge'
 import { PLAYGROUND_GENERATION_BATCH_STATUS } from '@/features/playground/constants'
+import type { TaskLog } from '@/features/usage-logs/types'
 import { formatLogQuota, formatUseTime } from '@/lib/format'
 
 import type {
@@ -48,13 +49,17 @@ const CELL_STATUS_LABELS: Record<CanvasGenerationCellStatus, string> = {
 
 interface CanvasGenerationResultsProps {
   cells: CanvasGenerationCell[]
+  /** Settled owner-scoped task rows, used for the actual cost and duration. */
+  tasks?: TaskLog[]
 }
 
 /**
  * One side-by-side cell per request of a media batch: the model and the
  * parameters actually sent, the elapsed time and pre-run estimate observed for
  * that cell, and the inline images of a synchronous answer. Durable task cells
- * only link their task id; the shared task list carries their artifacts.
+ * only link their task id; the shared task list carries their artifacts. When
+ * the matching durable task is already loaded, its settled quota and actual
+ * duration replace the estimate and request time.
  */
 export function CanvasGenerationResults(props: CanvasGenerationResultsProps) {
   const { t } = useTranslation()
@@ -65,6 +70,16 @@ export function CanvasGenerationResults(props: CanvasGenerationResultsProps) {
       <ul className='grid list-none gap-2 p-0 sm:grid-cols-2'>
         {props.cells.map((cell) => {
           const request = cell.request
+          const task = cell.taskId
+            ? props.tasks?.find((item) => item.task_id === cell.taskId)
+            : undefined
+          const taskStart = task?.start_time ?? task?.submit_time
+          const taskElapsedMs =
+            task?.finish_time && taskStart && task.finish_time >= taskStart
+              ? (task.finish_time - taskStart) * 1000
+              : undefined
+          const elapsedMs = taskElapsedMs ?? cell.elapsedMs
+          const costQuota = task && task.quota > 0 ? task.quota : undefined
           const params = [
             request.size,
             request.quality,
@@ -94,14 +109,20 @@ export function CanvasGenerationResults(props: CanvasGenerationResultsProps) {
                 {params.join(' · ')}
               </p>
               <div className='text-muted-foreground mt-1 flex flex-wrap items-center gap-x-3 text-xs'>
-                {cell.elapsedMs !== undefined ? (
+                {elapsedMs !== undefined ? (
                   <span>
                     {t('Elapsed {{time}}', {
-                      time: formatUseTime(cell.elapsedMs / 1000),
+                      time: formatUseTime(elapsedMs / 1000),
                     })}
                   </span>
                 ) : null}
-                {cell.estimatedQuota !== undefined ? (
+                {costQuota !== undefined ? (
+                  <span>
+                    {t('Cost {{quota}}', {
+                      quota: formatLogQuota(costQuota),
+                    })}
+                  </span>
+                ) : cell.estimatedQuota !== undefined ? (
                   <span>
                     {t('Estimated {{quota}}', {
                       quota: formatLogQuota(cell.estimatedQuota),
@@ -114,6 +135,18 @@ export function CanvasGenerationResults(props: CanvasGenerationResultsProps) {
                   </span>
                 ) : null}
               </div>
+              {request.adjustments.map((adjustment) => (
+                <p
+                  className='mt-1 text-xs text-amber-600'
+                  key={`${adjustment.field}-${adjustment.to}`}
+                >
+                  {t(adjustment.messageKey, {
+                    from: adjustment.from,
+                    to: adjustment.to,
+                    model: request.model,
+                  })}
+                </p>
+              ))}
               {cell.error ? (
                 <p className='text-destructive mt-1 text-xs break-words'>
                   {cell.error}

@@ -26,6 +26,7 @@ import {
 } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createInstance, type i18n } from 'i18next'
+import type { ComponentProps } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
@@ -77,7 +78,58 @@ function mockTaskEndpoints(tasks: TaskLog[], artifacts: TaskArtifact[] = []) {
   })
 }
 
-function renderPanel(onSendToCanvas = vi.fn()) {
+function mockBatchEndpoints() {
+  return vi.spyOn(api, 'post').mockImplementation(async (url, body) => {
+    if (url === '/api/playground/workflows/estimate') {
+      const steps = (body as { steps: Array<{ node_id: string }> }).steps
+      return {
+        data: {
+          success: true,
+          data: {
+            steps: steps.map((step) => ({
+              node_id: step.node_id,
+              quota: 100,
+              available: true,
+              approximate: false,
+            })),
+            total_quota: steps.length * 100,
+            available: true,
+          },
+        },
+      }
+    }
+    if (url === '/pg/images/generations') {
+      const model = String((body as { model?: string }).model ?? 'image')
+      return {
+        data: {
+          created: 1,
+          data: [{ url: `https://cdn.example.com/${model}.png` }],
+        },
+      }
+    }
+    if (url === '/pg/videos') {
+      return { data: { id: 'video-batch-1', status: 'queued' } }
+    }
+    throw new Error(`Unexpected POST ${url}`)
+  })
+}
+
+async function confirmBatchEstimate(user: ReturnType<typeof userEvent.setup>) {
+  const dialog = await screen.findByRole('dialog')
+  const confirm = await within(dialog).findByRole('button', {
+    name: 'Generate batch',
+  })
+  await waitFor(() => expect(confirm).toBeEnabled())
+  await user.click(confirm)
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  )
+}
+
+function renderPanel(
+  onSendToCanvas = vi.fn(),
+  overrides: Partial<ComponentProps<typeof CanvasGenerationPanel>> = {}
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
@@ -89,6 +141,7 @@ function renderPanel(onSendToCanvas = vi.fn()) {
           group='default'
           models={[{ label: 'gpt-image-1', value: 'gpt-image-1' }]}
           onSendToCanvas={onSendToCanvas}
+          {...overrides}
         />
       </QueryClientProvider>
     </I18nextProvider>
@@ -256,4 +309,132 @@ test('a failed task list request shows the error instead of an empty state', asy
 
   expect(await screen.findByRole('alert')).toHaveTextContent('Offline')
   expect(screen.queryByText('No generation tasks')).not.toBeInTheDocument()
+})
+
+test('variations send distinct seeds and rerun reuses the same plan', async () => {
+  mockTaskEndpoints([])
+  const post = mockBatchEndpoints()
+  const user = userEvent.setup()
+  renderPanel()
+
+  await user.click(screen.getByRole('button', { name: 'Variations' }))
+  await user.type(screen.getByLabelText('Prompt'), 'a red fox')
+  const seedInput = screen.getByLabelText('Base seed')
+  await user.clear(seedInput)
+  await user.type(seedInput, '100')
+  const countInput = screen.getByLabelText('Number of variations')
+  await user.selectOptions(countInput, '2')
+  await user.click(
+    screen.getByRole('button', { name: 'Review cost and generate' })
+  )
+  await confirmBatchEstimate(user)
+
+  await waitFor(() => {
+    const imageCalls = post.mock.calls.filter(
+      ([url]) => url === '/pg/images/generations'
+    )
+    expect(imageCalls).toHaveLength(2)
+  })
+  const bodies = post.mock.calls
+    .filter(([url]) => url === '/pg/images/generations')
+    .map(([, body]) => body as { seed?: number })
+  expect(bodies.map((body) => body.seed)).toEqual([100, 101])
+  expect(await screen.findByText(/Seed 100/)).toBeVisible()
+  expect(screen.getByText(/Seed 101/)).toBeVisible()
+
+  await user.click(
+    screen.getByRole('button', { name: 'Re-run with same params' })
+  )
+  await confirmBatchEstimate(user)
+
+  await waitFor(() => {
+    const imageCalls = post.mock.calls.filter(
+      ([url]) => url === '/pg/images/generations'
+    )
+    expect(imageCalls).toHaveLength(4)
+  })
+  const rerunBodies = post.mock.calls
+    .filter(([url]) => url === '/pg/images/generations')
+    .slice(2)
+    .map(([, body]) => body as { seed?: number })
+  expect(rerunBodies.map((body) => body.seed)).toEqual([100, 101])
+})
+
+test('comparison shares one seed and maps each model to its own size', async () => {
+  mockTaskEndpoints([])
+  const post = mockBatchEndpoints()
+  const user = userEvent.setup()
+  renderPanel(vi.fn(), {
+    models: [
+      { label: 'img-a', value: 'img-a' },
+      { label: 'img-b', value: 'img-b' },
+    ],
+    modelCapabilities: {
+      'img-a': { usageSchema: { size: { enum: ['1024x1024'] } } },
+      'img-b': { usageSchema: { size: { enum: ['1792x1024'] } } },
+    },
+  })
+
+  await user.click(screen.getByRole('button', { name: 'Compare' }))
+  await user.type(screen.getByLabelText('Prompt'), 'a lighthouse')
+  await user.click(
+    screen.getByRole('button', { name: 'Review cost and generate' })
+  )
+  await confirmBatchEstimate(user)
+
+  await waitFor(() => {
+    const imageCalls = post.mock.calls.filter(
+      ([url]) => url === '/pg/images/generations'
+    )
+    expect(imageCalls).toHaveLength(2)
+  })
+  const bodies = post.mock.calls
+    .filter(([url]) => url === '/pg/images/generations')
+    .map(([, body]) => body as { model?: string; seed?: number; size?: string })
+  expect(bodies.map((body) => body.model)).toEqual(['img-a', 'img-b'])
+  expect(bodies[0]?.seed).toBe(bodies[1]?.seed)
+  expect(bodies[0]?.size).toBe('1024x1024')
+  expect(bodies[1]?.size).toBe('1792x1024')
+  expect(
+    await screen.findByText(
+      'Size 1024x1024 is not available for img-b; using 1792x1024.'
+    )
+  ).toBeVisible()
+})
+
+test('a model without image capability blocks the comparison before billing', async () => {
+  mockTaskEndpoints([])
+  const post = mockBatchEndpoints()
+  const user = userEvent.setup()
+  renderPanel(vi.fn(), {
+    models: [
+      { label: 'video-only', value: 'video-only' },
+      { label: 'img-b', value: 'img-b' },
+    ],
+    modelCapabilities: {
+      'video-only': {
+        endpointTypes: ['openai-video'],
+        usageFields: ['seconds'],
+      },
+      'img-b': {
+        endpointTypes: ['image-generation'],
+        usageFields: ['image_count'],
+      },
+    },
+  })
+
+  await user.click(screen.getByRole('button', { name: 'Compare' }))
+  await user.type(screen.getByLabelText('Prompt'), 'a lighthouse')
+  await user.click(
+    screen.getByRole('button', { name: 'Review cost and generate' })
+  )
+
+  expect(
+    await screen.findByText('This model cannot generate images.')
+  ).toBeVisible()
+  expect(
+    screen.getByText('Remove the models that cannot generate this media first.')
+  ).toBeVisible()
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  expect(post).not.toHaveBeenCalled()
 })
