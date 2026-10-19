@@ -103,11 +103,20 @@ interface CanvasEditorOptions {
   onRejectedConnection?: (messageKey: string) => void
 }
 
-/** One node a caller adds in a single undoable step. */
+/**
+ * One node a caller adds in a single undoable step.
+ */
 export interface CanvasAddedNode {
   /** Optional stable id; graph callers use it to remap group parents first. */
   id?: string
   kind: CanvasNodeKind
+  position: { x: number; y: number }
+  data?: Partial<CanvasNodeData>
+}
+
+/** One node an affix action moves and patches in the same undo entry. */
+export interface CanvasAffixedNode {
+  id: string
   position: { x: number; y: number }
   data?: Partial<CanvasNodeData>
 }
@@ -459,6 +468,38 @@ export function useCanvasEditor(
       })
       if (!changed) return
       commit(nextNodes, edgesRef.current, { record: true, notify: true })
+    },
+    [commit]
+  )
+
+  /**
+   * Affixes a bloodline in one undoable change: the named nodes take their
+   * pinned positions and data together, so "pin to canvas" is one history step
+   * instead of one per node. Unknown ids are ignored; the change is reported
+   * as false when none of them matches.
+   */
+  const affixNodes = useCallback(
+    (placements: CanvasAffixedNode[]): boolean => {
+      if (placements.length === 0) return false
+      const byID = new Map(
+        placements.map((placement) => [placement.id, placement])
+      )
+      let changed = false
+      const nextNodes = nodesRef.current.map((node) => {
+        const placement = byID.get(node.id)
+        if (!placement) return node
+        changed = true
+        return {
+          ...node,
+          position: placement.position,
+          data: placement.data
+            ? { ...node.data, ...placement.data }
+            : node.data,
+        }
+      })
+      if (!changed) return false
+      commit(nextNodes, edgesRef.current, { record: true, notify: true })
+      return true
     },
     [commit]
   )
@@ -900,6 +941,7 @@ export function useCanvasEditor(
     addLinkedNode,
     updateNodeData,
     setWorkflowPreferredResult,
+    affixNodes,
     deleteNode,
     deleteSelection,
     nudgeSelection,
