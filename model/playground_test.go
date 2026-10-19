@@ -2530,6 +2530,8 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodPost, "/api/playground/sessions/" + sessionID + "/restore"},
 		{http.MethodPost, "/api/playground/tasks/missing/cancel"},
 		{http.MethodPost, "/pg/embeddings"},
+		{http.MethodPost, "/pg/responses"},
+		{http.MethodPost, "/pg/messages"},
 		{http.MethodPost, "/pg/rerank"},
 		{http.MethodPost, "/pg/moderations"},
 		{http.MethodGet, "/api/playground/presets"},

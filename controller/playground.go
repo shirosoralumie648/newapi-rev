@@ -5,10 +5,10 @@ import (
 	"fmt"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
-	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 
@@ -60,13 +60,12 @@ func playgroundRelay(c *gin.Context, relayFormat types.RelayFormat) {
 		return
 	}
 
-	relayInfo, err := relaycommon.GenRelayInfo(c, relayFormat, nil, nil)
-	if err != nil {
-		newAPIError = types.NewError(err, types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
-		return
-	}
-
-	if err := setupPlaygroundToken(c, relayInfo.UsingGroup); err != nil {
+	// Channel selection already resolved the group on this route, so the
+	// synthetic token carries exactly the group the caller selected. Building a
+	// relay info here would require the format-specific request, which the
+	// relay parses itself.
+	group := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+	if err := setupPlaygroundToken(c, group); err != nil {
 		newAPIError = types.NewError(err, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
 		return
 	}
@@ -84,6 +83,20 @@ func Playground(c *gin.Context) {
 		defer capture.Finish(c)
 	}
 	playgroundRelay(c, types.RelayFormatOpenAI)
+}
+
+// PlaygroundResponses serves the Responses protocol through the canonical
+// /v1/responses pipeline. The bridge rewrites the path and the relay parses and
+// bills the request exactly like a direct API call.
+func PlaygroundResponses(c *gin.Context) {
+	playgroundRelay(c, types.RelayFormatOpenAIResponses)
+}
+
+// PlaygroundMessages serves the Anthropic Messages protocol through the
+// canonical /v1/messages pipeline with the same group, channel selection and
+// billing rules as a direct API call.
+func PlaygroundMessages(c *gin.Context) {
+	playgroundRelay(c, types.RelayFormatClaude)
 }
 
 // PlaygroundEmbeddings serves the workspace knowledge indexer through the
