@@ -173,7 +173,15 @@ export const playgroundSessionSchema = z.object({
   /** Greeting copied from a preset; absent in data written before the market. */
   openingMessage: z.string().max(8192).optional(),
   /** Starter questions copied from a preset; absent in older sessions. */
-  suggestedQuestions: z.array(z.string().min(1).max(200)).max(6).optional(),
+  suggestedQuestions: z
+    .array(
+      z
+        .string()
+        .min(1)
+        .refine((value) => Array.from(value).length <= 200)
+    )
+    .max(6)
+    .optional(),
   /** Absent in data written before context management existed. */
   context: playgroundContextSchema.optional(),
   /** Absent or null when the conversation sends its full stored history. */

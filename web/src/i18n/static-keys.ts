@@ -110,6 +110,10 @@ export const STATIC_I18N_KEYS = [
   'Assistant preset name must contain 1 to 100 characters.',
   'Assistant preset avatar must be an emoji or an http(s) image URL.',
   'Invalid assistant preset.',
+  'Invalid preset file.',
+  'Too many suggested questions.',
+  'Each suggested question must contain 1 to 200 characters.',
+  'The opening message is too long.',
 
   'Authentication required.',
   'Invalid Playground canvas archive.',
