@@ -24,9 +24,15 @@ import { Controls } from './controls'
 
 type CanvasProps = ReactFlowProps & {
   children?: ReactNode
+  /** Renders the built-in zoom controls; editors can supply their own. */
+  showControls?: boolean
 }
 
-export const Canvas = ({ children, ...props }: CanvasProps) => (
+export const Canvas = ({
+  children,
+  showControls = true,
+  ...props
+}: CanvasProps) => (
   <ReactFlow
     deleteKeyCode={['Backspace', 'Delete']}
     fitView
@@ -37,7 +43,7 @@ export const Canvas = ({ children, ...props }: CanvasProps) => (
     {...props}
   >
     <Background bgColor='var(--sidebar)' />
-    <Controls />
+    {showControls ? <Controls /> : null}
     {children}
   </ReactFlow>
 )
