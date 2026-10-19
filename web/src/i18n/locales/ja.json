@@ -4974,6 +4974,7 @@
     "Not provided by this source": "このソースでは提供されていません",
     "Not recorded": "記録なし",
     "Not registered": "未登録",
+    "Not sent with this protocol: {{fields}}": "このプロトコルでは送信されません：{{fields}}",
     "Not set": "未設定",
     "Not Set": "未設定",
     "Not set yet": "未設定",

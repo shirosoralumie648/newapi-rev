@@ -4974,6 +4974,7 @@
     "Not provided by this source": "Не предоставлено этим источником",
     "Not recorded": "Не записано",
     "Not registered": "Не зарегистрирован",
+    "Not sent with this protocol: {{fields}}": "Не отправляется с этим протоколом: {{fields}}",
     "Not set": "Не задано",
     "Not Set": "Не установлено",
     "Not set yet": "Ещё не задано",

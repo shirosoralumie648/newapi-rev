@@ -19,7 +19,10 @@ For commercial licensing, please contact support@quantumnous.com
 import { describe, expect, it } from 'vitest'
 
 import type { ChatCompletionRequest } from '../../../types'
-import { buildPlaygroundProtocolRequest } from '../protocol-payload'
+import {
+  buildPlaygroundProtocolRequest,
+  playgroundProtocolUnsupportedFields,
+} from '../protocol-payload'
 
 const base: ChatCompletionRequest = {
   model: 'gpt-4o',
@@ -301,5 +304,36 @@ describe('buildPlaygroundProtocolRequest', () => {
     )
 
     expect(bodyOf(request).messages).toEqual([{ role: 'user', content: 'Hi' }])
+  })
+})
+
+describe('playgroundProtocolUnsupportedFields', () => {
+  it('names the fields each protocol conversion drops', () => {
+    const payload: ChatCompletionRequest = {
+      ...base,
+      frequency_penalty: 0.5,
+      presence_penalty: 0.4,
+      seed: 7,
+      reasoning_effort: 'high',
+      response_format: { type: 'json_object' },
+    }
+
+    expect(playgroundProtocolUnsupportedFields(payload, 'chat')).toEqual([])
+    expect(playgroundProtocolUnsupportedFields(payload, 'responses')).toEqual([
+      'frequency_penalty',
+      'presence_penalty',
+      'seed',
+    ])
+    expect(playgroundProtocolUnsupportedFields(payload, 'messages')).toEqual([
+      'frequency_penalty',
+      'presence_penalty',
+      'seed',
+      'reasoning_effort',
+      'response_format',
+    ])
+  })
+
+  it('reports no field when the payload does not carry any', () => {
+    expect(playgroundProtocolUnsupportedFields(base, 'messages')).toEqual([])
   })
 })

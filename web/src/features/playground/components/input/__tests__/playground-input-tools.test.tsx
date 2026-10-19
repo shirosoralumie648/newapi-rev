@@ -135,6 +135,8 @@ beforeAll(() => {
     Clear: 'Clear',
     'Clear chat history': 'Clear chat history',
     'Clear chat history?': 'Clear chat history?',
+    'Not sent with this protocol: {{fields}}':
+      'Not sent with this protocol: {{fields}}',
     Parameters: 'Parameters',
     'Prompt snippets': 'Prompt snippets',
     'Reasoning Effort': 'Reasoning Effort',
@@ -302,4 +304,25 @@ test('the protocol selector reports the chosen wire protocol', async () => {
   )
 
   expect(onConfigChange).toHaveBeenCalledWith('protocol', 'messages')
+})
+
+test('warns which composer parameters the selected protocol does not send', () => {
+  renderTools(vi.fn(), vi.fn(), '', {
+    ...DEFAULT_CONFIG,
+    protocol: 'messages',
+  })
+
+  expect(
+    screen.getByRole('img', {
+      name: 'Not sent with this protocol: frequency_penalty, presence_penalty',
+    })
+  ).toBeVisible()
+})
+
+test('shows no protocol warning while the chat protocol forwards every parameter', () => {
+  renderTools()
+
+  expect(
+    screen.queryByRole('img', { name: /^Not sent with this protocol:/ })
+  ).toBeNull()
 })
