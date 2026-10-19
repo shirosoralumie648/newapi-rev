@@ -8481,6 +8481,25 @@
     "Invalid conversation export.": "会話のエクスポートファイルが無効です。",
     "The conversation export is too large.": "会話のエクスポートファイルが大きすぎます。",
     "Unable to import the conversation.": "会話をインポートできませんでした。",
-    "{{count}} attachments could not be restored and were kept as placeholders.": "{{count}} 件の添付ファイルを復元できなかったため、プレースホルダーとして残しました。"
+    "{{count}} attachments could not be restored and were kept as placeholders.": "{{count}} 件の添付ファイルを復元できなかったため、プレースホルダーとして残しました。",
+    "Custom size": "カスタムサイズ",
+    "Size (WIDTHxHEIGHT)": "サイズ（幅x高さ）",
+    "WIDTHxHEIGHT, 64 to 8192 pixels per side.": "幅x高さ、各辺 64～8192 ピクセル。",
+    "Each generated image gets its own result node.": "生成された画像ごとに結果ノードが作成されます。",
+    "Leave empty for a random seed.": "空欄にするとランダムなシードを使用します。",
+    "The same seed will be reused on every run.": "実行のたびに同じシードが再利用されます。",
+    "Use last result": "前回の結果を使用",
+    "Last seed: {{seed}}": "前回のシード: {{seed}}",
+    "Connect at most {{count}} reference images to one step.": "1つのステップに接続できる参照画像は最大 {{count}} 枚です。",
+    "Preferred result": "優先結果",
+    "Preferred": "優先",
+    "Set as preferred result": "優先結果に設定",
+    "Downstream steps use the preferred result.": "後続のステップは優先結果を使用します。",
+    "Too many reference images are connected to this step.": "このステップに接続された参照画像が多すぎます。",
+    "The size must use WIDTHxHEIGHT with each side between 64 and 8192 pixels.": "サイズは幅x高さ形式で、各辺を 64～8192 ピクセルにしてください。",
+    "The seed must be an integer between 1 and 2147483647.": "シードは 1～2147483647 の整数である必要があります。",
+    "This model's channel metadata does not list image generation.": "このモデルのチャネルメタデータには画像生成が含まれていません。",
+    "This model's channel metadata does not list video generation.": "このモデルのチャネルメタデータには動画生成が含まれていません。",
+    "This model's channel metadata lists neither image nor video generation.": "このモデルのチャネルメタデータには画像生成も動画生成も含まれていません。"
   }
 }

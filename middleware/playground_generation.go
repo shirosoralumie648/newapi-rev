@@ -19,7 +19,10 @@ For commercial licensing, please contact support@quantumnous.com
 package middleware
 
 import (
+	"encoding/json"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -32,6 +35,81 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+const (
+	playgroundGenerationSizeMin = 64
+	playgroundGenerationSizeMax = 8192
+	playgroundGenerationSeedMax = 1<<31 - 1
+
+	playgroundGenerationSizeMessage = "The size must use WIDTHxHEIGHT with each side between 64 and 8192 pixels."
+	playgroundGenerationSeedMessage = "The seed must be an integer between 1 and 2147483647."
+)
+
+var playgroundGenerationSizePattern = regexp.MustCompile(`^([0-9]+)[xX]([0-9]+)$`)
+
+// playgroundGenerationSizeValid accepts provider size labels ("auto", "1K",
+// "16:9") unchanged and bounds only explicit WIDTHxHEIGHT values, which are the
+// custom sizes the canvas sends.
+func playgroundGenerationSizeValid(size string) bool {
+	size = strings.TrimSpace(size)
+	if size == "" || !strings.ContainsAny(size, "xX×") {
+		return true
+	}
+	match := playgroundGenerationSizePattern.FindStringSubmatch(size)
+	if match == nil {
+		return false
+	}
+	width, err := strconv.Atoi(match[1])
+	if err != nil || width < playgroundGenerationSizeMin || width > playgroundGenerationSizeMax {
+		return false
+	}
+	height, err := strconv.Atoi(match[2])
+	if err != nil || height < playgroundGenerationSizeMin || height > playgroundGenerationSizeMax {
+		return false
+	}
+	return true
+}
+
+func playgroundGenerationSeedValid(raw json.RawMessage) bool {
+	text := strings.TrimSpace(string(raw))
+	if text == "" {
+		return false
+	}
+	seed, err := strconv.ParseInt(text, 10, 64)
+	return err == nil && seed >= 1 && seed <= playgroundGenerationSeedMax
+}
+
+// validatePlaygroundGenerationParameters rejects malformed seed and custom
+// size values with a stable 400 before channel selection and billing start.
+// The body is read through the reusable storage, so the relay still receives
+// the original bytes.
+func validatePlaygroundGenerationParameters(c *gin.Context, canonicalPath string) bool {
+	if canonicalPath != "/v1/images/generations" && canonicalPath != "/v1/videos" {
+		return true
+	}
+	if !strings.HasPrefix(c.Request.Header.Get("Content-Type"), "application/json") {
+		return true
+	}
+	var request map[string]json.RawMessage
+	if err := common.UnmarshalBodyReusable(c, &request); err != nil {
+		abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}), types.ErrorCodeInvalidRequest)
+		return false
+	}
+	if raw, exists := request["size"]; exists && string(raw) != "null" {
+		var size string
+		if err := common.Unmarshal(raw, &size); err != nil || !playgroundGenerationSizeValid(size) {
+			abortWithOpenAiMessage(c, http.StatusBadRequest, playgroundGenerationSizeMessage, types.ErrorCodeInvalidRequest)
+			return false
+		}
+	}
+	if raw, exists := request["seed"]; exists && string(raw) != "null" {
+		if !playgroundGenerationSeedValid(raw) {
+			abortWithOpenAiMessage(c, http.StatusBadRequest, playgroundGenerationSeedMessage, types.ErrorCodeInvalidRequest)
+			return false
+		}
+	}
+	return true
+}
 
 // PlaygroundRelayBridge bridges one workspace media route to its canonical /v1
 // path before plugin endpoint pinning and channel selection run. Pinning,
@@ -53,6 +131,9 @@ func PlaygroundRelayBridge(canonicalPath string) gin.HandlerFunc {
 			return
 		}
 		if !consumePlaygroundWorkflowRun(c) {
+			return
+		}
+		if !validatePlaygroundGenerationParameters(c, canonicalPath) {
 			return
 		}
 		requestedGroup := strings.TrimSpace(c.Request.Header.Get("X-Playground-Group"))

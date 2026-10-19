@@ -8481,6 +8481,25 @@
     "Invalid conversation export.": "Export de conversation invalide.",
     "The conversation export is too large.": "L’export de conversation est trop volumineux.",
     "Unable to import the conversation.": "Impossible d’importer la conversation.",
-    "{{count}} attachments could not be restored and were kept as placeholders.": "{{count}} pièces jointes n’ont pas pu être restaurées et ont été remplacées par des espaces réservés."
+    "{{count}} attachments could not be restored and were kept as placeholders.": "{{count}} pièces jointes n’ont pas pu être restaurées et ont été remplacées par des espaces réservés.",
+    "Custom size": "Taille personnalisée",
+    "Size (WIDTHxHEIGHT)": "Taille (LARGEURxHAUTEUR)",
+    "WIDTHxHEIGHT, 64 to 8192 pixels per side.": "LARGEURxHAUTEUR, de 64 à 8192 pixels par côté.",
+    "Each generated image gets its own result node.": "Chaque image générée obtient son propre nœud de résultat.",
+    "Leave empty for a random seed.": "Laissez vide pour un seed aléatoire.",
+    "The same seed will be reused on every run.": "Le même seed sera réutilisé à chaque exécution.",
+    "Use last result": "Utiliser le dernier résultat",
+    "Last seed: {{seed}}": "Dernier seed : {{seed}}",
+    "Connect at most {{count}} reference images to one step.": "Connectez au maximum {{count}} images de référence à une étape.",
+    "Preferred result": "Résultat préféré",
+    "Preferred": "Préféré",
+    "Set as preferred result": "Définir comme résultat préféré",
+    "Downstream steps use the preferred result.": "Les étapes suivantes utilisent le résultat préféré.",
+    "Too many reference images are connected to this step.": "Trop d'images de référence sont connectées à cette étape.",
+    "The size must use WIDTHxHEIGHT with each side between 64 and 8192 pixels.": "La taille doit utiliser le format LARGEURxHAUTEUR, chaque côté entre 64 et 8192 pixels.",
+    "The seed must be an integer between 1 and 2147483647.": "Le seed doit être un entier compris entre 1 et 2147483647.",
+    "This model's channel metadata does not list image generation.": "Les métadonnées du canal de ce modèle n'indiquent pas la génération d'images.",
+    "This model's channel metadata does not list video generation.": "Les métadonnées du canal de ce modèle n'indiquent pas la génération de vidéos.",
+    "This model's channel metadata lists neither image nor video generation.": "Les métadonnées du canal de ce modèle n'indiquent ni génération d'images ni génération de vidéos."
   }
 }

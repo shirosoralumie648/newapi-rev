@@ -16,9 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { RotateCcw } from 'lucide-react'
+import { Check, RotateCcw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { translateServerText } from '@/lib/server-error-message'
 
@@ -32,6 +33,11 @@ interface CanvasNodeResultFieldsProps {
   node: CanvasFlowNode
   runPhase: CanvasWorkflowRunPhase
   disabled?: boolean
+  /** Whether this result is the batch's preferred member. */
+  preferred?: boolean
+  /** Whether a sibling result exists to choose between. */
+  canPrefer?: boolean
+  onPrefer?: (nodeId: string) => void
   onRetry: (nodeId: string) => void
 }
 
@@ -64,6 +70,9 @@ export function CanvasNodeResultFields(props: CanvasNodeResultFieldsProps) {
   }
   if (workflow?.duration) {
     rows.push({ label: t('Duration (seconds)'), value: workflow.duration })
+  }
+  if (workflow?.seed !== undefined) {
+    rows.push({ label: t('Seed'), value: workflow.seed })
   }
   if (workflow?.inputImageCount) {
     rows.push({
@@ -106,6 +115,35 @@ export function CanvasNodeResultFields(props: CanvasNodeResultFieldsProps) {
             </div>
           ))}
         </dl>
+      ) : null}
+
+      {props.canPrefer ? (
+        <div className='grid gap-1.5 rounded-md border p-2'>
+          <div className='flex flex-wrap items-center justify-between gap-2'>
+            <span className='text-muted-foreground text-xs'>
+              {t('Preferred result')}
+            </span>
+            {props.preferred ? (
+              <Badge variant='secondary'>
+                <Check aria-hidden='true' />
+                {t('Preferred')}
+              </Badge>
+            ) : (
+              <Button
+                disabled={props.disabled || props.runPhase === 'running'}
+                onClick={() => props.onPrefer?.(node.id)}
+                size='sm'
+                type='button'
+                variant='outline'
+              >
+                {t('Set as preferred result')}
+              </Button>
+            )}
+          </div>
+          <p className='text-muted-foreground text-xs'>
+            {t('Downstream steps use the preferred result.')}
+          </p>
+        </div>
       ) : null}
 
       {workflow?.error ? (

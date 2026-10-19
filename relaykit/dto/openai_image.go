@@ -22,11 +22,15 @@ type ImageBillingParameters struct {
 }
 
 type ImageRequest struct {
-	Model             string          `json:"model"`
-	Prompt            string          `json:"prompt" binding:"required"`
-	N                 *uint           `json:"n,omitempty"`
-	Size              string          `json:"size,omitempty"`
-	Quality           string          `json:"quality,omitempty"`
+	Model   string `json:"model"`
+	Prompt  string `json:"prompt" binding:"required"`
+	N       *uint  `json:"n,omitempty"`
+	Size    string `json:"size,omitempty"`
+	Quality string `json:"quality,omitempty"`
+
+	// Seed fixes the upstream sampling seed when present. It is a request
+	// parameter only and never participates in billing.
+	Seed              *int64          `json:"seed,omitempty"`
 	ResponseFormat    string          `json:"response_format,omitempty"`
 	Style             json.RawMessage `json:"style,omitempty"`
 	User              json.RawMessage `json:"user,omitempty"`

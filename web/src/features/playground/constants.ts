@@ -399,6 +399,12 @@ export const PLAYGROUND_IMAGE_SIZES = [
   '1024x1792',
 ] as const
 export const PLAYGROUND_VIDEO_DURATIONS = [5, 10] as const
+// The canvas custom-size and seed controls mirror these bounds. The server
+// validates the same WIDTHxHEIGHT and seed ranges on /pg before billing.
+export const PLAYGROUND_GENERATION_SIZE_MIN = 64
+export const PLAYGROUND_GENERATION_SIZE_MAX = 8192
+export const PLAYGROUND_GENERATION_SEED_MIN = 1
+export const PLAYGROUND_GENERATION_SEED_MAX = 2 ** 31 - 1
 // Mirrors `dto.MaxImageN` (image count is a billing multiplier) and
 // `relaycommon.MaxTaskDurationSeconds`; the client never sends a value outside
 // these bounds even though the relay validates the request again.

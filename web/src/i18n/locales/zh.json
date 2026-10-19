@@ -8481,6 +8481,25 @@
     "Invalid conversation export.": "会话导出文件无效。",
     "The conversation export is too large.": "会话导出文件过大。",
     "Unable to import the conversation.": "无法导入该会话。",
-    "{{count}} attachments could not be restored and were kept as placeholders.": "有 {{count}} 个附件无法恢复，已保留为占位标注。"
+    "{{count}} attachments could not be restored and were kept as placeholders.": "有 {{count}} 个附件无法恢复，已保留为占位标注。",
+    "Custom size": "自定义尺寸",
+    "Size (WIDTHxHEIGHT)": "尺寸（宽x高）",
+    "WIDTHxHEIGHT, 64 to 8192 pixels per side.": "宽x高，每边 64 到 8192 像素。",
+    "Each generated image gets its own result node.": "每张生成的图片都会有自己的结果节点。",
+    "Leave empty for a random seed.": "留空以使用随机种子。",
+    "The same seed will be reused on every run.": "每次运行都会复用同一个种子。",
+    "Use last result": "使用上次结果",
+    "Last seed: {{seed}}": "上次种子：{{seed}}",
+    "Connect at most {{count}} reference images to one step.": "每个步骤最多连接 {{count}} 张参考图片。",
+    "Preferred result": "首选结果",
+    "Preferred": "首选",
+    "Set as preferred result": "设为首选结果",
+    "Downstream steps use the preferred result.": "下游步骤会使用首选结果。",
+    "Too many reference images are connected to this step.": "此步骤连接的参考图片过多。",
+    "The size must use WIDTHxHEIGHT with each side between 64 and 8192 pixels.": "尺寸必须使用 宽x高 格式，每边在 64 到 8192 像素之间。",
+    "The seed must be an integer between 1 and 2147483647.": "种子必须是 1 到 2147483647 之间的整数。",
+    "This model's channel metadata does not list image generation.": "该模型的渠道元数据未列出图片生成。",
+    "This model's channel metadata does not list video generation.": "该模型的渠道元数据未列出视频生成。",
+    "This model's channel metadata lists neither image nor video generation.": "该模型的渠道元数据既未列出图片生成，也未列出视频生成。"
   }
 }
