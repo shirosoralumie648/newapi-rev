@@ -340,7 +340,8 @@ export function CanvasWorkflowRunHistory(props: CanvasWorkflowRunHistoryProps) {
 
 interface RunDetailProps {
   run: CanvasWorkflowRun
-  locale: string
+  /** Intl locale for the relative timestamp; absent uses the runtime default. */
+  locale?: string
   comparison: CanvasWorkflowRunDiffRow[] | null
   onBack: () => void
   onRestore: () => void

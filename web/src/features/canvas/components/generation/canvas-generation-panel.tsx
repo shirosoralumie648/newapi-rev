@@ -24,7 +24,12 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
+import { CANVAS_WORKFLOW_CAPABILITY_MESSAGES } from '@/features/canvas/constants'
 import type { CanvasSendSeed } from '@/features/canvas/lib/canvas-send'
+import {
+  canvasWorkflowGenerationSupport,
+  type CanvasWorkflowModelCapability,
+} from '@/features/canvas/lib/canvas-workflow'
 import {
   PLAYGROUND_AUDIO_VOICES,
   PLAYGROUND_GENERATION_ERRORS,
@@ -54,10 +59,21 @@ const GENERATION_ERROR_KEYS: Record<PlaygroundGenerationKind, string> = {
   audio: PLAYGROUND_GENERATION_ERRORS.AUDIO_FAILED,
 }
 
+// Only image and video carry generation support in the model catalog; an audio
+// model has no capability metadata to judge, so it is never gated.
+const GENERATION_CAPABILITY_MESSAGES: Partial<
+  Record<PlaygroundGenerationKind, string>
+> = {
+  image: CANVAS_WORKFLOW_CAPABILITY_MESSAGES.IMAGE_UNSUPPORTED,
+  video: CANVAS_WORKFLOW_CAPABILITY_MESSAGES.VIDEO_UNSUPPORTED,
+}
+
 interface CanvasGenerationPanelProps {
   active: boolean
   disabled?: boolean
   group: string
+  /** Endpoint and task-usage metadata keyed by model name, when available. */
+  modelCapabilities?: Record<string, CanvasWorkflowModelCapability>
   models: ModelOption[]
   /** Prompt a conversation message action handed to the canvas. */
   initialPrompt?: string
@@ -109,10 +125,23 @@ export function CanvasGenerationPanel(props: CanvasGenerationPanelProps) {
     }
   }, [audioUrl])
 
+  // A catalog row that proves the selected model cannot serve the current kind
+  // disables the send; unknown metadata keeps the panel usable, matching the
+  // canvas node controls.
+  const generationSupport = canvasWorkflowGenerationSupport(
+    props.modelCapabilities?.[model.trim()]
+  )
+  const generationUnsupported =
+    kind !== 'audio' && generationSupport !== null && !generationSupport[kind]
+  const capabilityReason = generationUnsupported
+    ? (GENERATION_CAPABILITY_MESSAGES[kind] ?? null)
+    : null
+
   const trimmedPrompt = prompt.trim()
   const canSubmit =
     !props.disabled &&
     !isSubmitting &&
+    !generationUnsupported &&
     model.trim() !== '' &&
     trimmedPrompt !== ''
 
@@ -205,6 +234,9 @@ export function CanvasGenerationPanel(props: CanvasGenerationPanelProps) {
               </NativeSelectOption>
             ))}
           </NativeSelect>
+          {capabilityReason ? (
+            <p className='text-warning text-xs'>{t(capabilityReason)}</p>
+          ) : null}
         </div>
 
         <div className='grid gap-2'>
