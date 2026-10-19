@@ -51,6 +51,7 @@ import type {
   PlaygroundConfig,
   PlaygroundContextSettings,
   PlaygroundContextSummary,
+  PlaygroundPendingQuote,
   ParameterEnabled,
 } from '../types'
 import { useStreamRequest } from './use-stream-request'
@@ -460,7 +461,11 @@ export function useChatHandler({
 
   // Send streaming chat request
   const sendStreamingChat = useCallback(
-    (messages: Message[], contextSummary: PlaygroundContextSummary | null) => {
+    (
+      messages: Message[],
+      contextSummary: PlaygroundContextSummary | null,
+      quote?: PlaygroundPendingQuote | null
+    ) => {
       const generation = requestGenerationRef.current + 1
       requestGenerationRef.current = generation
       requestSessionIdRef.current = sessionId
@@ -477,7 +482,8 @@ export function useChatHandler({
         parameterEnabled,
         systemPrompt,
         { settings: contextSettings, summary: contextSummary },
-        memoryBlock
+        memoryBlock,
+        quote
       )
       void sendStreamRequest(payload, {
         onUpdate: (type, chunk) => handleStreamUpdate(generation, type, chunk),
@@ -521,7 +527,9 @@ export function useChatHandler({
        * the branch content, so a response that only carries the continuation
        * is prefixed with it.
        */
-      prefix?: string
+      prefix?: string,
+      /** Composer quote carried by the next request; continuations send none. */
+      quote?: PlaygroundPendingQuote | null
     ) => {
       const payload = buildChatCompletionPayload(
         messages,
@@ -529,7 +537,8 @@ export function useChatHandler({
         parameterEnabled,
         systemPrompt,
         { settings: contextSettings, summary: contextSummary },
-        memoryBlock
+        memoryBlock,
+        quote
       )
       const generation = requestGenerationRef.current + 1
       const abortController = new AbortController()
@@ -653,7 +662,7 @@ export function useChatHandler({
   // automatic summary is on) is resolved first, because the payload must carry
   // the node the plan then uses.
   const sendChat = useCallback(
-    (messages: Message[]) => {
+    (messages: Message[], quote?: PlaygroundPendingQuote | null) => {
       continuationRef.current = null
       void Promise.all([
         ensurePlaygroundMessageAttachments(messages),
@@ -666,9 +675,9 @@ export function useChatHandler({
           contextSummary = null
         }
         if (config.stream) {
-          sendStreamingChat(messages, contextSummary)
+          sendStreamingChat(messages, contextSummary, quote)
         } else {
-          void sendNonStreamingChat(messages, contextSummary)
+          void sendNonStreamingChat(messages, contextSummary, undefined, quote)
         }
       })
     },

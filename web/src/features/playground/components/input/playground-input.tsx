@@ -98,6 +98,9 @@ interface PlaygroundInputProps {
   onAutoReadChange: (value: boolean) => void
   onAutoReadUseDefault: () => void
   onAutoReadDefaultChange: (value: boolean) => void
+  webSearchAvailable?: boolean
+  webSearchEnabled?: boolean
+  onWebSearchChange?: (value: boolean) => void
   /** Effective automatic naming state of the active conversation. */
   autoTitleEnabled: boolean
   /** Account default applied to conversations without an override. */
@@ -145,6 +148,9 @@ export function PlaygroundInput({
   onAutoReadChange,
   onAutoReadUseDefault,
   onAutoReadDefaultChange,
+  webSearchAvailable = false,
+  webSearchEnabled = false,
+  onWebSearchChange,
   autoTitleEnabled,
   autoTitleDefaultEnabled,
   autoTitleHasOverride,
@@ -251,8 +257,11 @@ export function PlaygroundInput({
                 onRemoveContextSummary={onRemoveContextSummary}
                 onSummarizeContext={onSummarizeContext}
                 onSystemPromptChange={onSystemPromptChange}
+                onWebSearchChange={onWebSearchChange}
                 parameterEnabled={parameterEnabled}
                 systemPrompt={systemPrompt}
+                webSearchAvailable={webSearchAvailable}
+                webSearchEnabled={webSearchEnabled}
               />
             }
           />

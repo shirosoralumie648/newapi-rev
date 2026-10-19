@@ -72,6 +72,12 @@ type PlaygroundUserUsage struct {
 	ArtifactBytes          int64 `json:"artifact_bytes" gorm:"not null"`
 	CanvasCount            int64 `json:"canvas_count" gorm:"not null"`
 	CanvasBytes            int64 `json:"canvas_bytes" gorm:"not null"`
+	// CanvasTemplateCount and CanvasTemplateBytes count the account's private
+	// canvas templates and their document plus raw inline asset bytes. The
+	// columns were appended to an existing table, so they carry DEFAULT 0 like
+	// the other later counters.
+	CanvasTemplateCount int64 `json:"canvas_template_count" gorm:"not null;default:0"`
+	CanvasTemplateBytes int64 `json:"canvas_template_bytes" gorm:"not null;default:0"`
 	// CanvasSnapshotCount and CanvasSnapshotBytes count the gzip canvas
 	// history objects of the account. They are separate from CanvasBytes so
 	// the board budgets and the history budget never trade one for the other,
@@ -115,6 +121,8 @@ type playgroundUserUsageCounters struct {
 	ArtifactBytes              int64
 	CanvasCount                int64
 	CanvasBytes                int64
+	CanvasTemplateCount        int64
+	CanvasTemplateBytes        int64
 	CanvasSnapshotCount        int64
 	CanvasSnapshotBytes        int64
 	KnowledgeBaseCount         int64
@@ -138,6 +146,8 @@ func (usage *PlaygroundUserUsage) counters() playgroundUserUsageCounters {
 		ArtifactBytes:              usage.ArtifactBytes,
 		CanvasCount:                usage.CanvasCount,
 		CanvasBytes:                usage.CanvasBytes,
+		CanvasTemplateCount:        usage.CanvasTemplateCount,
+		CanvasTemplateBytes:        usage.CanvasTemplateBytes,
 		CanvasSnapshotCount:        usage.CanvasSnapshotCount,
 		CanvasSnapshotBytes:        usage.CanvasSnapshotBytes,
 		KnowledgeBaseCount:         usage.KnowledgeBaseCount,
@@ -162,6 +172,8 @@ func (usage *PlaygroundUserUsage) load(counters playgroundUserUsageCounters) {
 	usage.ArtifactBytes = counters.ArtifactBytes
 	usage.CanvasCount = counters.CanvasCount
 	usage.CanvasBytes = counters.CanvasBytes
+	usage.CanvasTemplateCount = counters.CanvasTemplateCount
+	usage.CanvasTemplateBytes = counters.CanvasTemplateBytes
 	usage.CanvasSnapshotCount = counters.CanvasSnapshotCount
 	usage.CanvasSnapshotBytes = counters.CanvasSnapshotBytes
 	usage.KnowledgeBaseCount = counters.KnowledgeBaseCount
@@ -187,6 +199,8 @@ type playgroundUserUsageDelta struct {
 	ArtifactBytes              int64
 	CanvasCount                int64
 	CanvasBytes                int64
+	CanvasTemplateCount        int64
+	CanvasTemplateBytes        int64
 	CanvasSnapshotCount        int64
 	CanvasSnapshotBytes        int64
 	KnowledgeBaseCount         int64
@@ -209,6 +223,8 @@ func (usage *PlaygroundUserUsage) apply(delta playgroundUserUsageDelta) {
 	usage.ArtifactBytes = max(0, usage.ArtifactBytes+delta.ArtifactBytes)
 	usage.CanvasCount = max(0, usage.CanvasCount+delta.CanvasCount)
 	usage.CanvasBytes = max(0, usage.CanvasBytes+delta.CanvasBytes)
+	usage.CanvasTemplateCount = max(0, usage.CanvasTemplateCount+delta.CanvasTemplateCount)
+	usage.CanvasTemplateBytes = max(0, usage.CanvasTemplateBytes+delta.CanvasTemplateBytes)
 	usage.CanvasSnapshotCount = max(0, usage.CanvasSnapshotCount+delta.CanvasSnapshotCount)
 	usage.CanvasSnapshotBytes = max(0, usage.CanvasSnapshotBytes+delta.CanvasSnapshotBytes)
 	usage.KnowledgeBaseCount = max(0, usage.KnowledgeBaseCount+delta.KnowledgeBaseCount)
@@ -270,6 +286,8 @@ func savePlaygroundUserUsage(tx *gorm.DB, usage *PlaygroundUserUsage) error {
 		"artifact_bytes":                usage.ArtifactBytes,
 		"canvas_count":                  usage.CanvasCount,
 		"canvas_bytes":                  usage.CanvasBytes,
+		"canvas_template_count":         usage.CanvasTemplateCount,
+		"canvas_template_bytes":         usage.CanvasTemplateBytes,
 		"canvas_snapshot_count":         usage.CanvasSnapshotCount,
 		"canvas_snapshot_bytes":         usage.CanvasSnapshotBytes,
 		"knowledge_base_count":          usage.KnowledgeBaseCount,
@@ -342,6 +360,15 @@ func playgroundUserUsageSnapshot(tx *gorm.DB, userID int) (PlaygroundUserUsage, 
 		return usage, err
 	}
 	usage.CanvasCount, usage.CanvasBytes = canvas.Used, canvas.UsedBytes
+	var templates struct {
+		Used      int64
+		UsedBytes int64
+	}
+	if err := tx.Model(&PlaygroundCanvasTemplate{}).Where("user_id = ? AND deleted_at = 0", userID).
+		Select("COUNT(*) AS used, COALESCE(SUM(document_bytes + asset_bytes), 0) AS used_bytes").Scan(&templates).Error; err != nil {
+		return usage, err
+	}
+	usage.CanvasTemplateCount, usage.CanvasTemplateBytes = templates.Used, templates.UsedBytes
 	// Snapshot bytes are the logical (uncompressed) document bytes packed into
 	// the gzip history objects, which is what the snapshot budget weighs.
 	var snapshots struct {
@@ -416,7 +443,7 @@ type PlaygroundUsageReconciliation struct {
 // them.
 func playgroundUsageOwnerIDs(db *gorm.DB) ([]int, error) {
 	seen := map[int]bool{}
-	for _, resource := range []any{&PlaygroundSession{}, &PlaygroundPreset{}, &PlaygroundSnippet{}, &PlaygroundMemory{}, &PlaygroundAttachment{}, &PlaygroundUpload{}, &PlaygroundArtifact{}, &PlaygroundCanvasProject{}, &PlaygroundCanvasSnapshot{}, &PlaygroundKnowledgeBase{}} {
+	for _, resource := range []any{&PlaygroundSession{}, &PlaygroundPreset{}, &PlaygroundSnippet{}, &PlaygroundMemory{}, &PlaygroundAttachment{}, &PlaygroundUpload{}, &PlaygroundArtifact{}, &PlaygroundCanvasProject{}, &PlaygroundCanvasTemplate{}, &PlaygroundCanvasSnapshot{}, &PlaygroundKnowledgeBase{}} {
 		ids := make([]int, 0)
 		if err := db.Model(resource).Distinct("user_id").Pluck("user_id", &ids).Error; err != nil {
 			return nil, err

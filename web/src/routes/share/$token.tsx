@@ -16,14 +16,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { createFileRoute } from '@tanstack/react-router'
 
-type InputToolNotice = {
-  description?: string
-  title: string
-}
+import { PlaygroundSharedConversation } from '@/features/playground/components/share/playground-shared-conversation'
 
-export function getSearchActionNotice(): InputToolNotice {
-  return {
-    title: 'Search feature in development',
-  }
+export const Route = createFileRoute('/share/$token')({
+  component: SharedConversationRoute,
+})
+
+function SharedConversationRoute() {
+  const { token } = Route.useParams()
+  return <PlaygroundSharedConversation token={token} />
 }

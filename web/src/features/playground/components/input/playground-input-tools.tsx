@@ -32,7 +32,6 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 
-import { getSearchActionNotice } from '../../lib'
 import type { PlaygroundContextPlan } from '../../lib'
 import type {
   ModelOption,
@@ -91,6 +90,11 @@ type PlaygroundInputToolsProps = {
   onAutoReadChange: (value: boolean) => void
   onAutoReadUseDefault: () => void
   onAutoReadDefaultChange: (value: boolean) => void
+  /** Whether the administrator configured web search for this deployment. */
+  webSearchAvailable?: boolean
+  /** Whether the next submitted turn also searches the web. */
+  webSearchEnabled?: boolean
+  onWebSearchChange?: (value: boolean) => void
   /** Effective automatic naming state of the active conversation. */
   autoTitleEnabled: boolean
   /** Account default applied to conversations without an override. */
@@ -130,6 +134,9 @@ export function PlaygroundInputTools({
   onAutoReadChange,
   onAutoReadUseDefault,
   onAutoReadDefaultChange,
+  webSearchAvailable = false,
+  webSearchEnabled = false,
+  onWebSearchChange,
   autoTitleEnabled,
   autoTitleDefaultEnabled,
   autoTitleHasOverride,
@@ -139,11 +146,6 @@ export function PlaygroundInputTools({
 }: PlaygroundInputToolsProps) {
   const { t } = useTranslation()
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
-
-  const handleSearchAction = () => {
-    const notice = getSearchActionNotice()
-    toast.info(t(notice.title))
-  }
 
   const handleClearMessages = () => {
     onClearMessages?.()
@@ -159,24 +161,35 @@ export function PlaygroundInputTools({
           onInsertText={onInsertText}
         />
 
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <PromptInputButton
-                aria-label={t('Search')}
-                className='text-muted-foreground hover:text-foreground hover:bg-muted/70 font-medium'
-                disabled={disabled}
-                onClick={handleSearchAction}
-                variant='ghost'
-              >
-                <GlobeIcon size={16} />
-              </PromptInputButton>
-            }
-          />
-          <TooltipContent>
-            <p>{t('Search')}</p>
-          </TooltipContent>
-        </Tooltip>
+        {webSearchAvailable ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <PromptInputButton
+                  aria-label={t('Search this turn')}
+                  aria-pressed={webSearchEnabled}
+                  className={
+                    webSearchEnabled
+                      ? 'bg-primary/10 text-primary hover:bg-primary/15 font-medium'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/70 font-medium'
+                  }
+                  disabled={disabled || !onWebSearchChange}
+                  onClick={() => onWebSearchChange?.(!webSearchEnabled)}
+                  variant='ghost'
+                >
+                  <GlobeIcon size={16} />
+                </PromptInputButton>
+              }
+            />
+            <TooltipContent>
+              <p>
+                {webSearchEnabled
+                  ? t('Web search is on for this turn')
+                  : t('Search the web with this turn')}
+              </p>
+            </TooltipContent>
+          </Tooltip>
+        ) : null}
 
         {onDictateTranscript ? (
           <PlaygroundDictationPanel

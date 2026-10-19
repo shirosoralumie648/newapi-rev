@@ -13,6 +13,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/middleware"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/gin-gonic/gin"
@@ -35,6 +36,9 @@ var accessTokenExemptRoutes = []string{
 	"GET /api/home_page_content",
 	"GET /api/ratio_config",
 	"GET /api/user/groups",
+
+	// Anonymous public share link.
+	"GET /api/playground/shared/:token",
 
 	// Anonymous account entry points.
 	"GET /api/verification",

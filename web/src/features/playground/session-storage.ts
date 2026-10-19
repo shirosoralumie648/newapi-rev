@@ -32,6 +32,7 @@ import {
   normalizeContextSettings,
   normalizeContextSummary,
 } from './lib/context/playground-context'
+import { normalizeSessionTags } from './lib/session-organization'
 import {
   clearLegacyPlaygroundData,
   normalizeMessagesForStorage,
@@ -81,6 +82,9 @@ function createSession(
     suggestedQuestions: [...suggestedQuestions],
     context: { ...context },
     contextSummary,
+    pinned: false,
+    archived: false,
+    tags: [],
     messages: [],
   }
 }
@@ -105,6 +109,9 @@ function normalizeSession(value: unknown): PlaygroundSession | null {
     suggestedQuestions: parsed.data.suggestedQuestions ?? [],
     context: normalizeContextSettings(parsed.data.context),
     contextSummary: normalizeContextSummary(parsed.data.contextSummary),
+    pinned: parsed.data.archived ? false : (parsed.data.pinned ?? false),
+    archived: parsed.data.archived ?? false,
+    tags: normalizeSessionTags(parsed.data.tags),
     messages: normalizeMessagesForStorage(parsed.data.messages),
   }
 }
@@ -196,6 +203,9 @@ function migrateStoredSession(value: unknown): PlaygroundSession | null {
       : undefined,
     context: source.context,
     contextSummary: source.contextSummary,
+    pinned: source.pinned,
+    archived: source.archived,
+    tags: source.tags,
     messages: messages.data,
   })
 }

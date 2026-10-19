@@ -61,7 +61,10 @@ import {
   type KnowledgeBase,
   type KnowledgeDocument,
 } from '@/features/playground/knowledge-api'
-import { getGroupFallback } from '@/features/playground/lib'
+import {
+  getGroupFallback,
+  playgroundAttachmentUploadMediaType,
+} from '@/features/playground/lib'
 import { playgroundQueryKeys } from '@/features/playground/lib/query-keys'
 import type { GroupOption } from '@/features/playground/types'
 import { toIntlLocale } from '@/i18n/languages'
@@ -307,7 +310,7 @@ export function CanvasKnowledgeBaseSheet(props: CanvasKnowledgeBaseSheetProps) {
     try {
       document = await createKnowledgeDocument(selectedBase.id, {
         filename: file.name,
-        mediaType: file.type || 'application/octet-stream',
+        mediaType: playgroundAttachmentUploadMediaType(file.type, file.name),
         data: await file.arrayBuffer(),
         clientKey: createKnowledgeClientKey('pgkd'),
       })

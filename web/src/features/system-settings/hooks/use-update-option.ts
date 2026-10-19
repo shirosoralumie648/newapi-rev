@@ -23,8 +23,16 @@ import { toast } from 'sonner'
 import { handleServerError } from '@/lib/handle-server-error'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
-import { updatePasskeyDomains, updateSystemOption } from '../api'
-import type { UpdateOptionRequest, UpdatePasskeyDomainsRequest } from '../types'
+import {
+  updatePasskeyDomains,
+  updatePlaygroundWebSearch,
+  updateSystemOption,
+} from '../api'
+import type {
+  PlaygroundWebSearchSettingsRequest,
+  UpdateOptionRequest,
+  UpdatePasskeyDomainsRequest,
+} from '../types'
 
 // Configuration keys that require status refresh
 const STATUS_RELATED_KEYS = new Set([
@@ -80,6 +88,21 @@ export function useUpdateOption() {
     onError: (error: Error) => {
       handleServerError(error, i18next.t('Failed to update setting'))
     },
+  })
+}
+
+export function useUpdatePlaygroundWebSearch() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (request: PlaygroundWebSearchSettingsRequest) =>
+      requireServerSuccess(await updatePlaygroundWebSearch(request)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['system-options'] })
+      toast.success(i18next.t('Web search settings saved'))
+    },
+    onError: (error: Error) =>
+      handleServerError(error, i18next.t('Failed to update setting')),
   })
 }
 

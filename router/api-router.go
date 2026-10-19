@@ -72,6 +72,12 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/verify/methods", middleware.UserAuth(), middleware.DisableCache(), controller.GetVerificationMethods)
 		apiRouter.POST("/verify", middleware.UserAuth(), middleware.CriticalRateLimit(), middleware.UserCriticalRateLimit("security-verification"), middleware.DisableCache(), controller.UniversalVerify)
 
+		// A public share link is anonymous and read-only. It is registered
+		// outside the authenticated /playground group; the handler still
+		// validates the token hash on every request and returns one identical
+		// 404 for revoked, expired and unknown links.
+		apiRouter.GET("/playground/shared/:token", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.GetSharedPlaygroundSession)
+
 		playgroundRoute := apiRouter.Group("/playground")
 		playgroundRoute.Use(middleware.DisableCache(), middleware.UserAuth())
 		{
@@ -132,6 +138,10 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.GET("/sessions/:id", controller.GetPlaygroundSession)
 			playgroundRoute.PATCH("/sessions/:id", controller.UpdatePlaygroundSession)
 			playgroundRoute.DELETE("/sessions/:id", controller.DeletePlaygroundSession)
+			// A share link is revocable; creating a new one rotates (revokes)
+			// the previous link because the plaintext is never stored.
+			playgroundRoute.POST("/sessions/:id/share", controller.CreatePlaygroundSessionShare)
+			playgroundRoute.DELETE("/sessions/:id/share", controller.DeletePlaygroundSessionShare)
 			// The trash keeps a deleted conversation recoverable for the
 			// configured window; export also works while it waits there.
 			playgroundRoute.POST("/sessions/:id/restore", controller.RestorePlaygroundSession)
@@ -164,6 +174,10 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.GET("/canvases/:canvasId", controller.GetPlaygroundCanvasProject)
 			playgroundRoute.PATCH("/canvases/:canvasId", controller.UpdatePlaygroundCanvasProject)
 			playgroundRoute.DELETE("/canvases/:canvasId", controller.DeletePlaygroundCanvasProject)
+			// Canvas links follow the conversation share contract: a new link
+			// rotates the old one, and the anonymous route is the same.
+			playgroundRoute.POST("/canvases/:canvasId/share", controller.CreatePlaygroundCanvasShare)
+			playgroundRoute.DELETE("/canvases/:canvasId/share", controller.DeletePlaygroundCanvasShare)
 			// A trashed canvas waits in the shared trash window and comes back
 			// with its document, pins and counter share intact.
 			playgroundRoute.POST("/canvases/:canvasId/restore", controller.RestorePlaygroundCanvasProject)
@@ -361,6 +375,7 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.GET("/request_policy", controller.GetRequestPolicy)
 			optionRoute.PATCH("/request_policy", controller.UpdateRequestPolicy)
 			optionRoute.PUT("/", controller.UpdateOption)
+			optionRoute.PUT("/playground/web_search", controller.UpdatePlaygroundWebSearch)
 			optionRoute.PUT("/passkey/domains", controller.UpdatePasskeyDomains)
 			optionRoute.GET("/model_pricing", controller.GetModelPricingConfig)
 			optionRoute.PATCH("/model_pricing", controller.UpdateModelPricingConfig)

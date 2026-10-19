@@ -104,6 +104,9 @@ describe('playground session snapshots', () => {
       suggestedQuestions: [],
       context: { ...DEFAULT_CONTEXT_SETTINGS },
       contextSummary: null,
+      pinned: false,
+      archived: false,
+      tags: [],
       messages: [message('m1', 'first')],
       ...overrides,
     }
@@ -115,6 +118,18 @@ describe('playground session snapshots', () => {
     )
     expect(playgroundSnapshot(session('Answer in French.'))).toBe(
       playgroundSnapshot(session('Answer in French.'))
+    )
+  })
+
+  test('pin, archive and tag changes are part of the snapshot', () => {
+    expect(playgroundSnapshot(session('', { pinned: true }))).not.toBe(
+      playgroundSnapshot(session(''))
+    )
+    expect(playgroundSnapshot(session('', { archived: true }))).not.toBe(
+      playgroundSnapshot(session(''))
+    )
+    expect(playgroundSnapshot(session('', { tags: ['work'] }))).not.toBe(
+      playgroundSnapshot(session(''))
     )
   })
 

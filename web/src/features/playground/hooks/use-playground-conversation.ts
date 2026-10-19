@@ -30,14 +30,19 @@ import {
   setActiveMessageVersion,
   updateMessageToolCallStatus,
 } from '../lib'
-import type { Message, MessageAttachment } from '../types'
+import type {
+  Message,
+  MessageAttachment,
+  MessageSearchSnapshot,
+  PlaygroundPendingQuote,
+} from '../types'
 
 type UsePlaygroundConversationOptions = {
   messages: Message[]
   updateMessages: (
     updater: Message[] | ((prev: Message[]) => Message[])
   ) => void
-  sendChat: (messages: Message[]) => void
+  sendChat: (messages: Message[], quote?: PlaygroundPendingQuote | null) => void
   /**
    * Continue the last truncated assistant reply: the prefill form is tried
    * first, the fallback form appends one user instruction.
@@ -64,14 +69,20 @@ export function usePlaygroundConversation({
   messagesRef.current = messages
 
   const handleSendMessage = useCallback(
-    (text: string, attachments?: MessageAttachment[]) => {
+    (
+      text: string,
+      attachments?: MessageAttachment[],
+      search?: MessageSearchSnapshot,
+      quote?: PlaygroundPendingQuote | null
+    ) => {
       const nextMessages = appendUserMessagePair(
         messagesRef.current,
         text,
-        attachments
+        attachments,
+        search
       )
       updateMessages(nextMessages)
-      sendChat(nextMessages)
+      sendChat(nextMessages, quote)
     },
     [updateMessages, sendChat]
   )

@@ -17,7 +17,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { act, fireEvent, renderHook } from '@testing-library/react'
-import type { MouseEvent as ReactMouseEvent } from 'react'
 import { expect, test, vi } from 'vitest'
 
 import { CANVAS_MAX_NODES } from '../../constants'
@@ -650,7 +649,7 @@ test('dragging snaps to a nearby edge and records one history entry', () => {
     ...hook.result.current.nodes[1],
     position: { x: 258, y: 0 },
   } as CanvasFlowNode
-  const event = new MouseEvent('mousedown') as unknown as ReactMouseEvent
+  const event = new MouseEvent('mousedown')
 
   act(() => hook.result.current.handleNodeDragStart(event, dragged, [dragged]))
   act(() => hook.result.current.handleNodeDrag(event, dragged, [dragged]))
