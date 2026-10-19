@@ -2523,6 +2523,8 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodGet, "/api/playground/logs/route-cost/replay"},
 		{http.MethodDelete, "/api/playground/logs/route-cost/capture"},
 		{http.MethodGet, "/api/playground/assets?kind=attachment"},
+		{http.MethodGet, "/api/playground/mcp/servers"},
+		{http.MethodPost, "/api/playground/mcp/missing/call"},
 		{http.MethodGet, "/api/playground/trash"},
 		{http.MethodGet, "/api/playground/sessions/" + sessionID + "/export"},
 		{http.MethodPost, "/api/playground/sessions/" + sessionID + "/share"},

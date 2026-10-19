@@ -228,11 +228,15 @@ export function findPlaygroundMCPDraftErrors(
     }
 
     const token = server.token
-    if (token !== '') {
+    // An untouched stored credential is still a credential: saving the list
+    // without its header would make the gateway reject the whole draft.
+    const keepsStoredToken = server.hasToken && !server.clearToken
+    if (token !== '' || keepsStoredToken) {
       if (
-        token.length > PLAYGROUND_MCP_MAX_TOKEN_BYTES ||
-        token.includes('\u0000') ||
-        /[\r\n]/.test(token)
+        token !== '' &&
+        (token.length > PLAYGROUND_MCP_MAX_TOKEN_BYTES ||
+          token.includes('\u0000') ||
+          /[\r\n]/.test(token))
       ) {
         errors[`${prefix}-token`] = 'The token is invalid.'
       } else if (header === '') {

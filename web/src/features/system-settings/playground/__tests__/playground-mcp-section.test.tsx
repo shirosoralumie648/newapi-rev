@@ -180,6 +180,22 @@ test('an invalid connection is reported in place and never saved', async () => {
   expect(api.put).not.toHaveBeenCalled()
 })
 
+test('a stored credential without a header is reported before saving', async () => {
+  const user = userEvent.setup()
+  renderSection({ enabled: true, servers: [storedServer({ header: '' })] })
+
+  await save(user)
+
+  expect(
+    await screen.findByText('Choose a header before storing a token.')
+  ).toBeVisible()
+  expect(screen.getByLabelText('Access token')).toHaveAttribute(
+    'aria-invalid',
+    'true'
+  )
+  expect(api.put).not.toHaveBeenCalled()
+})
+
 test('an unchanged configuration is not saved again', async () => {
   const user = userEvent.setup()
   renderSection({ enabled: true, servers: [storedServer()] })
