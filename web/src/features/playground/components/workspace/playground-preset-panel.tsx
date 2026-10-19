@@ -384,7 +384,9 @@ export function PlaygroundPresetPanel(props: PlaygroundPresetPanelProps) {
       toast.error(t('Up to 6 suggested questions are allowed.'))
       return
     }
-    if (suggestedQuestions.some((question) => question.length > 200)) {
+    if (
+      suggestedQuestions.some((question) => Array.from(question).length > 200)
+    ) {
       toast.error(
         t('Each suggested question must contain 1 to 200 characters.')
       )
