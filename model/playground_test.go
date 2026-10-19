@@ -196,6 +196,13 @@ func playgroundRequest(t *testing.T, user int, method, path string, body any, ha
 		if parts[3] == "comparisons" {
 			c.Params = append(c.Params, gin.Param{Key: "runId", Value: parts[4]})
 		}
+		if parts[3] == "workflows" {
+			if parts[4] == "history" && len(parts) > 5 {
+				c.Params = append(c.Params, gin.Param{Key: "runId", Value: parts[5]})
+			} else if parts[4] != "history" {
+				c.Params = append(c.Params, gin.Param{Key: "runId", Value: parts[4]})
+			}
+		}
 		if parts[3] == "uploads" {
 			c.Params = append(c.Params, gin.Param{Key: "uploadId", Value: parts[4]})
 		}
@@ -2523,6 +2530,8 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodPost, "/api/playground/sessions/" + sessionID + "/restore"},
 		{http.MethodPost, "/api/playground/tasks/missing/cancel"},
 		{http.MethodPost, "/pg/embeddings"},
+		{http.MethodPost, "/pg/rerank"},
+		{http.MethodPost, "/pg/moderations"},
 		{http.MethodGet, "/api/playground/presets"},
 		{http.MethodPost, "/api/playground/presets"},
 		{http.MethodGet, "/api/playground/presets/market"},
@@ -7017,7 +7026,7 @@ func TestPlaygroundLogCapture(t *testing.T) {
 				require.NoError(t, db.Migrator().DropTable(&model.Log{}, &model.PlaygroundLogCapture{}))
 			})
 			require.NoError(t, db.Create(&[]model.Log{
-				{UserId: 7, Type: model.LogTypeConsume, RequestId: "pg-replay-owner", ModelName: "replay-model", Group: "default", Quota: 42, PromptTokens: 10, CompletionTokens: 20, CreatedAt: 1000,
+				{UserId: 7, Type: model.LogTypeConsume, RequestId: "pg-replay-owner", ModelName: "replay-model", Group: "default", IsStream: true, Quota: 42, PromptTokens: 10, CompletionTokens: 20, CreatedAt: 1000,
 					Other: `{"request_path":"/pg/chat/completions","reasoning_effort":"high","po":["set temperature = 0.2"]}`},
 				{UserId: 8, Type: model.LogTypeConsume, RequestId: "pg-replay-other", ModelName: "other-model", Group: "default", CreatedAt: 1000},
 				{UserId: 7, Type: model.LogTypeConsume, RequestId: "pg-replay-expired", ModelName: "replay-model", Group: "default", CreatedAt: 1000},

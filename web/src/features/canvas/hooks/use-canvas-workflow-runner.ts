@@ -18,14 +18,20 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { sendChatCompletion } from '@/features/playground/api'
+import {
+  getPlaygroundMessageCosts,
+  sendChatCompletion,
+} from '@/features/playground/api'
 import { PLAYGROUND_TASK_TERMINAL_STATUSES } from '@/features/playground/constants'
 import {
   cancelPlaygroundTask,
   submitImageGeneration,
   submitVideoGeneration,
 } from '@/features/playground/generation-api'
-import type { ContentPart } from '@/features/playground/types'
+import type {
+  ChatCompletionUsage,
+  ContentPart,
+} from '@/features/playground/types'
 import { getTaskArtifacts, getUserTaskLogs } from '@/features/usage-logs/api'
 import type { TaskArtifact, TaskLog } from '@/features/usage-logs/types'
 import {
@@ -34,7 +40,12 @@ import {
   isServerErrorCancelled,
 } from '@/lib/server-error-message'
 
-import { settleCanvasWorkflowRunBudget } from '../api'
+import {
+  createCanvasWorkflowRunHistory,
+  lookupCanvasWorkflowNodeCache,
+  settleCanvasWorkflowRunBudget,
+  updateCanvasWorkflowRunHistory,
+} from '../api'
 import {
   CANVAS_LINKED_NODE_OFFSET_X,
   CANVAS_WORKFLOW_GENERATION_LABELS,
@@ -65,6 +76,14 @@ import {
 import { canvasWorkflowEstimateSteps } from '../lib/canvas-workflow-budget'
 import type { CanvasWorkflowEstimateStepInput } from '../lib/canvas-workflow-budget'
 import {
+  CANVAS_WORKFLOW_CACHE_MAX_FINGERPRINTS,
+  canvasWorkflowCacheIndex,
+  canvasWorkflowGraphVersion,
+  canvasWorkflowPlanFingerprints,
+  canvasWorkflowRunCacheEntries,
+  canvasWorkflowStepFingerprint,
+} from '../lib/canvas-workflow-cache'
+import {
   CanvasWorkflowImageError,
   readCanvasWorkflowImages,
 } from '../lib/canvas-workflow-images'
@@ -74,6 +93,10 @@ import type {
   CanvasNodeData,
   CanvasNodeKind,
   CanvasNodeWorkflowState,
+  CanvasWorkflowCacheEntry,
+  CanvasWorkflowRun,
+  CanvasWorkflowRunNodeRecord,
+  CanvasWorkflowRunStatus,
 } from '../types'
 import type {
   CanvasNodeDataUpdate,
@@ -84,11 +107,36 @@ export type CanvasWorkflowRunPhase = 'idle' | 'running'
 
 type CanvasWorkflowStepOutcome = 'succeeded' | 'failed' | 'canceled'
 
+/** The outcome plus the metadata a run-history node records for one step. */
+type CanvasWorkflowStepResult = {
+  outcome: CanvasWorkflowStepOutcome
+  output?: string
+  taskId?: string
+  artifacts?: TaskArtifact[]
+  resultCount?: number
+  usage?: ChatCompletionUsage
+  requestId?: string
+  quota?: number
+  error?: string
+}
+
 /** A planned run: the estimate request payload of the steps about to start. */
 export interface CanvasWorkflowRunPlan {
   steps: CanvasWorkflowEstimateStepInput[]
   /** Whether the plan executes the whole board or the selected subgraph. */
   scope: 'workflow' | 'selection'
+  /** History reruns set this so every step re-executes instead of adopting. */
+  force?: boolean
+}
+
+/** Optional per-run behavior and display metadata. */
+export interface CanvasWorkflowRunStartOptions {
+  /** Bypass every node-cache entry for this run. */
+  force?: boolean
+  /** Server-estimated quota the run-budget dialog displayed. */
+  estimateQuota?: number
+  /** Optional BL-03 cap this run bills inside. */
+  budgetCap?: number
 }
 
 /** A resolved plan: the graph and step order one execution walks. */
@@ -131,6 +179,12 @@ export interface CanvasWorkflowRunnerOptions {
     data: Partial<CanvasNodeData>,
     position: { x: number; y: number }
   ) => string | null
+  /** Owned canvas whose run history receives the run; absent disables history. */
+  canvasId?: string
+  /** Conversation the board was opened against, when any. */
+  sessionId?: string
+  /** Revision the run starts from, stored as display metadata. */
+  workflowRevision?: number
 }
 
 /**
@@ -273,6 +327,10 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
   const [message, setMessage] = useState<string | null>(null)
   /** Transient image previews of the current run, keyed by node id. */
   const [results, setResults] = useState<Record<string, string[]>>({})
+  /** The persisted history row of the current or latest run. */
+  const [historyRunId, setHistoryRunId] = useState<string | null>(null)
+  /** Bumped after a run snapshot is finalized so the history panel reloads. */
+  const [historyRevision, setHistoryRevision] = useState(0)
 
   const nodesRef = useRef(options.nodes)
   const edgesRef = useRef(options.edges)
@@ -294,6 +352,27 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
   const resumedRef = useRef(false)
   /** Run budget the current run bills inside; null bills the wallet directly. */
   const budgetRef = useRef<string | null>(null)
+  const canvasIdRef = useRef(options.canvasId?.trim() ?? '')
+  const sessionIdRef = useRef(options.sessionId?.trim() ?? '')
+  const workflowRevisionRef = useRef(options.workflowRevision ?? 0)
+  const forceCacheMissRef = useRef(false)
+  /** Entries restored from a historical run; they outlive one execution. */
+  const cacheBaselineRef = useRef<CanvasWorkflowCacheEntry[]>([])
+  /** Entries prefetched for the current run, indexed by fingerprint. */
+  const cacheEntriesRef = useRef<Map<string, CanvasWorkflowCacheEntry>>(
+    new Map()
+  )
+  const workflowVersionRef = useRef('')
+  const historyRunRef = useRef<{ id: string; revision: number } | null>(null)
+  const historyStatusRef = useRef<CanvasWorkflowRunStatus>('running')
+  const historyNodesRef = useRef<Map<string, CanvasWorkflowRunNodeRecord>>(
+    new Map()
+  )
+  const historyRequestIdsRef = useRef<Map<string, string>>(new Map())
+  const historyQueueRef = useRef<Promise<void>>(Promise.resolve())
+  canvasIdRef.current = options.canvasId?.trim() ?? ''
+  sessionIdRef.current = options.sessionId?.trim() ?? ''
+  workflowRevisionRef.current = options.workflowRevision ?? 0
 
   const patchNode = useCallback((id: string, update: CanvasNodeDataUpdate) => {
     updateRef.current(id, update, { record: false })
@@ -332,10 +411,10 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
       id: string,
       error: unknown,
       generation: number
-    ): CanvasWorkflowStepOutcome => {
+    ): CanvasWorkflowStepResult => {
       if (generation !== runIdRef.current || isServerErrorCancelled(error)) {
         markStepCanceled(id)
-        return 'canceled'
+        return { outcome: 'canceled' }
       }
       // A local reference-image read failure is not a server answer; its
       // message is already a translation key.
@@ -345,10 +424,239 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
           : workflowServerErrorText(error)
       markStepFailed(id, text)
       setMessage(text)
-      return 'failed'
+      return { outcome: 'failed', error: text }
     },
     [markStepCanceled, markStepFailed]
   )
+
+  const emptyHistoryNode = useCallback(
+    (node: CanvasFlowNode): CanvasWorkflowRunNodeRecord => ({
+      nodeId: node.id,
+      kind: node.data.kind === 'task' ? 'task' : 'model',
+      model: node.data.workflow?.model?.trim() ?? '',
+      group: canvasWorkflowGroup(node, groupRef.current),
+      status: 'skipped',
+      fingerprint: '',
+      cacheHit: false,
+      output: '',
+      taskId: '',
+      artifactKeys: [],
+      resultCount: 0,
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      quota: 0,
+      durationMs: 0,
+      error: '',
+      startedAt: 0,
+      finishedAt: 0,
+    }),
+    []
+  )
+
+  /**
+   * Serializes history writes so a later snapshot can never be overwritten by
+   * an earlier one. History is best-effort: a failed snapshot must not fail or
+   * cancel the workflow itself.
+   */
+  const queueHistoryUpdate = useCallback(
+    (status?: CanvasWorkflowRunStatus): Promise<void> => {
+      const run = historyRunRef.current
+      if (!run) return Promise.resolve()
+      // Capture the target run and its snapshot when the update is queued. A
+      // later run replaces the refs before this request is sent, and an old
+      // update must never write its nodes into the new run.
+      const target = run
+      const snapshot = [...historyNodesRef.current.values()]
+      const nextStatus = status ?? historyStatusRef.current
+      const queued = historyQueueRef.current.then(async () => {
+        try {
+          const updated = await updateCanvasWorkflowRunHistory(target.id, {
+            revision: target.revision,
+            status: nextStatus,
+            nodes: snapshot,
+          })
+          target.revision = updated.revision
+        } catch {
+          // Keep the run id: a transient failure is retried by the next
+          // snapshot, while a permanently rejected run simply stays partial.
+        }
+      })
+      historyQueueRef.current = queued
+      return queued
+    },
+    []
+  )
+
+  const recordHistoryStep = useCallback(
+    (
+      node: CanvasFlowNode,
+      result: CanvasWorkflowStepResult,
+      details: {
+        fingerprint: string
+        group: string
+        startedAt: number
+        finishedAt: number
+        cacheHit: boolean
+        artifacts?: TaskArtifact[]
+      }
+    ) => {
+      const status =
+        result.outcome === 'succeeded'
+          ? 'succeeded'
+          : result.outcome === 'failed'
+            ? 'failed'
+            : 'canceled'
+      const artifacts = details.artifacts ?? result.artifacts ?? []
+      const resultCount = result.resultCount ?? artifacts.length
+      const usage = result.usage
+      historyNodesRef.current.set(node.id, {
+        nodeId: node.id,
+        kind: node.data.kind === 'task' ? 'task' : 'model',
+        model: node.data.workflow?.model?.trim() ?? '',
+        group: details.group,
+        status,
+        fingerprint: details.fingerprint,
+        cacheHit: details.cacheHit,
+        output: result.output ?? '',
+        taskId: result.taskId ?? '',
+        artifactKeys: artifacts.map((artifact) => artifact.key),
+        resultCount,
+        promptTokens: usage?.prompt_tokens ?? 0,
+        completionTokens: usage?.completion_tokens ?? 0,
+        totalTokens: usage?.total_tokens ?? 0,
+        quota: result.quota ?? 0,
+        durationMs:
+          details.finishedAt > details.startedAt
+            ? details.finishedAt - details.startedAt
+            : 0,
+        error: result.error ?? '',
+        startedAt: details.startedAt,
+        finishedAt: details.finishedAt,
+      })
+      if (result.requestId && status === 'succeeded') {
+        historyRequestIdsRef.current.set(result.requestId, node.id)
+      }
+    },
+    []
+  )
+
+  /**
+   * Replaces the token figures recorded by the relay response with the settled
+   * consume row, so a model step stores the same quota the account was billed.
+   */
+  const refreshHistoryCosts = useCallback(async (): Promise<void> => {
+    const requestIds = [...historyRequestIdsRef.current.keys()]
+    if (requestIds.length === 0) return
+    try {
+      const lookup = await getPlaygroundMessageCosts(requestIds)
+      for (const requestId of requestIds) {
+        const nodeId = historyRequestIdsRef.current.get(requestId)
+        const node = nodeId ? historyNodesRef.current.get(nodeId) : undefined
+        const cost = lookup.costs.get(requestId)
+        if (!node || !cost) continue
+        node.quota = cost.quota
+        node.promptTokens = cost.promptTokens
+        node.completionTokens = cost.completionTokens
+        node.totalTokens = cost.totalTokens
+      }
+    } catch {
+      // The relay response usage is still a useful fallback.
+    }
+  }, [])
+
+  const beginRunHistory = useCallback(
+    async (
+      plan: CanvasWorkflowPlannedRun,
+      options: CanvasWorkflowRunStartOptions,
+      budget?: CanvasWorkflowRunBudgetRef,
+      signal?: AbortSignal
+    ): Promise<void> => {
+      const canvasId = canvasIdRef.current
+      historyRunRef.current = null
+      setHistoryRunId(null)
+      historyNodesRef.current = new Map()
+      historyRequestIdsRef.current = new Map()
+      historyStatusRef.current = 'running'
+      forceCacheMissRef.current = options.force === true
+      // The structural version belongs to the whole board, not the selected
+      // subgraph, so a selection run can reuse the steps of a prior full run.
+      const workflowVersion = canvasWorkflowGraphVersion(
+        nodesRef.current,
+        edgesRef.current
+      )
+      workflowVersionRef.current = workflowVersion
+      cacheEntriesRef.current = new Map()
+      if (!canvasId) return
+      const fingerprints = canvasWorkflowPlanFingerprints(
+        plan.steps.slice(plan.startIndex),
+        plan.nodes,
+        plan.edges,
+        workflowVersion,
+        groupRef.current
+      ).slice(0, CANVAS_WORKFLOW_CACHE_MAX_FINGERPRINTS)
+      if (!forceCacheMissRef.current && fingerprints.length > 0) {
+        try {
+          const remote = await lookupCanvasWorkflowNodeCache(
+            canvasId,
+            fingerprints,
+            signal
+          )
+          // A restored baseline wins over the newest server row for the same
+          // fingerprint: the user explicitly chose that run's output.
+          cacheEntriesRef.current = canvasWorkflowCacheIndex([
+            ...remote,
+            ...cacheBaselineRef.current,
+          ])
+        } catch {
+          cacheEntriesRef.current = canvasWorkflowCacheIndex(
+            cacheBaselineRef.current
+          )
+        }
+      }
+      const byID = new Map(plan.nodes.map((node) => [node.id, node]))
+      for (const id of plan.steps.slice(plan.startIndex)) {
+        const node = byID.get(id)
+        if (node) historyNodesRef.current.set(id, emptyHistoryNode(node))
+      }
+      try {
+        const created = await createCanvasWorkflowRunHistory(
+          {
+            canvasId,
+            ...(sessionIdRef.current
+              ? { sessionId: sessionIdRef.current }
+              : {}),
+            workflowRevision: workflowRevisionRef.current,
+            estimateQuota: options.estimateQuota ?? 0,
+            budgetCap: budget?.runId ? (options.budgetCap ?? 0) : 0,
+          },
+          signal
+        )
+        historyRunRef.current = { id: created.id, revision: created.revision }
+        setHistoryRunId(created.id)
+      } catch (error) {
+        // A full history or a stale client must not block the actual run.
+        setMessage(workflowServerErrorText(error))
+      }
+    },
+    [emptyHistoryNode]
+  )
+
+  const finalizeRunHistory = useCallback(
+    async (status: CanvasWorkflowRunStatus): Promise<void> => {
+      if (!historyRunRef.current) return
+      historyStatusRef.current = status
+      await refreshHistoryCosts()
+      await queueHistoryUpdate(status)
+      setHistoryRevision((current) => current + 1)
+    },
+    [queueHistoryUpdate, refreshHistoryCosts]
+  )
+
+  /** Adopts the successful steps of a historical run as this board's baseline. */
+  const restoreCacheBaseline = useCallback((run: CanvasWorkflowRun) => {
+    cacheBaselineRef.current = canvasWorkflowRunCacheEntries(run)
+  }, [])
 
   const fetchTaskRow = useCallback(
     async (taskId: string): Promise<TaskLog | null> => {
@@ -490,7 +798,7 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
       node: CanvasFlowNode,
       taskId: string,
       attempt: CanvasWorkflowAttempt
-    ): Promise<void> => {
+    ): Promise<TaskArtifact[]> => {
       let artifacts: TaskArtifact[] = []
       try {
         const projection = await getTaskArtifacts(taskId)
@@ -504,9 +812,112 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
         taskId,
         artifacts,
       })
-      markStepSucceeded(node.id, { taskId })
+      markStepSucceeded(node.id, { taskId, cacheHit: false })
+      return artifacts
     },
     [markStepSucceeded, recordStepResult]
+  )
+
+  /**
+   * Reuses one cached output without calling the relay. A model entry needs a
+   * stored output; a task entry is adopted only while its durable task is still
+   * successful and every referenced artifact is still available, so an expired
+   * task or deleted artifact falls through to a fresh request.
+   */
+  const adoptCachedStep = useCallback(
+    async (input: {
+      node: CanvasFlowNode
+      entry: CanvasWorkflowCacheEntry
+      attempt: CanvasWorkflowAttempt
+      inputText: string
+      group: string
+      fingerprint: string
+      startedAt: number
+    }): Promise<boolean> => {
+      const { node, entry, attempt, inputText, group, fingerprint } = input
+      if (entry.kind === 'model') {
+        const output = entry.output.trim()
+        if (!output) return false
+        outputsRef.current.set(node.id, output)
+        markStepSucceeded(node.id, {
+          inputText,
+          output,
+          group,
+          inputImageCount: attempt.inputImageCount,
+          cacheHit: true,
+        })
+        recordHistoryStep(
+          node,
+          { outcome: 'succeeded', output, quota: 0 },
+          {
+            fingerprint,
+            group,
+            startedAt: input.startedAt,
+            finishedAt: Date.now(),
+            cacheHit: true,
+          }
+        )
+        return true
+      }
+      const taskId = entry.taskId.trim()
+      if (!taskId) return false
+      let row: TaskLog | null = null
+      try {
+        row = await fetchTaskRow(taskId)
+      } catch {
+        return false
+      }
+      if (!row || row.status !== 'SUCCESS') return false
+      let artifacts: TaskArtifact[] = []
+      try {
+        const projection = await getTaskArtifacts(taskId)
+        artifacts = projection.artifacts
+      } catch {
+        return false
+      }
+      const availableKeys = new Set(artifacts.map((artifact) => artifact.key))
+      if (
+        entry.artifactKeys.some((key) => !availableKeys.has(key)) ||
+        (entry.resultCount > 0 && artifacts.length === 0)
+      ) {
+        return false
+      }
+      const resultCount = entry.resultCount || artifacts.length
+      const generation = resolveCanvasWorkflowGeneration(node).generation
+      recordStepResult(node, attempt, {
+        suffix: CANVAS_WORKFLOW_GENERATION_LABELS[generation],
+        taskId,
+        artifacts,
+        resultCount,
+      })
+      markStepSucceeded(node.id, {
+        taskId,
+        inputText,
+        group,
+        inputImageCount: attempt.inputImageCount,
+        ...(generation === 'image' ? { resultImageCount: resultCount } : {}),
+        cacheHit: true,
+      })
+      recordHistoryStep(
+        node,
+        {
+          outcome: 'succeeded',
+          taskId,
+          artifacts,
+          resultCount,
+          quota: 0,
+        },
+        {
+          fingerprint,
+          group,
+          startedAt: input.startedAt,
+          finishedAt: Date.now(),
+          cacheHit: true,
+        }
+      )
+      return true
+    },
+    [fetchTaskRow, markStepSucceeded, recordHistoryStep, recordStepResult]
   )
 
   /**
@@ -537,7 +948,7 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
       edges: CanvasFlowEdge[],
       generation: number,
       signal: AbortSignal
-    ): Promise<CanvasWorkflowStepOutcome> => {
+    ): Promise<CanvasWorkflowStepResult> => {
       const model = node.data.workflow?.model?.trim() ?? ''
       try {
         const images = await readStepImages(node, nodes, edges, signal)
@@ -551,7 +962,7 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
                   image_url: { url },
                 })),
               ]
-        const { response } = await sendChatCompletion(
+        const { response, requestId } = await sendChatCompletion(
           {
             model,
             group,
@@ -565,7 +976,10 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
         if (!output) {
           markStepFailed(node.id, CANVAS_WORKFLOW_ERRORS.EMPTY_OUTPUT)
           setMessage(CANVAS_WORKFLOW_ERRORS.EMPTY_OUTPUT)
-          return 'failed'
+          return {
+            outcome: 'failed',
+            error: CANVAS_WORKFLOW_ERRORS.EMPTY_OUTPUT,
+          }
         }
         const bounded = truncateCanvasWorkflowText(
           output,
@@ -577,8 +991,14 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
           output: bounded,
           group,
           inputImageCount: images.length,
+          cacheHit: false,
         })
-        return 'succeeded'
+        return {
+          outcome: 'succeeded',
+          output: bounded,
+          usage: response.usage,
+          requestId,
+        }
       } catch (error) {
         return stepErrorOutcome(node.id, error, generation)
       }
@@ -597,7 +1017,7 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
       seed: number | undefined,
       generation: number,
       signal: AbortSignal
-    ): Promise<CanvasWorkflowStepOutcome> => {
+    ): Promise<CanvasWorkflowStepResult> => {
       const config = resolveCanvasWorkflowGeneration(node)
       const model = node.data.workflow?.model?.trim() ?? ''
       try {
@@ -631,7 +1051,10 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
             if (previews.length === 0) {
               markStepFailed(node.id, CANVAS_WORKFLOW_ERRORS.NO_IMAGE)
               setMessage(CANVAS_WORKFLOW_ERRORS.NO_IMAGE)
-              return 'failed'
+              return {
+                outcome: 'failed',
+                error: CANVAS_WORKFLOW_ERRORS.NO_IMAGE,
+              }
             }
             setResults((current) => ({ ...current, [node.id]: previews }))
             recordStepResult(
@@ -647,8 +1070,9 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
               group,
               inputImageCount: images.length,
               resultImageCount: previews.length,
+              cacheHit: false,
             })
-            return 'succeeded'
+            return { outcome: 'succeeded', resultCount: previews.length }
           }
           // A model served by a task plugin answers with a durable task
           // instead of images; the row and its stored artifacts then settle
@@ -673,7 +1097,10 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
         if (!taskId) {
           markStepFailed(node.id, CANVAS_WORKFLOW_ERRORS.NO_TASK_ID)
           setMessage(CANVAS_WORKFLOW_ERRORS.NO_TASK_ID)
-          return 'failed'
+          return {
+            outcome: 'failed',
+            error: CANVAS_WORKFLOW_ERRORS.NO_TASK_ID,
+          }
         }
         patchNode(node.id, (data) => ({
           workflow: {
@@ -689,27 +1116,37 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
         pendingTaskRef.current = null
         if (generation !== runIdRef.current) {
           markStepCanceled(node.id)
-          return 'canceled'
+          return { outcome: 'canceled', taskId }
         }
         if (!row) {
           markStepFailed(node.id, CANVAS_WORKFLOW_ERRORS.RUN_FAILED)
           setMessage(CANVAS_WORKFLOW_ERRORS.RUN_FAILED)
-          return 'failed'
+          return {
+            outcome: 'failed',
+            error: CANVAS_WORKFLOW_ERRORS.RUN_FAILED,
+            taskId,
+          }
         }
         if (row.status === 'FAILURE') {
           const reason =
             row.fail_reason?.trim() || CANVAS_WORKFLOW_ERRORS.RUN_FAILED
           markStepFailed(node.id, reason)
           setMessage(reason)
-          return 'failed'
+          return { outcome: 'failed', error: reason, taskId }
         }
-        await applyTaskSuccess(node, taskId, {
+        const artifacts = await applyTaskSuccess(node, taskId, {
           inputText: input,
           group,
           inputImageCount: images.length,
           seed,
         })
-        return 'succeeded'
+        return {
+          outcome: 'succeeded',
+          taskId,
+          artifacts,
+          resultCount: artifacts.length,
+          quota: row.quota,
+        }
       } catch (error) {
         pendingTaskRef.current = null
         return stepErrorOutcome(node.id, error, generation)
@@ -751,9 +1188,13 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
       signal: AbortSignal
     ): Promise<void> => {
       const byID = new Map(runNodes.map((node) => [node.id, node]))
+      let finalStatus: CanvasWorkflowRunStatus = 'completed'
       try {
         for (let index = startIndex; index < steps.length; index++) {
-          if (generation !== runIdRef.current) break
+          if (generation !== runIdRef.current) {
+            finalStatus = 'canceled'
+            break
+          }
           const id = steps[index]
           const node = byID.get(id)
           if (!node) continue
@@ -785,6 +1226,17 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
                 ? (node.data.workflow?.lastSeed ?? explicitSeed)
                 : (explicitSeed ?? randomCanvasWorkflowSeed())
               : undefined
+          const startedAt = Date.now()
+          const attempt: CanvasWorkflowAttempt = {
+            inputText: input,
+            group,
+            inputImageCount: resolveCanvasWorkflowImageSources(
+              node,
+              runNodes,
+              runEdges
+            ).length,
+            ...(attemptSeed === undefined ? {} : { seed: attemptSeed }),
+          }
           markStepRunning(id, {
             inputText: input,
             group,
@@ -795,10 +1247,63 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
           })
           if (!input) {
             markStepFailed(id, CANVAS_WORKFLOW_ERRORS.INPUT_REQUIRED)
+            recordHistoryStep(
+              node,
+              {
+                outcome: 'failed',
+                error: CANVAS_WORKFLOW_ERRORS.INPUT_REQUIRED,
+              },
+              {
+                fingerprint: '',
+                group,
+                startedAt,
+                finishedAt: Date.now(),
+                cacheHit: false,
+              }
+            )
             setMessage(CANVAS_WORKFLOW_ERRORS.INPUT_REQUIRED)
+            finalStatus = 'failed'
             return
           }
-          const outcome =
+          const fingerprint = canvasWorkflowStepFingerprint({
+            node,
+            nodes: runNodes,
+            edges: runEdges,
+            outputs: outputsRef.current,
+            workflowVersion: workflowVersionRef.current,
+            input,
+            group,
+            seed: attemptSeed,
+          })
+          // An interrupted durable task is settled for real, not replaced by
+          // an older cached output for the same prompt.
+          const cached =
+            !forceCacheMissRef.current && !adoptTaskId && fingerprint
+              ? cacheEntriesRef.current.get(fingerprint)
+              : undefined
+          if (cached) {
+            const adopted = await adoptCachedStep({
+              node,
+              entry: cached,
+              attempt,
+              inputText: input,
+              group,
+              fingerprint,
+              startedAt,
+            })
+            if (generation !== runIdRef.current) {
+              finalStatus = 'canceled'
+              break
+            }
+            if (adopted) {
+              void queueHistoryUpdate()
+              continue
+            }
+            // A stale task row, a missing artifact or an empty output turns
+            // this step into a normal request, never into a failed step.
+            cacheEntriesRef.current.delete(fingerprint)
+          }
+          const result =
             node.data.kind === 'model'
               ? await runModelStep(
                   node,
@@ -820,8 +1325,22 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
                   generation,
                   signal
                 )
-          if (outcome !== 'succeeded') return
+          recordHistoryStep(node, result, {
+            fingerprint,
+            group,
+            startedAt,
+            finishedAt: Date.now(),
+            cacheHit: false,
+          })
+          if (result.outcome !== 'succeeded') {
+            finalStatus = result.outcome === 'canceled' ? 'canceled' : 'failed'
+            return
+          }
+          void queueHistoryUpdate()
         }
+      } catch (error) {
+        finalStatus = 'failed'
+        setMessage(workflowServerErrorText(error))
       } finally {
         pendingTaskRef.current = null
         abortRef.current = null
@@ -830,13 +1349,21 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
         const budgetRunId = budgetRef.current
         budgetRef.current = null
         if (budgetRunId) settleRunBudget(budgetRunId)
+        if (generation !== runIdRef.current && finalStatus === 'completed') {
+          finalStatus = 'canceled'
+        }
+        await finalizeRunHistory(finalStatus)
         setActiveNodeId(null)
         setPhase('idle')
       }
     },
     [
+      adoptCachedStep,
+      finalizeRunHistory,
       markStepFailed,
       markStepRunning,
+      queueHistoryUpdate,
+      recordHistoryStep,
       runModelStep,
       runTaskStep,
       settleRunBudget,
@@ -923,7 +1450,11 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
 
   /** Starts one resolved plan, charging it inside `budget` when given. */
   const startPlannedRun = useCallback(
-    (plan: CanvasWorkflowPlannedRun, budget?: CanvasWorkflowRunBudgetRef) => {
+    (
+      plan: CanvasWorkflowPlannedRun,
+      budget?: CanvasWorkflowRunBudgetRef,
+      runOptions: CanvasWorkflowRunStartOptions = {}
+    ) => {
       if (phaseRef.current === 'running') return
       outputsRef.current = new Map()
       budgetRef.current = budget?.runId ?? null
@@ -933,16 +1464,25 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
       abortRef.current = controller
       setMessage(null)
       setPhase('running')
-      void executeSteps(
-        plan.nodes,
-        plan.edges,
-        plan.steps,
-        plan.startIndex,
-        generation,
-        controller.signal
-      )
+      void (async () => {
+        await beginRunHistory(plan, runOptions, budget, controller.signal)
+        await executeSteps(
+          plan.nodes,
+          plan.edges,
+          plan.steps,
+          plan.startIndex,
+          generation,
+          controller.signal
+        )
+      })().catch((error: unknown) => {
+        if (generation === runIdRef.current) {
+          setMessage(workflowServerErrorText(error))
+          setPhase('idle')
+          abortRef.current = null
+        }
+      })
     },
-    [executeSteps]
+    [beginRunHistory, executeSteps]
   )
 
   /**
@@ -989,22 +1529,29 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
   }, [planSelection])
 
   const start = useCallback(
-    (fromNodeId?: string, budget?: CanvasWorkflowRunBudgetRef) => {
+    (
+      fromNodeId?: string,
+      budget?: CanvasWorkflowRunBudgetRef,
+      runOptions?: CanvasWorkflowRunStartOptions
+    ) => {
       if (phaseRef.current === 'running') return
       const plan = planRun(fromNodeId)
       if (!plan) return
-      startPlannedRun(plan, budget)
+      startPlannedRun(plan, budget, runOptions)
     },
     [planRun, startPlannedRun]
   )
 
   /** Runs the planned selection scope, billed inside `budget` when given. */
   const startSelection = useCallback(
-    (budget?: CanvasWorkflowRunBudgetRef) => {
+    (
+      budget?: CanvasWorkflowRunBudgetRef,
+      runOptions?: CanvasWorkflowRunStartOptions
+    ) => {
       if (phaseRef.current === 'running') return
       const plan = planSelection()
       if (!plan) return
-      startPlannedRun(plan, budget)
+      startPlannedRun(plan, budget, runOptions)
     },
     [planSelection, startPlannedRun]
   )
@@ -1142,6 +1689,10 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
     activeNodeId,
     message,
     results,
+    /** The persisted row of the current or latest run, when history is on. */
+    historyRunId,
+    /** Changes when a run snapshot is finalized; reload the history list. */
+    historyRevision,
     /** The priced step payload of a run a click would start. */
     estimate: estimateRun,
     run: start,
@@ -1151,5 +1702,7 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
     retry,
     cancel,
     clearMessage,
+    /** Makes a historical run's successful steps the next cache baseline. */
+    restoreCacheBaseline,
   }
 }

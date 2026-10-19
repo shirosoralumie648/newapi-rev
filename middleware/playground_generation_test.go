@@ -102,6 +102,78 @@ func TestPlaygroundGenerationParameterValidationKeepsBodyReplayable(t *testing.T
 	assert.Contains(t, recorder.Body.String(), `"seed":7`)
 }
 
+func newPlaygroundNonChatTestRouter() *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	echo := func(c *gin.Context) {
+		var payload map[string]any
+		if err := common.UnmarshalBodyReusable(c, &payload); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"path": c.Request.URL.Path, "payload": payload})
+	}
+	router.POST("/pg/embeddings", PlaygroundRelayBridge("/v1/embeddings"), echo)
+	router.POST("/pg/rerank", PlaygroundRelayBridge("/v1/rerank"), echo)
+	router.POST("/pg/moderations", PlaygroundRelayBridge("/v1/moderations"), echo)
+	return router
+}
+
+func TestPlaygroundNonChatLimitsAndPathRewrite(t *testing.T) {
+	router := newPlaygroundNonChatTestRouter()
+	longInput := strings.Repeat("a", playgroundEmbeddingMaxInputRunes+1)
+	longQuery := strings.Repeat("q", playgroundRerankMaxQueryRunes+1)
+	longDocument := strings.Repeat("d", playgroundRerankMaxCandidateRunes+1)
+	tooManyEmbeddings, err := common.Marshal(map[string]any{"model": "text-embedding-3-small", "input": make([]string, playgroundEmbeddingMaxInputs+1)})
+	require.NoError(t, err)
+	tooManyRerank, err := common.Marshal(map[string]any{"model": "rerank", "query": "q", "documents": make([]string, playgroundRerankMaxCandidates+1)})
+	require.NoError(t, err)
+	tooManyModerations, err := common.Marshal(map[string]any{"model": "omni-moderation-latest", "input": make([]string, playgroundModerationMaxInputs+1)})
+	require.NoError(t, err)
+
+	tests := []struct {
+		name    string
+		path    string
+		body    string
+		status  int
+		code    string
+		message string
+		rewrite string
+	}{
+		{name: "embedding single input", path: "/pg/embeddings", body: `{"model":"text-embedding-3-small","input":"hello"}`, status: http.StatusOK, rewrite: "/v1/embeddings"},
+		{name: "embedding multiple inputs", path: "/pg/embeddings", body: `{"model":"text-embedding-3-small","input":["a","b"]}`, status: http.StatusOK, rewrite: "/v1/embeddings"},
+		{name: "embedding too many inputs", path: "/pg/embeddings", body: string(tooManyEmbeddings), status: http.StatusBadRequest, code: string(playgroundEmbeddingLimitCode), message: playgroundEmbeddingLimitMessage},
+		{name: "embedding input too long", path: "/pg/embeddings", body: `{"model":"text-embedding-3-small","input":"` + longInput + `"}`, status: http.StatusBadRequest, code: string(playgroundEmbeddingLimitCode), message: playgroundEmbeddingLimitMessage},
+		{name: "rerank valid", path: "/pg/rerank", body: `{"model":"rerank","query":"hello","documents":["a","b"],"top_n":1}`, status: http.StatusOK, rewrite: "/v1/rerank"},
+		{name: "rerank too many candidates", path: "/pg/rerank", body: string(tooManyRerank), status: http.StatusBadRequest, code: string(playgroundRerankLimitCode), message: playgroundRerankLimitMessage},
+		{name: "rerank query too long", path: "/pg/rerank", body: `{"model":"rerank","query":"` + longQuery + `","documents":["a"]}`, status: http.StatusBadRequest, code: string(playgroundRerankLimitCode), message: playgroundRerankLimitMessage},
+		{name: "rerank candidate too long", path: "/pg/rerank", body: `{"model":"rerank","query":"q","documents":["` + longDocument + `"]}`, status: http.StatusBadRequest, code: string(playgroundRerankLimitCode), message: playgroundRerankLimitMessage},
+		{name: "moderation valid", path: "/pg/moderations", body: `{"model":"omni-moderation-latest","input":["hello"]}`, status: http.StatusOK, rewrite: "/v1/moderations"},
+		{name: "moderation too many inputs", path: "/pg/moderations", body: string(tooManyModerations), status: http.StatusBadRequest, code: string(playgroundModerationLimitCode), message: playgroundModerationLimitMessage},
+		{name: "moderation input too long", path: "/pg/moderations", body: `{"model":"omni-moderation-latest","input":"` + longInput + `"}`, status: http.StatusBadRequest, code: string(playgroundModerationLimitCode), message: playgroundModerationLimitMessage},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, tt.path, bytes.NewBufferString(tt.body))
+			request.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(recorder, request)
+
+			require.Equal(t, tt.status, recorder.Code, recorder.Body.String())
+			if tt.code != "" {
+				assert.Contains(t, recorder.Body.String(), `"code":"`+tt.code+`"`)
+				assert.Contains(t, recorder.Body.String(), tt.message)
+				return
+			}
+			assert.Contains(t, recorder.Body.String(), `"path":"`+tt.rewrite+`"`)
+			// The bridge parsed the body for validation; the relay-facing
+			// handler must still be able to read the original payload.
+			assert.Contains(t, recorder.Body.String(), `"payload":{`)
+		})
+	}
+}
+
 func TestPlaygroundGenerationSnapshotRecordsDisplayMetadata(t *testing.T) {
 	router := newPlaygroundGenerationTestRouter()
 	longPrompt := strings.Repeat("猫", playgroundGenerationPromptMaxRunes+20)

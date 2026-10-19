@@ -71,7 +71,7 @@ export interface ChatCompletionResult {
 
 // Axios lower-cases response header names; the relay writes the request id it
 // logged into this header.
-function readRequestIdHeader(headers: unknown): string | undefined {
+export function readRequestIdHeader(headers: unknown): string | undefined {
   if (!headers || typeof headers !== 'object') return undefined
   const value = (headers as Record<string, unknown>)[
     PLAYGROUND_REQUEST_ID_HEADER.toLowerCase()
