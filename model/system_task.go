@@ -55,6 +55,9 @@ const (
 	// SystemTaskTypePlaygroundObjectReconcile lists the stored objects below
 	// the Playground key space and removes the ones no database row owns.
 	SystemTaskTypePlaygroundObjectReconcile = "playground_object_reconcile"
+	// SystemTaskTypePlaygroundLogCaptureCleanup deletes retained Playground
+	// request/response summaries whose retention window elapsed.
+	SystemTaskTypePlaygroundLogCaptureCleanup = "playground_log_capture_cleanup"
 	// SystemTaskTypeWalletReconcile compares every wallet balance with the sum
 	// of its append-only ledger and alerts on deviation without changing balances.
 	SystemTaskTypeWalletReconcile = "wallet_reconcile"

@@ -69,6 +69,11 @@ export function useSidebarData(): SidebarData {
             icon: Workflow,
           },
           {
+            title: t('Model tools'),
+            url: '/playground/tools',
+            icon: Box,
+          },
+          {
             title: t('Chat'),
             icon: MessageSquare,
             type: 'chat-presets',

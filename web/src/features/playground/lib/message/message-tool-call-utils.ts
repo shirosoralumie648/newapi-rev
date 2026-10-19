@@ -248,6 +248,11 @@ export function updateVersionToolCallStatus(
 ): Message[] {
   return messages.map((message) => {
     if (message.key !== messageKey) return message
+    // A message whose versions are all untouched keeps its identity so callers
+    // can rely on reference equality to skip work.
+    if (!message.versions.some((version) => version.id === versionId)) {
+      return message
+    }
     return {
       ...message,
       versions: message.versions.map((version) =>

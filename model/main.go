@@ -493,6 +493,7 @@ func migrateDB() error {
 		&PlaygroundTaskArtifactSync{},
 		&PlaygroundStorageLedger{},
 		&PlaygroundObjectDeleteOutbox{},
+		&PlaygroundLogCapture{},
 		&PlaygroundComparisonRun{},
 		&PlaygroundWorkflowRun{},
 		&WalletLedgerEntry{},

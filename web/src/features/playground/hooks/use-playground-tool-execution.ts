@@ -19,13 +19,13 @@ For commercial licensing, please contact support@quantumnous.com
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import {
+  getMessageToolCalls,
   getPendingToolCalls,
   updateVersionToolCallStatus,
 } from '../lib/message/message-tool-call-utils'
 import { getCurrentVersion } from '../lib/message/message-utils'
 import {
   countToolRoundsSinceLastUser,
-  getMessageToolCalls,
   getPendingExecutableToolCalls,
   getToolLoopMessage,
   toolCallExecutionKey,

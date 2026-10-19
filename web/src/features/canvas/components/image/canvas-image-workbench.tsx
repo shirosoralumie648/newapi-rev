@@ -53,7 +53,6 @@ import {
 
 import {
   CANVAS_DROP_MESSAGES,
-  CANVAS_ERRORS,
   CANVAS_IMAGE_TOOL_TITLES,
   CANVAS_LINKED_NODE_OFFSET_X,
   CANVAS_WORKFLOW_RESULT_NODE_OFFSET_Y,
@@ -69,6 +68,7 @@ import {
   type CanvasWorkflowRunPlan,
 } from '../../hooks/use-canvas-workflow-runner'
 import {
+  CANVAS_ERRORS,
   toServerDocument,
   validateCanvasDocument,
 } from '../../lib/canvas-document'

@@ -46,6 +46,7 @@ import { Route as AuthenticatedModelsIndexRouteImport } from './routes/_authenti
 import { Route as AuthenticatedModelsSectionRouteImport } from './routes/_authenticated/models/$section'
 import { Route as AuthenticatedPlaygroundIndexRouteImport } from './routes/_authenticated/playground/index'
 import { Route as AuthenticatedPlaygroundCanvasRouteImport } from './routes/_authenticated/playground/canvas'
+import { Route as AuthenticatedPlaygroundToolsRouteImport } from './routes/_authenticated/playground/tools'
 import { Route as AuthenticatedProfileIndexRouteImport } from './routes/_authenticated/profile/index'
 import { Route as AuthenticatedRedemptionCodesIndexRouteImport } from './routes/_authenticated/redemption-codes/index'
 import { Route as AuthenticatedSecurityIndexRouteImport } from './routes/_authenticated/security/index'
@@ -268,6 +269,12 @@ const AuthenticatedPlaygroundCanvasRoute =
     path: '/playground/canvas',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedPlaygroundToolsRoute =
+  AuthenticatedPlaygroundToolsRouteImport.update({
+    id: '/playground/tools',
+    path: '/playground/tools',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedProfileIndexRoute =
   AuthenticatedProfileIndexRouteImport.update({
     id: '/profile/',
@@ -472,6 +479,7 @@ export interface FileRoutesByFullPath {
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
   '/playground/canvas': typeof AuthenticatedPlaygroundCanvasRoute
+  '/playground/tools': typeof AuthenticatedPlaygroundToolsRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/usage-logs/audit': typeof AuthenticatedUsageLogsAuditRoute
   '/channels/': typeof AuthenticatedChannelsIndexRoute
@@ -537,6 +545,7 @@ export interface FileRoutesByTo {
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
   '/playground/canvas': typeof AuthenticatedPlaygroundCanvasRoute
+  '/playground/tools': typeof AuthenticatedPlaygroundToolsRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/usage-logs/audit': typeof AuthenticatedUsageLogsAuditRoute
   '/channels': typeof AuthenticatedChannelsIndexRoute
@@ -606,6 +615,7 @@ export interface FileRoutesById {
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/_authenticated/models/$section': typeof AuthenticatedModelsSectionRoute
   '/_authenticated/playground/canvas': typeof AuthenticatedPlaygroundCanvasRoute
+  '/_authenticated/playground/tools': typeof AuthenticatedPlaygroundToolsRoute
   '/_authenticated/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/_authenticated/usage-logs/audit': typeof AuthenticatedUsageLogsAuditRoute
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
@@ -674,6 +684,7 @@ export interface FileRouteTypes {
     | '/errors/$error'
     | '/models/$section'
     | '/playground/canvas'
+    | '/playground/tools'
     | '/usage-logs/$section'
     | '/usage-logs/audit'
     | '/channels/'
@@ -739,6 +750,7 @@ export interface FileRouteTypes {
     | '/errors/$error'
     | '/models/$section'
     | '/playground/canvas'
+    | '/playground/tools'
     | '/usage-logs/$section'
     | '/usage-logs/audit'
     | '/channels'
@@ -807,6 +819,7 @@ export interface FileRouteTypes {
     | '/_authenticated/errors/$error'
     | '/_authenticated/models/$section'
     | '/_authenticated/playground/canvas'
+    | '/_authenticated/playground/tools'
     | '/_authenticated/usage-logs/$section'
     | '/_authenticated/usage-logs/audit'
     | '/_authenticated/channels/'
@@ -1124,6 +1137,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedPlaygroundCanvasRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/playground/tools': {
+      id: '/_authenticated/playground/tools'
+      path: '/playground/tools'
+      fullPath: '/playground/tools'
+      preLoaderRoute: typeof AuthenticatedPlaygroundToolsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/profile/': {
       id: '/_authenticated/profile/'
       path: '/profile'
@@ -1428,6 +1448,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedErrorsErrorRoute: typeof AuthenticatedErrorsErrorRoute
   AuthenticatedModelsSectionRoute: typeof AuthenticatedModelsSectionRoute
   AuthenticatedPlaygroundCanvasRoute: typeof AuthenticatedPlaygroundCanvasRoute
+  AuthenticatedPlaygroundToolsRoute: typeof AuthenticatedPlaygroundToolsRoute
   AuthenticatedUsageLogsSectionRoute: typeof AuthenticatedUsageLogsSectionRoute
   AuthenticatedUsageLogsAuditRoute: typeof AuthenticatedUsageLogsAuditRoute
   AuthenticatedChannelsIndexRoute: typeof AuthenticatedChannelsIndexRoute
@@ -1456,6 +1477,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedErrorsErrorRoute: AuthenticatedErrorsErrorRoute,
   AuthenticatedModelsSectionRoute: AuthenticatedModelsSectionRoute,
   AuthenticatedPlaygroundCanvasRoute: AuthenticatedPlaygroundCanvasRoute,
+  AuthenticatedPlaygroundToolsRoute: AuthenticatedPlaygroundToolsRoute,
   AuthenticatedUsageLogsSectionRoute: AuthenticatedUsageLogsSectionRoute,
   AuthenticatedUsageLogsAuditRoute: AuthenticatedUsageLogsAuditRoute,
   AuthenticatedChannelsIndexRoute: AuthenticatedChannelsIndexRoute,

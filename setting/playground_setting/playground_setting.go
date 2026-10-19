@@ -354,6 +354,9 @@ type PlaygroundSetting struct {
 	// An empty value means SearXNG runs unauthenticated or the hosted provider
 	// is not configured yet.
 	WebSearchAPIKey string `json:"web_search_api_key"`
+	// MCP is the optional administrator-managed MCP client proxy. It stays off
+	// until an administrator enables it and at least one global connection.
+	MCP *PlaygroundMCPSetting `json:"mcp"`
 }
 
 var playgroundSetting = newPlaygroundSetting()
@@ -369,6 +372,7 @@ func newPlaygroundSetting() PlaygroundSetting {
 		GroupOverrides: map[string]PlaygroundQuotaPolicy{},
 		StorageBilling: builtinPlaygroundStorageBillingSetting(),
 		WebSearch:      builtinPlaygroundWebSearchSetting(),
+		MCP:            builtinPlaygroundMCPSetting(),
 	}
 }
 

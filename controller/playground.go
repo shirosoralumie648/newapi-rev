@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -74,6 +75,14 @@ func playgroundRelay(c *gin.Context, relayFormat types.RelayFormat) {
 }
 
 func Playground(c *gin.Context) {
+	// The optional replay capture tees the response and stores a desensitized
+	// summary after the relay returned. With PLAYGROUND_LOG_CAPTURE off (the
+	// default) nothing is buffered or stored.
+	capture := service.BeginPlaygroundLogCapture(c)
+	if capture != nil {
+		capture.TeeResponse(c)
+		defer capture.Finish(c)
+	}
 	playgroundRelay(c, types.RelayFormatOpenAI)
 }
 
@@ -82,4 +91,17 @@ func Playground(c *gin.Context) {
 // request is billed, grouped and channel-selected exactly like a direct call.
 func PlaygroundEmbeddings(c *gin.Context) {
 	playgroundRelay(c, types.RelayFormatEmbedding)
+}
+
+// PlaygroundRerank serves the non-chat model workbench through the canonical
+// /v1/rerank pipeline.
+func PlaygroundRerank(c *gin.Context) {
+	playgroundRelay(c, types.RelayFormatRerank)
+}
+
+// PlaygroundModerations serves the non-chat model workbench through the
+// canonical /v1/moderations pipeline. Moderation uses the OpenAI relay format,
+// matching the direct route.
+func PlaygroundModerations(c *gin.Context) {
+	playgroundRelay(c, types.RelayFormatOpenAI)
 }

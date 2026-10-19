@@ -113,10 +113,23 @@ export const PLAYGROUND_DOCUMENT_CONTEXT_MISSING =
 // authoritative argument/result byte limits.
 export const PLAYGROUND_TOOL_CALL_RESULT_MAX_CHARS = 64_000
 
+// Non-chat model workbench limits. These mirror the server-side bounds in
+// middleware/playground_nonchat.go so the form can reject oversized input
+// before a request is billed.
+export const PLAYGROUND_EMBEDDING_MAX_INPUTS = 64
+export const PLAYGROUND_EMBEDDING_MAX_INPUT_CHARS = 16_000
+export const PLAYGROUND_RERANK_MAX_CANDIDATES = 32
+export const PLAYGROUND_RERANK_MAX_QUERY_CHARS = 16_000
+export const PLAYGROUND_RERANK_MAX_CANDIDATE_CHARS = 16_000
+export const PLAYGROUND_MODERATION_MAX_INPUTS = 64
+export const PLAYGROUND_MODERATION_MAX_INPUT_CHARS = 16_000
+
 // API endpoints
 export const API_ENDPOINTS = {
   CHAT_COMPLETIONS: '/pg/chat/completions',
   EMBEDDINGS: '/pg/embeddings',
+  RERANK: '/pg/rerank',
+  MODERATIONS: '/pg/moderations',
   IMAGE_GENERATIONS: '/pg/images/generations',
   IMAGE_EDITS: '/pg/images/edits',
   VIDEO_GENERATIONS: '/pg/videos',
@@ -137,6 +150,7 @@ export const API_ENDPOINTS = {
   PLAYGROUND_SETTINGS: '/api/playground/settings',
   PLAYGROUND_SEARCH: '/api/playground/search',
   PLAYGROUND_MESSAGE_COSTS: '/api/playground/message-costs',
+  PLAYGROUND_LOGS: '/api/playground/logs',
   PLAYGROUND_ASSETS: '/api/playground/assets',
   PLAYGROUND_SHARED: '/api/playground/shared',
   PLAYGROUND_TASKS: '/api/playground/tasks',

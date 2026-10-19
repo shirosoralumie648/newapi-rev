@@ -342,7 +342,12 @@ export function comparisonExportRows(
     for (let modelIndex = 0; modelIndex < run.models.length; modelIndex++) {
       const cell = comparisonRunCell(run, promptIndex, modelIndex)
       if (!cell) continue
-      const cost = cell.requestId ? costs.get(cell.requestId) : undefined
+      // Only a succeeded cell can have settled figures; a failed cell must not
+      // borrow the cost row of an unrelated request.
+      const cost =
+        cell.status === 'succeeded' && cell.requestId
+          ? costs.get(cell.requestId)
+          : undefined
       rows.push({
         promptIndex,
         prompt: run.prompts[promptIndex],

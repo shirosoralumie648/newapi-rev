@@ -34,7 +34,7 @@ import { handleServerError } from '@/lib/handle-server-error'
 import { getServerMessage } from '@/lib/server-error-message'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { searchPlaygroundWeb } from './api'
+import { getPlaygroundLogReplay, searchPlaygroundWeb } from './api'
 import { PlaygroundArtifactSourceSheet } from './components/artifact/playground-artifact-source-sheet'
 import { PlaygroundChat } from './components/chat/playground-chat'
 import { PlaygroundComparisonDialog } from './components/comparison/playground-comparison-dialog'
@@ -88,6 +88,7 @@ import {
 import type { CapturedArtifactSource } from './hooks/use-playground-artifacts'
 import {
   appendParallelMessagePair,
+  buildPlaygroundReplayDraft,
   collectMessageRequestIds,
   createPendingQuote,
   developerOptionsActive,
@@ -171,6 +172,10 @@ function PlaygroundContent(props: {
   >(null)
   const [messageSearchOpen, setMessageSearchOpen] = useState(false)
   const appliedSessionRef = useRef<string | null>(null)
+  // A replay deep link is applied at most once per log reference.
+  const appliedReplayRef = useRef<string | null>(null)
+  // Composer text a replay link restored; consumed once by PlaygroundInput.
+  const [replayPrefill, setReplayPrefill] = useState('')
   const [compareModels, setCompareModels] = useState<string[]>([])
   const [compareRunsOpen, setCompareRunsOpen] = useState(false)
   const comparisonRunner = usePlaygroundComparisonRunner()
@@ -1130,6 +1135,42 @@ function PlaygroundContent(props: {
     })
   }, [props.onOpenCanvas, requestedArtifact, requestedSession])
 
+  // A /playground?replay=<request_id> deep link reopens a settled usage log as
+  // a new draft: the parameters the log (or its retained summary) recorded are
+  // applied to a fresh conversation and the last user turn is prefilled.
+  // Nothing is sent automatically, and content the deployment did not retain is
+  // reported instead of silently omitted.
+  const requestedReplay = props.target?.replay
+  const requestedReplayUser = props.target?.replayUser
+  useEffect(() => {
+    if (!requestedReplay || sync.isLoading) return
+    const appliedKey = `${requestedReplay}:${requestedReplayUser ?? ''}`
+    if (appliedReplayRef.current === appliedKey) return
+    appliedReplayRef.current = appliedKey
+    void getPlaygroundLogReplay(requestedReplay, requestedReplayUser)
+      .then((replay) => {
+        const draft = buildPlaygroundReplayDraft(replay)
+        createSession({
+          config: draft.config,
+          parameterEnabled: draft.parameterEnabled,
+        })
+        if (draft.text) setReplayPrefill(draft.text)
+        if (draft.contentNotice) toast.info(t(draft.contentNotice))
+      })
+      .catch((error) => {
+        // A failed load must stay retryable: the same link may be clicked
+        // again after a transient error.
+        appliedReplayRef.current = null
+        toast.error(
+          getServerMessage(error) ?? t('Failed to load this log for replay.')
+        )
+      })
+  }, [createSession, requestedReplay, requestedReplayUser, sync.isLoading, t])
+
+  const handleReplayPrefillConsumed = useCallback(() => {
+    setReplayPrefill('')
+  }, [])
+
   // An old /playground?session=...&message=... link names the exact message it
   // points at; the chat renders and highlights it once hydration is complete.
   const requestedMessage = props.target?.message
@@ -1364,6 +1405,8 @@ function PlaygroundContent(props: {
               contextSummary={contextSummary}
               developerOptions={developerOptions}
               sessionId={activeSession?.id}
+              prefillText={replayPrefill || undefined}
+              onPrefillTextConsumed={handleReplayPrefillConsumed}
               autoReadDefaultEnabled={preferences.autoReadDefault}
               autoReadEnabled={preferences.isAutoReadEnabled(activeSessionId)}
               autoReadHasOverride={preferences.hasSessionAutoReadOverride(

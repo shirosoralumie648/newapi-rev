@@ -35,6 +35,7 @@ import {
   normalizeContextSummary,
 } from './lib/context/playground-context'
 import { normalizeDeveloperOptions } from './lib/developer/developer-options'
+import type { PlaygroundLogReplay } from './lib/replay/playground-replay'
 import { normalizeSessionTags } from './lib/session-organization'
 import {
   messagesSchema,
@@ -70,7 +71,7 @@ export interface ChatCompletionResult {
 
 // Axios lower-cases response header names; the relay writes the request id it
 // logged into this header.
-function readRequestIdHeader(headers: unknown): string | undefined {
+export function readRequestIdHeader(headers: unknown): string | undefined {
   if (!headers || typeof headers !== 'object') return undefined
   const value = (headers as Record<string, unknown>)[
     PLAYGROUND_REQUEST_ID_HEADER.toLowerCase()
@@ -1120,6 +1121,66 @@ export async function getPlaygroundMessageCosts(
     })
   }
   return { enabled: data.enabled, costs }
+}
+
+// The replay projection is read-only and may not carry content; unrecognized
+// fields are dropped so the client only sees the documented contract.
+const playgroundLogReplaySchema = z.object({
+  request_id: z.string(),
+  model: z.string().optional(),
+  group: z.string().optional(),
+  stream: z.boolean().optional(),
+  content_available: z.boolean().optional(),
+  content_unavailable_reason: z.string().optional(),
+  sampling: z
+    .object({
+      temperature: z.number().finite().optional(),
+      top_p: z.number().finite().optional(),
+      max_tokens: z.number().finite().optional(),
+      frequency_penalty: z.number().finite().optional(),
+      presence_penalty: z.number().finite().optional(),
+      seed: z.number().finite().optional(),
+      reasoning_effort: z.string().optional(),
+    })
+    .optional(),
+  capture: z
+    .object({
+      request: z
+        .object({
+          messages: z
+            .array(
+              z.object({
+                role: z.string().optional(),
+                content: z.unknown().optional(),
+              })
+            )
+            .optional(),
+        })
+        .optional(),
+    })
+    .optional(),
+})
+
+/**
+ * Loads the replayable projection of one usage log. The caller's own log
+ * resolves with only the request id; an administrator may name the log's owner
+ * to replay another account's log, which the backend records in the audit
+ * trail when retained content is returned.
+ */
+export async function getPlaygroundLogReplay(
+  logRef: string,
+  userId?: string | null,
+  signal?: AbortSignal
+): Promise<PlaygroundLogReplay> {
+  const response = await api.get(
+    `${API_ENDPOINTS.PLAYGROUND_LOGS}/${encodeURIComponent(logRef)}/replay`,
+    {
+      params: userId ? { user_id: userId } : undefined,
+      signal,
+    }
+  )
+  requireServerSuccess(response.data)
+  return playgroundLogReplaySchema.parse(response.data.data)
 }
 
 export async function getPlaygroundUsage(
