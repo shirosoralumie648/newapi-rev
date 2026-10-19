@@ -58,7 +58,7 @@ test('server session responses map timestamps and settings into workspace state'
             ...wireSession,
             pinned: true,
             pinned_at: 30,
-            tags: [' Work ', 'work', 'ideas'],
+            tags: [' Work ', 'Work', 'ideas'],
           },
         ],
         total: 1,
@@ -74,7 +74,7 @@ test('server session responses map timestamps and settings into workspace state'
     parameterEnabled: { temperature: false },
     pinned: true,
     archived: false,
-    tags: ['work', 'ideas'],
+    tags: ['Work', 'ideas'],
     revision: 1,
     messageRevision: 2,
   })

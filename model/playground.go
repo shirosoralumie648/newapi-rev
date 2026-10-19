@@ -316,8 +316,11 @@ func UpdatePlaygroundSessionFields(userID int, id string, revision int64, update
 				archived = *organization.Archived
 				if archived {
 					// An archived conversation never keeps a pin, so a client
-					// never has to reconcile two contradictory groups.
-					updates["archived_at"] = now
+					// never has to reconcile two contradictory groups. Keep the
+					// original archive time when the client repeats the state.
+					if session.ArchivedAt == 0 {
+						updates["archived_at"] = now
+					}
 					updates["pinned_at"] = 0
 				} else {
 					updates["archived_at"] = 0
@@ -335,7 +338,10 @@ func UpdatePlaygroundSessionFields(userID int, id string, revision int64, update
 				case archived:
 					updates["pinned_at"] = 0
 				default:
-					updates["pinned_at"] = now
+					// Repeating "pinned" keeps the original pin time.
+					if session.PinnedAt == 0 {
+						updates["pinned_at"] = now
+					}
 				}
 			}
 		}

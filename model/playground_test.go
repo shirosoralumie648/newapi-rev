@@ -4131,8 +4131,20 @@ func TestPlaygroundSessionOrganization(t *testing.T) {
 			assert.True(t, session.Archived)
 			assert.False(t, session.Pinned)
 
+			// Repeating the archived state keeps the original archive time
+			// instead of moving it forward on every metadata save.
+			require.NoError(t, db.Model(&model.PlaygroundSession{}).Where("id = ? AND user_id = ?", id, 7).
+				Update("archived_at", int64(123)).Error)
+			repeatArchive := playgroundRequest(t, 7, http.MethodPatch, path, map[string]any{
+				"revision": session.Revision, "archived": true,
+			}, controller.UpdatePlaygroundSession)
+			require.Equal(t, http.StatusOK, repeatArchive.Code, repeatArchive.Body.String())
+			session = decode(repeatArchive)
+			assert.EqualValues(t, 123, session.ArchivedAt)
+			assert.False(t, session.Pinned)
+
 			// The rejected pin left the revision untouched; the successful
-			// archive request above advanced it, and that revision can now
+			// archive requests above advanced it, and that revision can now
 			// unarchive the conversation.
 			unarchived := playgroundRequest(t, 7, http.MethodPatch, path, map[string]any{
 				"revision": session.Revision, "archived": false,
@@ -4149,6 +4161,16 @@ func TestPlaygroundSessionOrganization(t *testing.T) {
 			session = decode(pinned)
 			assert.True(t, session.Pinned)
 			assert.NotZero(t, session.PinnedAt)
+
+			// Repeating the pinned state keeps the original pin time.
+			require.NoError(t, db.Model(&model.PlaygroundSession{}).Where("id = ? AND user_id = ?", id, 7).
+				Update("pinned_at", int64(456)).Error)
+			repeatPin := playgroundRequest(t, 7, http.MethodPatch, path, map[string]any{
+				"revision": session.Revision, "pinned": true,
+			}, controller.UpdatePlaygroundSession)
+			require.Equal(t, http.StatusOK, repeatPin.Code, repeatPin.Body.String())
+			session = decode(repeatPin)
+			assert.EqualValues(t, 456, session.PinnedAt)
 
 			// Omitting the switches keeps the stored state.
 			renamed := playgroundRequest(t, 7, http.MethodPatch, path, map[string]any{
@@ -4169,7 +4191,8 @@ func TestPlaygroundSessionOrganization(t *testing.T) {
 
 			for name, tags := range map[string][]string{
 				"too many": {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"},
-				"too long": {strings.Repeat("界", playgroundSessionTagMaxLength+1)},
+				// One more than the 24-character server bound.
+				"too long": {strings.Repeat("界", 25)},
 				"nul byte": {"a\x00b"},
 			} {
 				t.Run(name, func(t *testing.T) {
