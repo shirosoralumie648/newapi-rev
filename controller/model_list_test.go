@@ -10,6 +10,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting"
@@ -32,6 +33,23 @@ type listModelsResponse struct {
 type userModelsResponse struct {
 	Success bool     `json:"success"`
 	Data    []string `json:"data"`
+}
+
+type userModelDetailResponse struct {
+	ModelName         string   `json:"model_name"`
+	QuotaType         int      `json:"quota_type"`
+	ModelRatio        float64  `json:"model_ratio"`
+	ModelPrice        float64  `json:"model_price"`
+	CompletionRatio   float64  `json:"completion_ratio"`
+	ContextLength     int      `json:"context_length"`
+	Capabilities      []string `json:"capabilities"`
+	SupportsChat      bool     `json:"supports_chat"`
+	IsImageGeneration bool     `json:"is_image_generation"`
+}
+
+type userModelDetailsResponse struct {
+	Success bool                      `json:"success"`
+	Data    []userModelDetailResponse `json:"data"`
 }
 
 func setupModelListControllerTestDB(t *testing.T) *gorm.DB {
@@ -181,6 +199,16 @@ func decodeUserModelsResponse(t *testing.T, recorder *httptest.ResponseRecorder)
 	return payload.Data
 }
 
+func decodeUserModelDetailsResponse(t *testing.T, recorder *httptest.ResponseRecorder) []userModelDetailResponse {
+	t.Helper()
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var payload userModelDetailsResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
+	require.True(t, payload.Success)
+	return payload.Data
+}
+
 func TestGetUserModelsFiltersByRequestedGroup(t *testing.T) {
 	db := setupModelListControllerTestDB(t)
 	require.NoError(t, db.Create(&model.User{
@@ -263,6 +291,81 @@ func TestGetUserModelsExpandsAutoGroupsInConfiguredOrder(t *testing.T) {
 	require.Len(t, models, 3)
 	assert.ElementsMatch(t, []string{"zz-vip-model", "zz-shared-model"}, models[:2])
 	assert.Equal(t, "zz-default-model", models[2])
+}
+
+func TestGetUserModelsDetailsIncludeReadonlyMetadata(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.Create(&model.User{
+		Id:       1005,
+		Username: "playground-detail-model-user",
+		Password: "password",
+		Group:    "default",
+		Status:   common.UserStatusEnabled,
+	}).Error)
+	require.NoError(t, db.Create(&[]model.Ability{
+		{Group: "default", Model: "zz-detail-chat-model", ChannelId: 1, Enabled: true},
+		{Group: "default", Model: "gpt-image-1", ChannelId: 1, Enabled: true},
+		{Group: "vip", Model: "zz-detail-vip-model", ChannelId: 1, Enabled: true},
+	}).Error)
+	require.NoError(t, db.Create(&[]model.Model{
+		{ModelName: "zz-detail-chat-model", Tags: "Vision, Tools, Reasoning, JSON, 128K", Status: 1},
+		{ModelName: "gpt-image-1", Tags: "Vision, 16K", Status: 1},
+	}).Error)
+	model.InvalidatePricingCache()
+	t.Cleanup(model.InvalidatePricingCache)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/user/models?group=default&details=1", nil)
+	ctx.Set("id", 1005)
+
+	GetUserModels(ctx)
+
+	details := decodeUserModelDetailsResponse(t, recorder)
+	require.Len(t, details, 2)
+	byName := make(map[string]userModelDetailResponse, len(details))
+	for _, detail := range details {
+		byName[detail.ModelName] = detail
+	}
+
+	chat, ok := byName["zz-detail-chat-model"]
+	require.True(t, ok)
+	assert.True(t, chat.SupportsChat)
+	assert.False(t, chat.IsImageGeneration)
+	assert.Equal(t, 128000, chat.ContextLength)
+	assert.ElementsMatch(t, []string{"vision", "tools", "reasoning", "structured_output"}, chat.Capabilities)
+
+	image, ok := byName["gpt-image-1"]
+	require.True(t, ok)
+	assert.False(t, image.SupportsChat)
+	assert.True(t, image.IsImageGeneration)
+	assert.Equal(t, 16000, image.ContextLength)
+	assert.NotContains(t, image.Capabilities, "tools")
+
+	_, exists := byName["zz-detail-vip-model"]
+	require.False(t, exists, "a default-group user must not see a vip-only model")
+
+	vipRecorder := httptest.NewRecorder()
+	vipContext, _ := gin.CreateTestContext(vipRecorder)
+	vipContext.Request = httptest.NewRequest(http.MethodGet, "/api/user/models?group=vip&details=1", nil)
+	vipContext.Set("id", 1005)
+
+	GetUserModels(vipContext)
+
+	require.Empty(t, decodeUserModelDetailsResponse(t, vipRecorder))
+}
+
+func TestGetUserModelsDetailsRequireAuthentication(t *testing.T) {
+	setupModelListControllerTestDB(t)
+
+	router := gin.New()
+	router.GET("/api/user/models", middleware.UserAuth(), GetUserModels)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/user/models?group=default&details=1", nil)
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusUnauthorized, recorder.Code)
 }
 
 func TestListModelsIncludesTieredBillingModel(t *testing.T) {

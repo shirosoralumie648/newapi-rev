@@ -650,6 +650,26 @@ func generateDefaultSidebarConfig(userRole int) string {
 	return string(configBytes)
 }
 
+// userModelDetail is the read-only model metadata the Playground selector uses
+// for price, context window, and capability display. It is a projection of the
+// pricing cache and never participates in quota estimation or settlement.
+type userModelDetail struct {
+	ModelName         string   `json:"model_name"`
+	Description       string   `json:"description,omitempty"`
+	Tags              string   `json:"tags,omitempty"`
+	QuotaType         int      `json:"quota_type"`
+	ModelRatio        float64  `json:"model_ratio"`
+	ModelPrice        float64  `json:"model_price"`
+	CompletionRatio   float64  `json:"completion_ratio"`
+	CacheRatio        *float64 `json:"cache_ratio,omitempty"`
+	BillingMode       string   `json:"billing_mode,omitempty"`
+	BillingExpr       string   `json:"billing_expr,omitempty"`
+	ContextLength     int      `json:"context_length,omitempty"`
+	Capabilities      []string `json:"capabilities,omitempty"`
+	SupportsChat      bool     `json:"supports_chat"`
+	IsImageGeneration bool     `json:"is_image_generation,omitempty"`
+}
+
 func GetUserModels(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -677,10 +697,46 @@ func GetUserModels(c *gin.Context) {
 			groupsToQuery = []string{group}
 		}
 	}
+	modelNames := service.GetGroupsEnabledModels(groupsToQuery)
+	if c.Query("details") == "1" {
+		pricing := model.GetPricing()
+		pricingByName := make(map[string]model.Pricing, len(pricing))
+		for _, item := range pricing {
+			pricingByName[item.ModelName] = item
+		}
+		details := make([]userModelDetail, 0, len(modelNames))
+		for _, modelName := range modelNames {
+			// A model without a pricing row is still usable for chat; only the
+			// pricing-derived metadata is missing.
+			detail := userModelDetail{ModelName: modelName, SupportsChat: true}
+			if item, ok := pricingByName[modelName]; ok {
+				detail.Description = item.Description
+				detail.Tags = item.Tags
+				detail.QuotaType = item.QuotaType
+				detail.ModelRatio = item.ModelRatio
+				detail.ModelPrice = item.ModelPrice
+				detail.CompletionRatio = item.CompletionRatio
+				detail.CacheRatio = item.CacheRatio
+				detail.BillingMode = item.BillingMode
+				detail.BillingExpr = item.BillingExpr
+				detail.ContextLength = item.ContextLength
+				detail.Capabilities = item.Capabilities
+				detail.SupportsChat = item.SupportsChat
+				detail.IsImageGeneration = item.IsImageGeneration
+			}
+			details = append(details, detail)
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "",
+			"data":    details,
+		})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    service.GetGroupsEnabledModels(groupsToQuery),
+		"data":    modelNames,
 	})
 }
 

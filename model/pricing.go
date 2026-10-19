@@ -1,6 +1,8 @@
 package model
 
 import (
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -40,6 +42,10 @@ type Pricing struct {
 	Description            string                               `json:"description,omitempty"`
 	Icon                   string                               `json:"icon,omitempty"`
 	Tags                   string                               `json:"tags,omitempty"`
+	ContextLength          int                                  `json:"context_length,omitempty"`
+	Capabilities           []string                             `json:"capabilities,omitempty"`
+	SupportsChat           bool                                 `json:"supports_chat"`
+	IsImageGeneration      bool                                 `json:"is_image_generation,omitempty"`
 	VendorID               int                                  `json:"vendor_id,omitempty"`
 	QuotaType              int                                  `json:"quota_type"`
 	ModelRatio             float64                              `json:"model_ratio"`
@@ -66,6 +72,82 @@ type PricingVendor struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	Icon        string `json:"icon,omitempty"`
+}
+
+// Model metadata below is descriptive only. It is parsed from the operator-facing
+// model tags (for example "Vision,Tools,Reasoning,128K") and is never read by
+// quota estimation, pre-consume, or settlement.
+var modelCapabilityTagAliases = map[string]string{
+	"vision":            "vision",
+	"tools":             "tools",
+	"reasoning":         "reasoning",
+	"json":              "structured_output",
+	"structured output": "structured_output",
+	"structured_output": "structured_output",
+}
+
+// parseModelContextLength reads a context window tag such as "128K" or "1M".
+// Tags without a K/M suffix are ignored so version-like numbers ("4.1") or
+// unrelated tag values never become a context window.
+func parseModelContextLength(tags string) int {
+	contextLength := 0
+	for tag := range strings.SplitSeq(tags, ",") {
+		tag = strings.TrimSpace(tag)
+		if len(tag) < 2 {
+			continue
+		}
+		multiplier := 0
+		switch tag[len(tag)-1] {
+		case 'k', 'K':
+			multiplier = 1000
+		case 'm', 'M':
+			multiplier = 1_000_000
+		default:
+			continue
+		}
+		value, err := strconv.ParseFloat(strings.TrimSpace(tag[:len(tag)-1]), 64)
+		if err != nil || value <= 0 || value > 100_000 {
+			continue
+		}
+		if size := int(value * float64(multiplier)); size > contextLength {
+			contextLength = size
+		}
+	}
+	return contextLength
+}
+
+// parseModelCapabilities maps known tag names to the capability identifiers the
+// console renders. Unknown tags are ignored; the order is stable for display.
+func parseModelCapabilities(tags string) []string {
+	found := map[string]bool{}
+	for tag := range strings.SplitSeq(tags, ",") {
+		if capability, ok := modelCapabilityTagAliases[strings.ToLower(strings.TrimSpace(tag))]; ok {
+			found[capability] = true
+		}
+	}
+	capabilities := make([]string, 0, len(found))
+	for _, capability := range []string{"vision", "tools", "reasoning", "structured_output"} {
+		if found[capability] {
+			capabilities = append(capabilities, capability)
+		}
+	}
+	return capabilities
+}
+
+// modelSupportsChat reports whether the model has a chat-style endpoint and no
+// task usage schema. Image generation models are excluded separately because
+// they still advertise an OpenAI endpoint.
+func modelSupportsChat(endpoints []constant.EndpointType, usageSchema map[string]jsplugin.UsageFieldSchema) bool {
+	if len(usageSchema) > 0 {
+		return false
+	}
+	for _, endpoint := range endpoints {
+		switch endpoint {
+		case constant.EndpointTypeOpenAI, constant.EndpointTypeOpenAIResponse, constant.EndpointTypeAnthropic, constant.EndpointTypeGemini:
+			return true
+		}
+	}
+	return false
 }
 
 var (
@@ -438,6 +520,10 @@ func updatePricing() {
 			pricing.BillingUsageSchema = jsplugin.CloneUsageSchema(usageSchema)
 			pricing.BillingUsageExamples = jsplugin.CloneUsageExamples(usageExamples)
 		}
+		pricing.ContextLength = parseModelContextLength(pricing.Tags)
+		pricing.Capabilities = parseModelCapabilities(pricing.Tags)
+		pricing.IsImageGeneration = slices.Contains(pricing.SupportedEndpointTypes, constant.EndpointTypeImageGeneration)
+		pricing.SupportsChat = !pricing.IsImageGeneration && modelSupportsChat(pricing.SupportedEndpointTypes, pricing.BillingUsageSchema)
 		providers := pluginGeneration.PluginsByModel(model)
 		hasProviderOverride := false
 		for _, provider := range providers {

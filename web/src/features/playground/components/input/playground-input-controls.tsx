@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { SendIcon, SquareIcon } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -26,7 +26,13 @@ import {
 } from '@/components/ai-elements/prompt-input'
 import { ModelGroupSelector } from '@/components/model-group-selector'
 
-import { getInputControlState } from '../../lib'
+import {
+  describeModelCapabilities,
+  describeModelPrice,
+  formatModelPriceLabel,
+  getInputControlState,
+  isChatModelOption,
+} from '../../lib'
 import type { GroupOption, ModelOption } from '../../types'
 
 type PlaygroundInputControlsProps = {
@@ -60,6 +66,21 @@ export function PlaygroundInputControls({
 }: PlaygroundInputControlsProps) {
   const { t } = useTranslation()
   const attachments = usePromptInputAttachments()
+  const groupRatio = groups.find((group) => group.value === groupValue)?.ratio
+  // Prices and capability tags travel with the model options so the shared
+  // selector stays display-only.
+  const selectorModels = useMemo(
+    () =>
+      models.filter(isChatModelOption).map((model) => ({
+        ...model,
+        priceLabel: formatModelPriceLabel(
+          describeModelPrice(model, groupRatio),
+          t
+        ),
+        capabilityLabels: describeModelCapabilities(model.capabilities, t),
+      })),
+    [models, groupRatio, t]
+  )
   const { canSubmit, isSelectorDisabled, shouldShowStop } =
     getInputControlState({
       disabled,
@@ -68,14 +89,14 @@ export function PlaygroundInputControls({
       hasStopHandler: Boolean(onStop),
       isGenerating,
       isModelLoading,
-      models,
+      models: selectorModels,
       text,
     })
 
   const renderSelector = () => (
     <ModelGroupSelector
       selectedModel={modelValue}
-      models={models}
+      models={selectorModels}
       onModelChange={onModelChange}
       selectedGroup={groupValue}
       groups={groups}
