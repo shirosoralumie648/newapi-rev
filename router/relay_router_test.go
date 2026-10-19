@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -15,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -184,6 +186,90 @@ func TestClaudeTokenCountingEndpointRequiresAuthAndAvailableModel(t *testing.T) 
 		require.NoError(t, model.LOG_DB.Model(&model.Log{}).Where("user_id = ?", user.Id).Count(&consumeLogs).Error)
 		assert.Zero(t, consumeLogs, "the local estimate writes no consume log")
 	})
+}
+
+// TestPlaygroundProtocolBridgeBillsThroughRelay proves a workspace Messages
+// request runs the ordinary relay pipeline: the upstream receives the canonical
+// /v1/messages path, the caller's quota is settled and a consume log is written.
+func TestPlaygroundProtocolBridgeBillsThroughRelay(t *testing.T) {
+	setupRelayRouterTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.Log{}, &model.UserSession{}))
+	ratio_setting.InitRatioSettings()
+
+	upstreamPaths := make(chan string, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamPaths <- r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_pg","type":"message","role":"assistant","model":"claude-3-5-sonnet-20241022","content":[{"type":"text","text":"hello from upstream"}],"stop_reason":"end_turn","usage":{"input_tokens":12,"output_tokens":4}}`))
+	}))
+	defer upstream.Close()
+
+	user := model.User{
+		Username:    "playground-messages-user",
+		AffCode:     "playground-messages-user",
+		Status:      common.UserStatusEnabled,
+		Group:       "default",
+		Quota:       1_000_000,
+		AuthVersion: 1,
+	}
+	require.NoError(t, model.DB.Create(&user).Error)
+
+	secret := common.SessionSecret
+	common.SessionSecret = "playground-messages-billing-test"
+	t.Cleanup(func() { common.SessionSecret = secret })
+	now := time.Now().Unix()
+	sid, err := common.GenerateRandomCharsKey(32)
+	require.NoError(t, err)
+	session := model.UserSession{SID: sid, UserID: user.Id, Version: 1, UserAuthVersion: 1, Status: model.UserSessionStatusActive,
+		RefreshHash: "unused-test-refresh-hash", LoginMethod: "password", LastActiveAt: now, ExpiresAt: now + 3600}
+	require.NoError(t, model.CreateUserSession(&session))
+	accessToken, _, err := service.IssueAccessToken(service.AuthIdentity{UserID: user.Id, SessionID: session.SID, UserAuthVersion: 1, SessionVersion: 1})
+	require.NoError(t, err)
+
+	baseURL := upstream.URL
+	channel := model.Channel{
+		Name:    "playground-messages-channel",
+		Type:    constant.ChannelTypeAnthropic,
+		Key:     "sk-playground-messages",
+		Status:  common.ChannelStatusEnabled,
+		Models:  "claude-3-5-sonnet-20241022",
+		Group:   "default",
+		BaseURL: &baseURL,
+	}
+	require.NoError(t, model.DB.Create(&channel).Error)
+	require.NoError(t, model.DB.Create(&model.Ability{
+		ChannelId: channel.Id,
+		Model:     "claude-3-5-sonnet-20241022",
+		Group:     "default",
+		Enabled:   true,
+	}).Error)
+
+	engine := gin.New()
+	SetRelayRouter(engine)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/pg/messages", strings.NewReader(
+		`{"model":"claude-3-5-sonnet-20241022","max_tokens":32,"messages":[{"role":"user","content":"hello"}],"stream":false}`,
+	))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+accessToken)
+	engine.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	assert.Contains(t, recorder.Body.String(), "hello from upstream")
+	select {
+	case path := <-upstreamPaths:
+		assert.Equal(t, "/v1/messages", path)
+	default:
+		t.Fatal("the relay did not call the upstream channel")
+	}
+
+	var stored model.User
+	require.NoError(t, model.DB.First(&stored, user.Id).Error)
+	assert.Less(t, stored.Quota, 1_000_000, "the reply is billed through the ordinary relay pipeline")
+
+	var consumeLogs int64
+	require.NoError(t, model.LOG_DB.Model(&model.Log{}).Where("user_id = ?", user.Id).Count(&consumeLogs).Error)
+	assert.EqualValues(t, 1, consumeLogs)
 }
 
 // TestMidjourneyImageAccessControl covers the accepted proofs of

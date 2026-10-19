@@ -20,6 +20,7 @@ import type {
   PlaygroundConfig,
   PlaygroundContextSettings,
   PlaygroundDeveloperOptions,
+  PlaygroundProtocol,
   ParameterEnabled,
 } from './types'
 
@@ -62,6 +63,9 @@ export const PLAYGROUND_TOOL_EXECUTION_ERRORS = {
   KB_NOT_BOUND: 'No knowledge base is bound to this conversation.',
   KB_NOT_SELECTED:
     'The requested knowledge base is not bound to this conversation.',
+  // The call names an MCP tool the account no longer has (connection removed
+  // or switched off after the reply was generated).
+  MCP_TOOL_UNAVAILABLE: 'This MCP tool is no longer available.',
   FAILED: 'The tool call could not be executed.',
 } as const
 
@@ -75,6 +79,23 @@ export const PLAYGROUND_TOOL_EXECUTION_DEFAULT_ENABLED = false
 export const PLAYGROUND_TOOL_EXECUTION_DEFAULT_MAX_ROUNDS = 5
 export const PLAYGROUND_TOOL_EXECUTION_MIN_ROUNDS = 1
 export const PLAYGROUND_TOOL_EXECUTION_MAX_ROUNDS = 10
+
+// Client preference for the administrator-managed MCP connections (LB-10).
+// The gateway only offers a connection when an administrator enabled it; the
+// account switch additionally decides whether its tools are declared to the
+// model and called through the gateway. Off by default.
+export const PLAYGROUND_MCP_DEFAULT_ENABLED = false
+
+// Provider-safe prefix the gateway gives every MCP tool name. The catalog
+// reports the exact `mcp__<server>__<tool>` name, so only calls starting with
+// this prefix may be recognized as MCP calls.
+export const PLAYGROUND_MCP_TOOL_NAME_PREFIX = 'mcp__'
+
+// Ceiling of MCP tools one account may declare in a request. An administrator
+// can configure up to 20 connections with 64 tools each, which is far beyond
+// what a single request should carry; the first tools of the catalog win and
+// the server keeps enforcing its own per-connection limits.
+export const PLAYGROUND_MCP_MAX_DECLARED_TOOLS = 64
 
 // Fallback continue instruction. Channels that do not accept an assistant
 // prefill get one extra user turn with this sentence; it is model input, not
@@ -127,6 +148,8 @@ export const PLAYGROUND_MODERATION_MAX_INPUT_CHARS = 16_000
 // API endpoints
 export const API_ENDPOINTS = {
   CHAT_COMPLETIONS: '/pg/chat/completions',
+  RESPONSES: '/pg/responses',
+  MESSAGES: '/pg/messages',
   EMBEDDINGS: '/pg/embeddings',
   RERANK: '/pg/rerank',
   MODERATIONS: '/pg/moderations',
@@ -149,6 +172,8 @@ export const API_ENDPOINTS = {
   PLAYGROUND_STORAGE_BILLING: '/api/playground/storage/billing',
   PLAYGROUND_SETTINGS: '/api/playground/settings',
   PLAYGROUND_SEARCH: '/api/playground/search',
+  PLAYGROUND_MCP_SERVERS: '/api/playground/mcp/servers',
+  PLAYGROUND_MCP_CALL: '/api/playground/mcp',
   PLAYGROUND_MESSAGE_COSTS: '/api/playground/message-costs',
   PLAYGROUND_LOGS: '/api/playground/logs',
   PLAYGROUND_ASSETS: '/api/playground/assets',
@@ -331,7 +356,45 @@ export const DEFAULT_CONFIG: PlaygroundConfig = {
   seed: null,
   reasoning_effort: '',
   stream: true,
+  protocol: 'chat',
 }
+
+// The protocols the workspace can send one prompt with. The labels are i18n
+// keys (English source text); the protocol value travels in the session config
+// and selects the relay route and the payload conversion.
+export const PLAYGROUND_PROTOCOL_OPTIONS: ReadonlyArray<{
+  value: PlaygroundProtocol
+  labelKey: string
+}> = [
+  { value: 'chat', labelKey: 'Chat Completions' },
+  { value: 'responses', labelKey: 'Responses' },
+  { value: 'messages', labelKey: 'Anthropic Messages' },
+]
+
+// Public API path each protocol exports and relays to. The Playground itself
+// posts to the /pg bridge; exported code and the direct API use these paths.
+export const PLAYGROUND_PROTOCOL_API_PATHS: Record<PlaygroundProtocol, string> =
+  {
+    chat: '/v1/chat/completions',
+    responses: '/v1/responses',
+    messages: '/v1/messages',
+  }
+
+// Anthropic requires the version header on every Messages request.
+export const PLAYGROUND_ANTHROPIC_VERSION = '2023-06-01'
+
+// The Messages endpoint requires max_tokens; a conversation that leaves the
+// parameter unset still sends this bounded default instead of an empty field.
+export const PLAYGROUND_MESSAGES_FALLBACK_MAX_TOKENS = 4096
+
+// The captured raw response is display-only and stays in memory; an unbounded
+// SSE transcript would pin the whole stream in a component state.
+export const PLAYGROUND_CAPTURED_RESPONSE_MAX_CHARS = 64_000
+
+// Shown beside a relay error that names an unsupported protocol shape, so the
+// caller knows the model or channel is the limiting factor, not the prompt.
+export const PLAYGROUND_PROTOCOL_UNSUPPORTED_HINT =
+  'This model or channel may not support the selected protocol. Switch back to Chat Completions or choose another model.'
 
 export const DEFAULT_PARAMETER_ENABLED: ParameterEnabled = {
   temperature: true,
@@ -356,6 +419,7 @@ export const STORAGE_KEYS = {
   AUTO_READ_ALOUD: 'playground_auto_read_aloud',
   AUTO_TITLE: 'playground_auto_title',
   TOOL_EXECUTION: 'playground_tool_execution',
+  MCP: 'playground_mcp',
 } as const
 
 // The new-conversation defaults are a client-side preference, not a store: the
@@ -400,11 +464,20 @@ export const PLAYGROUND_PRESET_ERRORS = {
 // Prompt snippet display bounds and client-side failure messages. The server
 // validates the same values and owns the authoritative per-account quota.
 export const PLAYGROUND_SNIPPET_NAME_MAX_LENGTH = 100
+// The portable import/export document the host renders. The format and schema
+// markers let the import panel reject an unrelated JSON file before uploading.
+export const PLAYGROUND_SNIPPET_FILE_FORMAT =
+  'new-api-playground-prompt-template'
+export const PLAYGROUND_SNIPPET_FILE_VERSION = 1
 
 export const PLAYGROUND_SNIPPET_ERRORS = {
   LOAD_FAILED: 'Failed to load prompt snippets',
   SAVE_FAILED: 'Failed to save the prompt snippet',
   DELETE_FAILED: 'Failed to delete the prompt snippet',
+  VERSIONS_FAILED: 'Failed to load the prompt snippet versions',
+  ROLLBACK_FAILED: 'Failed to roll back the prompt snippet',
+  EXPORT_FAILED: 'Failed to export the prompt snippet',
+  IMPORT_FAILED: 'Failed to import the prompt snippet',
 } as const
 
 // Cross-session memory bounds and copy. The server owns the authoritative

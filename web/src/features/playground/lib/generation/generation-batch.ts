@@ -20,6 +20,7 @@ import {
   PLAYGROUND_GENERATION_ADJUSTMENTS,
   PLAYGROUND_GENERATION_BATCH_MESSAGES,
   PLAYGROUND_GENERATION_COMPARE_MAX,
+  PLAYGROUND_GENERATION_COMPARE_MIN,
   PLAYGROUND_GENERATION_SEED_MAX,
   PLAYGROUND_GENERATION_SEED_MIN,
   PLAYGROUND_GENERATION_VARIATION_MAX,
@@ -623,12 +624,18 @@ export function generationLimits(
   options: GenerationSchemaOptions | undefined,
   support: { image: boolean; video: boolean } | null
 ): GenerationCapabilityLimits {
+  // An empty enum means the catalog did not report this parameter, not that
+  // the model rejects every value; treating it as unrestricted keeps the
+  // request untouched instead of reporting a no-op adjustment.
+  const sizes = kind === 'image' ? options?.imageSizes : options?.videoSizes
+  const qualities = kind === 'image' ? options?.qualities : undefined
+  const durations = kind === 'video' ? options?.durations : undefined
   return {
     image: support?.image ?? true,
     video: support?.video ?? true,
-    ...(kind === 'image'
-      ? { sizes: options?.imageSizes, qualities: options?.qualities }
-      : { sizes: options?.videoSizes, durations: options?.durations }),
+    ...(sizes && sizes.length > 0 ? { sizes } : {}),
+    ...(qualities && qualities.length > 0 ? { qualities } : {}),
+    ...(durations && durations.length > 0 ? { durations } : {}),
   }
 }
 

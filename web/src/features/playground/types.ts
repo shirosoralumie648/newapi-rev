@@ -493,16 +493,37 @@ export interface AssistantPreset {
 }
 
 /**
- * A reusable prompt fragment owned by the account: a short display name and the
- * text the composer inserts. Snippets never carry credentials or provider
- * addresses; inserting one only fills the composer.
+ * One immutable revision of a prompt snippet. Saving changed text appends a
+ * revision; the production pointer below chooses the text the composer inserts.
+ */
+export interface PromptSnippetVersion {
+  version: number
+  content: string
+  byteSize: number
+  createdAt: number
+}
+
+/**
+ * A reusable prompt template owned by the account: a short display name and
+ * the text the composer inserts. Snippets never carry credentials or provider
+ * addresses; inserting one only fills the composer. Every content save stores
+ * an immutable revision, while `productionVersion` is the movable pointer the
+ * insert path publishes.
  */
 export interface PromptSnippet {
   id: string
   name: string
   content: string
+  currentVersion: number
+  productionVersion: number
+  versionCount: number
   createdAt: number
   updatedAt: number
+}
+
+/** One snippet with its full immutable revision history. */
+export interface PromptSnippetDetail extends PromptSnippet {
+  versions: PromptSnippetVersion[]
 }
 
 /**
@@ -638,6 +659,14 @@ export interface PlaygroundSessionExport {
 
 /** One preset export file: the JSON import document and its download metadata. */
 export interface PlaygroundPresetExport {
+  format: 'json'
+  filename: string
+  contentType: string
+  content: string
+}
+
+/** One prompt snippet export file with its portable version history. */
+export interface PlaygroundSnippetExport {
   format: 'json'
   filename: string
   contentType: string
@@ -789,6 +818,14 @@ export interface ChatCompletionResponse {
 }
 
 // Configuration types
+/**
+ * Wire protocol of one conversation. The workspace sends the same prompt
+ * through the OpenAI Chat Completions, OpenAI Responses or Anthropic Messages
+ * endpoint; each protocol uses its own relay route and payload shape while
+ * group, channel selection and billing stay identical.
+ */
+export type PlaygroundProtocol = 'chat' | 'responses' | 'messages'
+
 export interface PlaygroundConfig {
   model: string
   group: string
@@ -805,6 +842,8 @@ export interface PlaygroundConfig {
    */
   reasoning_effort: string
   stream: boolean
+  /** Wire protocol the next send uses; `chat` keeps the OpenAI shape. */
+  protocol: PlaygroundProtocol
 }
 
 export interface ParameterEnabled {

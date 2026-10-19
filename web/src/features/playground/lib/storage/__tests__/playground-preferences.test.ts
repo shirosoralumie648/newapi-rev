@@ -27,10 +27,12 @@ import {
 import {
   loadAutoReadPreferences,
   loadAutoTitlePreferences,
+  loadMCPPreferences,
   loadNewSessionDefaults,
   loadToolExecutionPreferences,
   saveAutoReadPreferences,
   saveAutoTitlePreferences,
+  saveMCPPreferences,
   saveNewSessionDefaults,
   saveToolExecutionPreferences,
 } from '../playground-preferences'
@@ -192,4 +194,22 @@ test('a malformed tool loop preference degrades to the default', () => {
     enabled: false,
     maxRounds: 5,
   })
+})
+
+test('the MCP switch is off by default and remembered per account', () => {
+  expect(loadMCPPreferences(7)).toEqual({ enabled: false })
+
+  expect(saveMCPPreferences(7, { enabled: true })).toBe(true)
+  expect(loadMCPPreferences(7)).toEqual({ enabled: true })
+  // Another account never sees the first account's choice.
+  expect(loadMCPPreferences(8)).toEqual({ enabled: false })
+})
+
+test('a malformed MCP preference degrades to the disabled default', () => {
+  localStorage.setItem(
+    `${STORAGE_KEYS.MCP}:7`,
+    JSON.stringify({ version: 1, data: { enabled: 'yes' } })
+  )
+
+  expect(loadMCPPreferences(7)).toEqual({ enabled: false })
 })

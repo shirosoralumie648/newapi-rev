@@ -50,6 +50,7 @@ import type {
 import type { PlaygroundKnowledgeDiagnostics } from './playground-context-panel'
 import { PlaygroundInputControls } from './playground-input-controls'
 import { PlaygroundInputTools } from './playground-input-tools'
+import type { PlaygroundToolExecutionMCPProps } from './playground-tool-execution-control'
 
 interface PlaygroundInputProps {
   config: PlaygroundConfig
@@ -141,6 +142,8 @@ interface PlaygroundInputProps {
   toolExecutionMaxRounds: number
   onToolExecutionEnabledChange: (value: boolean) => void
   onToolExecutionMaxRoundsChange: (value: number) => void
+  /** Account-level MCP switch and catalog; absent while the server has MCP off. */
+  mcp?: PlaygroundToolExecutionMCPProps
 }
 
 export function PlaygroundInput({
@@ -204,6 +207,7 @@ export function PlaygroundInput({
   toolExecutionMaxRounds,
   onToolExecutionEnabledChange,
   onToolExecutionMaxRoundsChange,
+  mcp,
 }: PlaygroundInputProps) {
   const { t } = useTranslation()
   const { text, updateText, appendText, handleKeyDown, rememberSubmittedText } =
@@ -301,6 +305,7 @@ export function PlaygroundInput({
                 knowledgeBases={knowledgeBases}
                 knowledgeDiagnostics={knowledgeDiagnostics}
                 knowledgeLoading={knowledgeLoading}
+                mcp={mcp}
                 models={models}
                 onAutoReadChange={onAutoReadChange}
                 onAutoReadDefaultChange={onAutoReadDefaultChange}

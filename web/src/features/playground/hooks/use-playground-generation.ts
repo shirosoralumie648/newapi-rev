@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { getTaskArtifacts, getUserTaskLogs } from '@/features/usage-logs/api'
-import type { TaskLog } from '@/features/usage-logs/types'
+import type { GetTaskLogsParams, TaskLog } from '@/features/usage-logs/types'
 
 import {
   PLAYGROUND_TASK_PAGE_SIZE,
@@ -40,6 +40,29 @@ import {
 } from '../generation-api'
 import { playgroundQueryKeys } from '../lib/query-keys'
 
+/** Server-side filters over the generation metadata a task recorded. */
+export interface PlaygroundTaskGenerationFilters {
+  prompt?: string
+  model?: string
+  size?: string
+  quality?: string
+  seed?: number
+  count?: number
+}
+
+function normalizeTaskGenerationFilters(
+  filters: PlaygroundTaskGenerationFilters
+): PlaygroundTaskGenerationFilters {
+  const normalized: PlaygroundTaskGenerationFilters = {}
+  if (filters.prompt?.trim()) normalized.prompt = filters.prompt.trim()
+  if (filters.model?.trim()) normalized.model = filters.model.trim()
+  if (filters.size?.trim()) normalized.size = filters.size.trim()
+  if (filters.quality?.trim()) normalized.quality = filters.quality.trim()
+  if (filters.seed !== undefined) normalized.seed = filters.seed
+  if (filters.count !== undefined) normalized.count = filters.count
+  return normalized
+}
+
 function hasUnfinishedTask(tasks: TaskLog[] | undefined): boolean {
   if (!tasks) return false
   return tasks.some(
@@ -52,16 +75,46 @@ function hasUnfinishedTask(tasks: TaskLog[] | undefined): boolean {
  * status source, so this reuses the owner-scoped dashboard endpoint instead of
  * inventing a second status contract; it keeps polling only while one of the
  * loaded tasks is unfinished.
+ *
+ * The result gallery passes generation filters here, so prompt/model/size/
+ * quality/seed/count narrow the durable rows on the server rather than only
+ * the current page in the browser.
  */
-export function usePlaygroundTasks(enabled: boolean) {
+export function usePlaygroundTasks(
+  enabled: boolean,
+  filters: PlaygroundTaskGenerationFilters = {}
+) {
+  const generationFilters = normalizeTaskGenerationFilters(filters)
+  const hasFilters = Object.keys(generationFilters).length > 0
+  const params: GetTaskLogsParams = {
+    p: 1,
+    page_size: PLAYGROUND_TASK_PAGE_SIZE,
+    ...(generationFilters.prompt
+      ? { generation_prompt: generationFilters.prompt }
+      : {}),
+    ...(generationFilters.model
+      ? { generation_model: generationFilters.model }
+      : {}),
+    ...(generationFilters.size
+      ? { generation_size: generationFilters.size }
+      : {}),
+    ...(generationFilters.quality
+      ? { generation_quality: generationFilters.quality }
+      : {}),
+    ...(generationFilters.seed !== undefined
+      ? { generation_seed: generationFilters.seed }
+      : {}),
+    ...(generationFilters.count !== undefined
+      ? { generation_count: generationFilters.count }
+      : {}),
+  }
   return useQuery({
-    queryKey: playgroundQueryKeys.tasks(),
+    queryKey: playgroundQueryKeys.tasks(
+      hasFilters ? JSON.stringify(generationFilters) : 'list'
+    ),
     enabled,
     queryFn: async () => {
-      const response = await getUserTaskLogs({
-        p: 1,
-        page_size: PLAYGROUND_TASK_PAGE_SIZE,
-      })
+      const response = await getUserTaskLogs(params)
       return (response.data?.items ?? []) as TaskLog[]
     },
     meta: { errorToast: false },
@@ -122,7 +175,7 @@ export function useCancelPlaygroundTask() {
     meta: { errorToast: false },
     onSettled: () => {
       void queryClient.invalidateQueries({
-        queryKey: playgroundQueryKeys.tasks(),
+        queryKey: playgroundQueryKeys.tasksAll(),
       })
       void queryClient.invalidateQueries({
         predicate: (query) =>
@@ -136,7 +189,7 @@ export function useCancelPlaygroundTask() {
 export function usePlaygroundGeneration() {
   const queryClient = useQueryClient()
   const invalidateTasks = () =>
-    queryClient.invalidateQueries({ queryKey: playgroundQueryKeys.tasks() })
+    queryClient.invalidateQueries({ queryKey: playgroundQueryKeys.tasksAll() })
 
   const image = useMutation({
     mutationFn: (input: PlaygroundImageGenerationInput) =>

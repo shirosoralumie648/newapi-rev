@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import type {
   ChatCompletionRequest,
   ChatCompletionMessage,
+  ChatCompletionTool,
   Message,
   PlaygroundConfig,
   PlaygroundContextSettings,
@@ -60,7 +61,10 @@ export interface ChatCompletionPayloadContext {
  * stored history is unaffected. With developer settings enabled the request
  * also carries the defined function tools and the structured response format;
  * disabled settings add no field at all, so the request is byte-identical to a
- * conversation without them.
+ * conversation without them. The catalog of administrator-managed MCP
+ * connections travels independently of the developer switch: while the account
+ * offers them, their declarations join the request tools and the tool choice
+ * defaults to `auto` so the model may actually call them.
  */
 export function buildChatCompletionPayload(
   messages: Message[],
@@ -70,7 +74,8 @@ export function buildChatCompletionPayload(
   context?: ChatCompletionPayloadContext,
   memoryBlock = '',
   quote?: PlaygroundPendingQuote | null,
-  developerOptions?: PlaygroundDeveloperOptions | null
+  developerOptions?: PlaygroundDeveloperOptions | null,
+  mcpTools?: ChatCompletionTool[]
 ): ChatCompletionRequest {
   // Filter and format valid messages; the plan applies the limits and the
   // compression node, the plain path sends the history unchanged.
@@ -152,13 +157,20 @@ export function buildChatCompletionPayload(
   }
 
   // Tools and the structured response format travel only while the developer
-  // settings are enabled and define something to send.
+  // settings are enabled and define something to send. The MCP declarations
+  // are added whenever the account offers them, because their own switch is
+  // the LB-09 loop, not the developer settings.
   const developer = buildDeveloperRequestFields(developerOptions)
-  if (developer.tools) {
-    payload.tools = developer.tools
+  const mcpDeclarations = mcpTools ?? []
+  if (developer.tools || mcpDeclarations.length > 0) {
+    payload.tools = [...(developer.tools ?? []), ...mcpDeclarations]
   }
   if (developer.tool_choice) {
     payload.tool_choice = developer.tool_choice
+  } else if ((payload.tools?.length ?? 0) > 0) {
+    // The declarations above only make sense while the model is allowed to
+    // call them; an absent choice must not silently disable the MCP catalog.
+    payload.tool_choice = 'auto'
   }
   if (developer.response_format) {
     payload.response_format = developer.response_format

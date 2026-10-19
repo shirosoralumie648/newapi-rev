@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useCallback, useEffect, useState } from 'react'
 
 import {
+  PLAYGROUND_MCP_DEFAULT_ENABLED,
   PLAYGROUND_TOOL_EXECUTION_DEFAULT_ENABLED,
   PLAYGROUND_TOOL_EXECUTION_DEFAULT_MAX_ROUNDS,
   PLAYGROUND_TOOL_EXECUTION_MAX_ROUNDS,
@@ -27,12 +28,15 @@ import {
 import {
   loadAutoReadPreferences,
   loadAutoTitlePreferences,
+  loadMCPPreferences,
   loadToolExecutionPreferences,
   saveAutoReadPreferences,
   saveAutoTitlePreferences,
+  saveMCPPreferences,
   saveToolExecutionPreferences,
   type PlaygroundAutoReadPreferences,
   type PlaygroundAutoTitlePreferences,
+  type PlaygroundMCPPreferences,
   type PlaygroundToolExecutionPreferences,
 } from '../lib/storage/playground-preferences'
 
@@ -40,7 +44,8 @@ import {
  * Account-level Playground preferences that stay in the browser: the auto
  * read-aloud and automatic conversation naming defaults plus one explicit
  * override per conversation. An account default applies to every conversation
- * without an override and to every new conversation.
+ * without an override and to every new conversation. The MCP switch selects
+ * whether the administrator-managed connections are offered to the model.
  */
 export function usePlaygroundPreferences(userId: number | null) {
   const [autoRead, setAutoRead] = useState<PlaygroundAutoReadPreferences>({
@@ -56,6 +61,9 @@ export function usePlaygroundPreferences(userId: number | null) {
       enabled: PLAYGROUND_TOOL_EXECUTION_DEFAULT_ENABLED,
       maxRounds: PLAYGROUND_TOOL_EXECUTION_DEFAULT_MAX_ROUNDS,
     })
+  const [mcp, setMCP] = useState<PlaygroundMCPPreferences>({
+    enabled: PLAYGROUND_MCP_DEFAULT_ENABLED,
+  })
 
   // Auth changes intentionally rehydrate browser-owned preferences after
   // hiding the previous account's state.
@@ -66,6 +74,8 @@ export function usePlaygroundPreferences(userId: number | null) {
     setAutoTitle(loadAutoTitlePreferences(userId))
     // eslint-disable-next-line react/set-state-in-effect
     setToolExecution(loadToolExecutionPreferences(userId))
+    // eslint-disable-next-line react/set-state-in-effect
+    setMCP(loadMCPPreferences(userId))
   }, [userId])
 
   const persistAutoRead = useCallback(
@@ -186,6 +196,15 @@ export function usePlaygroundPreferences(userId: number | null) {
     [persistToolExecution, toolExecution]
   )
 
+  const setMCPEnabled = useCallback(
+    (value: boolean) => {
+      const next = { enabled: value }
+      setMCP(next)
+      saveMCPPreferences(userId, next)
+    },
+    [userId]
+  )
+
   return {
     autoReadDefault: autoRead.defaultEnabled,
     hasSessionAutoReadOverride,
@@ -201,5 +220,7 @@ export function usePlaygroundPreferences(userId: number | null) {
     toolExecutionMaxRounds: toolExecution.maxRounds,
     setToolExecutionEnabled,
     setToolExecutionMaxRounds,
+    mcpEnabled: mcp.enabled,
+    setMCPEnabled,
   }
 }

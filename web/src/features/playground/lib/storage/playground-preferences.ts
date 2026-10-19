@@ -21,6 +21,7 @@ import { z } from 'zod'
 import {
   DEFAULT_CONFIG,
   DEFAULT_PARAMETER_ENABLED,
+  PLAYGROUND_MCP_DEFAULT_ENABLED,
   PLAYGROUND_NEW_SESSION_PROMPT_MAX_BYTES,
   PLAYGROUND_PREFERENCE_OVERRIDE_MAX_ENTRIES,
   PLAYGROUND_TOOL_EXECUTION_DEFAULT_ENABLED,
@@ -80,6 +81,15 @@ export interface PlaygroundToolExecutionPreferences {
   maxRounds: number
 }
 
+/**
+ * The account-level MCP switch. The global connection list and its credentials
+ * belong to the administrator; the account only decides whether the tools of
+ * the enabled connections are declared to the model. Off by default.
+ */
+export interface PlaygroundMCPPreferences {
+  enabled: boolean
+}
+
 const newSessionDefaultsSchema = z.object({
   config: playgroundConfigSchema,
   parameterEnabled: parameterEnabledSchema,
@@ -101,6 +111,10 @@ const autoTitlePreferencesSchema = z.object({
 const toolExecutionPreferencesSchema = z.object({
   enabled: z.boolean(),
   maxRounds: z.number().int(),
+})
+
+const mcpPreferencesSchema = z.object({
+  enabled: z.boolean(),
 })
 
 function prefixedKey(key: string, userId: number): string {
@@ -276,5 +290,29 @@ export function saveToolExecutionPreferences(
       PLAYGROUND_TOOL_EXECUTION_MAX_ROUNDS,
       Math.max(PLAYGROUND_TOOL_EXECUTION_MIN_ROUNDS, preferences.maxRounds)
     ),
+  })
+}
+
+export function loadMCPPreferences(
+  userId: number | null
+): PlaygroundMCPPreferences {
+  const fallback: PlaygroundMCPPreferences = {
+    enabled: PLAYGROUND_MCP_DEFAULT_ENABLED,
+  }
+  if (userId === null) return fallback
+  const parsed = mcpPreferencesSchema.safeParse(
+    readEnvelope(STORAGE_KEYS.MCP, userId)
+  )
+  if (!parsed.success) return fallback
+  return { enabled: parsed.data.enabled }
+}
+
+export function saveMCPPreferences(
+  userId: number | null,
+  preferences: PlaygroundMCPPreferences
+): boolean {
+  if (userId === null) return false
+  return writeEnvelope(STORAGE_KEYS.MCP, userId, {
+    enabled: preferences.enabled,
   })
 }

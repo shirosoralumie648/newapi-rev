@@ -34,9 +34,15 @@ type PlaygroundUsageMetric struct {
 // scope the read and write paths use, so one account can never observe another
 // account's totals. Group is the user group the limits were resolved from.
 type PlaygroundResourceUsage struct {
-	Group           string                `json:"group"`
-	Sessions        PlaygroundUsageMetric `json:"sessions"`
-	Memories        PlaygroundUsageMetric `json:"memories"`
+	Group    string                `json:"group"`
+	Sessions PlaygroundUsageMetric `json:"sessions"`
+	Memories PlaygroundUsageMetric `json:"memories"`
+	// Snippets and SnippetVersions are the prompt template library: the stored
+	// templates and their immutable revisions. The snippet metric carries the
+	// per-account template count, the version metric the account's total stored
+	// versions.
+	Snippets        PlaygroundUsageMetric `json:"snippets"`
+	SnippetVersions PlaygroundUsageMetric `json:"snippet_versions"`
 	Attachments     PlaygroundUsageMetric `json:"attachments"`
 	Artifacts       PlaygroundUsageMetric `json:"artifacts"`
 	Canvas          PlaygroundUsageMetric `json:"canvas"`
@@ -81,6 +87,12 @@ func PlaygroundUsageForUser(userID int) (*PlaygroundResourceUsage, error) {
 		},
 		Memories: PlaygroundUsageMetric{
 			Limit: int64(policy.MemoryUserMaxCount),
+		},
+		Snippets: PlaygroundUsageMetric{
+			Limit: int64(policy.SnippetUserMaxCount),
+		},
+		SnippetVersions: PlaygroundUsageMetric{
+			Limit: int64(policy.SnippetVersionUserMaxCount),
 		},
 		Attachments: PlaygroundUsageMetric{
 			Limit:      int64(policy.AttachmentUserMaxCount),
@@ -135,6 +147,8 @@ func PlaygroundUsageForUser(userID int) (*PlaygroundResourceUsage, error) {
 	}
 	usage.Sessions.Used = counters.Sessions
 	usage.Memories.Used = counters.Memories
+	usage.Snippets.Used = counters.Snippets
+	usage.SnippetVersions.Used = counters.SnippetVersions
 	usage.Attachments.Used = counters.AttachmentCount
 	usage.Attachments.UsedBytes = counters.AttachmentBytes
 	usage.Artifacts.Used = counters.ArtifactCount

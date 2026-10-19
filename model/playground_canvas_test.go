@@ -2103,6 +2103,7 @@ func TestPlaygroundWorkflowRunHistoryMatrix(t *testing.T) {
 				CacheHits   int    `json:"cache_hits"`
 				TotalQuota  int    `json:"total_quota"`
 				TotalTokens int64  `json:"total_tokens"`
+				DurationMs  int64  `json:"duration_ms"`
 				Revision    int64  `json:"revision"`
 				WorkflowRev int64  `json:"workflow_revision"`
 				Estimate    int    `json:"estimate_quota"`
@@ -2169,7 +2170,10 @@ func TestPlaygroundWorkflowRunHistoryMatrix(t *testing.T) {
 			assert.Equal(t, 3, updated.NodeCount)
 			assert.EqualValues(t, 65, updated.TotalQuota)
 			assert.EqualValues(t, 12, updated.TotalTokens)
-			assert.EqualValues(t, 800, updated.Nodes[1].DurationMs)
+			// The run spans the earliest start (1000) to the latest finish
+			// (1800); the per-node record carries the duration the browser
+			// reports, which this payload leaves unset.
+			assert.EqualValues(t, 800, updated.DurationMs)
 			require.Len(t, updated.Nodes[1].Artifact, 1)
 
 			// A stale revision cannot overwrite a newer snapshot, and another
@@ -2242,7 +2246,13 @@ func TestPlaygroundWorkflowRunHistoryMatrix(t *testing.T) {
 			assert.Equal(t, created.ID, cacheEnvelope.Data.Items[0].RunID)
 
 			// A second run with the same fingerprint supersedes the first one
-			// in the cache, while the first run remains in history.
+			// in the cache, while the first run remains in history. Both
+			// snapshots can land inside the same second, so the fixture ages
+			// the first run: the lookup then resolves the newer run instead of
+			// falling back to the id order on an updated_at tie.
+			require.NoError(t, db.Model(&model.PlaygroundWorkflowRun{}).
+				Where("id = ?", created.ID).
+				Update("updated_at", common.GetTimestamp()-100000).Error)
 			second := decodeRun(playgroundRequest(t, 7, http.MethodPost, "/api/playground/workflows/history", map[string]any{
 				"canvas_id": canvasID,
 			}, controller.CreatePlaygroundWorkflowRunHistory))
