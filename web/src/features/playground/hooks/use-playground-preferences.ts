@@ -1,0 +1,99 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+import { useCallback, useEffect, useState } from 'react'
+
+import {
+  loadAutoReadPreferences,
+  saveAutoReadPreferences,
+  type PlaygroundAutoReadPreferences,
+} from '../lib/storage/playground-preferences'
+
+/**
+ * Account-level Playground preferences that stay in the browser: the auto
+ * read-aloud default plus one explicit override per conversation. The account
+ * default applies to every conversation without an override and to every new
+ * conversation.
+ */
+export function usePlaygroundPreferences(userId: number | null) {
+  const [preferences, setPreferences] = useState<PlaygroundAutoReadPreferences>(
+    {
+      defaultEnabled: false,
+      overrides: {},
+    }
+  )
+
+  // Auth changes intentionally rehydrate browser-owned preferences after
+  // hiding the previous account's state.
+  useEffect(() => {
+    // eslint-disable-next-line react/set-state-in-effect
+    setPreferences(loadAutoReadPreferences(userId))
+  }, [userId])
+
+  const persist = useCallback(
+    (next: PlaygroundAutoReadPreferences) => {
+      setPreferences(next)
+      saveAutoReadPreferences(userId, next)
+    },
+    [userId]
+  )
+
+  const setAutoReadDefault = useCallback(
+    (value: boolean) => {
+      persist({ ...preferences, defaultEnabled: value })
+    },
+    [persist, preferences]
+  )
+
+  /** Set one conversation's override; null removes it and follows the default. */
+  const setSessionAutoRead = useCallback(
+    (sessionId: string | null, value: boolean | null) => {
+      if (!sessionId) return
+      const overrides = { ...preferences.overrides }
+      if (value === null) {
+        delete overrides[sessionId]
+      } else {
+        overrides[sessionId] = value
+      }
+      persist({ ...preferences, overrides })
+    },
+    [persist, preferences]
+  )
+
+  const isAutoReadEnabled = useCallback(
+    (sessionId: string | null) => {
+      if (!sessionId) return preferences.defaultEnabled
+      return preferences.overrides[sessionId] ?? preferences.defaultEnabled
+    },
+    [preferences]
+  )
+
+  const hasSessionAutoReadOverride = useCallback(
+    (sessionId: string | null) =>
+      Boolean(sessionId && sessionId in preferences.overrides),
+    [preferences]
+  )
+
+  return {
+    autoReadDefault: preferences.defaultEnabled,
+    hasSessionAutoReadOverride,
+    isAutoReadEnabled,
+    setAutoReadDefault,
+    setSessionAutoRead,
+  }
+}

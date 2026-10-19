@@ -8314,6 +8314,17 @@
     "Grace": "Grace",
     "Playground storage billing for {{date}}: {{quota}} quota charged, {{bytes}} bytes billed": "Playground storage billing for {{date}}: {{quota}} quota charged, {{bytes}} bytes billed",
     "You have reached the daily Playground storage download limit. It resets with the next storage day.": "You have reached the daily Playground storage download limit. It resets with the next storage day.",
-    "Playground storage settlement left {{count}} accounts read-only with {{quota}} quota uncovered; see the playground_storage_settle system task result": "Playground storage settlement left {{count}} accounts read-only with {{quota}} quota uncovered; see the playground_storage_settle system task result"
+    "Playground storage settlement left {{count}} accounts read-only with {{quota}} quota uncovered; see the playground_storage_settle system task result": "Playground storage settlement left {{count}} accounts read-only with {{quota}} quota uncovered; see the playground_storage_settle system task result",
+    "Read replies aloud": "Read replies aloud",
+    "Read each completed reply aloud automatically.": "Read each completed reply aloud automatically.",
+    "Use account default": "Use account default",
+    "New conversations read replies aloud": "New conversations read replies aloud",
+    "This default also applies to conversations without a choice.": "This default also applies to conversations without a choice.",
+    "Import conversation": "Import conversation",
+    "Conversation imported": "Conversation imported",
+    "Invalid conversation export.": "Invalid conversation export.",
+    "The conversation export is too large.": "The conversation export is too large.",
+    "Unable to import the conversation.": "Unable to import the conversation.",
+    "{{count}} attachments could not be restored and were kept as placeholders.": "{{count}} attachments could not be restored and were kept as placeholders."
   }
 }

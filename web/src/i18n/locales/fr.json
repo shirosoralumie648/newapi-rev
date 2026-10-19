@@ -8314,6 +8314,17 @@
     "Grace": "En grâce",
     "Playground storage billing for {{date}}: {{quota}} quota charged, {{bytes}} bytes billed": "Facturation du stockage Playground du {{date}} : {{quota}} de quota facturé, {{bytes}} octets facturés",
     "You have reached the daily Playground storage download limit. It resets with the next storage day.": "Vous avez atteint la limite quotidienne de téléchargement du stockage Playground. Elle se réinitialise au prochain jour de stockage.",
-    "Playground storage settlement left {{count}} accounts read-only with {{quota}} quota uncovered; see the playground_storage_settle system task result": "Le règlement du stockage Playground a laissé {{count}} comptes en lecture seule avec {{quota}} de quota non couvert ; voir le résultat de la tâche système playground_storage_settle"
+    "Playground storage settlement left {{count}} accounts read-only with {{quota}} quota uncovered; see the playground_storage_settle system task result": "Le règlement du stockage Playground a laissé {{count}} comptes en lecture seule avec {{quota}} de quota non couvert ; voir le résultat de la tâche système playground_storage_settle",
+    "Read replies aloud": "Lire les réponses à voix haute",
+    "Read each completed reply aloud automatically.": "Lire automatiquement chaque réponse terminée.",
+    "Use account default": "Utiliser la valeur par défaut du compte",
+    "New conversations read replies aloud": "Les nouvelles conversations lisent les réponses à voix haute",
+    "This default also applies to conversations without a choice.": "Cette valeur par défaut s’applique aussi aux conversations sans choix explicite.",
+    "Import conversation": "Importer une conversation",
+    "Conversation imported": "Conversation importée",
+    "Invalid conversation export.": "Export de conversation invalide.",
+    "The conversation export is too large.": "L’export de conversation est trop volumineux.",
+    "Unable to import the conversation.": "Impossible d’importer la conversation.",
+    "{{count}} attachments could not be restored and were kept as placeholders.": "{{count}} pièces jointes n’ont pas pu être restaurées et ont été remplacées par des espaces réservés."
   }
 }

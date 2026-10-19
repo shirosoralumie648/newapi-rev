@@ -38,6 +38,11 @@ export type StreamChunkParseResult = {
   updates: StreamMessageUpdate[]
   toolCalls: ChatCompletionToolCallDelta[]
   usage?: MessageUsage
+  /**
+   * Provider finish reason of this chunk, when it carries one. It is the last
+   * frame of a completion and labels the stored version.
+   */
+  finishReason?: string
 }
 
 type StreamErrorPayload = {
@@ -84,10 +89,13 @@ export function parseStreamErrorDetails(data?: string): StreamErrorDetails {
 export function parseStreamChunk(data: string): StreamChunkParseResult {
   const chunk = JSON.parse(data) as ChatCompletionChunk
   const usage = toMessageUsage(chunk.usage)
-  const delta = chunk.choices?.[0]?.delta
+  const choice = chunk.choices?.[0]
+  const delta = choice?.delta
+  const finishReason =
+    typeof choice?.finish_reason === 'string' ? choice.finish_reason : undefined
 
   if (!delta) {
-    return { updates: [], toolCalls: [], usage }
+    return { updates: [], toolCalls: [], usage, finishReason }
   }
 
   const updates: StreamMessageUpdate[] = []
@@ -101,7 +109,7 @@ export function parseStreamChunk(data: string): StreamChunkParseResult {
     updates.push({ type: 'content', chunk: delta.content })
   }
 
-  return { updates, toolCalls: delta.tool_calls ?? [], usage }
+  return { updates, toolCalls: delta.tool_calls ?? [], usage, finishReason }
 }
 
 /**

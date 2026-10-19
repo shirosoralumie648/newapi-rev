@@ -1,0 +1,103 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+import { afterEach, beforeEach, expect, test } from 'vitest'
+
+import {
+  DEFAULT_CONFIG,
+  DEFAULT_PARAMETER_ENABLED,
+  PLAYGROUND_NEW_SESSION_PROMPT_MAX_BYTES,
+  STORAGE_KEYS,
+} from '../../../constants'
+import {
+  loadAutoReadPreferences,
+  loadNewSessionDefaults,
+  saveAutoReadPreferences,
+  saveNewSessionDefaults,
+} from '../playground-preferences'
+
+beforeEach(() => localStorage.clear())
+afterEach(() => localStorage.clear())
+
+test('remembers the new-conversation settings per account', () => {
+  const saved = saveNewSessionDefaults(7, {
+    config: { ...DEFAULT_CONFIG, model: 'recent-model', temperature: 0.2 },
+    parameterEnabled: { ...DEFAULT_PARAMETER_ENABLED, temperature: false },
+    systemPrompt: 'Stay concise.',
+  })
+
+  expect(saved).toBe(true)
+  expect(loadNewSessionDefaults(7)).toMatchObject({
+    config: { model: 'recent-model', temperature: 0.2 },
+    parameterEnabled: { temperature: false },
+    systemPrompt: 'Stay concise.',
+  })
+  // Another account never sees the first account's defaults.
+  expect(loadNewSessionDefaults(8)).toBeNull()
+})
+
+test('oversized or corrupted defaults degrade to none', () => {
+  expect(
+    saveNewSessionDefaults(7, {
+      config: DEFAULT_CONFIG,
+      parameterEnabled: DEFAULT_PARAMETER_ENABLED,
+      systemPrompt: 'x'.repeat(PLAYGROUND_NEW_SESSION_PROMPT_MAX_BYTES + 1),
+    })
+  ).toBe(false)
+  expect(loadNewSessionDefaults(7)).toBeNull()
+
+  localStorage.setItem(
+    `${STORAGE_KEYS.NEW_SESSION_DEFAULTS}:9`,
+    '{"version":1,"data":{"config":"broken"}}'
+  )
+  expect(loadNewSessionDefaults(9)).toBeNull()
+})
+
+test('stores the account default and per-conversation read-aloud overrides', () => {
+  saveAutoReadPreferences(7, {
+    defaultEnabled: true,
+    overrides: { 'local-1': false },
+  })
+
+  expect(loadAutoReadPreferences(7)).toEqual({
+    defaultEnabled: true,
+    overrides: { 'local-1': false },
+  })
+  expect(loadAutoReadPreferences(8)).toEqual({
+    defaultEnabled: false,
+    overrides: {},
+  })
+})
+
+test('malformed read-aloud overrides are dropped instead of breaking the store', () => {
+  localStorage.setItem(
+    `${STORAGE_KEYS.AUTO_READ_ALOUD}:7`,
+    JSON.stringify({
+      version: 1,
+      data: {
+        defaultEnabled: true,
+        overrides: { keep: false, drop: 'yes', '': true },
+      },
+    })
+  )
+
+  expect(loadAutoReadPreferences(7)).toEqual({
+    defaultEnabled: true,
+    overrides: { keep: false },
+  })
+})

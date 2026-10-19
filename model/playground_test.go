@@ -322,6 +322,7 @@ func TestPlaygroundRejectsInvalidSnapshotsWithoutReplacingHistory(t *testing.T) 
 		{"invalid role", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "owner", "versions": []any{map[string]any{"id": "v", "content": "text"}}}}}}},
 		{"oversized body", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "user", "versions": []any{map[string]any{"id": "v", "content": strings.Repeat("x", 2<<20)}}}}}}},
 		{"oversized request id", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "assistant", "versions": []any{map[string]any{"id": "v", "content": "text", "requestId": strings.Repeat("r", 65)}}}}}}},
+		{"oversized finish reason", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "assistant", "versions": []any{map[string]any{"id": "v", "content": "text", "finishReason": strings.Repeat("f", 65)}}}}}}},
 		{"empty request id", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "assistant", "versions": []any{map[string]any{"id": "v", "content": "text", "requestId": ""}}}}}}},
 		{"negative usage", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "assistant", "versions": []any{map[string]any{"id": "v", "content": "text", "usage": map[string]any{"promptTokens": -1, "completionTokens": 0, "totalTokens": 0}}}}}}}},
 		{"fractional usage", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "assistant", "versions": []any{map[string]any{"id": "v", "content": "text", "usage": map[string]any{"promptTokens": 1.5, "completionTokens": 0, "totalTokens": 1.5}}}}}}}},
@@ -2598,8 +2599,9 @@ func TestPlaygroundMessageVersionBranches(t *testing.T) {
 						"versions": []any{
 							map[string]any{"id": "a1", "content": "First answer"},
 							map[string]any{"id": "a2", "content": "Regenerated answer",
-								"requestId": "req-branch-2",
-								"usage":     map[string]any{"promptTokens": 12, "completionTokens": 34, "totalTokens": 46}},
+								"requestId":    "req-branch-2",
+								"finishReason": "length",
+								"usage":        map[string]any{"promptTokens": 12, "completionTokens": 34, "totalTokens": 46}},
 						},
 					}},
 				},
@@ -2619,6 +2621,9 @@ func TestPlaygroundMessageVersionBranches(t *testing.T) {
 			// The generation record of the selected version round-trips verbatim.
 			assert.Contains(t, string(messages[1].Payload), `"requestId":"req-branch-2"`)
 			assert.Contains(t, string(messages[1].Payload), `"totalTokens":46`)
+			// A truncated reply keeps its provider finish reason so the client
+			// can offer "continue generation" after a reload.
+			assert.Contains(t, string(messages[1].Payload), `"finishReason":"length"`)
 
 			for _, index := range []int{-1, 2} {
 				invalid := map[string]any{

@@ -26,6 +26,7 @@ import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 
 import type { PlaygroundSession } from '../../types'
+import { PlaygroundSessionImportButton } from './playground-session-import'
 import { PlaygroundSessionItem } from './playground-session-item'
 
 interface PlaygroundSessionListProps {
@@ -39,6 +40,8 @@ interface PlaygroundSessionListProps {
   onOpenTrash?: () => void
   onAction?: () => void
   onOpenPresets?: () => void
+  /** Rebuild one conversation from an exported JSON file. */
+  onImportFile?: (file: File) => Promise<void> | void
 }
 
 export function PlaygroundSessionList(props: PlaygroundSessionListProps) {
@@ -98,6 +101,12 @@ export function PlaygroundSessionList(props: PlaygroundSessionListProps) {
         >
           <Plus aria-hidden='true' />
         </Button>
+        {props.onImportFile ? (
+          <PlaygroundSessionImportButton
+            disabled={props.disabled}
+            onImport={props.onImportFile}
+          />
+        ) : null}
       </div>
 
       <ScrollArea className='min-h-0 flex-1'>
