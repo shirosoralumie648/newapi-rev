@@ -82,6 +82,7 @@ func SetApiRouter(router *gin.Engine) {
 		playgroundRoute.Use(middleware.DisableCache(), middleware.UserAuth())
 		{
 			playgroundRoute.GET("/usage", controller.GetPlaygroundUsage)
+			playgroundRoute.GET("/usage/analytics", controller.GetPlaygroundUsageAnalytics)
 			playgroundRoute.GET("/storage/billing", controller.GetPlaygroundStorageBilling)
 			// One canvas workflow run may open a budget cap and settle it when
 			// the run stops (BL-03).

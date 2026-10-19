@@ -70,6 +70,12 @@ func playgroundRelay(c *gin.Context, relayFormat types.RelayFormat) {
 		return
 	}
 
+	// Mark the request as Playground-origin before the relay runs. The marker
+	// only scopes log metadata (the settled consume/error rows carry
+	// `other.playground_origin`) used by the read-only usage analytics; billing,
+	// group resolution and channel selection are untouched.
+	c.Set(string(constant.ContextKeyPlaygroundOrigin), true)
+
 	Relay(c, relayFormat)
 }
 
