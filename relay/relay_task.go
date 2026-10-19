@@ -642,6 +642,19 @@ func mapTaskStatusToSimple(status model.TaskStatus) string {
 }
 
 func TaskModel2Dto(task *model.Task) *dto.TaskDto {
+	var generation *dto.TaskGenerationInfo
+	if params := task.PrivateData.Generation; params != nil {
+		generation = &dto.TaskGenerationInfo{
+			Kind:     params.Kind,
+			Prompt:   params.Prompt,
+			Model:    params.Model,
+			Size:     params.Size,
+			Quality:  params.Quality,
+			Seed:     params.Seed,
+			Count:    params.Count,
+			Duration: params.Duration,
+		}
+	}
 	return &dto.TaskDto{
 		ID:         task.ID,
 		CreatedAt:  task.CreatedAt,
@@ -663,5 +676,6 @@ func TaskModel2Dto(task *model.Task) *dto.TaskDto {
 		Properties: task.Properties,
 		Username:   task.Username,
 		Data:       task.Data,
+		Generation: generation,
 	}
 }

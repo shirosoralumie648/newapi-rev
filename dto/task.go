@@ -56,8 +56,25 @@ type TaskDto struct {
 	Properties      any             `json:"properties"`
 	Username        string          `json:"username,omitempty"`
 	Data            json.RawMessage `json:"data"`
-	AdminInfo       *TaskAdminInfo  `json:"admin_info,omitempty"`
-	RootInfo        *TaskRootInfo   `json:"root_info,omitempty"`
+	// Generation is the credential-free Playground request snapshot shown in
+	// the result gallery. It is only present on tasks created by the workspace.
+	Generation *TaskGenerationInfo `json:"generation,omitempty"`
+	AdminInfo  *TaskAdminInfo      `json:"admin_info,omitempty"`
+	RootInfo   *TaskRootInfo       `json:"root_info,omitempty"`
+}
+
+// TaskGenerationInfo mirrors model.TaskGenerationParams in the public task
+// contract. It deliberately omits every private field (keys, upstream ids,
+// billing context) because the list endpoint returns it to the task owner.
+type TaskGenerationInfo struct {
+	Kind     string `json:"kind,omitempty"`
+	Prompt   string `json:"prompt,omitempty"`
+	Model    string `json:"model,omitempty"`
+	Size     string `json:"size,omitempty"`
+	Quality  string `json:"quality,omitempty"`
+	Seed     *int64 `json:"seed,omitempty"`
+	Count    int    `json:"count,omitempty"`
+	Duration int    `json:"duration,omitempty"`
 }
 
 type TaskPluginInfo struct {

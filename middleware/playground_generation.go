@@ -28,6 +28,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
@@ -40,6 +41,10 @@ const (
 	playgroundGenerationSizeMin = 64
 	playgroundGenerationSizeMax = 8192
 	playgroundGenerationSeedMax = 1<<31 - 1
+	// playgroundGenerationPromptMaxRunes bounds the display-only prompt that is
+	// copied into task metadata. It is deliberately generous for a real prompt
+	// while keeping one task row from retaining an unbounded request body.
+	playgroundGenerationPromptMaxRunes = 2000
 
 	playgroundGenerationSizeMessage = "The size must use WIDTHxHEIGHT with each side between 64 and 8192 pixels."
 	playgroundGenerationSeedMessage = "The seed must be an integer between 1 and 2147483647."
@@ -108,7 +113,70 @@ func validatePlaygroundGenerationParameters(c *gin.Context, canonicalPath string
 			return false
 		}
 	}
+	common.SetContextKey(c, constant.ContextKeyPlaygroundGenerationParams, playgroundGenerationSnapshot(canonicalPath, request))
 	return true
+}
+
+// playgroundGenerationSnapshot copies the display fields of a validated image
+// or video request. Only request metadata is read here: the body has already
+// been parsed once for validation, and nothing is added to what the relay
+// forwards upstream. Credentials or provider-specific extensions are never
+// part of this shape.
+func playgroundGenerationSnapshot(canonicalPath string, request map[string]json.RawMessage) *model.TaskGenerationParams {
+	kind := "image"
+	if canonicalPath == "/v1/videos" {
+		kind = "video"
+	}
+	prompt := []rune(playgroundGenerationString(request, "prompt"))
+	if len(prompt) > playgroundGenerationPromptMaxRunes {
+		prompt = prompt[:playgroundGenerationPromptMaxRunes]
+	}
+	params := &model.TaskGenerationParams{
+		Kind:    kind,
+		Prompt:  string(prompt),
+		Model:   playgroundGenerationString(request, "model"),
+		Size:    playgroundGenerationString(request, "size"),
+		Quality: playgroundGenerationString(request, "quality"),
+	}
+	if raw, exists := request["seed"]; exists && string(raw) != "null" {
+		var seed int64
+		if err := common.Unmarshal(raw, &seed); err == nil && seed >= 1 && seed <= playgroundGenerationSeedMax {
+			params.Seed = &seed
+		}
+	}
+	if count, ok := playgroundGenerationNumber(request, "n"); ok && count >= 1 {
+		params.Count = min(int(count), dto.MaxImageN)
+	}
+	if duration, ok := playgroundGenerationNumber(request, "duration"); ok && duration > 0 {
+		params.Duration = int(duration)
+	} else if duration, ok := playgroundGenerationNumber(request, "seconds"); ok && duration > 0 {
+		params.Duration = int(duration)
+	}
+	return params
+}
+
+func playgroundGenerationString(request map[string]json.RawMessage, field string) string {
+	raw, exists := request[field]
+	if !exists || string(raw) == "null" {
+		return ""
+	}
+	var value string
+	if err := common.Unmarshal(raw, &value); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(value)
+}
+
+func playgroundGenerationNumber(request map[string]json.RawMessage, field string) (float64, bool) {
+	raw, exists := request[field]
+	if !exists || string(raw) == "null" {
+		return 0, false
+	}
+	var value float64
+	if err := common.Unmarshal(raw, &value); err != nil {
+		return 0, false
+	}
+	return value, true
 }
 
 // PlaygroundRelayBridge bridges one workspace media route to its canonical /v1
