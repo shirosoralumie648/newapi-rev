@@ -76,6 +76,7 @@ export const PLAYGROUND_TOOL_CALL_RESULT_MAX_CHARS = 64_000
 // API endpoints
 export const API_ENDPOINTS = {
   CHAT_COMPLETIONS: '/pg/chat/completions',
+  EMBEDDINGS: '/pg/embeddings',
   IMAGE_GENERATIONS: '/pg/images/generations',
   IMAGE_EDITS: '/pg/images/edits',
   VIDEO_GENERATIONS: '/pg/videos',
@@ -90,6 +91,7 @@ export const API_ENDPOINTS = {
   PLAYGROUND_PRESETS: '/api/playground/presets',
   PLAYGROUND_SNIPPETS: '/api/playground/snippets',
   PLAYGROUND_MEMORIES: '/api/playground/memories',
+  PLAYGROUND_KNOWLEDGE_BASES: '/api/playground/knowledge-bases',
   PLAYGROUND_USAGE: '/api/playground/usage',
   PLAYGROUND_STORAGE_BILLING: '/api/playground/storage/billing',
   PLAYGROUND_SETTINGS: '/api/playground/settings',
@@ -437,6 +439,8 @@ export const MESSAGE_ACTION_LABELS = {
   EDIT: 'Edit',
   DELETE: 'Delete',
   SEND_TO_CANVAS: 'Send to canvas',
+  GENERATE_IMAGE: 'Generate image',
+  GENERATE_VIDEO: 'Generate video',
   NO_CONTENT: 'No content to copy',
   WAIT_GENERATION: 'Please wait for the current generation to complete',
 } as const

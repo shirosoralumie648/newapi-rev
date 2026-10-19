@@ -68,20 +68,21 @@ test('a renamed conversation survives a reload and a fresh sign-in', async ({
   await freshContext.close()
 })
 
-test('desktop artifact toggle docks the panel beside the chat', async ({
+test('the chat top bar keeps only conversation-domain controls', async ({
   page,
 }) => {
   await page.goto('/playground')
   await page.getByRole('button', { name: 'New session' }).click()
 
-  const toggle = page.getByRole('button', { name: 'Artifacts', exact: true })
-  await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+  for (const name of ['Generate', 'Canvases', 'Artifacts', 'Library']) {
+    await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0)
+  }
 
-  await toggle.click()
-
-  await expect(toggle).toHaveAttribute('aria-pressed', 'true')
-  await expect(page.locator('[data-slot="resizable-handle"]')).toBeVisible()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await page.getByRole('link', { name: 'Canvas', exact: true }).click()
+  await expect(page).toHaveURL(/\/playground\/canvas/)
+  await expect(
+    page.getByRole('button', { name: 'New canvas' }).first()
+  ).toBeVisible()
 })
 
 test('the conversation list scrolls without moving the page', async ({

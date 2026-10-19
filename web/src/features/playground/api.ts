@@ -52,6 +52,7 @@ import type {
   PlaygroundMessageCost,
   PlaygroundMemory,
   PlaygroundServerSession,
+  PlaygroundPresetExport,
   PlaygroundSessionExport,
   PlaygroundTrashListing,
   PromptSnippet,
@@ -181,6 +182,8 @@ const serverSessionSchema = z.object({
   config: playgroundConfigSchema,
   parameter_enabled: parameterEnabledSchema,
   system_prompt: z.string().optional(),
+  opening_message: z.string().optional(),
+  suggested_questions: z.array(z.string()).optional(),
   context: serverContextSettingsSchema.optional(),
   context_summary: serverContextSummarySchema.nullable().optional(),
   created_at: z.number().int().nonnegative(),
@@ -195,6 +198,8 @@ export interface PlaygroundSessionInput {
   config?: PlaygroundConfig
   parameter_enabled?: ParameterEnabled
   system_prompt?: string
+  opening_message?: string
+  suggested_questions?: string[]
   context?: PlaygroundContextSettings
   context_summary?: PlaygroundContextSummary | null
   revision?: number
@@ -388,6 +393,8 @@ function mapServerSession(value: unknown): PlaygroundServerSession {
       ...session.parameter_enabled,
     },
     systemPrompt: session.system_prompt ?? '',
+    openingMessage: session.opening_message ?? '',
+    suggestedQuestions: session.suggested_questions ?? [],
     context: normalizeContextSettings({
       historyLimit: session.context?.history_limit,
       tokenBudget: session.context?.token_budget,
@@ -941,6 +948,9 @@ const playgroundUsageSchema = z.object({
   artifacts: playgroundUsageMetricSchema,
   canvas: playgroundUsageMetricSchema,
   canvas_snapshots: playgroundUsageMetricSchema,
+  knowledge_bases: playgroundUsageMetricSchema,
+  kb_documents: playgroundUsageMetricSchema,
+  kb_chunks: playgroundUsageMetricSchema,
   storage: playgroundUsageMetricSchema,
   tasks: playgroundUsageMetricSchema,
 })
@@ -968,6 +978,9 @@ export interface PlaygroundResourceUsage {
   artifacts: PlaygroundUsageMetric
   canvas: PlaygroundUsageMetric
   canvasSnapshots: PlaygroundUsageMetric
+  knowledgeBases: PlaygroundUsageMetric
+  knowledgeBaseDocuments: PlaygroundUsageMetric
+  knowledgeBaseChunks: PlaygroundUsageMetric
   storage: PlaygroundUsageMetric
   tasks: PlaygroundUsageMetric
 }
@@ -1035,6 +1048,9 @@ export async function getPlaygroundUsage(
     artifacts: toMetric(metrics.artifacts),
     canvas: toMetric(metrics.canvas),
     canvasSnapshots: toMetric(metrics.canvas_snapshots),
+    knowledgeBases: toMetric(metrics.knowledge_bases),
+    knowledgeBaseDocuments: toMetric(metrics.kb_documents),
+    knowledgeBaseChunks: toMetric(metrics.kb_chunks),
     storage: toMetric(metrics.storage),
     tasks: toMetric(metrics.tasks),
   }
@@ -1171,6 +1187,9 @@ const serverPresetSchema = z.object({
   config: playgroundConfigSchema,
   parameter_enabled: parameterEnabledSchema,
   system_prompt: z.string(),
+  visibility: z.enum(['private', 'global']).optional(),
+  opening_message: z.string().optional(),
+  suggested_questions: z.array(z.string()).optional(),
   created_at: z.number().int().nonnegative(),
   updated_at: z.number().int().nonnegative(),
 })
@@ -1182,15 +1201,24 @@ export interface PlaygroundPresetInput {
   config: Partial<PlaygroundConfig>
   parameter_enabled?: ParameterEnabled
   system_prompt: string
+  opening_message?: string
+  suggested_questions?: string[]
 }
 
 export type PlaygroundPresetUpdateInput = Partial<PlaygroundPresetInput>
+
+export type PlaygroundPresetScope = 'private' | 'global'
 
 export interface PlaygroundPresetListing {
   items: AssistantPreset[]
   total: number
   /** Per-account preset budget the server enforces for the owner's group. */
   limit: number
+}
+
+export interface PlaygroundPresetMarket {
+  items: AssistantPreset[]
+  total: number
 }
 
 function mapServerPreset(value: unknown): AssistantPreset {
@@ -1205,6 +1233,9 @@ function mapServerPreset(value: unknown): AssistantPreset {
       ...preset.parameter_enabled,
     },
     systemPrompt: preset.system_prompt,
+    visibility: preset.visibility ?? 'private',
+    openingMessage: preset.opening_message ?? '',
+    suggestedQuestions: preset.suggested_questions ?? [],
     createdAt: preset.created_at * 1000,
     updatedAt: preset.updated_at * 1000,
   }
@@ -1229,6 +1260,51 @@ export async function getPlaygroundPresets(
   }
 }
 
+export async function getPlaygroundPresetMarket(
+  signal?: AbortSignal
+): Promise<PlaygroundPresetMarket> {
+  const response = await api.get(`${API_ENDPOINTS.PLAYGROUND_PRESETS}/market`, {
+    signal,
+  })
+  requireServerSuccess(response.data)
+  const data = z
+    .object({
+      items: z.array(z.unknown()),
+      total: z.number().nonnegative(),
+    })
+    .parse(response.data.data)
+  return { items: data.items.map(mapServerPreset), total: data.total }
+}
+
+export async function copyPlaygroundPresetToMine(
+  presetId: string,
+  signal?: AbortSignal
+): Promise<AssistantPreset> {
+  const response = await api.post(
+    `${API_ENDPOINTS.PLAYGROUND_PRESETS}/market/${encodeURIComponent(presetId)}/copy`,
+    undefined,
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  return mapServerPreset(response.data.data)
+}
+
+export async function getGlobalPlaygroundPresets(
+  signal?: AbortSignal
+): Promise<PlaygroundPresetMarket> {
+  const response = await api.get(`${API_ENDPOINTS.PLAYGROUND_PRESETS}/global`, {
+    signal,
+  })
+  requireServerSuccess(response.data)
+  const data = z
+    .object({
+      items: z.array(z.unknown()),
+      total: z.number().nonnegative(),
+    })
+    .parse(response.data.data)
+  return { items: data.items.map(mapServerPreset), total: data.total }
+}
+
 export async function createPlaygroundPreset(
   input: PlaygroundPresetInput,
   signal?: AbortSignal
@@ -1236,6 +1312,19 @@ export async function createPlaygroundPreset(
   const response = await api.post(API_ENDPOINTS.PLAYGROUND_PRESETS, input, {
     signal,
   })
+  requireServerSuccess(response.data)
+  return mapServerPreset(response.data.data)
+}
+
+export async function createGlobalPlaygroundPreset(
+  input: PlaygroundPresetInput,
+  signal?: AbortSignal
+): Promise<AssistantPreset> {
+  const response = await api.post(
+    `${API_ENDPOINTS.PLAYGROUND_PRESETS}/global`,
+    input,
+    { signal }
+  )
   requireServerSuccess(response.data)
   return mapServerPreset(response.data.data)
 }
@@ -1254,6 +1343,20 @@ export async function updatePlaygroundPreset(
   return mapServerPreset(response.data.data)
 }
 
+export async function updateGlobalPlaygroundPreset(
+  presetId: string,
+  input: PlaygroundPresetUpdateInput,
+  signal?: AbortSignal
+): Promise<AssistantPreset> {
+  const response = await api.patch(
+    `${API_ENDPOINTS.PLAYGROUND_PRESETS}/global/${encodeURIComponent(presetId)}`,
+    input,
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  return mapServerPreset(response.data.data)
+}
+
 export async function deletePlaygroundPreset(
   presetId: string,
   signal?: AbortSignal
@@ -1263,6 +1366,62 @@ export async function deletePlaygroundPreset(
     { signal }
   )
   requireServerSuccess(response.data)
+}
+
+export async function deleteGlobalPlaygroundPreset(
+  presetId: string,
+  signal?: AbortSignal
+): Promise<void> {
+  const response = await api.delete(
+    `${API_ENDPOINTS.PLAYGROUND_PRESETS}/global/${encodeURIComponent(presetId)}`,
+    { signal }
+  )
+  requireServerSuccess(response.data)
+}
+
+export async function exportPlaygroundPreset(
+  presetId: string,
+  scope: PlaygroundPresetScope = 'private',
+  signal?: AbortSignal
+): Promise<PlaygroundPresetExport> {
+  const response = await api.get(
+    scope === 'global'
+      ? `${API_ENDPOINTS.PLAYGROUND_PRESETS}/global/${encodeURIComponent(presetId)}/export`
+      : `${API_ENDPOINTS.PLAYGROUND_PRESETS}/${encodeURIComponent(presetId)}/export`,
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  const data = z
+    .object({
+      format: z.literal('json'),
+      filename: z.string().min(1),
+      content_type: z.string().min(1),
+      content: z.string(),
+    })
+    .parse(response.data.data)
+  return {
+    format: data.format,
+    filename: data.filename,
+    contentType: data.content_type,
+    content: data.content,
+  }
+}
+
+export async function importPlaygroundPreset(
+  content: string,
+  scope: PlaygroundPresetScope = 'private',
+  signal?: AbortSignal
+): Promise<AssistantPreset> {
+  const path =
+    scope === 'global'
+      ? `${API_ENDPOINTS.PLAYGROUND_PRESETS}/global/import`
+      : `${API_ENDPOINTS.PLAYGROUND_PRESETS}/import`
+  const response = await api.post(path, content, {
+    headers: { 'Content-Type': 'application/json' },
+    signal,
+  })
+  requireServerSuccess(response.data)
+  return mapServerPreset(response.data.data)
 }
 
 const serverSnippetSchema = z.object({

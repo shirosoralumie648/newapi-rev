@@ -30,6 +30,16 @@ export const playgroundQueryKeys = {
   messageCosts: (userId: number | null, requestIds: string) =>
     ['playground', userId, 'message-costs', requestIds] as const,
   tasks: () => ['playground', 'tasks', 'list'] as const,
+  knowledgeBases: (userId: number | null) =>
+    ['playground', userId, 'knowledge-bases'] as const,
+  knowledgeDocuments: (userId: number | null, knowledgeBaseId: string) =>
+    [
+      'playground',
+      userId,
+      'knowledge-bases',
+      knowledgeBaseId,
+      'documents',
+    ] as const,
   assets: (userId: number | null, kind: string, search: string, page: number) =>
     ['playground-assets', userId, kind, search, page] as const,
   assetsAll: (userId: number | null) => ['playground-assets', userId] as const,

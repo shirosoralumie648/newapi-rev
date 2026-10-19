@@ -41,13 +41,16 @@ export function CanvasInspectorViewToggle(
   const views: Array<{ value: CanvasInspectorView; label: string }> = [
     { value: 'details', label: t('Node details') },
     { value: 'assistant', label: t('Assistant') },
+    { value: 'generate', label: t('Generate') },
+    { value: 'library', label: t('Library') },
+    { value: 'artifacts', label: t('Artifacts') },
   ]
 
   return (
     <div
       aria-label={t('View mode')}
       className={cn(
-        'bg-muted/60 inline-flex items-center rounded-lg border p-0.5',
+        'bg-muted/60 flex flex-wrap items-center gap-0.5 rounded-lg border p-0.5',
         props.className
       )}
       role='group'

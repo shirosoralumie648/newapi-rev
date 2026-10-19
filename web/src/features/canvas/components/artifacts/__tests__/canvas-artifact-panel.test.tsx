@@ -28,9 +28,9 @@ import type {
   PlaygroundArtifactKind,
   PlaygroundArtifactResult,
   PlaygroundArtifactSummary,
-} from '../../../artifact-api'
-import { usePlaygroundArtifacts } from '../../../hooks/use-playground-artifacts'
-import { PlaygroundArtifactPanel } from '../playground-artifact-panel'
+} from '@/features/playground/artifact-api'
+import { usePlaygroundArtifacts } from '@/features/playground/hooks/use-playground-artifacts'
+import { CanvasArtifactPanel } from '../canvas-artifact-panel'
 
 Object.defineProperty(HTMLElement.prototype, 'getAnimations', {
   configurable: true,
@@ -182,7 +182,7 @@ function Harness(props: {
 }) {
   const controller = usePlaygroundArtifacts(7, SESSION)
   return (
-    <PlaygroundArtifactPanel
+    <CanvasArtifactPanel
       controller={controller}
       onClose={onClose}
       onSendToCanvas={props.onSendToCanvas}

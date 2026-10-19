@@ -100,6 +100,8 @@ describe('playground session snapshots', () => {
       config: { ...DEFAULT_CONFIG },
       parameterEnabled: { ...DEFAULT_PARAMETER_ENABLED },
       systemPrompt,
+      openingMessage: '',
+      suggestedQuestions: [],
       context: { ...DEFAULT_CONTEXT_SETTINGS },
       contextSummary: null,
       messages: [message('m1', 'first')],

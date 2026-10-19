@@ -30,6 +30,16 @@ import {
   buildTaskResultCanvasSeeds,
   type CanvasSendSeed,
 } from '@/features/canvas/lib/canvas-send'
+import {
+  PLAYGROUND_GENERATION_ERRORS,
+  PLAYGROUND_TASK_TERMINAL_STATUSES,
+} from '@/features/playground/constants'
+import {
+  useCancelPlaygroundTask,
+  usePlaygroundTasks,
+  useSetPlaygroundTaskArtifactPin,
+  useTaskArtifactsRequest,
+} from '@/features/playground/hooks'
 import { TaskArtifactsCell } from '@/features/usage-logs/components/task-artifacts'
 import { taskStatusMapper } from '@/features/usage-logs/lib/mappers'
 import type { TaskArtifact, TaskLog } from '@/features/usage-logs/types'
@@ -39,18 +49,7 @@ import {
   translateServerText,
 } from '@/lib/server-error-message'
 
-import {
-  PLAYGROUND_GENERATION_ERRORS,
-  PLAYGROUND_TASK_TERMINAL_STATUSES,
-} from '../../constants'
-import {
-  useCancelPlaygroundTask,
-  usePlaygroundTasks,
-  useSetPlaygroundTaskArtifactPin,
-  useTaskArtifactsRequest,
-} from '../../hooks'
-
-interface PlaygroundTaskListProps {
+interface CanvasTaskListProps {
   active: boolean
   onSendToCanvas: (seeds: CanvasSendSeed[]) => void
   /** Case-insensitive client-side filter used by the asset library. */
@@ -58,12 +57,12 @@ interface PlaygroundTaskListProps {
 }
 
 /**
- * The workspace view of the account's async generation tasks. Status, errors,
+ * The canvas view of the account's async generation tasks. Status, errors,
  * permissions and billing all come from the durable task rows through the
  * owner-scoped task endpoints, and artifacts are viewed through the shared
- * task artifact cell, so the Playground adds no second result store.
+ * task artifact cell, so the canvas adds no second result store.
  */
-export function PlaygroundTaskList(props: PlaygroundTaskListProps) {
+export function CanvasTaskList(props: CanvasTaskListProps) {
   const { t } = useTranslation()
   const tasksQuery = usePlaygroundTasks(props.active)
   const artifactsRequest = useTaskArtifactsRequest()

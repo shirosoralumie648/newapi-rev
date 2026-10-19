@@ -25,19 +25,22 @@ import { Label } from '@/components/ui/label'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
 import type { CanvasSendSeed } from '@/features/canvas/lib/canvas-send'
-import { handleServerError } from '@/lib/handle-server-error'
-
 import {
   PLAYGROUND_AUDIO_VOICES,
   PLAYGROUND_GENERATION_ERRORS,
   PLAYGROUND_GENERATION_KINDS,
   PLAYGROUND_IMAGE_SIZES,
   PLAYGROUND_VIDEO_DURATIONS,
-} from '../../constants'
-import type { PlaygroundImageResult } from '../../generation-api'
-import { usePlaygroundGeneration } from '../../hooks'
-import type { ModelOption, PlaygroundGenerationKind } from '../../types'
-import { PlaygroundTaskList } from './playground-task-list'
+} from '@/features/playground/constants'
+import type { PlaygroundImageResult } from '@/features/playground/generation-api'
+import { usePlaygroundGeneration } from '@/features/playground/hooks'
+import type {
+  ModelOption,
+  PlaygroundGenerationKind,
+} from '@/features/playground/types'
+import { handleServerError } from '@/lib/handle-server-error'
+
+import { CanvasTaskList } from './canvas-task-list'
 
 const GENERATION_KIND_LABELS: Record<PlaygroundGenerationKind, string> = {
   image: 'Image',
@@ -51,27 +54,31 @@ const GENERATION_ERROR_KEYS: Record<PlaygroundGenerationKind, string> = {
   audio: PLAYGROUND_GENERATION_ERRORS.AUDIO_FAILED,
 }
 
-interface PlaygroundGenerationPanelProps {
+interface CanvasGenerationPanelProps {
   active: boolean
   disabled?: boolean
   group: string
   models: ModelOption[]
+  /** Prompt a conversation message action handed to the canvas. */
+  initialPrompt?: string
+  initialKind?: PlaygroundGenerationKind
   onSendToCanvas: (seeds: CanvasSendSeed[]) => void
 }
 
 /**
- * The workspace generation entry. Image, video and audio requests are mapped
- * to the existing Relay routes through /pg, so channel selection, permissions
- * and billing are the ordinary pipeline; async results are then tracked
- * through the account's durable task rows.
+ * The canvas generation entry. Image, video and audio requests are mapped to
+ * the existing Relay routes through /pg, so channel selection, permissions and
+ * billing are the ordinary pipeline; async results are then tracked through the
+ * account's durable task rows. Generation lives on the canvas side of the
+ * workspace: the conversation only bridges a message into a prefilled canvas.
  */
-export function PlaygroundGenerationPanel(
-  props: PlaygroundGenerationPanelProps
-) {
+export function CanvasGenerationPanel(props: CanvasGenerationPanelProps) {
   const { t } = useTranslation()
-  const [kind, setKind] = useState<PlaygroundGenerationKind>('image')
+  const [kind, setKind] = useState<PlaygroundGenerationKind>(
+    props.initialKind ?? 'image'
+  )
   const [model, setModel] = useState('')
-  const [prompt, setPrompt] = useState('')
+  const [prompt, setPrompt] = useState(props.initialPrompt ?? '')
   const [size, setSize] = useState<string>(PLAYGROUND_IMAGE_SIZES[0])
   const [duration, setDuration] = useState<number>(
     PLAYGROUND_VIDEO_DURATIONS[0]
@@ -87,6 +94,14 @@ export function PlaygroundGenerationPanel(
     const firstModel = props.models[0]?.value ?? ''
     if (!model && firstModel) setModel(firstModel)
   }, [model, props.models])
+
+  useEffect(() => {
+    if (props.initialKind) setKind(props.initialKind)
+  }, [props.initialKind])
+
+  useEffect(() => {
+    if (props.initialPrompt !== undefined) setPrompt(props.initialPrompt)
+  }, [props.initialPrompt])
 
   useEffect(() => {
     return () => {
@@ -318,7 +333,7 @@ export function PlaygroundGenerationPanel(
 
       <section className='grid gap-2'>
         <h3 className='text-sm font-medium'>{t('Generation tasks')}</h3>
-        <PlaygroundTaskList
+        <CanvasTaskList
           active={props.active}
           onSendToCanvas={props.onSendToCanvas}
         />

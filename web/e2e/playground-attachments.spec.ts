@@ -42,6 +42,7 @@ test('an attached image reaches the model request and survives a reload', async 
 
   const chooserPromise = page.waitForEvent('filechooser')
   await attach.click()
+  await page.getByRole('button', { name: 'Choose files' }).click()
   const chooser = await chooserPromise
   await chooser.setFiles({
     name: 'pixel.png',
