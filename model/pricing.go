@@ -24,6 +24,16 @@ type PricingPluginVariant struct {
 	BillingUsageExamples []jsplugin.UsageExample              `json:"billing_usage_examples,omitempty"`
 }
 
+// PricingImageTools describes the image-edit operations the enabled channels of
+// a model advertise on /api/pricing. The canvas uses it to show only the tools
+// a model can actually route through the OpenAI-compatible image edit contract.
+type PricingImageTools struct {
+	Edit              bool `json:"edit"`
+	Outpaint          bool `json:"outpaint"`
+	BackgroundRemoval bool `json:"background_removal"`
+	StyleReference    bool `json:"style_reference"`
+}
+
 type Pricing struct {
 	BillingPluginVariants  []PricingPluginVariant               `json:"billing_plugin_variants,omitempty"`
 	ModelName              string                               `json:"model_name"`
@@ -47,6 +57,7 @@ type Pricing struct {
 	BillingExpr            string                               `json:"billing_expr,omitempty"`
 	BillingUsageSchema     map[string]jsplugin.UsageFieldSchema `json:"billing_usage_schema,omitempty"`
 	BillingUsageExamples   []jsplugin.UsageExample              `json:"billing_usage_examples,omitempty"`
+	ImageTools             *PricingImageTools                   `json:"image_tools,omitempty"`
 	PricingVersion         string                               `json:"pricing_version,omitempty"`
 }
 
@@ -127,6 +138,23 @@ func getPricingEndpointTypesForAbility(ability AbilityWithChannel, advancedCusto
 		return config.SupportedEndpointTypesForModel(ability.Model)
 	}
 	return common.GetEndpointTypesByChannelType(ability.ChannelType, ability.Model)
+}
+
+// imageToolCapabilitiesForModel maps model families to the operations their
+// image-edit API accepts. Only families that implement mask-based edits,
+// transparent-background output and multiple reference images are advertised;
+// every other model is reported as unsupported by omitting the field.
+func imageToolCapabilitiesForModel(modelName string) PricingImageTools {
+	name := strings.ToLower(strings.TrimSpace(modelName))
+	if !strings.Contains(name, "gpt-image-") && name != "chatgpt-image-latest" {
+		return PricingImageTools{}
+	}
+	return PricingImageTools{
+		Edit:              true,
+		Outpaint:          true,
+		BackgroundRemoval: true,
+		StyleReference:    true,
+	}
 }
 
 // loadPricingAdvancedCustomConfigs runs inside updatePricing while
@@ -228,6 +256,7 @@ func updatePricing() {
 	}
 
 	modelGroupsMap := make(map[string]*types.Set[string])
+	modelImageTools := make(map[string]PricingImageTools)
 
 	for _, ability := range enableAbilities {
 		groups, ok := modelGroupsMap[ability.Model]
@@ -236,6 +265,16 @@ func updatePricing() {
 			modelGroupsMap[ability.Model] = groups
 		}
 		groups.Add(ability.Group)
+
+		// Capabilities are OR-ed across enabled channels: a tool is advertised
+		// when any channel serving the model supports it.
+		imageTools := modelImageTools[ability.Model]
+		channelTools := imageToolCapabilitiesForModel(ability.Model)
+		imageTools.Edit = imageTools.Edit || channelTools.Edit
+		imageTools.Outpaint = imageTools.Outpaint || channelTools.Outpaint
+		imageTools.BackgroundRemoval = imageTools.BackgroundRemoval || channelTools.BackgroundRemoval
+		imageTools.StyleReference = imageTools.StyleReference || channelTools.StyleReference
+		modelImageTools[ability.Model] = imageTools
 	}
 
 	//这里使用切片而不是Set，因为一个模型可能支持多个端点类型，并且第一个端点是优先使用端点
@@ -330,6 +369,9 @@ func updatePricing() {
 			ModelName:              model,
 			EnableGroup:            groups.Items(),
 			SupportedEndpointTypes: modelSupportEndpointTypes[model],
+		}
+		if imageTools, ok := modelImageTools[model]; ok && (imageTools.Edit || imageTools.Outpaint || imageTools.BackgroundRemoval || imageTools.StyleReference) {
+			pricing.ImageTools = &imageTools
 		}
 
 		// 补充模型元数据（描述、标签、供应商、状态）

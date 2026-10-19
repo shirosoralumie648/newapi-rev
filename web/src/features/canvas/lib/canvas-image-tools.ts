@@ -17,21 +17,50 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { playgroundAttachmentKind } from '@/features/playground/constants'
+import type { ModelOption } from '@/features/playground/types'
 
 import {
+  CANVAS_IMAGE_TOOL_CAPABILITY_MESSAGES,
   CANVAS_IMAGE_TOOL_CROP_MIN_SIZE,
   CANVAS_IMAGE_TOOL_MAX_EDGE,
   CANVAS_IMAGE_TOOL_MESSAGES,
+  CANVAS_IMAGE_TOOL_OUTPAINT_RATIOS,
+  CANVAS_IMAGE_TOOL_STYLE_IMAGE_TYPES,
   CANVAS_IMAGE_TOOL_TITLES,
   CANVAS_IMAGE_TOOL_UPSCALE_FACTORS,
+  CANVAS_WORKFLOW_IMAGE_INPUT_MAX_BYTES,
+  type CanvasImageToolOutpaintRatio,
 } from '../constants'
 import type { CanvasNodeData } from '../types'
-import { canvasWorkflowNodeLabel } from './canvas-workflow'
+import {
+  canvasWorkflowNodeLabel,
+  type CanvasWorkflowModelCapability,
+} from './canvas-workflow'
 
 /** Which image tool a dialog runs; the titles double as translation keys. */
 export type CanvasImageToolKind = keyof typeof CANVAS_IMAGE_TOOL_TITLES
 
+/** The tools that call the relay instead of running in the browser. */
+export const CANVAS_IMAGE_REMOTE_TOOLS = [
+  'redraw',
+  'outpaint',
+  'backgroundRemoval',
+  'styleReference',
+] as const
+
+export type CanvasImageRemoteToolKind =
+  (typeof CANVAS_IMAGE_REMOTE_TOOLS)[number]
+
+export type CanvasImageToolSupport = Record<CanvasImageRemoteToolKind, boolean>
+
 export type CanvasImageSize = { width: number; height: number }
+
+export type CanvasImageOutpaintLayout = CanvasImageSize & {
+  sourceX: number
+  sourceY: number
+  sourceWidth: number
+  sourceHeight: number
+}
 
 /** Crop rectangle in source pixels. */
 export type CanvasImageCropRect = {
@@ -54,6 +83,25 @@ export type CanvasImageRedrawInput = {
   model: string
   size?: string
   strokes: CanvasImageMaskStroke[]
+}
+
+export type CanvasImageOutpaintInput = {
+  prompt: string
+  model: string
+  ratio: CanvasImageToolOutpaintRatio
+}
+
+export type CanvasImageBackgroundRemovalInput = {
+  prompt: string
+  model: string
+}
+
+export type CanvasImageStyleReferenceInput = {
+  prompt: string
+  model: string
+  styleImage: Blob
+  styleFilename: string
+  size?: string
 }
 
 /**
@@ -190,6 +238,60 @@ export function scaledCanvasImageSize(
   }
 }
 
+/** The selected outpaint ratio, or the first one for an unknown value. */
+export function canvasImageOutpaintRatio(
+  value: string
+): (typeof CANVAS_IMAGE_TOOL_OUTPAINT_RATIOS)[number] {
+  return (
+    CANVAS_IMAGE_TOOL_OUTPAINT_RATIOS.find(
+      (option) => option.value === value
+    ) ?? CANVAS_IMAGE_TOOL_OUTPAINT_RATIOS[0]
+  )
+}
+
+/**
+ * The canvas an outpainting request draws: the source keeps its pixels and is
+ * centered, while the target ratio adds blank space around it. The result is
+ * capped to the same longest edge as every other image operation, scaling the
+ * source uniformly when the cap applies.
+ */
+export function canvasImageOutpaintLayout(
+  source: CanvasImageSize,
+  ratio: { width: number; height: number },
+  maxEdge = CANVAS_IMAGE_TOOL_MAX_EDGE
+): CanvasImageOutpaintLayout {
+  const targetRatio = ratio.width / ratio.height
+  let width: number
+  let height: number
+  if (source.width / source.height >= targetRatio) {
+    width = source.width
+    height = Math.max(1, Math.round(source.width / targetRatio))
+  } else {
+    height = source.height
+    width = Math.max(1, Math.round(source.height * targetRatio))
+  }
+  const scale =
+    Math.max(width, height) > maxEdge ? maxEdge / Math.max(width, height) : 1
+  const outputWidth = Math.max(1, Math.round(width * scale))
+  const outputHeight = Math.max(1, Math.round(height * scale))
+  const sourceWidth = Math.min(
+    outputWidth,
+    Math.max(1, Math.round(source.width * scale))
+  )
+  const sourceHeight = Math.min(
+    outputHeight,
+    Math.max(1, Math.round(source.height * scale))
+  )
+  return {
+    width: outputWidth,
+    height: outputHeight,
+    sourceX: Math.floor((outputWidth - sourceWidth) / 2),
+    sourceY: Math.floor((outputHeight - sourceHeight) / 2),
+    sourceWidth,
+    sourceHeight,
+  }
+}
+
 /** The scale that fits the longest edge into the limit; 1 when it already fits. */
 export function canvasImageToolCanvasScale(
   image: CanvasImageSize,
@@ -233,6 +335,81 @@ export function canvasImageMaskHasPaint(
   return strokes.some((stroke) => stroke.points.length > 0)
 }
 
+/**
+ * The relay tools one model supports, or null when the pricing catalog cannot
+ * prove either way. A catalog row with endpoint metadata but no image tools is
+ * a known gap; a row without any metadata keeps the controls enabled.
+ */
+export function canvasImageToolSupport(
+  capability?: CanvasWorkflowModelCapability
+): CanvasImageToolSupport | null {
+  if (!capability) return null
+  if (capability.imageTools) {
+    return {
+      redraw: capability.imageTools.edit === true,
+      outpaint: capability.imageTools.outpaint === true,
+      backgroundRemoval: capability.imageTools.backgroundRemoval === true,
+      styleReference: capability.imageTools.styleReference === true,
+    }
+  }
+  const endpoints = capability.endpointTypes ?? []
+  const usageFields = capability.usageFields ?? []
+  if (endpoints.length === 0 && usageFields.length === 0) return null
+  return {
+    redraw: false,
+    outpaint: false,
+    backgroundRemoval: false,
+    styleReference: false,
+  }
+}
+
+/** Whether a tool can run on one model; local tools always can. */
+export function canvasImageToolModelSupports(
+  tool: CanvasImageToolKind,
+  capability?: CanvasWorkflowModelCapability
+): boolean {
+  if (tool === 'crop' || tool === 'upscale') return true
+  const support = canvasImageToolSupport(capability)
+  return support === null || support[tool]
+}
+
+/**
+ * The model choices of one tool. Models without catalog metadata stay in the
+ * list because the catalog may be disabled, while a known gap is filtered out.
+ */
+export function canvasImageToolModels(
+  models: ModelOption[],
+  capabilities: Record<string, CanvasWorkflowModelCapability> | undefined,
+  tool: CanvasImageToolKind
+): ModelOption[] {
+  if (!capabilities || tool === 'crop' || tool === 'upscale') return models
+  return models.filter((model) =>
+    canvasImageToolModelSupports(tool, capabilities[model.value])
+  )
+}
+
+/**
+ * Remote tools no model of the current group advertises. An empty model list
+ * or a missing catalog keeps every tool visible, matching the unknown-metadata
+ * behavior of the workflow controls.
+ */
+export function canvasImageToolUnavailableKinds(
+  models: ModelOption[],
+  capabilities: Record<string, CanvasWorkflowModelCapability> | undefined
+): CanvasImageRemoteToolKind[] {
+  if (!capabilities || models.length === 0) return []
+  return CANVAS_IMAGE_REMOTE_TOOLS.filter(
+    (tool) => canvasImageToolModels(models, capabilities, tool).length === 0
+  )
+}
+
+/** The tooltip reason of one hidden remote tool. */
+export function canvasImageToolUnavailableReason(
+  tool: CanvasImageRemoteToolKind
+): string {
+  return CANVAS_IMAGE_TOOL_CAPABILITY_MESSAGES[tool]
+}
+
 /** The first problem that stops a redraw, or null when it is ready to send. */
 export function canvasImageRedrawError(input: {
   prompt: string
@@ -247,6 +424,60 @@ export function canvasImageRedrawError(input: {
   }
   if (!input.model.trim()) {
     return CANVAS_IMAGE_TOOL_MESSAGES.MODEL_REQUIRED
+  }
+  return null
+}
+
+/** The first problem that stops an outpaint, or null when it is ready. */
+export function canvasImageOutpaintError(input: {
+  model: string
+}): string | null {
+  if (!input.model.trim()) {
+    return CANVAS_IMAGE_TOOL_MESSAGES.OUTPAINT_MODEL_REQUIRED
+  }
+  return null
+}
+
+/** The first problem that stops background removal, or null when it is ready. */
+export function canvasImageBackgroundRemovalError(input: {
+  model: string
+}): string | null {
+  if (!input.model.trim()) {
+    return CANVAS_IMAGE_TOOL_MESSAGES.BACKGROUND_REMOVAL_MODEL_REQUIRED
+  }
+  return null
+}
+
+/** The first problem with an uploaded style image, or null when it is usable. */
+export function canvasImageStyleImageError(
+  image: Pick<Blob, 'size' | 'type'> | null
+): string | null {
+  if (!image) return CANVAS_IMAGE_TOOL_MESSAGES.STYLE_IMAGE_REQUIRED
+  if (!CANVAS_IMAGE_TOOL_STYLE_IMAGE_TYPES.includes(image.type)) {
+    return CANVAS_IMAGE_TOOL_MESSAGES.STYLE_IMAGE_TYPE_UNSUPPORTED
+  }
+  if (image.size <= 0) {
+    return CANVAS_IMAGE_TOOL_MESSAGES.STYLE_IMAGE_TYPE_UNSUPPORTED
+  }
+  if (image.size > CANVAS_WORKFLOW_IMAGE_INPUT_MAX_BYTES) {
+    return CANVAS_IMAGE_TOOL_MESSAGES.STYLE_IMAGE_TOO_LARGE
+  }
+  return null
+}
+
+/** The first problem that stops a style reference, or null when it is ready. */
+export function canvasImageStyleReferenceError(input: {
+  prompt: string
+  model: string
+  styleImage: Pick<Blob, 'size' | 'type'> | null
+}): string | null {
+  const imageProblem = canvasImageStyleImageError(input.styleImage)
+  if (imageProblem) return imageProblem
+  if (!input.prompt.trim()) {
+    return CANVAS_IMAGE_TOOL_MESSAGES.STYLE_REFERENCE_PROMPT_REQUIRED
+  }
+  if (!input.model.trim()) {
+    return CANVAS_IMAGE_TOOL_MESSAGES.STYLE_REFERENCE_MODEL_REQUIRED
   }
   return null
 }

@@ -96,3 +96,42 @@ func TestConvertImageEditRequestMultipart(t *testing.T) {
 		convertAndReplay(t, c, prompt)
 	})
 }
+
+// TestConvertImageEditRequestMultipartReferences verifies that a style
+// reference request keeps both images and the background/output options when
+// the adaptor re-serializes it for the upstream provider.
+func TestConvertImageEditRequestMultipartReferences(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	require.NoError(t, writer.WriteField("model", "gpt-image-1"))
+	require.NoError(t, writer.WriteField("prompt", "use this style"))
+	require.NoError(t, writer.WriteField("background", "transparent"))
+	require.NoError(t, writer.WriteField("output_format", "png"))
+	for _, filename := range []string{"source.png", "style.png"} {
+		part, err := writer.CreateFormFile("image[]", filename)
+		require.NoError(t, err)
+		_, err = part.Write([]byte(filename))
+		require.NoError(t, err)
+	}
+	require.NoError(t, writer.Close())
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", &body)
+	c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+
+	converted, err := (&Adaptor{}).ConvertImageRequest(c, &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeImagesEdits,
+	}, dto.ImageRequest{Model: "gpt-image-1", Prompt: "use this style"})
+	require.NoError(t, err)
+	convertedBody, ok := converted.(*bytes.Buffer)
+	require.True(t, ok)
+
+	replayed := httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(convertedBody.Bytes()))
+	replayed.Header.Set("Content-Type", c.Request.Header.Get("Content-Type"))
+	require.NoError(t, replayed.ParseMultipartForm(32<<20))
+	require.Equal(t, "transparent", replayed.PostForm.Get("background"))
+	require.Equal(t, "png", replayed.PostForm.Get("output_format"))
+	require.Len(t, replayed.MultipartForm.File["image[]"], 2)
+}

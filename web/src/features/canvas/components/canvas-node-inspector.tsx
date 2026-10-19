@@ -19,10 +19,14 @@ For commercial licensing, please contact support@quantumnous.com
 import {
   Ban,
   Crop,
+  Eraser,
+  Expand,
   FileText,
+  Info,
   Maximize2,
   MessageSquare,
   Paintbrush,
+  Palette,
   Trash2,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -32,6 +36,12 @@ import { ConfirmDialog } from '@/components/confirm-dialog'
 import { TagInput } from '@/components/tag-input'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import type { GroupOption, ModelOption } from '@/features/playground/types'
 import { cn } from '@/lib/utils'
 
@@ -51,6 +61,8 @@ import type {
 import type { CanvasWorkflowRunPhase } from '../hooks/use-canvas-workflow-runner'
 import {
   canvasImageToolSource,
+  canvasImageToolUnavailableKinds,
+  canvasImageToolUnavailableReason,
   type CanvasImageToolKind,
 } from '../lib/canvas-image-tools'
 import {
@@ -74,6 +86,9 @@ const CANVAS_IMAGE_TOOL_ICONS: Record<CanvasImageToolKind, typeof Crop> = {
   crop: Crop,
   redraw: Paintbrush,
   upscale: Maximize2,
+  outpaint: Expand,
+  backgroundRemoval: Eraser,
+  styleReference: Palette,
 }
 
 interface CanvasNodeInspectorProps {
@@ -130,6 +145,11 @@ export function CanvasNodeInspector(props: CanvasNodeInspectorProps) {
   const snapshot = node.data.snapshot
   const reference = node.data.ref
   const sourceTarget = canvasNodeSourceTarget(reference)
+  const unavailableImageTools = canvasImageToolUnavailableKinds(
+    props.models ?? [],
+    props.modelCapabilities
+  )
+  const hiddenImageTools = new Set<CanvasImageToolKind>(unavailableImageTools)
   // The result panel renders the task reference rows of a result node, so the
   // generic reference list skips them while it is shown.
   const resultFieldsShown =
@@ -362,28 +382,57 @@ export function CanvasNodeInspector(props: CanvasNodeInspectorProps) {
 
       {props.onOpenImageTools && canvasImageToolSource(node.data) ? (
         <div className='grid gap-2'>
-          <span className='text-muted-foreground text-xs'>
-            {t('Image tools')}
-          </span>
+          <div className='flex items-center gap-1'>
+            <span className='text-muted-foreground text-xs'>
+              {t('Image tools')}
+            </span>
+            {unavailableImageTools.length > 0 ? (
+              <TooltipProvider delay={0}>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        aria-label={t('Why some image tools are hidden')}
+                        size='icon-xs'
+                        type='button'
+                        variant='ghost'
+                      />
+                    }
+                  >
+                    <Info aria-hidden='true' />
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <div className='grid gap-1'>
+                      {unavailableImageTools.map((tool) => (
+                        <span key={tool}>
+                          {t(canvasImageToolUnavailableReason(tool))}
+                        </span>
+                      ))}
+                    </div>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            ) : null}
+          </div>
           <div className='flex flex-wrap gap-2'>
-            {(
-              Object.keys(CANVAS_IMAGE_TOOL_TITLES) as CanvasImageToolKind[]
-            ).map((tool) => {
-              const Icon = CANVAS_IMAGE_TOOL_ICONS[tool]
-              return (
-                <Button
-                  disabled={props.disabled}
-                  key={tool}
-                  onClick={() => props.onOpenImageTools?.(node, tool)}
-                  size='sm'
-                  type='button'
-                  variant='outline'
-                >
-                  <Icon aria-hidden='true' />
-                  {t(CANVAS_IMAGE_TOOL_TITLES[tool])}
-                </Button>
-              )
-            })}
+            {(Object.keys(CANVAS_IMAGE_TOOL_TITLES) as CanvasImageToolKind[])
+              .filter((tool) => !hiddenImageTools.has(tool))
+              .map((tool) => {
+                const Icon = CANVAS_IMAGE_TOOL_ICONS[tool]
+                return (
+                  <Button
+                    disabled={props.disabled}
+                    key={tool}
+                    onClick={() => props.onOpenImageTools?.(node, tool)}
+                    size='sm'
+                    type='button'
+                    variant='outline'
+                  >
+                    <Icon aria-hidden='true' />
+                    {t(CANVAS_IMAGE_TOOL_TITLES[tool])}
+                  </Button>
+                )
+              })}
           </div>
         </div>
       ) : null}

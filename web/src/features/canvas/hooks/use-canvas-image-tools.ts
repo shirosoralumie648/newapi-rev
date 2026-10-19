@@ -25,6 +25,7 @@ import {
 } from '@/features/playground/api'
 import {
   submitImageEdit,
+  type PlaygroundImageGenerationOutcome,
   type PlaygroundImageResult,
 } from '@/features/playground/generation-api'
 import {
@@ -40,31 +41,45 @@ import {
 import {
   CANVAS_ATTACHMENT_INLINE_MAX_BYTES,
   CANVAS_IMAGE_TOOL_MESSAGES,
+  CANVAS_IMAGE_TOOL_PROMPTS,
   CANVAS_LINKED_NODE_OFFSET_X,
   CANVAS_WORKFLOW_MESSAGES,
 } from '../constants'
 import {
   CanvasImageRenderError,
   composeCanvasMask,
+  composeCanvasOutpaint,
   cropCanvasImage,
   readCanvasImageSize,
   scaleCanvasImage,
 } from '../lib/canvas-image-render'
 import {
   availableCanvasImageUpscaleFactors,
+  canvasImageBackgroundRemovalError,
+  canvasImageOutpaintError,
+  canvasImageOutpaintRatio,
   canvasImageRedrawError,
+  canvasImageStyleReferenceError,
   canvasImageToolCanvasScale,
   canvasImageToolFilename,
+  canvasImageToolModelSupports,
   canvasImageToolResultLabel,
   canvasImageToolSource,
   isCanvasImageCropUsable,
   scaleCanvasImageMaskStrokes,
+  type CanvasImageBackgroundRemovalInput,
   type CanvasImageCropRect,
+  type CanvasImageOutpaintInput,
   type CanvasImageRedrawInput,
+  type CanvasImageRemoteToolKind,
   type CanvasImageSize,
+  type CanvasImageStyleReferenceInput,
   type CanvasImageToolKind,
 } from '../lib/canvas-image-tools'
-import type { CanvasWorkflowImageSource } from '../lib/canvas-workflow'
+import type {
+  CanvasWorkflowImageSource,
+  CanvasWorkflowModelCapability,
+} from '../lib/canvas-workflow'
 import {
   CanvasWorkflowImageError,
   readCanvasWorkflowImage,
@@ -84,6 +99,14 @@ class CanvasImageToolError extends Error {
     this.name = 'CanvasImageToolError'
     this.messageKey = messageKey
   }
+}
+
+type CanvasImageEditResultOptions = {
+  model: string
+  prompt: string
+  size?: string
+  labelSuffix: string
+  filenameSuffix: string
 }
 
 /**
@@ -248,6 +271,8 @@ export interface UseCanvasImageToolsOptions {
   canvasId: string
   /** User group a redraw runs in; empty uses the account group. */
   group: string
+  /** Model capability metadata used to reject a tool on an unsupported model. */
+  modelCapabilities?: Record<string, CanvasWorkflowModelCapability>
   /** Adds a node fed by an existing one; null when the canvas is full. */
   addLinkedNode: (
     kind: CanvasNodeKind,
@@ -272,6 +297,11 @@ export interface UseCanvasImageToolsResult {
   crop: (rect: CanvasImageCropRect) => Promise<boolean>
   redraw: (input: CanvasImageRedrawInput) => Promise<boolean>
   upscale: (factor: number) => Promise<boolean>
+  outpaint: (input: CanvasImageOutpaintInput) => Promise<boolean>
+  backgroundRemoval: (
+    input: CanvasImageBackgroundRemovalInput
+  ) => Promise<boolean>
+  styleReference: (input: CanvasImageStyleReferenceInput) => Promise<boolean>
 }
 
 /**
@@ -301,6 +331,17 @@ export function useCanvasImageTools(
   const busyRef = useRef(false)
 
   const clearMessage = useCallback(() => setMessage(null), [])
+
+  /** Rejects a relay tool before a request when the model cannot route it. */
+  const modelSupportsTool = useCallback(
+    (tool: CanvasImageRemoteToolKind, model: string): boolean => {
+      const capability = optionsRef.current.modelCapabilities?.[model]
+      if (canvasImageToolModelSupports(tool, capability)) return true
+      setMessage(CANVAS_IMAGE_TOOL_MESSAGES.TOOL_UNSUPPORTED)
+      return false
+    },
+    []
+  )
 
   const close = useCallback(() => {
     readIdRef.current += 1
@@ -409,6 +450,63 @@ export function useCanvasImageTools(
     [close]
   )
 
+  /**
+   * Turns one image-edit outcome into a linked node. A task-plugin model answers
+   * with a durable task id; every other edit returns images whose bytes are
+   * stored as a new attachment. Both paths add the same visible result node.
+   */
+  const completeEdit = useCallback(
+    async (
+      node: CanvasFlowNode,
+      outcome: PlaygroundImageGenerationOutcome,
+      resultOptions: CanvasImageEditResultOptions
+    ): Promise<boolean> => {
+      const label = canvasImageToolResultLabel(
+        node.data,
+        resultOptions.labelSuffix
+      )
+      if (outcome.kind === 'task') {
+        const created = optionsRef.current.addLinkedNode(
+          'task-result',
+          node.id,
+          {
+            label,
+            ref: { taskId: outcome.taskId },
+            workflow: {
+              status: 'succeeded',
+              model: resultOptions.model,
+              inputText: resultOptions.prompt,
+              ...(resultOptions.size ? { size: resultOptions.size } : {}),
+              updatedAt: Date.now(),
+            },
+          },
+          {
+            x: node.position.x + CANVAS_LINKED_NODE_OFFSET_X,
+            y: node.position.y,
+          }
+        )
+        if (!created) {
+          setMessage(CANVAS_IMAGE_TOOL_MESSAGES.NODE_LIMIT)
+          return false
+        }
+        close()
+        return true
+      }
+      const result = outcome.images[0]
+      if (!result) {
+        setMessage(CANVAS_IMAGE_TOOL_MESSAGES.RESULT_UNREADABLE)
+        return false
+      }
+      const blob = await imageResultToBlob(result)
+      return await storeResult(
+        blob,
+        canvasImageToolFilename(node.data.label, resultOptions.filenameSuffix),
+        label
+      )
+    },
+    [close, storeResult]
+  )
+
   const crop = useCallback(
     async (rect: CanvasImageCropRect): Promise<boolean> => {
       const node = targetRef.current
@@ -480,6 +578,8 @@ export function useCanvasImageTools(
         setMessage(problem)
         return false
       }
+      const model = input.model.trim()
+      if (!modelSupportsTool('redraw', model)) return false
       busyRef.current = true
       setBusy(true)
       try {
@@ -493,7 +593,6 @@ export function useCanvasImageTools(
           scaleCanvasImageMaskStrokes(input.strokes, scale)
         )
         const prompt = input.prompt.trim()
-        const model = input.model.trim()
         const outcome = await submitImageEdit({
           model,
           prompt,
@@ -506,44 +605,13 @@ export function useCanvasImageTools(
             : {}),
           ...(input.size ? { size: input.size } : {}),
         })
-        if (outcome.kind === 'task') {
-          const created = optionsRef.current.addLinkedNode(
-            'task-result',
-            node.id,
-            {
-              label: canvasImageToolResultLabel(node.data, 'redrawn'),
-              ref: { taskId: outcome.taskId },
-              workflow: {
-                status: 'succeeded',
-                model,
-                inputText: prompt,
-                ...(input.size ? { size: input.size } : {}),
-                updatedAt: Date.now(),
-              },
-            },
-            {
-              x: node.position.x + CANVAS_LINKED_NODE_OFFSET_X,
-              y: node.position.y,
-            }
-          )
-          if (!created) {
-            setMessage(CANVAS_IMAGE_TOOL_MESSAGES.NODE_LIMIT)
-            return false
-          }
-          close()
-          return true
-        }
-        const result = outcome.images[0]
-        if (!result) {
-          setMessage(CANVAS_IMAGE_TOOL_MESSAGES.RESULT_UNREADABLE)
-          return false
-        }
-        const blob = await imageResultToBlob(result)
-        return await storeResult(
-          blob,
-          canvasImageToolFilename(node.data.label, 'redrawn'),
-          canvasImageToolResultLabel(node.data, 'redrawn')
-        )
+        return await completeEdit(node, outcome, {
+          model,
+          prompt,
+          ...(input.size ? { size: input.size } : {}),
+          labelSuffix: 'redrawn',
+          filenameSuffix: 'redrawn',
+        })
       } catch (error) {
         setMessage(imageToolErrorText(error))
         return false
@@ -552,7 +620,161 @@ export function useCanvasImageTools(
         setBusy(false)
       }
     },
-    [close, storeResult]
+    [completeEdit, modelSupportsTool]
+  )
+
+  const outpaint = useCallback(
+    async (input: CanvasImageOutpaintInput): Promise<boolean> => {
+      const node = targetRef.current
+      const image = sourceRef.current
+      if (!node || !image || busyRef.current) return false
+      const problem = canvasImageOutpaintError(input)
+      if (problem) {
+        setMessage(problem)
+        return false
+      }
+      const model = input.model.trim()
+      if (!modelSupportsTool('outpaint', model)) return false
+      busyRef.current = true
+      setBusy(true)
+      try {
+        const ratio = canvasImageOutpaintRatio(input.ratio)
+        const rendered = await composeCanvasOutpaint(image, ratio)
+        const prompt = input.prompt.trim() || CANVAS_IMAGE_TOOL_PROMPTS.OUTPAINT
+        const outcome = await submitImageEdit({
+          model,
+          prompt,
+          image: rendered.blob,
+          imageFilename: canvasImageToolFilename(node.data.label, 'outpaint'),
+          mask: rendered.mask,
+          maskFilename: canvasImageToolFilename(
+            node.data.label,
+            'outpaint-mask'
+          ),
+          size: ratio.size,
+          ...(optionsRef.current.group
+            ? { group: optionsRef.current.group }
+            : {}),
+        })
+        return await completeEdit(node, outcome, {
+          model,
+          prompt,
+          size: ratio.size,
+          labelSuffix: 'outpainted',
+          filenameSuffix: 'outpainted',
+        })
+      } catch (error) {
+        setMessage(imageToolErrorText(error))
+        return false
+      } finally {
+        busyRef.current = false
+        setBusy(false)
+      }
+    },
+    [completeEdit, modelSupportsTool]
+  )
+
+  const backgroundRemoval = useCallback(
+    async (input: CanvasImageBackgroundRemovalInput): Promise<boolean> => {
+      const node = targetRef.current
+      const image = sourceRef.current
+      if (!node || !image || busyRef.current) return false
+      const problem = canvasImageBackgroundRemovalError(input)
+      if (problem) {
+        setMessage(problem)
+        return false
+      }
+      const model = input.model.trim()
+      if (!modelSupportsTool('backgroundRemoval', model)) return false
+      busyRef.current = true
+      setBusy(true)
+      try {
+        const prompt =
+          input.prompt.trim() || CANVAS_IMAGE_TOOL_PROMPTS.BACKGROUND_REMOVAL
+        const outcome = await submitImageEdit({
+          model,
+          prompt,
+          image,
+          imageFilename: canvasImageToolFilename(
+            node.data.label,
+            'background-source'
+          ),
+          size: 'auto',
+          background: 'transparent',
+          outputFormat: 'png',
+          ...(optionsRef.current.group
+            ? { group: optionsRef.current.group }
+            : {}),
+        })
+        return await completeEdit(node, outcome, {
+          model,
+          prompt,
+          size: 'auto',
+          labelSuffix: 'background removed',
+          filenameSuffix: 'background-removed',
+        })
+      } catch (error) {
+        setMessage(imageToolErrorText(error))
+        return false
+      } finally {
+        busyRef.current = false
+        setBusy(false)
+      }
+    },
+    [completeEdit, modelSupportsTool]
+  )
+
+  const styleReference = useCallback(
+    async (input: CanvasImageStyleReferenceInput): Promise<boolean> => {
+      const node = targetRef.current
+      const image = sourceRef.current
+      if (!node || !image || busyRef.current) return false
+      const problem = canvasImageStyleReferenceError(input)
+      if (problem) {
+        setMessage(problem)
+        return false
+      }
+      const model = input.model.trim()
+      if (!modelSupportsTool('styleReference', model)) return false
+      busyRef.current = true
+      setBusy(true)
+      try {
+        const prompt = input.prompt.trim()
+        const outcome = await submitImageEdit({
+          model,
+          prompt,
+          image,
+          imageFilename: canvasImageToolFilename(
+            node.data.label,
+            'style-source'
+          ),
+          references: [
+            {
+              blob: input.styleImage,
+              filename: input.styleFilename.trim() || 'style.png',
+            },
+          ],
+          ...(input.size ? { size: input.size } : {}),
+          ...(optionsRef.current.group
+            ? { group: optionsRef.current.group }
+            : {}),
+        })
+        return await completeEdit(node, outcome, {
+          model,
+          prompt,
+          ...(input.size ? { size: input.size } : {}),
+          labelSuffix: 'style referenced',
+          filenameSuffix: 'style-referenced',
+        })
+      } catch (error) {
+        setMessage(imageToolErrorText(error))
+        return false
+      } finally {
+        busyRef.current = false
+        setBusy(false)
+      }
+    },
+    [completeEdit, modelSupportsTool]
   )
 
   return {
@@ -567,5 +789,8 @@ export function useCanvasImageTools(
     crop,
     redraw,
     upscale,
+    outpaint,
+    backgroundRemoval,
+    styleReference,
   }
 }

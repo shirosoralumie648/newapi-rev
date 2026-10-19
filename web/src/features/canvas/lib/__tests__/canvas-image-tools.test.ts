@@ -19,21 +19,33 @@ For commercial licensing, please contact support@quantumnous.com
 import { expect, test } from 'vitest'
 
 import {
+  CANVAS_IMAGE_TOOL_CAPABILITY_MESSAGES,
   CANVAS_IMAGE_TOOL_CROP_MIN_SIZE,
   CANVAS_IMAGE_TOOL_MESSAGES,
+  CANVAS_IMAGE_TOOL_OUTPAINT_RATIOS,
 } from '../../constants'
 import type { CanvasNodeData } from '../../types'
 import {
   availableCanvasImageUpscaleFactors,
+  canvasImageBackgroundRemovalError,
   canvasImageCropRect,
   canvasImageCropRectFromDisplay,
   canvasImageMaskHasPaint,
+  canvasImageOutpaintError,
+  canvasImageOutpaintLayout,
+  canvasImageOutpaintRatio,
   canvasImageRedrawError,
   canvasImageScale,
+  canvasImageStyleImageError,
+  canvasImageStyleReferenceError,
   canvasImageToolCanvasScale,
   canvasImageToolFilename,
+  canvasImageToolModels,
   canvasImageToolResultLabel,
   canvasImageToolSource,
+  canvasImageToolSupport,
+  canvasImageToolUnavailableKinds,
+  canvasImageToolUnavailableReason,
   clampCanvasImageCropRect,
   isCanvasImageCropUsable,
   scaledCanvasImageSize,
@@ -255,5 +267,150 @@ test('a result label names the source node and the tool', () => {
   ).toBe('photo · cropped')
   expect(canvasImageToolResultLabel(nodeData({}), 'redrawn')).toBe(
     'Image · redrawn'
+  )
+})
+
+test('an outpaint centers the source in the selected aspect ratio', () => {
+  expect(canvasImageOutpaintRatio('3:2')).toEqual(
+    CANVAS_IMAGE_TOOL_OUTPAINT_RATIOS[1]
+  )
+  expect(
+    canvasImageOutpaintLayout(
+      { width: 1000, height: 500 },
+      { width: 1, height: 1 }
+    )
+  ).toEqual({
+    width: 1000,
+    height: 1000,
+    sourceX: 0,
+    sourceY: 250,
+    sourceWidth: 1000,
+    sourceHeight: 500,
+  })
+  expect(
+    canvasImageOutpaintLayout(
+      { width: 500, height: 1000 },
+      { width: 3, height: 2 }
+    )
+  ).toEqual({
+    width: 1500,
+    height: 1000,
+    sourceX: 500,
+    sourceY: 0,
+    sourceWidth: 500,
+    sourceHeight: 1000,
+  })
+})
+
+test('an outpaint respects the longest-edge limit', () => {
+  expect(
+    canvasImageOutpaintLayout(
+      { width: 8192, height: 4096 },
+      { width: 1, height: 1 }
+    )
+  ).toEqual({
+    width: 4096,
+    height: 4096,
+    sourceX: 0,
+    sourceY: 1024,
+    sourceWidth: 4096,
+    sourceHeight: 2048,
+  })
+})
+
+test('creative tools require a model and a usable style image', () => {
+  expect(canvasImageOutpaintError({ model: ' ' })).toBe(
+    CANVAS_IMAGE_TOOL_MESSAGES.OUTPAINT_MODEL_REQUIRED
+  )
+  expect(canvasImageOutpaintError({ model: 'gpt-image-1' })).toBeNull()
+  expect(canvasImageBackgroundRemovalError({ model: '' })).toBe(
+    CANVAS_IMAGE_TOOL_MESSAGES.BACKGROUND_REMOVAL_MODEL_REQUIRED
+  )
+  expect(canvasImageBackgroundRemovalError({ model: 'gpt-image-1' })).toBeNull()
+  expect(canvasImageStyleImageError(null)).toBe(
+    CANVAS_IMAGE_TOOL_MESSAGES.STYLE_IMAGE_REQUIRED
+  )
+  expect(
+    canvasImageStyleImageError({ type: 'image/svg+xml', size: 1024 })
+  ).toBe(CANVAS_IMAGE_TOOL_MESSAGES.STYLE_IMAGE_TYPE_UNSUPPORTED)
+  expect(
+    canvasImageStyleImageError({ type: 'image/png', size: 8 * 1024 * 1024 + 1 })
+  ).toBe(CANVAS_IMAGE_TOOL_MESSAGES.STYLE_IMAGE_TOO_LARGE)
+  expect(
+    canvasImageStyleReferenceError({
+      prompt: '  ',
+      model: 'gpt-image-1',
+      styleImage: { type: 'image/png', size: 1024 },
+    })
+  ).toBe(CANVAS_IMAGE_TOOL_MESSAGES.STYLE_REFERENCE_PROMPT_REQUIRED)
+  expect(
+    canvasImageStyleReferenceError({
+      prompt: 'paint it blue',
+      model: 'gpt-image-1',
+      styleImage: { type: 'image/png', size: 1024 },
+    })
+  ).toBeNull()
+})
+
+test('remote image tools follow the advertised model capabilities', () => {
+  const models = [
+    { label: 'GPT Image', value: 'gpt-image-1' },
+    { label: 'GPT-4o', value: 'gpt-4o' },
+  ]
+  const capabilities = {
+    'gpt-image-1': {
+      imageTools: {
+        edit: true,
+        outpaint: true,
+        backgroundRemoval: true,
+        styleReference: true,
+      },
+    },
+    'gpt-4o': { endpointTypes: ['openai'], usageFields: [] },
+  }
+
+  expect(canvasImageToolSupport(capabilities['gpt-image-1'])).toEqual({
+    redraw: true,
+    outpaint: true,
+    backgroundRemoval: true,
+    styleReference: true,
+  })
+  expect(canvasImageToolSupport(capabilities['gpt-4o'])).toEqual({
+    redraw: false,
+    outpaint: false,
+    backgroundRemoval: false,
+    styleReference: false,
+  })
+  expect(
+    canvasImageToolSupport({ endpointTypes: ['image-generation'] })
+  ).toEqual({
+    redraw: false,
+    outpaint: false,
+    backgroundRemoval: false,
+    styleReference: false,
+  })
+  expect(canvasImageToolSupport({})).toBeNull()
+  expect(canvasImageToolModels(models, capabilities, 'outpaint')).toEqual([
+    models[0],
+  ])
+  expect(canvasImageToolModels(models, undefined, 'outpaint')).toEqual(models)
+  expect(canvasImageToolUnavailableKinds(models, capabilities)).toEqual([])
+  expect(
+    canvasImageToolUnavailableKinds(models, {
+      ...capabilities,
+      'gpt-image-1': {
+        imageTools: {
+          edit: true,
+          outpaint: true,
+          backgroundRemoval: false,
+          styleReference: true,
+        },
+      },
+    })
+  ).toEqual(['backgroundRemoval'])
+  expect(canvasImageToolUnavailableKinds([], capabilities)).toEqual([])
+  expect(canvasImageToolUnavailableKinds(models, undefined)).toEqual([])
+  expect(canvasImageToolUnavailableReason('backgroundRemoval')).toBe(
+    CANVAS_IMAGE_TOOL_CAPABILITY_MESSAGES.backgroundRemoval
   )
 })

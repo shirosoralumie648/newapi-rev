@@ -285,12 +285,44 @@ export const CANVAS_IMAGE_TOOL_CROP_MIN_SIZE = 8
 // Brush diameters in source pixels: a fine stroke, the default and a broad one.
 export const CANVAS_IMAGE_TOOL_BRUSH_SIZES = [12, 24, 48] as const
 
+// Target ratios of the outpaint tool. The provider size keeps the composed
+// canvas and the upstream contract in the same aspect ratio; only the ratios
+// the supported image-edit families accept are offered.
+export const CANVAS_IMAGE_TOOL_OUTPAINT_RATIOS = [
+  { value: '1:1', width: 1, height: 1, size: '1024x1024' },
+  { value: '3:2', width: 3, height: 2, size: '1536x1024' },
+  { value: '2:3', width: 2, height: 3, size: '1024x1536' },
+] as const
+export type CanvasImageToolOutpaintRatio =
+  (typeof CANVAS_IMAGE_TOOL_OUTPAINT_RATIOS)[number]['value']
+
+// The style reference is uploaded as-is to the provider, so only types the
+// image pipeline can decode and the attachment contract accepts are allowed.
+export const CANVAS_IMAGE_TOOL_STYLE_IMAGE_TYPES: readonly string[] = [
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
+]
+
+// The instructions sent when the user leaves the creative prompt empty. They
+// are model input rather than interface copy and stay in English.
+export const CANVAS_IMAGE_TOOL_PROMPTS = {
+  OUTPAINT:
+    'Extend this image naturally to fill the expanded canvas. Keep the existing pixels unchanged and continue the lighting, perspective, textures and style into the new area.',
+  BACKGROUND_REMOVAL:
+    'Remove the background completely and keep the subject on a transparent background. Preserve fine edges, hair and reflections.',
+} as const
+
 // Translation keys for the image tool dialogs. The values double as English
 // source text and as i18n keys.
 export const CANVAS_IMAGE_TOOL_TITLES = {
   crop: 'Crop image',
   redraw: 'Redraw image area',
   upscale: 'Upscale image',
+  outpaint: 'Outpaint image',
+  backgroundRemoval: 'Remove background',
+  styleReference: 'Use style reference',
 } as const
 
 // Image tool problem keys the hook reports. The strings double as English
@@ -305,9 +337,29 @@ export const CANVAS_IMAGE_TOOL_MESSAGES = {
   MASK_EMPTY: 'Paint over the area you want to change.',
   PROMPT_REQUIRED: 'Describe the change for the painted area.',
   MODEL_REQUIRED: 'Choose a model for the redraw.',
+  OUTPAINT_MODEL_REQUIRED: 'Choose a model for the outpaint.',
+  BACKGROUND_REMOVAL_MODEL_REQUIRED: 'Choose a model for background removal.',
+  STYLE_REFERENCE_MODEL_REQUIRED: 'Choose a model for the style reference.',
+  STYLE_REFERENCE_PROMPT_REQUIRED:
+    'Describe the result you want from the style reference.',
+  STYLE_IMAGE_REQUIRED: 'Choose a style image.',
+  STYLE_IMAGE_TYPE_UNSUPPORTED:
+    'The style image must be a PNG, JPEG, WebP or GIF file.',
+  STYLE_IMAGE_TOO_LARGE: 'The style image is larger than the 8 MiB limit.',
+  TOOL_UNSUPPORTED: 'The selected model does not support this image tool.',
   RESULT_UNREADABLE: 'The generated image could not be added to the canvas.',
   NODE_LIMIT: 'The canvas is full; the result could not be added.',
   FAILED: 'The image operation failed.',
+} as const
+
+// Why a remote image tool is hidden for the models of the current group. Each
+// value is an i18n key shown in the inspector tooltip.
+export const CANVAS_IMAGE_TOOL_CAPABILITY_MESSAGES = {
+  redraw: 'No available model advertises masked image edits.',
+  outpaint: 'No available model advertises masked outpaint edits.',
+  backgroundRemoval:
+    'No available model advertises transparent-background removal.',
+  styleReference: 'No available model advertises style-reference edits.',
 } as const
 
 // A new linked node (a result node added by a run) is dropped to the right of

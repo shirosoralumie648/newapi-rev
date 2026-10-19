@@ -21,10 +21,12 @@ import {
   CANVAS_IMAGE_TOOL_MESSAGES,
 } from '../constants'
 import {
+  canvasImageOutpaintLayout,
   canvasImageToolCanvasScale,
   scaledCanvasImageSize,
   type CanvasImageCropRect,
   type CanvasImageMaskStroke,
+  type CanvasImageOutpaintLayout,
   type CanvasImageSize,
 } from './canvas-image-tools'
 
@@ -33,6 +35,12 @@ export interface CanvasImageRendered {
   blob: Blob
   width: number
   height: number
+}
+
+/** The outpainted image and the matching mask of its newly added area. */
+export interface CanvasImageOutpaintRendered extends CanvasImageOutpaintLayout {
+  blob: Blob
+  mask: Blob
 }
 
 /**
@@ -170,6 +178,49 @@ export async function scaleCanvasImage(
     output.height
   )
   return { blob: await canvasToBlob(canvas), ...output }
+}
+
+/**
+ * Composes an outpaint request: the source is centered on a white canvas of the
+ * target ratio, and the mask is opaque only over the source pixels so the new
+ * space is the editable area. Both images share the exact same dimensions.
+ */
+export async function composeCanvasOutpaint(
+  source: string,
+  ratio: { width: number; height: number }
+): Promise<CanvasImageOutpaintRendered> {
+  const image = await loadCanvasImage(source)
+  const size = imageNaturalSize(image)
+  const layout = canvasImageOutpaintLayout(size, ratio)
+  const { canvas, context } = createRenderCanvas(layout.width, layout.height)
+  context.fillStyle = '#ffffff'
+  context.fillRect(0, 0, layout.width, layout.height)
+  context.imageSmoothingEnabled = true
+  context.imageSmoothingQuality = 'high'
+  context.drawImage(
+    image,
+    0,
+    0,
+    size.width,
+    size.height,
+    layout.sourceX,
+    layout.sourceY,
+    layout.sourceWidth,
+    layout.sourceHeight
+  )
+  const maskCanvas = createRenderCanvas(layout.width, layout.height)
+  maskCanvas.context.fillStyle = '#ffffff'
+  maskCanvas.context.fillRect(
+    layout.sourceX,
+    layout.sourceY,
+    layout.sourceWidth,
+    layout.sourceHeight
+  )
+  return {
+    ...layout,
+    blob: await canvasToBlob(canvas),
+    mask: await canvasToBlob(maskCanvas.canvas),
+  }
 }
 
 /**
