@@ -65,7 +65,7 @@ import {
   PLAYGROUND_CONTEXT_TOKEN_BUDGET_MAX,
 } from '../../constants'
 import type { KnowledgeBase } from '../../knowledge-api'
-import type { PlaygroundContextPlan } from '../../lib'
+import { isChatModelOption, type PlaygroundContextPlan } from '../../lib'
 import type {
   KnowledgeStaleDocument,
   ModelOption,
@@ -124,7 +124,7 @@ function PlaygroundContextContent(props: PlaygroundContextContentProps) {
   const modelItems = [
     { value: '', label: t('Same as conversation model') },
     ...props.models
-      .filter((model) => model.value !== '')
+      .filter((model) => model.value !== '' && isChatModelOption(model))
       .map((model) => ({ value: model.value, label: model.label })),
   ]
   if (

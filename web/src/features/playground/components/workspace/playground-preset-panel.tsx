@@ -60,6 +60,7 @@ import {
 } from '../../constants'
 import {
   exportPlaygroundPresetFile,
+  isChatModelOption,
   presetAvatarUrl,
   presetInputFromSettings,
 } from '../../lib'
@@ -249,6 +250,8 @@ export function PlaygroundPresetPanel(props: PlaygroundPresetPanelProps) {
   const { t } = useTranslation()
   const role = useAuthStore((state) => state.auth.user?.role ?? ROLE.USER)
   const isAdmin = role >= ROLE.ADMIN
+  // Presets pick the conversation model, so generation-only models are hidden.
+  const chatModels = props.models.filter(isChatModelOption)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [tab, setTab] = useState<PresetTab>('private')
   const [presets, setPresets] = useState<AssistantPreset[]>([])
@@ -818,7 +821,7 @@ export function PlaygroundPresetPanel(props: PlaygroundPresetPanelProps) {
           <div className='grid gap-2'>
             <Label>{t('Model')}</Label>
             <ModelSelector
-              models={props.models}
+              models={chatModels}
               onModelChange={(value) =>
                 setDraft((current) => ({
                   ...current,

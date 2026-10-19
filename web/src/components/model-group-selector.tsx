@@ -60,6 +60,8 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { toIntlLocale } from '@/i18n/languages'
+import { formatCompactNumber } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import { formatGroupDetail } from './model-group-selector/group-detail'
@@ -73,6 +75,12 @@ interface ModelOption {
   value: string
   category?: string
   description?: string
+  /** Preformatted price summary shown under the model name. */
+  priceLabel?: string
+  /** Context window in tokens, shown beside the price. */
+  contextLength?: number
+  /** Already translated capability tags shown beside the price. */
+  capabilityLabels?: string[]
 }
 
 interface GroupOption {
@@ -571,7 +579,8 @@ export const ModelGroupSelector: React.FC<ModelGroupSelectorProps> = ({
   className,
   disabled = false,
 }) => {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const [open, setOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const isMobile = useIsMobile()
@@ -746,41 +755,80 @@ export const ModelGroupSelector: React.FC<ModelGroupSelectorProps> = ({
           </div>
         ) : (
           <CommandGroup className='p-1'>
-            {filteredModels.map((model) => (
-              <CommandItem
-                className={cn(
-                  modelGroupSelectorLayoutClasses.modelItem,
-                  selectedModel === model.value
-                    ? modelGroupSelectorLayoutClasses.selectedModelItem
-                    : modelGroupSelectorLayoutClasses.unselectedModelItem
-                )}
-                key={model.value}
-                onSelect={handleModelChange}
-                ref={
-                  selectedModel === model.value
-                    ? selectedModelOptionRef
-                    : undefined
-                }
-                value={model.value}
-              >
-                <span
+            {filteredModels.map((model) => {
+              const contextLength = model.contextLength ?? 0
+              const hasMeta = Boolean(
+                model.priceLabel ||
+                contextLength > 0 ||
+                model.capabilityLabels?.length
+              )
+              return (
+                <CommandItem
                   className={cn(
-                    'min-w-0 truncate',
+                    modelGroupSelectorLayoutClasses.modelItem,
+                    hasMeta && 'items-start',
                     selectedModel === model.value
-                      ? modelGroupSelectorLayoutClasses.selectedModelText
-                      : modelGroupSelectorLayoutClasses.unselectedModelText
+                      ? modelGroupSelectorLayoutClasses.selectedModelItem
+                      : modelGroupSelectorLayoutClasses.unselectedModelItem
                   )}
+                  key={model.value}
+                  onSelect={handleModelChange}
+                  ref={
+                    selectedModel === model.value
+                      ? selectedModelOptionRef
+                      : undefined
+                  }
+                  value={model.value}
                 >
-                  {model.label}
-                </span>
-                <Check
-                  className={cn(
-                    'size-3.5 shrink-0',
-                    selectedModel === model.value ? 'opacity-100' : 'opacity-0'
-                  )}
-                />
-              </CommandItem>
-            ))}
+                  <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
+                    <span
+                      className={cn(
+                        'min-w-0 truncate',
+                        selectedModel === model.value
+                          ? modelGroupSelectorLayoutClasses.selectedModelText
+                          : modelGroupSelectorLayoutClasses.unselectedModelText
+                      )}
+                    >
+                      {model.label}
+                    </span>
+                    {hasMeta && (
+                      <span className='text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] leading-4'>
+                        {model.priceLabel && (
+                          <span className='truncate'>{model.priceLabel}</span>
+                        )}
+                        {contextLength > 0 && (
+                          <span className='shrink-0'>
+                            {t('{{tokens}} context', {
+                              tokens: formatCompactNumber(
+                                contextLength,
+                                locale
+                              ),
+                            })}
+                          </span>
+                        )}
+                        {model.capabilityLabels?.map((capability) => (
+                          <span
+                            className='bg-muted shrink-0 rounded px-1 py-px'
+                            key={capability}
+                          >
+                            {capability}
+                          </span>
+                        ))}
+                      </span>
+                    )}
+                  </div>
+                  <Check
+                    className={cn(
+                      'size-3.5 shrink-0',
+                      selectedModel === model.value
+                        ? 'opacity-100'
+                        : 'opacity-0',
+                      hasMeta && 'mt-0.5'
+                    )}
+                  />
+                </CommandItem>
+              )
+            })}
           </CommandGroup>
         )}
       </CommandList>

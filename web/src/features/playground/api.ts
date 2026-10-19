@@ -102,12 +102,30 @@ export async function sendChatCompletion(
   }
 }
 
+// Read-only model metadata from /api/user/models?details=1. Plain strings stay
+// accepted so an older server still yields usable options.
+const serverModelDetailSchema = z.object({
+  model_name: z.string().min(1),
+  description: z.string().optional(),
+  quota_type: z.number().finite().optional(),
+  model_ratio: z.number().finite().optional(),
+  model_price: z.number().finite().optional(),
+  completion_ratio: z.number().finite().optional(),
+  cache_ratio: z.number().finite().nullable().optional(),
+  billing_mode: z.string().optional(),
+  billing_expr: z.string().optional(),
+  context_length: z.number().finite().nonnegative().optional(),
+  capabilities: z.array(z.string()).optional(),
+  supports_chat: z.boolean().optional(),
+  is_image_generation: z.boolean().optional(),
+})
+
 /**
  * Get user available models
  */
 export async function getUserModels(group: string): Promise<ModelOption[]> {
   const res = await api.get(API_ENDPOINTS.USER_MODELS, {
-    params: { group },
+    params: { group, details: 1 },
   })
   const { data } = res
   requireServerSuccess(data)
@@ -116,10 +134,36 @@ export async function getUserModels(group: string): Promise<ModelOption[]> {
     return []
   }
 
-  return data.data.map((model: string) => ({
-    label: model,
-    value: model,
-  }))
+  return data.data.flatMap((entry: unknown): ModelOption[] => {
+    if (typeof entry === 'string') {
+      return [{ label: entry, value: entry }]
+    }
+    const parsed = serverModelDetailSchema.safeParse(entry)
+    if (!parsed.success) {
+      return []
+    }
+    const model = parsed.data
+    return [
+      {
+        label: model.model_name,
+        value: model.model_name,
+        description: model.description,
+        quotaType: model.quota_type,
+        modelRatio: model.model_ratio,
+        modelPrice: model.model_price,
+        completionRatio: model.completion_ratio,
+        cacheRatio: model.cache_ratio,
+        billingMode: model.billing_mode,
+        billingExpr: model.billing_expr,
+        contextLength: model.context_length,
+        capabilities: model.capabilities?.filter(
+          (capability) => capability.length > 0
+        ),
+        supportsChat: model.supports_chat ?? true,
+        isImageGeneration: model.is_image_generation ?? false,
+      },
+    ]
+  })
 }
 
 /**

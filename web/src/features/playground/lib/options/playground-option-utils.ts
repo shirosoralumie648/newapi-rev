@@ -18,6 +18,15 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type { GroupOption, ModelOption } from '../../types'
 
+/**
+ * Chat selectors must not offer image/video generation models that still
+ * advertise an OpenAI endpoint. Missing metadata (older server) keeps every
+ * model selectable.
+ */
+export function isChatModelOption(model: ModelOption): boolean {
+  return model.supportsChat !== false
+}
+
 export function getModelFallback(
   models: ModelOption[],
   currentModel: string

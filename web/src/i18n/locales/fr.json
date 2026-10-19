@@ -8618,6 +8618,17 @@
     "The seed must be an integer between 1 and 2147483647.": "Le seed doit être un entier compris entre 1 et 2147483647.",
     "This model's channel metadata does not list image generation.": "Les métadonnées du canal de ce modèle n'indiquent pas la génération d'images.",
     "This model's channel metadata does not list video generation.": "Les métadonnées du canal de ce modèle n'indiquent pas la génération de vidéos.",
-    "This model's channel metadata lists neither image nor video generation.": "Les métadonnées du canal de ce modèle n'indiquent ni génération d'images ni génération de vidéos."
+    "This model's channel metadata lists neither image nor video generation.": "Les métadonnées du canal de ce modèle n'indiquent ni génération d'images ni génération de vidéos.",
+    "≈{{amount}} (estimated)": "≈{{amount}} (estimation)",
+    "Final amount is in the consumption logs.": "Le montant final figure dans les journaux de consommation.",
+    "No price is configured for this model.": "Aucun prix n'est configuré pour ce modèle.",
+    "This model is priced by usage.": "Ce modèle est facturé à l'usage.",
+    "Cached input pricing is not configured.": "Le prix des entrées en cache n'est pas configuré.",
+    "Group ratio {{ratio}}": "Ratio du groupe {{ratio}}",
+    "Balance {{balance}}": "Solde {{balance}}",
+    "The input exceeds this model's context window.": "L'entrée dépasse la fenêtre de contexte de ce modèle.",
+    "{{tokens}} context": "{{tokens}} de contexte",
+    "Priced by usage": "Facturé à l'usage",
+    "No price configured": "Aucun prix configuré"
   }
 }

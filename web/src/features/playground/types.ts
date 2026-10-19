@@ -622,6 +622,22 @@ export interface ParameterEnabled {
 export interface ModelOption {
   label: string
   value: string
+  description?: string
+  /** Read-only pricing metadata returned by /api/user/models?details=1. */
+  quotaType?: number
+  modelRatio?: number
+  modelPrice?: number
+  completionRatio?: number
+  cacheRatio?: number | null
+  billingMode?: string
+  billingExpr?: string
+  /** Context window parsed from the model tags, when known. */
+  contextLength?: number
+  /** Capability identifiers: vision, tools, reasoning, structured_output. */
+  capabilities?: string[]
+  /** Chat-style endpoint and no task usage schema. */
+  supportsChat?: boolean
+  isImageGeneration?: boolean
 }
 
 export interface GroupOption {

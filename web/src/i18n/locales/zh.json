@@ -8618,6 +8618,17 @@
     "The seed must be an integer between 1 and 2147483647.": "种子必须是 1 到 2147483647 之间的整数。",
     "This model's channel metadata does not list image generation.": "该模型的渠道元数据未列出图片生成。",
     "This model's channel metadata does not list video generation.": "该模型的渠道元数据未列出视频生成。",
-    "This model's channel metadata lists neither image nor video generation.": "该模型的渠道元数据既未列出图片生成，也未列出视频生成。"
+    "This model's channel metadata lists neither image nor video generation.": "该模型的渠道元数据既未列出图片生成，也未列出视频生成。",
+    "≈{{amount}} (estimated)": "≈{{amount}}（估算）",
+    "Final amount is in the consumption logs.": "最终金额以消费日志为准。",
+    "No price is configured for this model.": "该模型未配置价格。",
+    "This model is priced by usage.": "该模型按用量计费。",
+    "Cached input pricing is not configured.": "未配置缓存输入价格。",
+    "Group ratio {{ratio}}": "分组倍率 {{ratio}}",
+    "Balance {{balance}}": "余额 {{balance}}",
+    "The input exceeds this model's context window.": "输入已超出该模型的上下文窗口。",
+    "{{tokens}} context": "{{tokens}} 上下文",
+    "Priced by usage": "按用量计费",
+    "No price configured": "未配置价格"
   }
 }
