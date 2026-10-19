@@ -222,19 +222,19 @@ export function canvasPngExportLayout(
     maxEdge / Math.max(bounds.width, 1),
     maxEdge / Math.max(bounds.height, 1)
   )
-  const rectById = new Map(layoutNodes.map((entry) => [entry.id, entry.rect]))
+  const layoutById = new Map(layoutNodes.map((entry) => [entry.id, entry]))
   const layoutEdges = edges
     .filter(
       (edge) =>
         ids.has(edge.source) &&
         ids.has(edge.target) &&
-        !rectById.get(edge.source)?.group &&
-        !rectById.get(edge.target)?.group
+        !layoutById.get(edge.source)?.group &&
+        !layoutById.get(edge.target)?.group
     )
     .map((edge) => ({
       id: edge.id,
-      source: rectById.get(edge.source) as CanvasRect,
-      target: rectById.get(edge.target) as CanvasRect,
+      source: layoutById.get(edge.source)?.rect as CanvasRect,
+      target: layoutById.get(edge.target)?.rect as CanvasRect,
     }))
   return {
     nodes: layoutNodes,
