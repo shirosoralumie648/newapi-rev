@@ -22,7 +22,7 @@ import { useTranslation } from 'react-i18next'
 import { handleServerError } from '@/lib/handle-server-error'
 
 import { sendChatCompletion } from '../api'
-import { ERROR_MESSAGES } from '../constants'
+import { ERROR_MESSAGES, MESSAGE_STATUS } from '../constants'
 import {
   applyStreamingChunk,
   applyToolCallDelta,
@@ -35,6 +35,7 @@ import {
   setCurrentVersionFinishReason,
   toMessageUsage,
   updateAssistantMessageWithError,
+  updateCurrentVersionContent,
   updateLastAssistantMessage,
   parseRequestErrorDetails,
   applyChatCompletionResponse,
@@ -391,6 +392,25 @@ export function useChatHandler({
         pendingUsageRef.current = null
         pendingFinishReasonRef.current = null
         setIsRequesting(false)
+        // The prefill attempt may have produced a few chunks before the
+        // channel rejected it. The user-instruction retry starts a fresh
+        // answer, so the half-written branch is cleared first.
+        onMessageUpdate(
+          (prev) =>
+            updateLastAssistantMessage(prev, (message) => ({
+              ...updateCurrentVersionContent(message, ''),
+              startedAt: Date.now(),
+              completedAt: undefined,
+              durationMs: undefined,
+              reasoning: undefined,
+              isReasoningStreaming: false,
+              isReasoningComplete: false,
+              isContentComplete: false,
+              status: MESSAGE_STATUS.LOADING,
+              errorCode: null,
+            })),
+          requestSessionIdRef.current
+        )
         deliverPayloadRef.current(
           continuation.fallbackMessages,
           continuation.contextSummary
