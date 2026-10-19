@@ -518,6 +518,16 @@ export function playgroundAttachmentKind(
 // Generation entry defaults. The server validates every model and parameter
 // again through the ordinary Relay/task pipeline.
 export const PLAYGROUND_GENERATION_KINDS = ['image', 'video', 'audio'] as const
+export const PLAYGROUND_GENERATION_MODES = [
+  'single',
+  'variations',
+  'compare',
+] as const
+export const PLAYGROUND_GENERATION_MODE_LABELS = {
+  single: 'Single',
+  variations: 'Variations',
+  compare: 'Compare',
+} as const
 export const PLAYGROUND_IMAGE_SIZES = [
   '1024x1024',
   '1792x1024',
@@ -544,6 +554,7 @@ export const PLAYGROUND_GENERATION_VARIATION_MIN = 1
 export const PLAYGROUND_GENERATION_VARIATION_MAX = 8
 export const PLAYGROUND_GENERATION_COMPARE_MIN = 2
 export const PLAYGROUND_GENERATION_COMPARE_MAX = 4
+export const PLAYGROUND_GENERATION_BATCH_CONCURRENCY = 2
 export const PLAYGROUND_GENERATION_SEED_MODES = ['increment', 'random'] as const
 // The canvas custom-size and seed controls mirror these bounds. The server
 // validates the same WIDTHxHEIGHT and seed ranges on /pg before billing.
@@ -598,7 +609,12 @@ export const PLAYGROUND_GENERATION_BATCH_MESSAGES = {
   VIDEO_UNSUPPORTED: 'This model cannot generate videos.',
   COMPARE_SELECTION: 'Select 2 to 4 models to compare.',
   COMPARE_REQUIRED: 'Select at least two models to compare.',
+  MODEL_REQUIRED: 'Choose a model to generate media.',
   PROMPT_REQUIRED: 'Describe what you want to generate',
+  SEED_INVALID: 'The seed must be an integer between 1 and 2147483647.',
+  BATCH_CONCURRENCY:
+    'Up to {{count}} requests run at once; the account task quota still applies.',
+  BLOCKED_MODELS: 'Remove the models that cannot generate this media first.',
 } as const
 
 // Parameter mapping of one model. The plan reports every adjustment instead of

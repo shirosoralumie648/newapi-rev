@@ -51,7 +51,14 @@ interface CanvasRunBudgetDialogProps {
   /** The steps of the run a click would start, in run order. */
   steps: CanvasWorkflowEstimateStepInput[]
   /** Starts the run; a run id bills its steps inside the opened budget. */
-  onRun: (budget?: CanvasWorkflowRunBudgetRef) => void
+  onRun: (
+    budget?: CanvasWorkflowRunBudgetRef,
+    estimate?: CanvasWorkflowRunEstimate
+  ) => void
+  /** Optional copy so another flow (for example a media batch) can reuse it. */
+  title?: string
+  description?: string
+  confirmLabel?: string
 }
 
 /**
@@ -118,16 +125,21 @@ export function CanvasRunBudgetDialog(props: CanvasRunBudgetDialogProps) {
     // Start while the parent can still read the plan the dialog was opened
     // for, then close; the scope of a selection run must not depend on state
     // teardown order.
-    props.onRun(budget)
+    props.onRun(budget, estimate ?? undefined)
     props.onOpenChange(false)
   }
+
+  const dialogTitle = props.title ?? t('Run workflow')
 
   return (
     <Dialog
       bodyClassName='space-y-4'
       contentClassName='max-sm:w-[calc(100vw-1.5rem)] sm:max-w-md'
       contentHeight='auto'
-      description={t('Review the estimated cost before the run starts.')}
+      description={
+        props.description ??
+        t('Review the estimated cost before the run starts.')
+      }
       footer={
         <>
           <Button
@@ -144,13 +156,13 @@ export function CanvasRunBudgetDialog(props: CanvasRunBudgetDialogProps) {
             type='button'
           >
             {starting && <Spinner />}
-            {t('Run workflow')}
+            {props.confirmLabel ?? t('Run workflow')}
           </Button>
         </>
       }
       onOpenChange={props.onOpenChange}
       open={props.open}
-      title={t('Run workflow')}
+      title={dialogTitle}
     >
       {status === 'loading' && <LoadingState className='min-h-20' />}
       {status === 'error' && (

@@ -530,8 +530,8 @@ func GetAllTask(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
 	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
-	generationPrompt, generationModel, generationSeed := taskGenerationFilters(c)
-	queryParams := model.SyncTaskQueryParams{Platform: constant.TaskPlatform(c.Query("platform")), TaskID: c.Query("task_id"), Status: c.Query("status"), Action: c.Query("action"), StartTimestamp: startTimestamp, EndTimestamp: endTimestamp, ChannelID: c.Query("channel_id"), GenerationPrompt: generationPrompt, GenerationModel: generationModel, GenerationSeed: generationSeed}
+	generationFilters := taskGenerationFilters(c)
+	queryParams := model.SyncTaskQueryParams{Platform: constant.TaskPlatform(c.Query("platform")), TaskID: c.Query("task_id"), Status: c.Query("status"), Action: c.Query("action"), StartTimestamp: startTimestamp, EndTimestamp: endTimestamp, ChannelID: c.Query("channel_id"), GenerationPrompt: generationFilters.Prompt, GenerationModel: generationFilters.Model, GenerationSize: generationFilters.Size, GenerationQuality: generationFilters.Quality, GenerationSeed: generationFilters.Seed, GenerationCount: generationFilters.Count}
 	items := model.TaskGetAllTasks(pageInfo.GetStartIdx(), pageInfo.GetPageSize(), queryParams)
 	pageInfo.SetTotal(int(model.TaskCountAllTasks(queryParams)))
 	pageInfo.SetItems(tasksToDto(items, true, c.GetInt("role")))
@@ -543,25 +543,47 @@ func GetUserTask(c *gin.Context) {
 	userID := c.GetInt("id")
 	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
 	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
-	generationPrompt, generationModel, generationSeed := taskGenerationFilters(c)
-	queryParams := model.SyncTaskQueryParams{Platform: constant.TaskPlatform(c.Query("platform")), TaskID: c.Query("task_id"), Status: c.Query("status"), Action: c.Query("action"), StartTimestamp: startTimestamp, EndTimestamp: endTimestamp, GenerationPrompt: generationPrompt, GenerationModel: generationModel, GenerationSeed: generationSeed}
+	generationFilters := taskGenerationFilters(c)
+	queryParams := model.SyncTaskQueryParams{Platform: constant.TaskPlatform(c.Query("platform")), TaskID: c.Query("task_id"), Status: c.Query("status"), Action: c.Query("action"), StartTimestamp: startTimestamp, EndTimestamp: endTimestamp, GenerationPrompt: generationFilters.Prompt, GenerationModel: generationFilters.Model, GenerationSize: generationFilters.Size, GenerationQuality: generationFilters.Quality, GenerationSeed: generationFilters.Seed, GenerationCount: generationFilters.Count}
 	items := model.TaskGetAllUserTask(userID, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), queryParams)
 	pageInfo.SetTotal(int(model.TaskCountAllUserTask(userID, queryParams)))
 	pageInfo.SetItems(tasksToDto(items, false, common.RoleCommonUser))
 	common.ApiSuccess(c, pageInfo)
 }
 
+// taskGenerationFilterValues are the result-gallery metadata filters one task
+// list request carries. They narrow the same durable task query the gallery
+// already uses; no second result store is read.
+type taskGenerationFilterValues struct {
+	Prompt  string
+	Model   string
+	Size    string
+	Quality string
+	Seed    *int64
+	Count   *int
+}
+
 // taskGenerationFilters reads the result-gallery metadata filters. An
-// unparsable seed is ignored, matching the timestamp handling above, so a
+// unparsable number is ignored, matching the timestamp handling above, so a
 // malformed optional filter never hides the whole task list behind an error.
-func taskGenerationFilters(c *gin.Context) (string, string, *int64) {
-	var seed *int64
+func taskGenerationFilters(c *gin.Context) taskGenerationFilterValues {
+	filters := taskGenerationFilterValues{
+		Prompt:  strings.TrimSpace(c.Query("generation_prompt")),
+		Model:   strings.TrimSpace(c.Query("generation_model")),
+		Size:    strings.TrimSpace(c.Query("generation_size")),
+		Quality: strings.TrimSpace(c.Query("generation_quality")),
+	}
 	if raw := strings.TrimSpace(c.Query("generation_seed")); raw != "" {
 		if parsed, err := strconv.ParseInt(raw, 10, 64); err == nil {
-			seed = &parsed
+			filters.Seed = &parsed
 		}
 	}
-	return strings.TrimSpace(c.Query("generation_prompt")), strings.TrimSpace(c.Query("generation_model")), seed
+	if raw := strings.TrimSpace(c.Query("generation_count")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			filters.Count = &parsed
+		}
+	}
+	return filters
 }
 
 func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskDto {

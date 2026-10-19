@@ -57,14 +57,37 @@ export function useCanvasWorkflowOptions() {
     const capabilities: Record<string, CanvasWorkflowModelCapability> = {}
     for (const model of pricing.models) {
       const usageFields = new Set(Object.keys(model.billing_usage_schema ?? {}))
-      for (const variant of model.billing_plugin_variants ?? []) {
-        for (const field of Object.keys(variant.billing_usage_schema ?? {})) {
+      // Enum values of every usage field a task plugin can report, merged
+      // across the model's plugin variants: these are the exact sizes,
+      // qualities and durations a batch may send to this model.
+      const enumValues = new Map<string, Set<string>>()
+      const schemas = [
+        model.billing_usage_schema,
+        ...(model.billing_plugin_variants ?? []).map(
+          (variant) => variant.billing_usage_schema
+        ),
+      ]
+      for (const schema of schemas) {
+        for (const [field, definition] of Object.entries(schema ?? {})) {
+          for (const value of definition?.enum ?? []) {
+            if (!value) continue
+            const values = enumValues.get(field) ?? new Set<string>()
+            values.add(value)
+            enumValues.set(field, values)
+          }
+        }
+        for (const field of Object.keys(schema ?? {})) {
           usageFields.add(field)
         }
+      }
+      const usageSchema: Record<string, { enum: string[] }> = {}
+      for (const [field, values] of enumValues) {
+        usageSchema[field] = { enum: [...values] }
       }
       capabilities[model.model_name] = {
         endpointTypes: model.supported_endpoint_types ?? [],
         usageFields: [...usageFields],
+        usageSchema,
         ...(model.image_tools
           ? {
               imageTools: {
