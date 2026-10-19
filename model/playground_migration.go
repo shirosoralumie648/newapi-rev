@@ -155,7 +155,7 @@ func migratePlaygroundTrashColumns(db *gorm.DB) error {
 // later releases added to the account counter row. PostgreSQL refuses to add a
 // NOT NULL column to a non-empty table without a default, so they are created
 // with DEFAULT 0 before AutoMigrate sees them.
-var playgroundUserUsageCounterColumns = []string{"snippets", "memories", "canvas_snapshot_count", "canvas_snapshot_bytes", "attachment_pending_count", "attachment_pending_bytes", "knowledge_base_count", "knowledge_base_document_count", "knowledge_base_chunk_count", "knowledge_base_bytes", "comparison_run_count", "comparison_run_bytes"}
+var playgroundUserUsageCounterColumns = []string{"snippets", "memories", "canvas_snapshot_count", "canvas_snapshot_bytes", "attachment_pending_count", "attachment_pending_bytes", "knowledge_base_count", "knowledge_base_document_count", "knowledge_base_chunk_count", "knowledge_base_bytes", "comparison_run_count", "comparison_run_bytes", "workflow_run_count", "workflow_run_bytes"}
 
 // migratePlaygroundUserUsageCounters adds the counters that later releases
 // introduced (prompt snippets, canvas snapshots and in-flight upload

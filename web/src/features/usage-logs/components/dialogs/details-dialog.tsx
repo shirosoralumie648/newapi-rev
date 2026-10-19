@@ -38,6 +38,7 @@ For commercial licensing, please contact support@quantumnous.com
 import {
   Copy,
   Check,
+  Play,
   Route,
   Settings2,
   AlertTriangle,
@@ -85,6 +86,10 @@ import {
   renderLogContent,
 } from '../../lib/format'
 import { buildQuotaAuditOperation } from '../../lib/quota-audit-operation'
+import {
+  buildPlaygroundReplayHref,
+  buildPlaygroundReplayLink,
+} from '../../lib/replay'
 import {
   getLogTypeConfig,
   isPerCallBilling,
@@ -484,6 +489,13 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const other = parseLogOther(props.log.other)
   const typeConfig = getLogTypeConfig(props.log.type)
 
+  // A chat-style request log reopens as a Playground draft in a new tab, so
+  // the log stays visible for comparison. Nothing is sent by opening it.
+  const replayLink = buildPlaygroundReplayLink(props.log, other, {
+    includeOwner: props.isAdmin,
+  })
+  const replayHref = replayLink ? buildPlaygroundReplayHref(replayLink) : null
+
   const isViolation = isViolationFeeLog(other)
   const isRefund = props.log.type === 6
   const isConsume = props.log.type === 2
@@ -655,6 +667,18 @@ export function DetailsDialog(props: DetailsDialogProps) {
       descriptionClassName='sr-only'
       contentHeight='min(72dvh, 720px)'
       bodyClassName='pr-2 sm:pr-4'
+      footer={
+        replayHref ? (
+          <Button
+            type='button'
+            variant='outline'
+            render={<a href={replayHref} target='_blank' rel='noreferrer' />}
+          >
+            <Play className='size-4' aria-hidden='true' />
+            {t('Open in Playground')}
+          </Button>
+        ) : undefined
+      }
     >
       <div className='w-full max-w-full min-w-0 space-y-2.5 overflow-x-hidden py-1 sm:space-y-3'>
         {/* Overview section - key identifiers */}

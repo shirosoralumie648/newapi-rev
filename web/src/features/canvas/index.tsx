@@ -68,11 +68,7 @@ import {
   type CanvasGenerationPrefill,
 } from './lib/canvas-navigation'
 import type { CanvasSourceTarget } from './lib/canvas-navigation'
-import type {
-  CanvasProjectMode,
-  CanvasServerDocument,
-  CanvasServerProject,
-} from './types'
+import type { CanvasProjectMode, CanvasServerDocument } from './types'
 
 interface CanvasWorkspaceProps {
   /** Project to open on first load; overrides the last-used selection. */
@@ -358,7 +354,7 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
         description={t('Create a canvas to start arranging nodes.')}
         title={t('No canvas projects yet')}
         action={
-          <Button onClick={handleCreate} type='button'>
+          <Button onClick={() => void handleCreate()} type='button'>
             {t('New canvas')}
           </Button>
         }

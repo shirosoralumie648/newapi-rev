@@ -1358,9 +1358,11 @@ test('a selection run executes and prices only the selected subgraph', async () 
     expect.objectContaining({ model: 'gpt-4o' }),
     expect.anything()
   )
+  // The selection covers p1 → m1 only; m2 keeps its configuration and is never
+  // touched by the run.
   expect(
     hook.result.current.nodes.find((node) => node.id === 'm2')?.data.workflow
-  ).toBeUndefined()
+  ).toEqual({ model: 'gpt-4o-mini' })
 })
 
 test('refuses a selection without any workflow step with its own message', () => {

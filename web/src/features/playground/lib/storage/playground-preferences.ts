@@ -93,7 +93,9 @@ const autoReadPreferencesSchema = z.object({
 
 const autoTitlePreferencesSchema = z.object({
   defaultEnabled: z.boolean(),
-  overrides: z.record(z.string(), z.boolean()),
+  // Kept opaque like the auto-read store: `normalizeOverrides` drops malformed
+  // entries, so one bad override must not reset the whole preference.
+  overrides: z.unknown(),
 })
 
 const toolExecutionPreferencesSchema = z.object({

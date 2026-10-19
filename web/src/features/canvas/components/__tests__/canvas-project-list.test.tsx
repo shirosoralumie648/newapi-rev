@@ -87,7 +87,11 @@ test('creates a new canvas from the list header', async () => {
   )
 
   await user.click(screen.getByRole('button', { name: 'New canvas' }))
+  await user.click(
+    await screen.findByRole('menuitem', { name: 'Infinite canvas' })
+  )
   expect(onCreate).toHaveBeenCalledTimes(1)
+  expect(onCreate).toHaveBeenCalledWith('infinite')
 })
 
 test('confirms before moving a canvas to the trash', async () => {

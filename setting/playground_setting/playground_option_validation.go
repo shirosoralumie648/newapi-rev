@@ -54,6 +54,8 @@ func ValidatePlaygroundOption(key, value string) error {
 		return ValidatePlaygroundWebSearchJSON(value)
 	case PlaygroundWebSearchAPIKeyOptionKey:
 		return validatePlaygroundWebSearchAPIKey(value)
+	case PlaygroundMCPOptionKey:
+		return ValidatePlaygroundMCPJSON(value)
 	default:
 		return nil
 	}

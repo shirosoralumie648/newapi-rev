@@ -100,8 +100,14 @@ type PlaygroundUserUsage struct {
 	// were appended to an existing table, so they carry DEFAULT 0 for upgrades.
 	ComparisonRunCount int64 `json:"comparison_run_count" gorm:"not null;default:0"`
 	ComparisonRunBytes int64 `json:"comparison_run_bytes" gorm:"not null;default:0"`
-	CreatedAt          int64 `json:"created_at" gorm:"not null"`
-	UpdatedAt          int64 `json:"updated_at" gorm:"not null"`
+	// WorkflowRunCount and WorkflowRunBytes count the persisted canvas
+	// workflow runs of the account and their stored node-snapshot bytes. The
+	// columns were appended to an existing table, so they carry DEFAULT 0 for
+	// upgrades.
+	WorkflowRunCount int64 `json:"workflow_run_count" gorm:"not null;default:0"`
+	WorkflowRunBytes int64 `json:"workflow_run_bytes" gorm:"not null;default:0"`
+	CreatedAt        int64 `json:"created_at" gorm:"not null"`
+	UpdatedAt        int64 `json:"updated_at" gorm:"not null"`
 }
 
 // TableName pins the table name the plan defines; GORM would otherwise
@@ -136,6 +142,8 @@ type playgroundUserUsageCounters struct {
 	KnowledgeBaseBytes         int64
 	ComparisonRunCount         int64
 	ComparisonRunBytes         int64
+	WorkflowRunCount           int64
+	WorkflowRunBytes           int64
 }
 
 func (usage *PlaygroundUserUsage) counters() playgroundUserUsageCounters {
@@ -163,6 +171,8 @@ func (usage *PlaygroundUserUsage) counters() playgroundUserUsageCounters {
 		KnowledgeBaseBytes:         usage.KnowledgeBaseBytes,
 		ComparisonRunCount:         usage.ComparisonRunCount,
 		ComparisonRunBytes:         usage.ComparisonRunBytes,
+		WorkflowRunCount:           usage.WorkflowRunCount,
+		WorkflowRunBytes:           usage.WorkflowRunBytes,
 	}
 }
 
@@ -191,6 +201,8 @@ func (usage *PlaygroundUserUsage) load(counters playgroundUserUsageCounters) {
 	usage.KnowledgeBaseBytes = counters.KnowledgeBaseBytes
 	usage.ComparisonRunCount = counters.ComparisonRunCount
 	usage.ComparisonRunBytes = counters.ComparisonRunBytes
+	usage.WorkflowRunCount = counters.WorkflowRunCount
+	usage.WorkflowRunBytes = counters.WorkflowRunBytes
 }
 
 // playgroundUserUsageDelta is a signed change applied to a locked counter row.
@@ -220,6 +232,8 @@ type playgroundUserUsageDelta struct {
 	KnowledgeBaseBytes         int64
 	ComparisonRunCount         int64
 	ComparisonRunBytes         int64
+	WorkflowRunCount           int64
+	WorkflowRunBytes           int64
 }
 
 func (usage *PlaygroundUserUsage) apply(delta playgroundUserUsageDelta) {
@@ -246,6 +260,8 @@ func (usage *PlaygroundUserUsage) apply(delta playgroundUserUsageDelta) {
 	usage.KnowledgeBaseBytes = max(0, usage.KnowledgeBaseBytes+delta.KnowledgeBaseBytes)
 	usage.ComparisonRunCount = max(0, usage.ComparisonRunCount+delta.ComparisonRunCount)
 	usage.ComparisonRunBytes = max(0, usage.ComparisonRunBytes+delta.ComparisonRunBytes)
+	usage.WorkflowRunCount = max(0, usage.WorkflowRunCount+delta.WorkflowRunCount)
+	usage.WorkflowRunBytes = max(0, usage.WorkflowRunBytes+delta.WorkflowRunBytes)
 }
 
 // lockPlaygroundUserUsage acquires the account's counter row for the rest of
@@ -311,6 +327,8 @@ func savePlaygroundUserUsage(tx *gorm.DB, usage *PlaygroundUserUsage) error {
 		"knowledge_base_bytes":          usage.KnowledgeBaseBytes,
 		"comparison_run_count":          usage.ComparisonRunCount,
 		"comparison_run_bytes":          usage.ComparisonRunBytes,
+		"workflow_run_count":            usage.WorkflowRunCount,
+		"workflow_run_bytes":            usage.WorkflowRunBytes,
 		"updated_at":                    usage.UpdatedAt,
 	}).Error
 }
@@ -431,6 +449,15 @@ func playgroundUserUsageSnapshot(tx *gorm.DB, userID int) (PlaygroundUserUsage, 
 		return usage, err
 	}
 	usage.ComparisonRunCount, usage.ComparisonRunBytes = comparisons.Used, comparisons.UsedBytes
+	var workflowRuns struct {
+		Used      int64
+		UsedBytes int64
+	}
+	if err := tx.Model(&PlaygroundWorkflowRun{}).Where("user_id = ?", userID).
+		Select("COUNT(*) AS used, COALESCE(SUM(byte_size), 0) AS used_bytes").Scan(&workflowRuns).Error; err != nil {
+		return usage, err
+	}
+	usage.WorkflowRunCount, usage.WorkflowRunBytes = workflowRuns.Used, workflowRuns.UsedBytes
 	return usage, nil
 }
 
@@ -469,7 +496,7 @@ type PlaygroundUsageReconciliation struct {
 // them.
 func playgroundUsageOwnerIDs(db *gorm.DB) ([]int, error) {
 	seen := map[int]bool{}
-	for _, resource := range []any{&PlaygroundSession{}, &PlaygroundPreset{}, &PlaygroundSnippet{}, &PlaygroundMemory{}, &PlaygroundAttachment{}, &PlaygroundUpload{}, &PlaygroundArtifact{}, &PlaygroundCanvasProject{}, &PlaygroundCanvasTemplate{}, &PlaygroundCanvasSnapshot{}, &PlaygroundKnowledgeBase{}, &PlaygroundComparisonRun{}} {
+	for _, resource := range []any{&PlaygroundSession{}, &PlaygroundPreset{}, &PlaygroundSnippet{}, &PlaygroundMemory{}, &PlaygroundAttachment{}, &PlaygroundUpload{}, &PlaygroundArtifact{}, &PlaygroundCanvasProject{}, &PlaygroundCanvasTemplate{}, &PlaygroundCanvasSnapshot{}, &PlaygroundKnowledgeBase{}, &PlaygroundComparisonRun{}, &PlaygroundWorkflowRun{}} {
 		ids := make([]int, 0)
 		if err := db.Model(resource).Distinct("user_id").Pluck("user_id", &ids).Error; err != nil {
 			return nil, err

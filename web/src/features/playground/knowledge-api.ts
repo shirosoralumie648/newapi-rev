@@ -20,7 +20,8 @@ import { z } from 'zod'
 
 import { api } from '@/lib/api'
 import {
-  getServerMessage,
+  getServerErrorMessage,
+  getServerErrorStatus,
   requireServerSuccess,
 } from '@/lib/server-error-message'
 
@@ -536,8 +537,14 @@ export async function indexKnowledgeDocument(
     )
   } catch (error) {
     if (!input.signal?.aborted) {
+      // Only a server response carries a reason worth storing on the document
+      // row; a transport or client-side failure gets the fixed browser
+      // sentence so the manager can offer a retry.
+      const fallback = 'Knowledge indexing failed in the browser.'
       const message =
-        getServerMessage(error) ?? 'Knowledge indexing failed in the browser.'
+        getServerErrorStatus(error) === undefined
+          ? fallback
+          : getServerErrorMessage(error, fallback)
       await failKnowledgeDocument(
         input.knowledgeBaseId,
         input.documentId,

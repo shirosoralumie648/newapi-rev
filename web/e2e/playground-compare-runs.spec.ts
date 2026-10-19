@@ -37,13 +37,13 @@ async function mockComparisonPage(
         json: {
           success: true,
           data: {
-            steps: [0, 1, 2, 3].map((index) => ({
+            steps: [0, 1, 2, 3, 4, 5].map((index) => ({
               node_id: `pgc-${index}`,
               quota: 10,
               available: true,
               approximate: false,
             })),
-            total_quota: 40,
+            total_quota: 60,
             available: true,
           },
         },
@@ -122,34 +122,38 @@ async function selectComparisonModels(page: Page) {
   await second.click()
 }
 
-test('compares two models across two prompts, retries a failed cell and exports CSV', async ({
+test('compares two models across three prompts, retries a failed cell and exports CSV', async ({
   page,
 }) => {
   await mockComparisonPage(page, { failFirstClaude: true })
   await openWorkbench(page)
 
   await page.getByLabel('Run title (optional)').fill('Batch check')
-  await page.getByLabel('Prompts').fill('first prompt\nsecond prompt')
+  await page
+    .getByLabel('Prompts')
+    .fill('first prompt\nsecond prompt\nthird prompt')
   await selectComparisonModels(page)
 
   await page.getByRole('button', { name: 'Run comparison' }).click()
   await page.getByRole('tab', { name: 'Results' }).click()
 
-  await expect(page.getByText('2 models x 2 prompts')).toBeVisible()
+  await expect(page.getByText('2 models x 3 prompts')).toBeVisible()
   await expect(page.getByText('reply 1')).toBeVisible()
   await expect(page.getByText('reply 3')).toBeVisible()
   await expect(page.getByText('reply 4')).toBeVisible()
+  await expect(page.getByText('reply 5')).toBeVisible()
+  await expect(page.getByText('reply 6')).toBeVisible()
   await expect(
     page.getByText('Upstream is busy · rate_limit_exceeded')
   ).toBeVisible()
   await expect(page.getByText('Completed', { exact: true })).toBeVisible()
 
   await page.getByRole('button', { name: 'Retry' }).click()
-  await expect(page.getByText('reply 5')).toBeVisible()
+  await expect(page.getByText('reply 7')).toBeVisible()
   await expect(
     page.getByText('Upstream is busy · rate_limit_exceeded')
   ).toHaveCount(0)
-  await expect(page.getByText('4 / 2')).toHaveCount(4)
+  await expect(page.getByText('4 / 2')).toHaveCount(6)
   await expect(page.getByRole('button', { name: 'Retry' })).toHaveCount(0)
 
   await page.getByRole('button', { name: 'Mark as baseline' }).first().click()

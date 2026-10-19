@@ -150,6 +150,7 @@ export const API_ENDPOINTS = {
   PLAYGROUND_SETTINGS: '/api/playground/settings',
   PLAYGROUND_SEARCH: '/api/playground/search',
   PLAYGROUND_MESSAGE_COSTS: '/api/playground/message-costs',
+  PLAYGROUND_LOGS: '/api/playground/logs',
   PLAYGROUND_ASSETS: '/api/playground/assets',
   PLAYGROUND_SHARED: '/api/playground/shared',
   PLAYGROUND_TASKS: '/api/playground/tasks',

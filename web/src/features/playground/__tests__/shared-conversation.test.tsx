@@ -182,17 +182,23 @@ test('a shared canvas renders sanitized node previews from its document', async 
         updated_at: 100,
         document: {
           viewport: { x: 0, y: 0, zoom: 1 },
+          // A saved document carries the measured sizes; React Flow hides a
+          // node without dimensions and the jsdom ResizeObserver never measures.
           nodes: [
             {
               id: 'n-text',
               type: 'text',
               position: { x: 0, y: 0 },
+              width: 240,
+              height: 120,
               data: { kind: 'text', text: 'Visible prompt' },
             },
             {
               id: 'n-artifact',
               type: 'artifact',
               position: { x: 280, y: 0 },
+              width: 256,
+              height: 160,
               data: {
                 kind: 'artifact',
                 label: 'chart.png',

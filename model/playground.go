@@ -497,6 +497,12 @@ func purgePlaygroundSessionTx(tx *gorm.DB, userID int, session *PlaygroundSessio
 	if err := tx.Where("session_id = ? AND user_id = ?", session.ID, userID).Delete(&PlaygroundMessage{}).Error; err != nil {
 		return nil, err
 	}
+	// A workflow run is tied to the conversation only when one was open while
+	// the board ran; the counters are remeasured below, so the rows only need
+	// to leave with their conversation.
+	if err := tx.Where("session_id = ? AND user_id = ?", session.ID, userID).Delete(&PlaygroundWorkflowRun{}).Error; err != nil {
+		return nil, err
+	}
 	// Share links are an access mechanism, not content: they are deleted with
 	// the conversation and their hashes never enter an export.
 	if err := tx.Where("session_id = ? AND user_id = ?", session.ID, userID).Delete(&PlaygroundSessionShare{}).Error; err != nil {

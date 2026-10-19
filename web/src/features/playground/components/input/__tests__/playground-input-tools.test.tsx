@@ -51,6 +51,12 @@ function renderTools(
   requestViewer?: {
     hasCapturedRequest: boolean
     onOpen: () => void
+  },
+  toolExecution?: {
+    enabled: boolean
+    maxRounds: number
+    onEnabledChange: (value: boolean) => void
+    onMaxRoundsChange: (value: number) => void
   }
 ) {
   // The dictation panel mounts a transcription mutation, which needs the query
@@ -96,12 +102,16 @@ function renderTools(
           onRemoveContextSummary={() => undefined}
           onSummarizeContext={() => undefined}
           onSystemPromptChange={onSystemPromptChange}
-          onToolExecutionEnabledChange={() => undefined}
-          onToolExecutionMaxRoundsChange={() => undefined}
+          onToolExecutionEnabledChange={
+            toolExecution?.onEnabledChange ?? (() => undefined)
+          }
+          onToolExecutionMaxRoundsChange={
+            toolExecution?.onMaxRoundsChange ?? (() => undefined)
+          }
           parameterEnabled={DEFAULT_PARAMETER_ENABLED}
           systemPrompt={systemPrompt}
-          toolExecutionEnabled={false}
-          toolExecutionMaxRounds={5}
+          toolExecutionEnabled={toolExecution?.enabled ?? false}
+          toolExecutionMaxRounds={toolExecution?.maxRounds ?? 5}
           webSearchAvailable={webSearch?.available}
           webSearchEnabled={webSearch?.enabled}
           onWebSearchChange={webSearch?.onChange}
@@ -199,6 +209,35 @@ test('toggles the next turn web search and exposes its pressed state', async () 
   await user.click(toggle)
 
   expect(onChange).toHaveBeenCalledWith(false)
+})
+
+test('wires the composer tool loop control to the account preference', async () => {
+  const user = userEvent.setup()
+  const onEnabledChange = vi.fn()
+  renderTools(
+    vi.fn(),
+    vi.fn(),
+    '',
+    DEFAULT_CONFIG,
+    undefined,
+    undefined,
+    undefined,
+    {
+      enabled: false,
+      maxRounds: 5,
+      onEnabledChange,
+      onMaxRoundsChange: vi.fn(),
+    }
+  )
+
+  await user.click(screen.getByRole('button', { name: 'Tool loop' }))
+  await user.click(
+    await screen.findByRole('switch', {
+      name: 'Run supported tool calls automatically',
+    })
+  )
+
+  expect(onEnabledChange).toHaveBeenCalledWith(true)
 })
 
 test('the dictation entry is offered when the composer accepts transcripts', () => {

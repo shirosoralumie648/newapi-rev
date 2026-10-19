@@ -33,6 +33,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -119,14 +120,14 @@ func playgroundTestDB(t *testing.T, dialect string) *gorm.DB {
 	common.SetDatabaseTypes(common.DatabaseType(dialect), previousLog)
 	model.DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundKnowledgeChunk{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasTemplateAsset{}, &model.PlaygroundCanvasTemplate{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundComparisonRun{}, &model.PlaygroundUserUsage{}, &model.PlaygroundUpload{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundMessage{}, &model.PlaygroundSessionShare{}, &model.PlaygroundSession{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundKnowledgeChunk{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasTemplateAsset{}, &model.PlaygroundCanvasTemplate{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundComparisonRun{}, &model.PlaygroundWorkflowRun{}, &model.PlaygroundUserUsage{}, &model.PlaygroundUpload{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundMessage{}, &model.PlaygroundSessionShare{}, &model.PlaygroundSession{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
 		model.DB = previous
 		common.SetDatabaseTypes(previousMain, previousLog)
 	})
-	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundSessionShare{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUpload{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasTemplate{}, &model.PlaygroundCanvasTemplateAsset{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeChunk{}, &model.PlaygroundComparisonRun{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundSessionShare{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUpload{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasTemplate{}, &model.PlaygroundCanvasTemplateAsset{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeChunk{}, &model.PlaygroundComparisonRun{}, &model.PlaygroundWorkflowRun{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -2510,6 +2511,8 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodGet, "/api/playground/usage"},
 		{http.MethodGet, "/api/playground/settings"},
 		{http.MethodGet, "/api/playground/message-costs?request_ids=route-cost"},
+		{http.MethodGet, "/api/playground/logs/route-cost/replay"},
+		{http.MethodDelete, "/api/playground/logs/route-cost/capture"},
 		{http.MethodGet, "/api/playground/assets?kind=attachment"},
 		{http.MethodGet, "/api/playground/trash"},
 		{http.MethodGet, "/api/playground/sessions/" + sessionID + "/export"},
@@ -2558,6 +2561,11 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodGet, attachmentBase + "/missing"}, {http.MethodGet, attachmentBase + "/missing/content"},
 		{http.MethodGet, attachmentBase + "/missing/text"},
 		{http.MethodDelete, attachmentBase + "/missing"},
+		{http.MethodGet, "/api/playground/comparisons"},
+		{http.MethodPost, "/api/playground/comparisons"},
+		{http.MethodGet, "/api/playground/comparisons/missing"},
+		{http.MethodPatch, "/api/playground/comparisons/missing"},
+		{http.MethodDelete, "/api/playground/comparisons/missing"},
 		{http.MethodPost, "/api/playground/uploads"},
 		{http.MethodPut, "/api/playground/uploads/missing/content"},
 		{http.MethodPost, "/api/playground/uploads/missing/complete"},
@@ -2725,6 +2733,20 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	settingsResponse := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, "/api/playground/settings", nil)
 	require.Equal(t, 200, settingsResponse.Code, settingsResponse.Body.String())
 	assert.Contains(t, settingsResponse.Body.String(), `"sandbox_preview_enabled":false`)
+	assert.Contains(t, settingsResponse.Body.String(), `"mcp_enabled":false`)
+
+	// MCP proxying is a dashboard-session capability. A personal access token
+	// is rejected even with the option scope, and an anonymous caller gets 401.
+	for _, route := range []struct{ method, path string }{
+		{http.MethodGet, "/api/playground/mcp/servers"},
+		{http.MethodPost, "/api/playground/mcp/docs/call"},
+	} {
+		response := playgroundAuthenticatedRequest(t, engine, "", route.method, route.path, input)
+		assert.Equal(t, 401, response.Code, response.Body.String())
+		response = playgroundAuthenticatedRequest(t, engine, patRaw, route.method, route.path, input)
+		assert.Equal(t, 403, response.Code, response.Body.String())
+		assert.Contains(t, response.Body.String(), "AUTH_SESSION_REQUIRED")
+	}
 
 	// Canvas routes share the same session-only authentication contract.
 	canvasBase := "/api/playground/canvases"
@@ -6966,6 +6988,311 @@ func TestPlaygroundTaskGenerationMetadataRoundTripAndFilters(t *testing.T) {
 					assert.Equal(t, tt.total, model.TaskCountAllUserTask(7, tt.params))
 				})
 			}
+		})
+	}
+}
+
+// The optional replay capture (PG2-08) is off by default; with the switch off
+// no Playground request retains a body. When an administrator turns it on, the
+// stored request is whitelisted, scrubbed and truncated, only its owner can
+// replay it (a cross-user reference is a 404), an administrator viewing
+// another account's retained content writes an audit row, and the scheduled
+// cleanup collects rows whose retention window elapsed.
+func TestPlaygroundLogCapture(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			previousLog := model.LOG_DB
+			model.LOG_DB = db
+			require.NoError(t, db.AutoMigrate(&model.Log{}, &model.PlaygroundLogCapture{}))
+			// Audit rows are written to the unprefixed audit_logs table, which
+			// is also what a deployment without a table prefix uses.
+			require.NoError(t, db.Table("audit_logs").AutoMigrate(&model.AuditLog{}))
+			t.Cleanup(func() {
+				model.LOG_DB = previousLog
+				require.NoError(t, db.Migrator().DropTable(&model.Log{}, &model.PlaygroundLogCapture{}))
+			})
+			require.NoError(t, db.Create(&[]model.Log{
+				{UserId: 7, Type: model.LogTypeConsume, RequestId: "pg-replay-owner", ModelName: "replay-model", Group: "default", IsStream: true, Quota: 42, PromptTokens: 10, CompletionTokens: 20, CreatedAt: 1000,
+					Other: `{"request_path":"/pg/chat/completions","reasoning_effort":"high","po":["set temperature = 0.2"]}`},
+				{UserId: 8, Type: model.LogTypeConsume, RequestId: "pg-replay-other", ModelName: "other-model", Group: "default", CreatedAt: 1000},
+				{UserId: 7, Type: model.LogTypeConsume, RequestId: "pg-replay-expired", ModelName: "replay-model", Group: "default", CreatedAt: 1000},
+			}).Error)
+
+			hugePrompt := strings.Repeat("untrusted prompt text ", 400)
+			captureBody := map[string]any{
+				"model": "replay-model", "group": "default", "stream": true,
+				"temperature": 0.7, "top_p": 0.9, "max_tokens": 256,
+				"frequency_penalty": 0.1, "presence_penalty": 0.2, "seed": 7,
+				"reasoning_effort": "high",
+				"api_key":          "sk-must-not-be-stored",
+				"messages": []any{
+					map[string]any{"role": "system", "content": "You are helpful"},
+					map[string]any{"role": "user", "content": []any{
+						map[string]any{"type": "text", "text": hugePrompt},
+					}},
+					map[string]any{"role": "user", "content": []any{
+						map[string]any{"type": "text", "text": "the key is sk-abcdefghijklmnopqrstuvwxyz"},
+						map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,AAAA"}},
+					}},
+					map[string]any{"role": "assistant", "content": "", "tool_calls": []any{
+						map[string]any{"id": "call_1", "type": "function", "function": map[string]any{"name": "lookup_customer", "arguments": `{"secret":"sk-toolsecret123456"}`}},
+					}},
+				},
+			}
+			createCapture := func(user int, requestID string) (*gin.Context, *service.PlaygroundLogCaptureSession) {
+				encoded, err := common.Marshal(captureBody)
+				require.NoError(t, err)
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Set("id", user)
+				c.Set(common.RequestIdKey, requestID)
+				c.Request = httptest.NewRequest(http.MethodPost, "/pg/chat/completions", bytes.NewReader(encoded))
+				c.Request.Header.Set("Content-Type", "application/json")
+				return c, service.BeginPlaygroundLogCapture(c)
+			}
+
+			// The switch is off by default: no capture session is created, so
+			// the Playground path cannot store anything.
+			t.Setenv(playground_setting.PlaygroundLogCaptureEnv, "false")
+			_, disabled := createCapture(7, "pg-replay-owner")
+			assert.Nil(t, disabled)
+			var count int64
+			require.NoError(t, db.Model(&model.PlaygroundLogCapture{}).Count(&count).Error)
+			assert.Zero(t, count)
+
+			// With the switch on and the smallest budget, ordinary long content
+			// exercises the truncation branch.
+			t.Setenv(playground_setting.PlaygroundLogCaptureEnv, "true")
+			t.Setenv(playground_setting.PlaygroundLogCaptureMaxBytesEnv, "4096")
+			c, session := createCapture(7, "pg-replay-owner")
+			require.NotNil(t, session)
+			session.TeeResponse(c)
+			c.Writer.Header().Set("Content-Type", "application/json")
+			_, err := c.Writer.WriteString(`{"model":"replay-model","choices":[{"message":{"content":"the retained answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`)
+			require.NoError(t, err)
+			session.Finish(c)
+
+			var capture model.PlaygroundLogCapture
+			require.NoError(t, db.Where("user_id = ? AND request_id = ?", 7, "pg-replay-owner").First(&capture).Error)
+			assert.Equal(t, "replay-model", capture.ModelName)
+			assert.Equal(t, "default", capture.Group)
+			assert.True(t, capture.IsStream)
+			assert.Equal(t, http.StatusOK, capture.StatusCode)
+			assert.LessOrEqual(t, len(capture.RequestSummary), 4096)
+			assert.LessOrEqual(t, len(capture.ResponseSummary), 4096)
+			assert.Greater(t, capture.ExpiresAt, capture.CreatedAt)
+			assert.True(t, capture.Truncated)
+			// Only whitelisted fields are retained: the top-level api_key and
+			// tool arguments never reach the summary, pasted keys are redacted,
+			// and image parts become a count instead of their bytes or URL.
+			assert.NotContains(t, capture.RequestSummary, "api_key")
+			assert.NotContains(t, capture.RequestSummary, "sk-")
+			assert.NotContains(t, capture.RequestSummary, "arguments")
+			assert.NotContains(t, capture.RequestSummary, "data:image")
+			assert.Contains(t, capture.RequestSummary, "[redacted]")
+			assert.Contains(t, capture.RequestSummary, `"attachments":1`)
+			assert.Contains(t, capture.RequestSummary, "lookup_customer")
+			assert.Contains(t, capture.ResponseSummary, "the retained answer")
+			assert.Contains(t, capture.ResponseSummary, `"prompt_tokens":10`)
+
+			type replaySampling struct {
+				Temperature     *float64 `json:"temperature"`
+				TopP            *float64 `json:"top_p"`
+				MaxTokens       *int     `json:"max_tokens"`
+				ReasoningEffort string   `json:"reasoning_effort"`
+			}
+			type replayEnvelope struct {
+				Success bool `json:"success"`
+				Data    struct {
+					RequestID                string          `json:"request_id"`
+					ModelName                string          `json:"model"`
+					Group                    string          `json:"group"`
+					IsStream                 bool            `json:"stream"`
+					Path                     string          `json:"path"`
+					ParamOverrides           []string        `json:"param_overrides"`
+					CaptureEnabled           bool            `json:"capture_enabled"`
+					ContentAvailable         bool            `json:"content_available"`
+					ContentUnavailableReason string          `json:"content_unavailable_reason"`
+					Sampling                 *replaySampling `json:"sampling"`
+					Capture                  *struct {
+						ExpiresAt int64          `json:"expires_at"`
+						Truncated bool           `json:"truncated"`
+						Request   map[string]any `json:"request"`
+						Response  map[string]any `json:"response"`
+					} `json:"capture"`
+				} `json:"data"`
+			}
+			callLogRoute := func(user, role int, method, logRef, userIDQuery string, handler gin.HandlerFunc) *httptest.ResponseRecorder {
+				recorder := httptest.NewRecorder()
+				caller, _ := gin.CreateTestContext(recorder)
+				caller.Set("id", user)
+				caller.Set("role", role)
+				path := "/api/playground/logs/" + logRef + "/replay"
+				if method == http.MethodDelete {
+					path = "/api/playground/logs/" + logRef + "/capture"
+				}
+				if userIDQuery != "" {
+					path += "?user_id=" + userIDQuery
+				}
+				caller.Request = httptest.NewRequest(method, path, nil)
+				caller.Params = gin.Params{{Key: "logRef", Value: logRef}}
+				handler(caller)
+				return recorder
+			}
+
+			replay := callLogRoute(7, common.RoleCommonUser, http.MethodGet, "pg-replay-owner", "", controller.GetPlaygroundLogReplay)
+			require.Equal(t, http.StatusOK, replay.Code, replay.Body.String())
+			var ownerReplay replayEnvelope
+			require.NoError(t, common.Unmarshal(replay.Body.Bytes(), &ownerReplay))
+			require.True(t, ownerReplay.Success, replay.Body.String())
+			assert.Equal(t, "pg-replay-owner", ownerReplay.Data.RequestID)
+			assert.Equal(t, "replay-model", ownerReplay.Data.ModelName)
+			assert.Equal(t, "default", ownerReplay.Data.Group)
+			assert.True(t, ownerReplay.Data.IsStream)
+			assert.Equal(t, "/pg/chat/completions", ownerReplay.Data.Path)
+			assert.Equal(t, []string{"set temperature = 0.2"}, ownerReplay.Data.ParamOverrides)
+			assert.True(t, ownerReplay.Data.CaptureEnabled)
+			assert.True(t, ownerReplay.Data.ContentAvailable)
+			assert.Empty(t, ownerReplay.Data.ContentUnavailableReason)
+			require.NotNil(t, ownerReplay.Data.Sampling)
+			require.NotNil(t, ownerReplay.Data.Sampling.Temperature)
+			assert.InDelta(t, 0.7, *ownerReplay.Data.Sampling.Temperature, 1e-9)
+			require.NotNil(t, ownerReplay.Data.Sampling.TopP)
+			assert.InDelta(t, 0.9, *ownerReplay.Data.Sampling.TopP, 1e-9)
+			require.NotNil(t, ownerReplay.Data.Sampling.MaxTokens)
+			assert.Equal(t, 256, *ownerReplay.Data.Sampling.MaxTokens)
+			assert.Equal(t, "high", ownerReplay.Data.Sampling.ReasoningEffort)
+			require.NotNil(t, ownerReplay.Data.Capture)
+			assert.True(t, ownerReplay.Data.Capture.Truncated)
+			require.NotNil(t, ownerReplay.Data.Capture.Request)
+			assert.Equal(t, "the retained answer", ownerReplay.Data.Capture.Response["content"])
+
+			// Turning the switch off hides already stored content but keeps the
+			// metadata every owner receives, including the public reasoning
+			// effort recorded in the log itself.
+			t.Setenv(playground_setting.PlaygroundLogCaptureEnv, "false")
+			hidden := callLogRoute(7, common.RoleCommonUser, http.MethodGet, "pg-replay-owner", "", controller.GetPlaygroundLogReplay)
+			require.Equal(t, http.StatusOK, hidden.Code, hidden.Body.String())
+			var hiddenReplay replayEnvelope
+			require.NoError(t, common.Unmarshal(hidden.Body.Bytes(), &hiddenReplay))
+			assert.False(t, hiddenReplay.Data.CaptureEnabled)
+			assert.False(t, hiddenReplay.Data.ContentAvailable)
+			assert.Equal(t, model.PlaygroundLogReplayContentCaptureDisabled, hiddenReplay.Data.ContentUnavailableReason)
+			assert.Nil(t, hiddenReplay.Data.Capture)
+			require.NotNil(t, hiddenReplay.Data.Sampling)
+			assert.Equal(t, "high", hiddenReplay.Data.Sampling.ReasoningEffort)
+			t.Setenv(playground_setting.PlaygroundLogCaptureEnv, "true")
+
+			// A log belongs to its owner: another user, and a common user asking
+			// for someone else's account, both get the same 404 as a missing id.
+			assert.Equal(t, http.StatusNotFound, callLogRoute(8, common.RoleCommonUser, http.MethodGet, "pg-replay-owner", "", controller.GetPlaygroundLogReplay).Code)
+			assert.Equal(t, http.StatusNotFound, callLogRoute(7, common.RoleCommonUser, http.MethodGet, "pg-replay-other", "", controller.GetPlaygroundLogReplay).Code)
+			assert.Equal(t, http.StatusNotFound, callLogRoute(7, common.RoleCommonUser, http.MethodGet, "pg-replay-other", "8", controller.GetPlaygroundLogReplay).Code)
+			assert.Equal(t, http.StatusNotFound, callLogRoute(7, common.RoleCommonUser, http.MethodGet, "pg-replay-missing", "", controller.GetPlaygroundLogReplay).Code)
+
+			// An administrator may replay another account's log. Metadata alone
+			// is not audited; retained content is.
+			require.NoError(t, db.Table("audit_logs").Where("action = ?", "playground.log_replay_view").Delete(&model.AuditLog{}).Error)
+			adminMetadata := callLogRoute(1, common.RoleAdminUser, http.MethodGet, "pg-replay-other", "8", controller.GetPlaygroundLogReplay)
+			require.Equal(t, http.StatusOK, adminMetadata.Code, adminMetadata.Body.String())
+			var adminMetadataReplay replayEnvelope
+			require.NoError(t, common.Unmarshal(adminMetadata.Body.Bytes(), &adminMetadataReplay))
+			assert.False(t, adminMetadataReplay.Data.ContentAvailable)
+			assert.Equal(t, model.PlaygroundLogReplayContentNotCaptured, adminMetadataReplay.Data.ContentUnavailableReason)
+			var auditCount int64
+			require.NoError(t, db.Table("audit_logs").Where("action = ?", "playground.log_replay_view").Count(&auditCount).Error)
+			assert.Zero(t, auditCount)
+
+			now := common.GetTimestamp()
+			require.NoError(t, model.SavePlaygroundLogCapture(&model.PlaygroundLogCapture{
+				UserId: 8, RequestId: "pg-replay-other", ModelName: "other-model", Group: "default",
+				RequestSummary:  `{"model":"other-model","group":"default","message_count":1,"messages":[{"role":"user","content":"other prompt"}]}`,
+				ResponseSummary: `{"status":200,"content":"other answer"}`,
+				CreatedAt:       now, ExpiresAt: now + 3600,
+			}))
+			adminContent := callLogRoute(1, common.RoleAdminUser, http.MethodGet, "pg-replay-other", "8", controller.GetPlaygroundLogReplay)
+			require.Equal(t, http.StatusOK, adminContent.Code, adminContent.Body.String())
+			var adminContentReplay replayEnvelope
+			require.NoError(t, common.Unmarshal(adminContent.Body.Bytes(), &adminContentReplay))
+			assert.True(t, adminContentReplay.Data.ContentAvailable)
+			require.NotNil(t, adminContentReplay.Data.Capture)
+			assert.Equal(t, "other answer", adminContentReplay.Data.Capture.Response["content"])
+			require.NoError(t, db.Table("audit_logs").Where("action = ?", "playground.log_replay_view").Count(&auditCount).Error)
+			assert.EqualValues(t, 1, auditCount)
+			// The owner still reads their own content without an audit row.
+			ownerSelf := callLogRoute(8, common.RoleCommonUser, http.MethodGet, "pg-replay-other", "", controller.GetPlaygroundLogReplay)
+			require.Equal(t, http.StatusOK, ownerSelf.Code, ownerSelf.Body.String())
+
+			// Expired rows stop serving content before cleanup removes them.
+			require.NoError(t, model.SavePlaygroundLogCapture(&model.PlaygroundLogCapture{
+				UserId: 7, RequestId: "pg-replay-expired", ModelName: "replay-model",
+				RequestSummary: `{"model":"replay-model"}`, ResponseSummary: `{"status":200}`,
+				CreatedAt: now - 100, ExpiresAt: now - 10,
+			}))
+			expired := callLogRoute(7, common.RoleCommonUser, http.MethodGet, "pg-replay-expired", "", controller.GetPlaygroundLogReplay)
+			require.Equal(t, http.StatusOK, expired.Code, expired.Body.String())
+			var expiredReplay replayEnvelope
+			require.NoError(t, common.Unmarshal(expired.Body.Bytes(), &expiredReplay))
+			assert.False(t, expiredReplay.Data.ContentAvailable)
+			assert.Equal(t, model.PlaygroundLogReplayContentExpired, expiredReplay.Data.ContentUnavailableReason)
+			require.NoError(t, model.SavePlaygroundLogCapture(&model.PlaygroundLogCapture{
+				UserId: 7, RequestId: "pg-replay-fresh", RequestSummary: `{}`, ResponseSummary: `{}`,
+				CreatedAt: now, ExpiresAt: now + 3600,
+			}))
+			removed, err := model.DeleteExpiredPlaygroundLogCaptures(now, 50)
+			require.NoError(t, err)
+			assert.GreaterOrEqual(t, removed, int64(1))
+			require.NoError(t, db.Model(&model.PlaygroundLogCapture{}).Where("request_id = ?", "pg-replay-expired").Count(&count).Error)
+			assert.Zero(t, count)
+			require.NoError(t, db.Model(&model.PlaygroundLogCapture{}).Where("request_id = ?", "pg-replay-fresh").Count(&count).Error)
+			assert.EqualValues(t, 1, count)
+
+			// A deletion removes the stored summary and is idempotent.
+			deleted := callLogRoute(7, common.RoleCommonUser, http.MethodDelete, "pg-replay-owner", "", controller.DeletePlaygroundLogCapture)
+			require.Equal(t, http.StatusOK, deleted.Code, deleted.Body.String())
+			var deleteEnvelope struct {
+				Success bool `json:"success"`
+				Data    struct {
+					Deleted int64 `json:"deleted"`
+				} `json:"data"`
+			}
+			require.NoError(t, common.Unmarshal(deleted.Body.Bytes(), &deleteEnvelope))
+			require.True(t, deleteEnvelope.Success, deleted.Body.String())
+			assert.EqualValues(t, 1, deleteEnvelope.Data.Deleted)
+			afterDelete := callLogRoute(7, common.RoleCommonUser, http.MethodDelete, "pg-replay-owner", "", controller.DeletePlaygroundLogCapture)
+			require.Equal(t, http.StatusOK, afterDelete.Code, afterDelete.Body.String())
+			require.NoError(t, common.Unmarshal(afterDelete.Body.Bytes(), &deleteEnvelope))
+			assert.Zero(t, deleteEnvelope.Data.Deleted)
+			withoutContent := callLogRoute(7, common.RoleCommonUser, http.MethodGet, "pg-replay-owner", "", controller.GetPlaygroundLogReplay)
+			require.Equal(t, http.StatusOK, withoutContent.Code, withoutContent.Body.String())
+			var withoutContentReplay replayEnvelope
+			require.NoError(t, common.Unmarshal(withoutContent.Body.Bytes(), &withoutContentReplay))
+			assert.False(t, withoutContentReplay.Data.ContentAvailable)
+			assert.Equal(t, model.PlaygroundLogReplayContentNotCaptured, withoutContentReplay.Data.ContentUnavailableReason)
+			// A foreign owner cannot delete the row.
+			assert.Equal(t, http.StatusNotFound, callLogRoute(8, common.RoleCommonUser, http.MethodDelete, "pg-replay-owner", "", controller.DeletePlaygroundLogCapture).Code)
+
+			// A numeric reference resolves the database id except on ClickHouse,
+			// whose log rows carry no usable numeric id; the request id always
+			// addresses the row.
+			numericLog := model.Log{UserId: 7, Type: model.LogTypeConsume, RequestId: "pg-replay-numeric", ModelName: "replay-model", CreatedAt: 1000}
+			require.NoError(t, db.Create(&numericLog).Error)
+			byID, err := model.GetPlaygroundReplayLog(7, strconv.Itoa(numericLog.Id))
+			require.NoError(t, err)
+			require.NotNil(t, byID)
+			assert.Equal(t, "pg-replay-numeric", byID.RequestId)
+			unknown, err := model.GetPlaygroundReplayLog(7, "pg-replay-missing")
+			require.NoError(t, err)
+			assert.Nil(t, unknown)
+			previousLogDatabaseType := common.LogDatabaseType()
+			common.SetLogDatabaseType(common.DatabaseTypeClickHouse)
+			clickhouseRef, err := model.GetPlaygroundReplayLog(7, strconv.Itoa(numericLog.Id))
+			require.NoError(t, err)
+			assert.Nil(t, clickhouseRef, "ClickHouse rows must not be addressed by the numeric id")
+			byRequestID, err := model.GetPlaygroundReplayLog(7, "pg-replay-numeric")
+			require.NoError(t, err)
+			require.NotNil(t, byRequestID)
+			common.SetLogDatabaseType(previousLogDatabaseType)
 		})
 	}
 }
