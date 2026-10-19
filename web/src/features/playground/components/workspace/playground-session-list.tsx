@@ -38,6 +38,8 @@ interface PlaygroundSessionListProps {
   onRename: (sessionId: string, title: string) => void
   onDelete: (sessionId: string) => void
   onOpenTrash?: () => void
+  /** Opens the cross-session message search dialog. */
+  onOpenMessageSearch?: () => void
   onAction?: () => void
   onOpenPresets?: () => void
   /** Rebuild one conversation from an exported JSON file. */
@@ -132,6 +134,22 @@ export function PlaygroundSessionList(props: PlaygroundSessionListProps) {
           )}
         </div>
       </ScrollArea>
+
+      {props.onOpenMessageSearch && (
+        <Button
+          className='w-full justify-start'
+          onClick={() => {
+            props.onOpenMessageSearch?.()
+            props.onAction?.()
+          }}
+          size='sm'
+          type='button'
+          variant='outline'
+        >
+          <Search aria-hidden='true' />
+          {t('Search messages')}
+        </Button>
+      )}
 
       {props.onOpenTrash && (
         <Button

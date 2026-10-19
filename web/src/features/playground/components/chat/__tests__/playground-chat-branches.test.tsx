@@ -181,3 +181,47 @@ describe('PlaygroundChat branch history', () => {
     ).toBeTruthy()
   })
 })
+
+function historyMessage(
+  key: string,
+  from: 'user' | 'assistant',
+  content: string
+): Message {
+  return {
+    key,
+    from,
+    status: 'complete',
+    versions: [{ id: `${key}-v`, content }],
+  }
+}
+
+const longHistory: Message[] = Array.from({ length: 30 }, (_, index) =>
+  historyMessage(
+    `m${index}`,
+    index % 2 === 0 ? 'user' : 'assistant',
+    `Message number ${index}`
+  )
+)
+
+describe('PlaygroundChat message highlight', () => {
+  test('keeps the rendered window on the newest messages without a highlight', () => {
+    render(<PlaygroundChat messages={longHistory} />)
+
+    expect(screen.queryByText('Message number 0')).not.toBeInTheDocument()
+    expect(screen.getByText('Message number 29')).toBeInTheDocument()
+  })
+
+  test('renders and marks a highlighted message outside the rendered tail', () => {
+    render(<PlaygroundChat highlightedMessageKey='m1' messages={longHistory} />)
+
+    const highlighted = screen
+      .getByText('Message number 1')
+      .closest('[data-message-key]')
+    expect(highlighted).toHaveAttribute('data-message-key', 'm1')
+    expect(highlighted).toHaveAttribute('data-highlighted', 'true')
+    expect(screen.getByText('Message number 29')).toBeInTheDocument()
+    expect(
+      screen.getByText('Message number 29').closest('[data-message-key]')
+    ).not.toHaveAttribute('data-highlighted')
+  })
+})

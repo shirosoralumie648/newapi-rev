@@ -60,6 +60,8 @@ interface PlaygroundWorkspaceProps {
   onCloseInspector: () => void
   onOpenTrash?: () => void
   onOpenPresets?: () => void
+  /** Opens the cross-session message search dialog. */
+  onOpenMessageSearch?: () => void
   onToggleInspector?: (view: PlaygroundInspectorView) => void
 }
 
@@ -76,6 +78,7 @@ export function PlaygroundWorkspace(props: PlaygroundWorkspaceProps) {
       onCreate={props.onCreate}
       onDelete={props.onDelete}
       onImportFile={props.onImportFile}
+      onOpenMessageSearch={props.onOpenMessageSearch}
       onOpenPresets={props.onOpenPresets}
       onOpenTrash={props.onOpenTrash}
       onRename={props.onRename}

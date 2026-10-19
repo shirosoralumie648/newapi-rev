@@ -1180,6 +1180,11 @@ export const STATIC_I18N_KEYS = [
   'Microphone access failed.',
   'Transcription failed',
   'No speech was detected.',
+  // Message-level actions (LB-04) render from MESSAGE_ACTION_LABELS and
+  // PLAYGROUND_FORK_ERRORS, so the literal scan cannot see them.
+  'Quote',
+  'Fork from here',
+  'Unable to fork the conversation.',
   // Referral anti-abuse (RF-06) mark levels, review states, review reasons and
   // the settings action label render through t(labelKey) from the referral
   // label maps in features/wallet/lib/referral.ts and

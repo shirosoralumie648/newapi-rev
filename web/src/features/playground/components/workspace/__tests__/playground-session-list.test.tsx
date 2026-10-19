@@ -157,6 +157,42 @@ test('opens the trash from the session list footer', async () => {
   expect(onAction).toHaveBeenCalledTimes(1)
 })
 
+test('offers message search only when a handler is wired', async () => {
+  const user = userEvent.setup()
+  const onAction = vi.fn()
+  const onOpenMessageSearch = vi.fn()
+  const { rerender } = render(
+    <PlaygroundSessionList
+      activeSessionId='older'
+      onCreate={vi.fn()}
+      onDelete={vi.fn()}
+      onRename={vi.fn()}
+      onSwitch={vi.fn()}
+      sessions={sessions}
+    />
+  )
+  expect(
+    screen.queryByRole('button', { name: 'Search messages' })
+  ).not.toBeInTheDocument()
+
+  rerender(
+    <PlaygroundSessionList
+      activeSessionId='older'
+      onAction={onAction}
+      onCreate={vi.fn()}
+      onDelete={vi.fn()}
+      onOpenMessageSearch={onOpenMessageSearch}
+      onRename={vi.fn()}
+      onSwitch={vi.fn()}
+      sessions={sessions}
+    />
+  )
+  await user.click(screen.getByRole('button', { name: 'Search messages' }))
+
+  expect(onOpenMessageSearch).toHaveBeenCalledTimes(1)
+  expect(onAction).toHaveBeenCalledTimes(1)
+})
+
 test('offers export only for a persisted conversation', async () => {
   const user = userEvent.setup()
   render(
