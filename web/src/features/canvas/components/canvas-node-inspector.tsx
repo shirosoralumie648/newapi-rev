@@ -120,10 +120,13 @@ export function CanvasNodeInspector(props: CanvasNodeInspectorProps) {
     node.data.kind === 'note' ||
     node.data.kind === 'group'
 
-  const commitDraft = () => {
-    const text = draft.trim()
-    if (text === (node.data.text ?? '').trim()) return
-    props.onUpdateData(node.id, { text: draft })
+  const commitDraft = (value: string) => {
+    setDraft(value)
+    props.onUpdateData(
+      node.id,
+      { text: value },
+      { mergeKey: `text:${node.id}` }
+    )
   }
 
   return (
@@ -173,8 +176,7 @@ export function CanvasNodeInspector(props: CanvasNodeInspectorProps) {
             aria-label={t('Node content')}
             className='min-h-24'
             disabled={props.disabled}
-            onBlur={commitDraft}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => commitDraft(event.target.value)}
             value={draft}
           />
         </label>

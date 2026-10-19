@@ -77,3 +77,32 @@ test('history keeps at most the configured number of past snapshots', () => {
   expect(history.past).toHaveLength(CANVAS_HISTORY_LIMIT)
   expect(history.past[0].nodes[0].id).toBe('n5')
 })
+
+test('edits with the same merge key inside the window share one undo entry', () => {
+  const first = snapshot('n1')
+  const second = snapshot('n2')
+  const third = snapshot('n3')
+  let history = createCanvasHistory(first)
+  history = pushCanvasHistory(history, second, { key: 'text:n1', at: 1000 })
+  history = pushCanvasHistory(history, third, { key: 'text:n1', at: 1200 })
+
+  expect(history.present).toBe(third)
+  expect(history.past).toEqual([first])
+
+  const outsideWindow = pushCanvasHistory(history, snapshot('n4'), {
+    key: 'text:n1',
+    at: 5000,
+  })
+  expect(outsideWindow.past).toEqual([first, third])
+})
+
+test('a different merge key starts a new undo entry', () => {
+  const first = snapshot('n1')
+  const second = snapshot('n2')
+  const third = snapshot('n3')
+  let history = createCanvasHistory(first)
+  history = pushCanvasHistory(history, second, { key: 'text:n1', at: 1000 })
+  history = pushCanvasHistory(history, third, { key: 'move:n1', at: 1100 })
+
+  expect(history.past).toEqual([first, second])
+})

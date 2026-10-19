@@ -31,6 +31,40 @@ export const CANVAS_NODE_DATA_MAX_BYTES = 64 << 10
 
 export const CANVAS_AUTOSAVE_DELAY_MS = 800
 export const CANVAS_HISTORY_LIMIT = 50
+// Keystrokes, nudge bursts and rapid parameter changes within this window share
+// one undo entry; a pause starts a new entry. The stack still stores the state
+// before the burst, so one undo reverts the whole run of edits.
+export const CANVAS_HISTORY_MERGE_MS = 700
+
+// Keyboard movement of the selection. Shift turns the same gesture into a
+// larger step; both values are flow coordinates, so they stay stable at any
+// zoom level.
+export const CANVAS_NUDGE_STEP = 1
+export const CANVAS_NUDGE_LARGE_STEP = 10
+
+// Snapping distance for the alignment guides, in flow coordinates. Small enough
+// to leave free placement intact, large enough to feel magnetic on a touchpad.
+export const CANVAS_ALIGN_SNAP_THRESHOLD = 6
+// Minimum gap between two nodes when an equal-gap snap is measured; nodes that
+// overlap do not produce spacing candidates.
+export const CANVAS_ALIGN_MIN_GAP = 8
+
+// PNG export. The raster scale is capped so a large board still fits in one
+// canvas; the server's attachment limit is not the only memory bound.
+export const CANVAS_PNG_EXPORT_SCALE = 2
+export const CANVAS_PNG_EXPORT_MAX_EDGE = 4096
+export const CANVAS_PNG_EXPORT_PADDING = 48
+
+// PNG export problem keys the editor reports. The strings double as English
+// source text and as i18n keys.
+export const CANVAS_PNG_EXPORT_MESSAGES = {
+  EMPTY: 'The canvas has no nodes to export.',
+  EMPTY_SELECTION: 'Select at least one node to export.',
+  FAILED: 'The PNG image could not be created.',
+  SAVE_FAILED: 'The PNG image could not be saved to the asset library.',
+} as const
+
+export const CANVAS_PNG_EXPORT_SCOPES = ['canvas', 'selection'] as const
 
 export const CANVAS_STORAGE_LAST_PROJECT = 'playground_canvas_last_project'
 
