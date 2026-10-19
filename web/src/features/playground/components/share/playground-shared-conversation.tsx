@@ -99,56 +99,69 @@ export function PlaygroundSharedConversation(
 
   const data = conversation.data
   return (
-    <main className='bg-background text-foreground min-h-svh px-4 py-8 sm:px-6 sm:py-12'>
-      <article className='mx-auto flex w-full max-w-3xl flex-col gap-6'>
-        <header className='flex flex-col gap-3 border-b pb-6'>
-          <div className='text-muted-foreground flex items-center gap-2 text-sm'>
-            <Share2 aria-hidden='true' className='size-4' />
-            <span>{t('Read-only shared conversation')}</span>
-          </div>
-          <h1 className='text-2xl font-semibold break-words sm:text-3xl'>
-            {data.title.trim() || t('Untitled conversation')}
-          </h1>
-          <p className='text-muted-foreground text-sm'>
-            {t(
-              'This is a read-only copy shared by a Playground user. Attachments and tool call details are not included.'
-            )}
-          </p>
-        </header>
-
-        {data.openingMessage.trim() ? (
-          <section className='bg-muted/40 rounded-xl border p-4'>
-            <h2 className='mb-2 text-sm font-medium'>{t('Opening message')}</h2>
-            <p className='text-sm leading-6 break-words whitespace-pre-wrap'>
-              {data.openingMessage}
+    <>
+      {/* A share link is unlisted: keep it out of search indexes and prevent
+          the token in the path from travelling in a Referer header. */}
+      <title>
+        {`${data.title.trim() || t('Untitled conversation')} · ${t(
+          'Read-only shared conversation'
+        )}`}
+      </title>
+      <meta content='noindex, nofollow, noarchive' name='robots' />
+      <meta content='no-referrer' name='referrer' />
+      <main className='bg-background text-foreground min-h-svh px-4 py-8 sm:px-6 sm:py-12'>
+        <article className='mx-auto flex w-full max-w-3xl flex-col gap-6'>
+          <header className='flex flex-col gap-3 border-b pb-6'>
+            <div className='text-muted-foreground flex items-center gap-2 text-sm'>
+              <Share2 aria-hidden='true' className='size-4' />
+              <span>{t('Read-only shared conversation')}</span>
+            </div>
+            <h1 className='text-2xl font-semibold break-words sm:text-3xl'>
+              {data.title.trim() || t('Untitled conversation')}
+            </h1>
+            <p className='text-muted-foreground text-sm'>
+              {t(
+                'This is a read-only copy shared by a Playground user. Attachments and tool call details are not included.'
+              )}
             </p>
-          </section>
-        ) : null}
+          </header>
 
-        {data.messages.length === 0 ? (
-          <EmptyState
-            bordered
-            description={t('The shared conversation has no messages yet.')}
-            title={t('No messages')}
-          />
-        ) : (
-          <section
-            aria-label={t('Shared messages')}
-            className='flex flex-col gap-4'
-          >
-            {data.messages.map((message) => (
-              <SharedMessage key={message.key} message={message} />
-            ))}
-          </section>
-        )}
+          {data.openingMessage.trim() ? (
+            <section className='bg-muted/40 rounded-xl border p-4'>
+              <h2 className='mb-2 text-sm font-medium'>
+                {t('Opening message')}
+              </h2>
+              <p className='text-sm leading-6 break-words whitespace-pre-wrap'>
+                {data.openingMessage}
+              </p>
+            </section>
+          ) : null}
 
-        <footer className='text-muted-foreground border-t pt-4 text-center text-xs'>
-          {t(
-            'The owner of this conversation can revoke this link at any time.'
+          {data.messages.length === 0 ? (
+            <EmptyState
+              bordered
+              description={t('The shared conversation has no messages yet.')}
+              title={t('No messages')}
+            />
+          ) : (
+            <section
+              aria-label={t('Shared messages')}
+              className='flex flex-col gap-4'
+            >
+              {data.messages.map((message) => (
+                <SharedMessage key={message.key} message={message} />
+              ))}
+            </section>
           )}
-        </footer>
-      </article>
-    </main>
+
+          <footer className='text-muted-foreground border-t pt-4 text-center text-xs'>
+            {t(
+              'The owner of this conversation can revoke this link at any time.'
+            )}
+          </footer>
+        </article>
+      </main>
+    </>
   )
 }
 

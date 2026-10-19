@@ -5760,6 +5760,21 @@ func TestPlaygroundSessionShares(t *testing.T) {
 					"sources":   []any{map[string]any{"href": "https://private.example", "title": "Private source"}},
 					"requestId": "private-request-id",
 				},
+				// Internal senders and unusable version pointers are never part
+				// of a public snapshot, even if legacy or corrupt rows contain
+				// them. They must not shift the two visible messages.
+				{
+					"key": "shared-system", "from": "system",
+					"versions": []any{map[string]any{"id": "shared-system-v1", "content": "system secret"}},
+				},
+				{
+					"key": "shared-empty", "from": "assistant",
+					"versions": []any{map[string]any{"id": "shared-empty-v1", "content": ""}},
+				},
+				{
+					"key": "shared-out-of-range", "from": "assistant", "activeVersionIndex": 9,
+					"versions": []any{map[string]any{"id": "shared-out-of-range-v1", "content": "unreachable secret"}},
+				},
 			}
 			for index, payload := range storedPayloads {
 				encoded, err := common.Marshal(payload)
@@ -5769,6 +5784,11 @@ func TestPlaygroundSessionShares(t *testing.T) {
 					Position: index * 1024, Payload: model.LongText(encoded), CreatedAt: now, UpdatedAt: now,
 				}).Error)
 			}
+			require.NoError(t, db.Create(&model.PlaygroundMessage{
+				SessionID: sessionID, UserID: 7, ClientKey: "shared-invalid-json",
+				Position: len(storedPayloads) * 1024, Payload: model.LongText(`{"from":"assistant","versions":[`),
+				CreatedAt: now, UpdatedAt: now,
+			}).Error)
 
 			createPath := "/api/playground/sessions/" + sessionID + "/share"
 			missingToken := "this-token-does-not-exist"
@@ -5776,6 +5796,9 @@ func TestPlaygroundSessionShares(t *testing.T) {
 			require.Equal(t, http.StatusNotFound, missing.Code, missing.Body.String())
 			assert.Contains(t, missing.Body.String(), "PLAYGROUND_SHARE_NOT_FOUND")
 			notFoundBody := missing.Body.String()
+			oversized := playgroundRequest(t, 0, http.MethodGet, "/api/playground/shared/"+strings.Repeat("a", 257), nil, controller.GetSharedPlaygroundSession)
+			assert.Equal(t, http.StatusNotFound, oversized.Code)
+			assert.Equal(t, notFoundBody, oversized.Body.String())
 
 			foreignCreate := playgroundRequest(t, 8, http.MethodPost, createPath, map[string]any{"expires_in_days": 7}, controller.CreatePlaygroundSessionShare)
 			assert.Equal(t, http.StatusNotFound, foreignCreate.Code, foreignCreate.Body.String())
@@ -5810,6 +5833,9 @@ func TestPlaygroundSessionShares(t *testing.T) {
 
 			firstToken, firstExpiry := createShare(7)
 			assert.GreaterOrEqual(t, firstExpiry, now+7*24*60*60)
+			decodedToken, decodeErr := base64.RawURLEncoding.DecodeString(firstToken)
+			require.NoError(t, decodeErr)
+			assert.Len(t, decodedToken, 16, "the plaintext token carries exactly 128 random bits")
 			var storedShare model.PlaygroundSessionShare
 			require.NoError(t, db.Where("session_id = ? AND revoked_at = 0", sessionID).First(&storedShare).Error)
 			hash := sha256.Sum256([]byte(firstToken))
@@ -5862,7 +5888,8 @@ func TestPlaygroundSessionShares(t *testing.T) {
 			assert.Equal(t, "application/pdf", snapshot.Data.Messages[1].Attachments[0].MediaType)
 			for _, secret := range []string{
 				"Draft answer", "private arguments", "private result", "private reasoning",
-				"private-request-id", "private.example", "att-secret", "call-secret", sessionID,
+				"private-request-id", "private.example", "att-secret", "call-secret",
+				"system secret", "unreachable secret", sessionID,
 			} {
 				assert.NotContains(t, read.Body.String(), secret)
 			}
