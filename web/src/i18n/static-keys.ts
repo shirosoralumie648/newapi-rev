@@ -78,6 +78,15 @@ export const STATIC_I18N_KEYS = [
   'Enter a web search query.',
   'Unable to hold or settle the wallet quota for the search.',
   'Web search settings saved',
+  // Playground automatic tool execution (LB-09): execution failures are stored
+  // as i18n keys and rendered through t(), so the literal scan cannot see them.
+  'The tool call arguments are not a JSON object.',
+  'The requested time zone is not valid.',
+  'Web search needs a non-empty query.',
+  'Knowledge base search needs a non-empty query.',
+  'No knowledge base is bound to this conversation.',
+  'The requested knowledge base is not bound to this conversation.',
+  'The tool call could not be executed.',
   // Playground workflow run budget server messages (BL-03): the endpoints answer
   // with these stable-code messages, so the literal scan cannot see them.
   'Unable to price the workflow steps.',

@@ -71,8 +71,9 @@ type ToolCallUiState =
   | 'output-available'
   | 'output-error'
 
-// Stored statuses mapped onto the ai-elements tool states. Nothing here
-// executes the call; the states only describe the user-provided result.
+// Stored statuses mapped onto the ai-elements tool states. This component only
+// renders them: the automatic loop writes results through the snapshot, while
+// the dialog below stays the manual fallback for unknown or opted-out calls.
 const TOOL_CALL_UI_STATES: Record<MessageToolCallStatus, ToolCallUiState> = {
   pending: 'approval-requested',
   completed: 'output-available',
@@ -255,7 +256,7 @@ export function MessageToolCalls(props: MessageToolCallsProps) {
             <DialogTitle>{t('Provide tool result')}</DialogTitle>
             <DialogDescription>
               {t(
-                'The Playground does not run tools. Paste the result obtained elsewhere; it is sent back to the model as a tool message.'
+                'The Playground only runs supported tools automatically. Paste the result obtained elsewhere; it is sent back to the model as a tool message.'
               )}
             </DialogDescription>
           </DialogHeader>
