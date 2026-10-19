@@ -794,7 +794,7 @@ Step 进度：
 | ID | 标题 | 依赖 | 优先级 |
 | --- | --- | --- | --- |
 | LB-01 | 联网搜索增强：可配 provider（Tavily/SearXNG/Brave/Bing 等，API IO 不本地计算），结果注入 payload 与引用标注，替换 Globe 占位按钮；**按次计费**（固定单价经钱包结算，上游自带搜索的模型原生可用、沿用上游 usage 计费） | 无 | P0 |
-| LB-02 | 会话整理：置顶 + 归档 + **标签**（字段、PATCH 契约、列表过滤与侧栏分组） | 无 | P0 |
+| LB-02 | 会话整理：置顶 + 归档 + **标签**（字段、PATCH 契约、列表过滤与侧栏分组）（已完成，见 14.3 LB-02 验收；CI-only） | 无 | P0 |
 | LB-03 | 会话自动命名：首轮回复完成后前端经既有 `/pg/chat/completions` 用小模型起名并 PATCH 标题（全局开关 + 每会话可关） | 无（纯前端 + 既有 Relay） | P0 |
 | LB-04 | 消息级操作：引用回复、跨会话消息搜索、从某条消息分叉新会话 | 无（纯前端，复用既有 create/上传链路） | P0 |
 | LB-05 | 只读分享链接：带 token 的公开只读页 + 撤销（Phase 7 分享项的轻量落地） | 无 | P0 |
@@ -818,6 +818,15 @@ Step 进度：
 
 - **LB-01 联网搜索**——管理端系统设置新增搜索 provider 配置（URL + API Key 服务端保管，绝不前端保存；首批 Tavily / SearXNG 自托管 / Brave，可扩展）；后端新增 `POST /api/playground/search`（`UserAuth`，调用 provider API 属纯 IO；结果规范化为 `{title,url,snippet}` 列表、总字节数上限）；前端输入区 Globe 按钮由占位改为「将随本轮联网检索」开关；命中结果作为可选块注入 payload（`[1](url) snippet` 编号列表）并在助手回复后以引用标注渲染，检索块作为该消息的元数据快照持久化（可重放）。**计费（2026-10-19 用户确认按次计费）**：playground_setting 新增「Web search unit price」固定单价（全局默认 + 用户组覆盖，金额换算走 `common/quota_math.go`）；每次 provider 调用成功才结算一次（数量恒为 1 不受用户控制，无需有界乘数校验），结算复用 BL-03 工作流的钱包 hold/settle 链路（先 hold 单价、失败自动退款），存账走 wallet_ledger 并复用现有消费日志字段；provider 调用失败不产生扣费；仍保留每用户每分钟限次防刷。**上游自带搜索的模型（如 OpenAI web_search 系、Perplexity 类渠道）零改动原生可用**：费用随上游 usage 正常计费，网关不重复计价，也不为其做透传 UI（列为后续扩展）。
 - **LB-02 置顶/归档/标签**——`playground_sessions` 新增 `pinned_at`/`archived_at`（`not null;default:0`，AutoMigrate 直加列，legacy 行读回 0）与 `tags`（TEXT 存 JSON 字符串数组；PATCH `tags` 为整组替换，写入校验：≤10 个、每个去空格后 ≤24 字符、去重）；PATCH 契约加显式 `pinned`/`archived` 布尔（缺省=保持原值；`archived=true` 同事务清置顶；对已归档会话置顶返回 400 稳定错误）；响应与列表返回三项；服务端列表不排除归档（仍 `updated_at DESC` 分页），**分组、标签过滤与排序全部在前端**：主列表 = 置顶区 + 一般区，归档折叠为底部「Archived」区（可打开、可归档还原），列表上方为一排标签筛选 chips（含「全部/未打标」）；会话条目菜单新增置顶/归档/标签操作与 Pin 图标；本地 storage schema 加可选字段（损坏降级为空态）、`playgroundSnapshot` 与服务端元数据 PATCH 契约带入三态；跨设备以服务端为准。回收站与归档/标签互不干扰（回收站保留期语义不变）。
+**LB-02 置顶/归档/标签验收（2026-10-19，CI-only，本地未运行测试/build）**：
+
+- [x] 字段与迁移：`PlaygroundSession` 新增 `PinnedAt`/`ArchivedAt`（`not null;default:0`）与 `Tags`（TEXT 存 JSON 字符串数组）；`TestPlaygroundPresetSchemaMigration` 断言旧库 AutoMigrate 直加三列、legacy 行读回 0 与空标签，重复迁移幂等；CI `backend-databases` 在 MySQL 8/PostgreSQL 16 与 MySQL 5.7 上运行 `TestPlaygroundSessionOrganization`；
+- [x] PATCH 契约：显式 `pinned`/`archived`（缺省保持原值），`archived=true` 同事务清置顶且重复归档保留原归档时间；对已归档会话置顶返回 400 稳定错误 `PLAYGROUND_SESSION_ARCHIVED` 且不消耗 revision；`tags` 整组替换，trim、精确去重、≤10 个、每个 ≤24 字符、NUL 拒绝；创建路径同样接受三态；
+- [x] 响应与列表：创建、详情、PATCH 与分页列表均返回 `pinned_at`/`archived_at`/`pinned`/`archived`/`tags`；服务端列表不排除归档并继续按 `updated_at DESC, id DESC` 分页；
+- [x] 前端会话整理：`lib/session-organization.ts` 统一规范化标签；local storage schema 三态可选，损坏值降级为空态（归档优先于置顶）；`playgroundSnapshot`、水合、创建 POST 与元数据 PATCH 均携带三态，跨设备以服务端水合结果为准；侧栏实现 All/Untagged/标签筛选 chips、Pinned/General 分组、底部可折叠 Archived 区（可打开与还原）、条目菜单置顶/归档/标签操作与 Pin 图标，标签编辑复用共享 `TagInput`；
+- [x] 回收站互不干扰：归档/标签不改变 `deleted_at`，删除、恢复与保留期清扫路径未修改；
+- [x] 测试与质量：后端 `TestPlaygroundSessionOrganization`（SQLite/MySQL/PostgreSQL 矩阵：创建三态、trim/去重、超量/超长/NUL 拒绝、归档清置顶、重复归档/置顶保留原时间、稳定 400、取消归档、缺省保持、列表包含归档、legacy NULL tags）与 `TestPlaygroundPresetSchemaMigration`；前端扩展 `playground-session-list.test.tsx`、`session-storage.test.ts`、`server-api.test.ts`、`server-sync.test.tsx`、`server-sync-delta.test.ts`、`workspace-layout.test.tsx`；`i18n:sync` missingCount=0、extrasCount=0（untranslated 基线保持 zh 3/ja 4/ru 5）；无新依赖。Local tests not run (CI-only session). 本地未运行测试/typecheck/lint/build，全部由 CI 验证。
+
 - **LB-03 自动命名**——全局设置 + 会话级开关；首轮（或后续轮次）回复完成后，前端经既有 `/pg/chat/completions`（非流式、走摘要模型的调用约定）生成 ≤50 字标题，PATCH 走既有标题链路；失败静默保留旧标题；不新增后端代码。
 - **LB-04 消息级操作**——引用回复：消息操作新增「引用」，payload 首位插入 quote 块（被引消息 key + 文本快照 ≤ 配额上限），渲染层显示引用条；跨会话消息搜索：前端对已水合 workspace 全量文本搜索（`hydratePlaygroundWorkspace` 已把每个远端会话的全部消息拉进本地，无后端；水合进行中只搜已就绪部分并在结果页标示），结果跳转会话并高亮；分叉：新会话 + 逐条复制消息 payload + 经既有上传链路重建附件（新会话分区、配额校验，超限拒绝并提示），源会话保持不动；三项均无后端新增。
 - **LB-05 分享链接**——主库新增 `playground_session_shares`（owner 归属、明文 token 为随机 128-bit 但库中只存其 SHA-256（按哈希等值索引查找，不存明文）、可撤销、可选过期时间）；`POST/DELETE /api/playground/sessions/:id/share`（owner 校验、撤销幂等）与匿名 `GET /api/playground/shared/:token`（`CriticalRateLimit`、不可枚举 404——撤销与不存在同响应）；前端 `/share/:token` 公开只读路由（安全渲染链路、暗色适配、只显示文本与工具调用摘要，**附件只显示占位不代理内容**）与会话菜单「Share」入口；导出/隐私审计设计与 CH-04 一致。
