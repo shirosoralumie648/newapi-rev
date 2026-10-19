@@ -20,17 +20,21 @@ import { render, waitFor } from '@testing-library/react'
 import { useState } from 'react'
 import { beforeEach, expect, test, vi } from 'vitest'
 
-import { searchPlaygroundWeb } from '../../api'
+import { callPlaygroundMCPTool, searchPlaygroundWeb } from '../../api'
 import { PLAYGROUND_TOOL_EXECUTION_ERRORS } from '../../constants'
 import { searchKnowledgeBase } from '../../knowledge-api'
 import { getMessageToolCalls } from '../../lib'
+import type { PlaygroundMCPToolRef } from '../../lib/tools/mcp-tools'
 import type { Message, MessageToolCall } from '../../types'
 import {
   usePlaygroundToolExecution,
   type PlaygroundToolExecutionState,
 } from '../use-playground-tool-execution'
 
-vi.mock('../../api', () => ({ searchPlaygroundWeb: vi.fn() }))
+vi.mock('../../api', () => ({
+  callPlaygroundMCPTool: vi.fn(),
+  searchPlaygroundWeb: vi.fn(),
+}))
 vi.mock('../../knowledge-api', () => ({ searchKnowledgeBase: vi.fn() }))
 
 type HookOptions = Omit<
@@ -235,6 +239,57 @@ test('a base outside the conversation binding becomes a stable error', async () 
   expect(searchKnowledgeBase).not.toHaveBeenCalled()
   // An execution failure is still an automatic round, so the loop continues.
   await waitFor(() => expect(onContinue).toHaveBeenCalledTimes(1))
+})
+
+test('an MCP call is proxied with the catalog names and continues the loop', async () => {
+  vi.mocked(callPlaygroundMCPTool).mockResolvedValue({
+    isError: false,
+    content: [{ type: 'text', text: 'pong' }],
+  })
+  const mcpTools: PlaygroundMCPToolRef[] = [
+    {
+      serverId: 'github',
+      serverName: 'GitHub',
+      toolName: 'ping',
+      functionName: 'mcp__github__ping',
+    },
+  ]
+  const { onContinue, getLatest } = renderToolLoop(
+    [
+      userMessage(),
+      assistantMessage([
+        toolCall({ name: 'mcp__github__ping', arguments: '{"repo":"a"}' }),
+      ]),
+    ],
+    { mcpTools }
+  )
+
+  await waitFor(() => {
+    expect(getMessageToolCalls(getLatest().messages[1])[0].status).toBe(
+      'completed'
+    )
+  })
+  expect(callPlaygroundMCPTool).toHaveBeenCalledWith(
+    'github',
+    'ping',
+    { repo: 'a' },
+    expect.any(AbortSignal)
+  )
+  expect(getMessageToolCalls(getLatest().messages[1])[0].result).toContain(
+    '"server":"GitHub"'
+  )
+  await waitFor(() => expect(onContinue).toHaveBeenCalledTimes(1))
+})
+
+test('an MCP call without a declared connection stays pending for the manual path', async () => {
+  const { onContinue, getLatest } = renderToolLoop([
+    userMessage(),
+    assistantMessage([toolCall({ name: 'mcp__github__ping' })]),
+  ])
+
+  expect(callPlaygroundMCPTool).not.toHaveBeenCalled()
+  expect(onContinue).not.toHaveBeenCalled()
+  expect(getMessageToolCalls(getLatest().messages[1])[0].status).toBe('pending')
 })
 
 test('an unknown tool stays pending for the manual path and blocks the loop', async () => {

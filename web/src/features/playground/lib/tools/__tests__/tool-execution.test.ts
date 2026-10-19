@@ -20,6 +20,7 @@ import { describe, expect, test } from 'vitest'
 
 import { PLAYGROUND_TOOL_EXECUTION_ERRORS } from '../../../constants'
 import type { Message, MessageToolCall } from '../../../types'
+import type { PlaygroundMCPToolRef } from '../mcp-tools'
 import {
   buildKnowledgeSearchToolResult,
   buildTimeToolResult,
@@ -91,6 +92,28 @@ describe('executable tool matching and arguments', () => {
     expect(
       getPendingExecutableToolCalls(message).map((call) => call.id)
     ).toEqual(['call_web'])
+  })
+
+  test('an MCP call is executable only while its connection tool is declared', () => {
+    const mcpTools: PlaygroundMCPToolRef[] = [
+      {
+        serverId: 'github',
+        serverName: 'GitHub',
+        toolName: 'ping',
+        functionName: 'mcp__github__ping',
+      },
+    ]
+    const message = assistantMessage([
+      toolCall({ id: 'call_mcp', name: 'mcp__github__ping' }),
+      toolCall({ id: 'call_gone', name: 'mcp__github__gone' }),
+    ])
+
+    expect(
+      getPendingExecutableToolCalls(message, mcpTools).map((call) => call.id)
+    ).toEqual(['call_mcp'])
+    expect(
+      getPendingExecutableToolCalls(message).map((call) => call.id)
+    ).toEqual([])
   })
 })
 

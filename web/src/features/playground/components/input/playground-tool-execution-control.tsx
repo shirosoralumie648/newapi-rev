@@ -46,6 +46,17 @@ import {
   PLAYGROUND_TOOL_EXECUTION_MAX_ROUNDS,
   PLAYGROUND_TOOL_EXECUTION_MIN_ROUNDS,
 } from '../../constants'
+import type { PlaygroundMCPServerSummary } from '../../lib/tools/mcp-tools'
+
+/** Account-level switch of the administrator-managed MCP connections. */
+export type PlaygroundToolExecutionMCPProps = {
+  enabled: boolean
+  /** The catalog request failed; a previously loaded list may still show. */
+  failed: boolean
+  loading: boolean
+  onEnabledChange: (value: boolean) => void
+  servers: readonly PlaygroundMCPServerSummary[]
+}
 
 type PlaygroundToolExecutionControlProps = {
   disabled?: boolean
@@ -53,6 +64,50 @@ type PlaygroundToolExecutionControlProps = {
   maxRounds: number
   onEnabledChange: (value: boolean) => void
   onMaxRoundsChange: (value: number) => void
+  /** Absent while the administrator disabled MCP for the whole gateway. */
+  mcp?: PlaygroundToolExecutionMCPProps
+}
+
+function PlaygroundMCPConnectionList(props: {
+  mcp: PlaygroundToolExecutionMCPProps
+}) {
+  const { t } = useTranslation()
+  const mcp = props.mcp
+
+  if (mcp.servers.length === 0) {
+    let message = t('No MCP connections are available.')
+    if (mcp.loading) {
+      message = t('Loading MCP connections...')
+    } else if (mcp.failed) {
+      message = t('MCP connections are unavailable right now.')
+    }
+    return <p className='text-muted-foreground text-xs leading-4'>{message}</p>
+  }
+
+  return (
+    <div className='space-y-1'>
+      <ul className='space-y-1'>
+        {mcp.servers.map((server) => (
+          <li
+            className='flex items-center justify-between gap-2 text-xs'
+            key={server.id}
+          >
+            <span className='truncate'>{server.name}</span>
+            <span className='text-muted-foreground shrink-0'>
+              {server.available
+                ? t('{{count}} tools', { count: server.toolCount })
+                : t('Unavailable')}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {mcp.failed ? (
+        <p className='text-muted-foreground text-xs leading-4'>
+          {t('MCP connections are unavailable right now.')}
+        </p>
+      ) : null}
+    </div>
+  )
 }
 
 function PlaygroundToolExecutionContent(
@@ -109,6 +164,36 @@ function PlaygroundToolExecutionContent(
           value={props.maxRounds}
         />
       </div>
+
+      {props.mcp ? (
+        <div className='border-border/70 space-y-3 border-t pt-3'>
+          <div className='flex items-start justify-between gap-3'>
+            <div className='min-w-0 space-y-1'>
+              <p className='text-sm leading-5 font-medium'>{t('MCP tools')}</p>
+              <p className='text-muted-foreground text-xs leading-4'>
+                {t(
+                  'Tools of the MCP connections your administrator configured.'
+                )}
+              </p>
+            </div>
+            <Switch
+              aria-label={t('MCP tools')}
+              checked={props.mcp.enabled}
+              disabled={props.disabled}
+              onCheckedChange={(checked) => props.mcp?.onEnabledChange(checked)}
+              size='sm'
+            />
+          </div>
+          {!props.enabled ? (
+            <p className='text-muted-foreground text-xs leading-4'>
+              {t('Turn on the tool loop above to offer these tools.')}
+            </p>
+          ) : null}
+          {props.enabled && props.mcp.enabled ? (
+            <PlaygroundMCPConnectionList mcp={props.mcp} />
+          ) : null}
+        </div>
+      ) : null}
 
       <p className='text-muted-foreground border-border/70 border-t pt-3 text-xs leading-4'>
         {t(

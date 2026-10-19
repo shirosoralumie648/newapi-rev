@@ -46,6 +46,7 @@ import {
 } from '../lib'
 import type { PlaygroundCapturedRequest, ToolCallDelta } from '../lib'
 import type {
+  ChatCompletionTool,
   Message,
   MessageUsage,
   PlaygroundConfig,
@@ -71,6 +72,12 @@ interface UseChatHandlerOptions {
    * injected into every send while enabled. Absent keeps the request unchanged.
    */
   developerOptions?: PlaygroundDeveloperOptions | null
+  /**
+   * Declarations of the MCP tools the account may call right now. Empty or
+   * absent while the account switch, the server switch or the tool loop is
+   * off, so a disabled feature never sends tools the model cannot use.
+   */
+  mcpTools?: ChatCompletionTool[]
   /**
    * Resolves the compression node the send should carry, summarizing the
    * messages a limit leaves out first when automatic summary is enabled. The
@@ -135,6 +142,7 @@ export function useChatHandler({
   memoryBlock,
   contextSettings,
   developerOptions,
+  mcpTools,
   prepareContextSummary,
   prepareKnowledge,
   onMessageUpdate,
@@ -502,7 +510,8 @@ export function useChatHandler({
         { settings: contextSettings, summary: contextSummary },
         memoryBlock,
         quote,
-        developerOptions
+        developerOptions,
+        mcpTools
       )
       setCapturedRequest({ payload, capturedAt: Date.now() })
       void sendStreamRequest(payload, {
@@ -525,6 +534,7 @@ export function useChatHandler({
       memoryBlock,
       contextSettings,
       developerOptions,
+      mcpTools,
       sendStreamRequest,
       discardPendingStreamUpdates,
       handleStreamUpdate,
@@ -560,7 +570,8 @@ export function useChatHandler({
         { settings: contextSettings, summary: contextSummary },
         memoryBlock,
         quote,
-        developerOptions
+        developerOptions,
+        mcpTools
       )
       setCapturedRequest({ payload, capturedAt: Date.now() })
       const generation = requestGenerationRef.current + 1
@@ -670,6 +681,7 @@ export function useChatHandler({
       memoryBlock,
       contextSettings,
       developerOptions,
+      mcpTools,
       stopStream,
       discardPendingStreamUpdates,
       onMessageUpdate,

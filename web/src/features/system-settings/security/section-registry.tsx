@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { PlaygroundMCPSection } from '../playground/playground-mcp-section'
 import { PlaygroundQuotaSection } from '../playground/playground-quota-section'
 import { PlaygroundStorageBillingSection } from '../playground/playground-storage-billing-section'
 import { PlaygroundWebSearchSection } from '../playground/playground-web-search-section'
@@ -109,6 +110,13 @@ const SECURITY_SECTIONS = [
       <PlaygroundWebSearchSection
         webSearchJson={settings['playground_setting.web_search']}
       />
+    ),
+  },
+  {
+    id: 'playground-mcp',
+    titleKey: 'Playground MCP Tools',
+    build: (settings: SecuritySettings) => (
+      <PlaygroundMCPSection mcpJson={settings['playground_setting.mcp']} />
     ),
   },
 ] as const

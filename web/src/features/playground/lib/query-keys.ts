@@ -27,6 +27,8 @@ export const playgroundQueryKeys = {
     ['playground', userId, 'storage-billing'] as const,
   settings: (userId: number | null) =>
     ['playground', userId, 'settings'] as const,
+  mcpServers: (userId: number | null) =>
+    ['playground', userId, 'mcp-servers'] as const,
   messageCosts: (userId: number | null, requestIds: string) =>
     ['playground', userId, 'message-costs', requestIds] as const,
   tasks: () => ['playground', 'tasks', 'list'] as const,

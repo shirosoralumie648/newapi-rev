@@ -28,6 +28,7 @@ import {
   getMessageToolCalls,
   getPendingToolCalls,
 } from '../message/message-tool-call-utils'
+import { findMCPToolRef, type PlaygroundMCPToolRef } from './mcp-tools'
 
 /** Tool names the Playground can answer without a manual result. */
 export const EXECUTABLE_TOOL_NAMES = [
@@ -236,14 +237,19 @@ export function buildKnowledgeSearchToolResult(
 }
 
 /**
- * Pending calls of one message that map to an executable tool. A call with a
- * malformed name or an unknown function stays pending for the manual path.
+ * Pending calls of one message that map to an executable tool: a built-in
+ * function or a tool of a global MCP connection the account may call right
+ * now. A call with a malformed name or an unknown function stays pending for
+ * the manual path.
  */
 export function getPendingExecutableToolCalls(
-  message: Message
+  message: Message,
+  mcpTools: readonly PlaygroundMCPToolRef[] = []
 ): MessageToolCall[] {
   return getPendingToolCalls(message).filter(
-    (call) => getExecutableToolKind(call.name) !== null
+    (call) =>
+      getExecutableToolKind(call.name) !== null ||
+      findMCPToolRef(call.name, mcpTools) !== null
   )
 }
 
