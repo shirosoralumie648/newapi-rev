@@ -30,6 +30,10 @@ interface TagInputProps {
   placeholder?: string
   className?: string
   disabled?: boolean
+  /** Maximum number of tags accepted; omitted means no client-side bound. */
+  maxTags?: number
+  /** Maximum code points accepted per tag; omitted means no bound. */
+  maxTagLength?: number
 }
 
 export function TagInput({
@@ -38,18 +42,26 @@ export function TagInput({
   placeholder,
   className,
   disabled = false,
+  maxTags,
+  maxTagLength,
 }: TagInputProps) {
   const { t } = useTranslation()
   const placeholderText = placeholder ?? t('Add tags...')
   const [inputValue, setInputValue] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const atTagLimit = maxTags !== undefined && value.length >= maxTags
 
   const addTag = (tag: string) => {
     const trimmed = tag.trim()
-    if (trimmed && !value.includes(trimmed)) {
-      onChange([...value, trimmed])
-      setInputValue('')
+    if (!trimmed || value.includes(trimmed) || atTagLimit) return
+    if (
+      maxTagLength !== undefined &&
+      Array.from(trimmed).length > maxTagLength
+    ) {
+      return
     }
+    onChange([...value, trimmed])
+    setInputValue('')
   }
 
   const removeTag = (tagToRemove: string) => {
@@ -87,7 +99,7 @@ export function TagInput({
               type='button'
               variant='ghost'
               size='icon-sm'
-              aria-label='Remove tag'
+              aria-label={t('Remove tag')}
               onClick={(e) => {
                 e.stopPropagation()
                 removeTag(tag)
@@ -103,11 +115,13 @@ export function TagInput({
         ref={inputRef}
         type='text'
         value={inputValue}
+        aria-label={placeholderText}
+        maxLength={maxTagLength}
         onChange={(e) => setInputValue(e.target.value)}
         onKeyDown={handleKeyDown}
         onBlur={handleBlur}
         placeholder={value.length === 0 ? placeholderText : ''}
-        disabled={disabled}
+        disabled={disabled || atTagLimit}
         className='placeholder:text-muted-foreground min-w-[120px] flex-1 border-0 bg-transparent shadow-none outline-none focus-visible:ring-0'
       />
     </div>

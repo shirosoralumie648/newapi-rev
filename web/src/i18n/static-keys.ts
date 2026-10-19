@@ -124,6 +124,8 @@ export const STATIC_I18N_KEYS = [
   'Playground conversation name must contain 1 to 200 characters.',
   'Playground conversation not found.',
   'Playground conversation limit exceeded.',
+  'Invalid Playground conversation tags.',
+  'Cannot pin an archived Playground conversation.',
   'Playground message limit exceeded.',
   'Playground request is too large.',
   'Playground changed on another device. Reload before saving.',

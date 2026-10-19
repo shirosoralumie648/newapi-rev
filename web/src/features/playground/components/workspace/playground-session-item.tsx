@@ -16,17 +16,22 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Check, Pencil, Trash2, X } from 'lucide-react'
+import { Check, Pencil, Pin, Trash2, X } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 
 import { PLAYGROUND_SESSION_TITLE_MAX_LENGTH } from '../../constants'
-import type { PlaygroundSession } from '../../types'
+import type {
+  PlaygroundSession,
+  PlaygroundSessionOrganization,
+} from '../../types'
 import { PlaygroundSessionExportMenu } from './playground-session-export-menu'
+import { PlaygroundSessionOrganizationMenu } from './playground-session-organization-menu'
 
 interface PlaygroundSessionItemProps {
   disabled?: boolean
@@ -34,6 +39,8 @@ interface PlaygroundSessionItemProps {
   isActive: boolean
   onSelect: () => void
   onRename: (title: string) => void
+  onOrganize: (organization: PlaygroundSessionOrganization) => void
+  onManageTags: () => void
   onDelete: () => void
 }
 
@@ -114,55 +121,98 @@ export function PlaygroundSessionItem(props: PlaygroundSessionItemProps) {
   return (
     <div
       className={cn(
-        'group flex min-w-0 items-center gap-1 rounded-lg border border-transparent p-1',
-        props.isActive && 'border-border bg-muted/60'
+        'group flex min-w-0 flex-col rounded-lg border border-transparent p-1',
+        props.isActive && 'border-border bg-muted/60',
+        props.session.archived && 'opacity-75'
       )}
       data-active={props.isActive ? 'true' : 'false'}
+      data-archived={props.session.archived ? 'true' : 'false'}
+      data-pinned={props.session.pinned ? 'true' : 'false'}
     >
-      <Button
-        disabled={props.disabled}
-        aria-current={props.isActive ? 'page' : undefined}
-        aria-pressed={props.isActive}
-        aria-label={displayTitle}
-        className='min-w-0 flex-1 justify-start truncate text-start font-normal'
-        onClick={props.onSelect}
-        type='button'
-        variant='ghost'
-      >
-        <span className='truncate'>{displayTitle}</span>
-      </Button>
-      <Button
-        disabled={props.disabled}
-        aria-label={t('Rename {{name}}', { name: displayTitle })}
-        className='opacity-70 group-hover:opacity-100 focus-visible:opacity-100'
-        onClick={() => {
-          setTitle(displayTitle)
-          setIsEditing(true)
-        }}
-        size='icon-xs'
-        type='button'
-        variant='ghost'
-      >
-        <Pencil aria-hidden='true' />
-      </Button>
-      {props.session.server && (
-        <PlaygroundSessionExportMenu
-          className='text-muted-foreground hover:text-foreground opacity-70 group-hover:opacity-100 focus-visible:opacity-100'
-          sessionId={props.session.server.id}
-          title={displayTitle}
+      <div className='flex min-w-0 items-center gap-1'>
+        <Button
+          disabled={props.disabled}
+          aria-current={props.isActive ? 'page' : undefined}
+          aria-pressed={props.isActive}
+          aria-label={displayTitle}
+          className='min-w-0 flex-1 justify-start truncate text-start font-normal'
+          onClick={props.onSelect}
+          type='button'
+          variant='ghost'
+        >
+          <span className='truncate'>{displayTitle}</span>
+        </Button>
+        {props.session.pinned && (
+          <span
+            className='text-muted-foreground flex shrink-0 items-center'
+            title={t('Pinned')}
+          >
+            <Pin aria-hidden='true' className='size-3' />
+            <span className='sr-only'>{t('Pinned')}</span>
+          </span>
+        )}
+        <Button
+          disabled={props.disabled}
+          aria-label={t('Rename {{name}}', { name: displayTitle })}
+          className='opacity-70 group-hover:opacity-100 focus-visible:opacity-100'
+          onClick={() => {
+            setTitle(displayTitle)
+            setIsEditing(true)
+          }}
+          size='icon-xs'
+          type='button'
+          variant='ghost'
+        >
+          <Pencil aria-hidden='true' />
+        </Button>
+        <PlaygroundSessionOrganizationMenu
+          disabled={props.disabled}
+          onManageTags={props.onManageTags}
+          onOrganize={props.onOrganize}
+          session={props.session}
         />
+        {props.session.server && (
+          <PlaygroundSessionExportMenu
+            className='text-muted-foreground hover:text-foreground opacity-70 group-hover:opacity-100 focus-visible:opacity-100'
+            sessionId={props.session.server.id}
+            title={displayTitle}
+          />
+        )}
+        <Button
+          disabled={props.disabled}
+          aria-label={t('Delete {{name}}', { name: displayTitle })}
+          className='text-muted-foreground group-hover:text-destructive opacity-70 group-hover:opacity-100 focus-visible:opacity-100'
+          onClick={props.onDelete}
+          size='icon-xs'
+          type='button'
+          variant='ghost'
+        >
+          <Trash2 aria-hidden='true' />
+        </Button>
+      </div>
+      {props.session.tags.length > 0 && (
+        <div className='flex min-w-0 flex-wrap gap-1 px-1 pb-1'>
+          {props.session.tags.slice(0, 3).map((tag) => (
+            <Badge
+              className='h-4 max-w-full px-1 text-[10px]'
+              key={tag}
+              title={tag}
+              variant='outline'
+            >
+              <span className='truncate'>{tag}</span>
+            </Badge>
+          ))}
+          {props.session.tags.length > 3 && (
+            <Badge
+              className='h-4 shrink-0 px-1 text-[10px]'
+              title={props.session.tags.slice(3).join(', ')}
+              variant='outline'
+            >
+              +{props.session.tags.length - 3}
+            </Badge>
+          )}
+        </div>
       )}
-      <Button
-        disabled={props.disabled}
-        aria-label={t('Delete {{name}}', { name: displayTitle })}
-        className='text-muted-foreground group-hover:text-destructive opacity-70 group-hover:opacity-100 focus-visible:opacity-100'
-        onClick={props.onDelete}
-        size='icon-xs'
-        type='button'
-        variant='ghost'
-      >
-        <Trash2 aria-hidden='true' />
-      </Button>
     </div>
   )
 }

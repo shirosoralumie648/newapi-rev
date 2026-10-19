@@ -105,6 +105,7 @@ import type {
   PlaygroundMemoryExtractionSettings,
   PlaygroundPendingQuote,
   PlaygroundRouteTarget,
+  PlaygroundSessionOrganization,
 } from './types'
 
 export function Playground(props: {
@@ -185,6 +186,7 @@ function PlaygroundContent(props: {
     activeSessionId,
     createSession,
     renameSession,
+    organizeSession,
     switchSession,
   } = local
 
@@ -626,6 +628,14 @@ function PlaygroundContent(props: {
       switchSession,
       handleWorkspaceTransition,
     ]
+  )
+
+  const handleOrganizeSession = useCallback(
+    (sessionId: string, organization: PlaygroundSessionOrganization) => {
+      if (sync.isLoading) return
+      organizeSession(sessionId, organization)
+    },
+    [organizeSession, sync.isLoading]
   )
 
   const handleDeleteSession = useCallback(
@@ -1083,6 +1093,7 @@ function PlaygroundContent(props: {
         onOpenMessageSearch={() => setMessageSearchOpen(true)}
         onOpenPresets={handleOpenPresets}
         onOpenTrash={handleOpenTrash}
+        onOrganize={handleOrganizeSession}
         onRename={renameSession}
         disabled={sync.isLoading}
         onSwitch={handleSwitchSession}

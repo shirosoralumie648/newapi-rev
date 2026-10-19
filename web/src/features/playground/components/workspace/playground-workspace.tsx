@@ -31,7 +31,10 @@ import {
 import { WorkspaceInspector } from '@/components/workspace-inspector'
 import { useIsMobile } from '@/hooks/use-mobile'
 
-import type { PlaygroundSession } from '../../types'
+import type {
+  PlaygroundSession,
+  PlaygroundSessionOrganization,
+} from '../../types'
 import { PlaygroundSessionList } from './playground-session-list'
 
 /**
@@ -48,6 +51,10 @@ interface PlaygroundWorkspaceProps {
   onCreate: () => void
   onSwitch: (sessionId: string) => void
   onRename: (sessionId: string, title: string) => void
+  onOrganize: (
+    sessionId: string,
+    organization: PlaygroundSessionOrganization
+  ) => void
   onDelete: (sessionId: string) => void
   /** Rebuild one conversation from an exported JSON file. */
   onImportFile?: (file: File) => Promise<void> | void
@@ -81,6 +88,7 @@ export function PlaygroundWorkspace(props: PlaygroundWorkspaceProps) {
       onOpenMessageSearch={props.onOpenMessageSearch}
       onOpenPresets={props.onOpenPresets}
       onOpenTrash={props.onOpenTrash}
+      onOrganize={props.onOrganize}
       onRename={props.onRename}
       onSwitch={props.onSwitch}
       sessions={props.sessions}
