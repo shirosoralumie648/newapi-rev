@@ -71,7 +71,7 @@ func playgroundMigrationDB(t *testing.T, dialect string) *gorm.DB {
 		sqlDB.SetMaxOpenConns(1)
 	}
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&PlaygroundMessage{}, &PlaygroundAttachment{}, &PlaygroundUserUsage{}, &PlaygroundPreset{}, &PlaygroundSession{}))
+		require.NoError(t, db.Migrator().DropTable(&PlaygroundMessage{}, &PlaygroundAttachment{}, &PlaygroundUserUsage{}, &PlaygroundPreset{}, &PlaygroundSession{}, &PlaygroundSessionShare{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
@@ -281,6 +281,52 @@ func TestPlaygroundPresetSchemaMigration(t *testing.T) {
 			assert.Zero(t, session.PinnedAt)
 			assert.Zero(t, session.ArchivedAt)
 			assert.Empty(t, session.Tags)
+		})
+	}
+}
+
+// A share table written before canvas links existed must gain the nullable
+// canvas_id column on upgrade, keep its session links working, and stay
+// idempotent. Existing rows default to the empty canvas id, so they keep
+// resolving as conversation links and can never be mistaken for a canvas link.
+func TestPlaygroundShareCanvasColumnMigration(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundMigrationDB(t, dialect)
+			quote := "`"
+			if dialect == "postgres" {
+				quote = `"`
+			}
+			q := func(name string) string { return quote + name + quote }
+			table := db.NamingStrategy.TableName("PlaygroundSessionShare")
+			legacyColumns := []string{"id", "session_id", "user_id", "token_hash", "expires_at", "revoked_at", "created_at"}
+			legacyTypes := []string{"bigint PRIMARY KEY", "varchar(128) NOT NULL", "bigint NOT NULL", "varchar(64) NOT NULL", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL"}
+			definitions := make([]string, len(legacyColumns))
+			quoted := make([]string, len(legacyColumns))
+			for index, name := range legacyColumns {
+				definitions[index] = q(name) + " " + legacyTypes[index]
+				quoted[index] = q(name)
+			}
+			require.NoError(t, db.Exec("CREATE TABLE "+q(table)+" ("+strings.Join(definitions, ", ")+")").Error)
+			require.NoError(t, db.Exec("INSERT INTO "+q(table)+" ("+strings.Join(quoted, ", ")+") VALUES ("+strings.Repeat("?,", len(legacyColumns)-1)+"?)",
+				1, "pgs_legacy", 7, "legacy-token-hash", 0, 0, 111).Error)
+
+			for range 2 {
+				require.NoError(t, db.AutoMigrate(&PlaygroundSessionShare{}))
+			}
+			require.True(t, db.Migrator().HasColumn(&PlaygroundSessionShare{}, "canvas_id"))
+			var stored PlaygroundSessionShare
+			require.NoError(t, db.Where("token_hash = ?", "legacy-token-hash").First(&stored).Error)
+			assert.Equal(t, "pgs_legacy", stored.SessionID)
+			assert.Empty(t, stored.CanvasID)
+
+			// A canvas link created after the upgrade fills the new column and
+			// still coexists with the migrated session link.
+			require.NoError(t, db.Create(&PlaygroundSessionShare{CanvasID: "pgc_upgraded", UserID: 7, TokenHash: "canvas-token-hash", CreatedAt: 222}).Error)
+			var canvasShare PlaygroundSessionShare
+			require.NoError(t, db.Where("token_hash = ?", "canvas-token-hash").First(&canvasShare).Error)
+			assert.Equal(t, "pgc_upgraded", canvasShare.CanvasID)
+			assert.Empty(t, canvasShare.SessionID)
 		})
 	}
 }

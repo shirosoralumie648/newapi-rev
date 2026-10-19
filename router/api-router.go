@@ -174,6 +174,10 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.GET("/canvases/:canvasId", controller.GetPlaygroundCanvasProject)
 			playgroundRoute.PATCH("/canvases/:canvasId", controller.UpdatePlaygroundCanvasProject)
 			playgroundRoute.DELETE("/canvases/:canvasId", controller.DeletePlaygroundCanvasProject)
+			// Canvas links follow the conversation share contract: a new link
+			// rotates the old one, and the anonymous route is the same.
+			playgroundRoute.POST("/canvases/:canvasId/share", controller.CreatePlaygroundCanvasShare)
+			playgroundRoute.DELETE("/canvases/:canvasId/share", controller.DeletePlaygroundCanvasShare)
 			// A trashed canvas waits in the shared trash window and comes back
 			// with its document, pins and counter share intact.
 			playgroundRoute.POST("/canvases/:canvasId/restore", controller.RestorePlaygroundCanvasProject)
