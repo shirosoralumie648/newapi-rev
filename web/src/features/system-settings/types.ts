@@ -50,6 +50,11 @@ export type PlaygroundMCPSettingsRequest = {
   mcp: string
 }
 
+export type PlaygroundModelCatalogSettingsRequest = {
+  /** Serialized curated Playground catalog and its user-group overrides. */
+  catalog: string
+}
+
 export interface PasskeyDomainChange {
   rp_id: string
   legacy_rp_ids: string
@@ -449,6 +454,7 @@ export type SecuritySettings = {
   'playground_setting.storage_billing': string
   'playground_setting.web_search': string
   'playground_setting.mcp': string
+  'playground_setting.model_catalog': string
   'playground_setting.sandbox_preview_enabled': boolean
 }
 

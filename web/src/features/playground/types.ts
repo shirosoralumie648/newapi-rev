@@ -892,6 +892,54 @@ export interface ParameterEnabled {
   reasoning_effort: boolean
 }
 
+/**
+ * Sampling values an administrator attached to one curated model. The server
+ * stores absent values as omitted fields, so an explicit 0 (temperature) stays
+ * a real default while an omitted field means "keep the account value".
+ */
+export interface PlaygroundModelCatalogDefaults {
+  temperature?: number
+  topP?: number
+  maxTokens?: number
+  frequencyPenalty?: number
+  presencePenalty?: number
+  seed?: number
+  reasoningEffort?: string
+}
+
+export interface PlaygroundModelCatalogLimits {
+  contextLength?: number
+  maxOutputTokens?: number
+}
+
+export interface PlaygroundModelCatalogGroup {
+  id: string
+  label: string
+  description?: string
+}
+
+export interface PlaygroundModelCatalogEntry {
+  model: string
+  displayName?: string
+  description?: string
+  icon?: string
+  group?: string
+  capabilities?: string[]
+  hidden?: boolean
+  defaults?: PlaygroundModelCatalogDefaults
+  limits?: PlaygroundModelCatalogLimits
+}
+
+/**
+ * Effective catalog the server resolved for the signed-in account's group.
+ * An administrator can replace the global list per user group; hidden entries
+ * never reach this shape.
+ */
+export interface PlaygroundModelCatalog {
+  groups: PlaygroundModelCatalogGroup[]
+  models: PlaygroundModelCatalogEntry[]
+}
+
 // Model and group options
 export interface ModelOption {
   label: string
@@ -912,6 +960,14 @@ export interface ModelOption {
   /** Chat-style endpoint and no task usage schema. */
   supportsChat?: boolean
   isImageGeneration?: boolean
+  /** Curated catalog section this model belongs to, when the catalog groups it. */
+  category?: string
+  /** Description of the curated catalog section. */
+  categoryDescription?: string
+  /** Emoji or HTTP(S) image URL supplied by the model catalog. */
+  icon?: string
+  /** Sampling values of a new conversation that starts with this model. */
+  catalogDefaults?: PlaygroundModelCatalogDefaults
 }
 
 export interface GroupOption {

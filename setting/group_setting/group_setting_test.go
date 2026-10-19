@@ -114,6 +114,67 @@ func TestUpdateGroupDisplayNamesKeepsPreviousStateOnInvalidInput(t *testing.T) {
 	assert.Equal(t, "vip", group_setting.GetGroupDisplayName("vip"))
 }
 
+func TestPlaygroundModelCatalogResolvesOverridesAndValidates(t *testing.T) {
+	configureGroupIdentity(t)
+	catalog := playground_setting.GetPlaygroundModelCatalogSetting()
+	original := *catalog
+	t.Cleanup(func() { *catalog = original })
+
+	catalog.Groups = []playground_setting.PlaygroundModelCatalogGroup{
+		{ID: "recommended", Label: "Recommended"},
+	}
+	catalog.Models = []playground_setting.PlaygroundModelCatalogEntry{
+		{Model: "gpt-4o", DisplayName: "GPT-4o", Group: "recommended"},
+		{Model: "retired-model", DisplayName: "Retired", Hidden: true},
+	}
+	catalog.GroupOverrides = map[string]playground_setting.PlaygroundModelCatalog{
+		"vip": {
+			Groups: []playground_setting.PlaygroundModelCatalogGroup{{ID: "vip-only", Label: "VIP"}},
+			Models: []playground_setting.PlaygroundModelCatalogEntry{{Model: "vip-model", Group: "vip-only"}},
+		},
+		"empty-group": {},
+	}
+
+	global := playground_setting.GetPlaygroundModelCatalog("default")
+	require.Len(t, global.Models, 1)
+	assert.Equal(t, "gpt-4o", global.Models[0].Model)
+	assert.Equal(t, "Recommended", global.Groups[0].Label)
+
+	vip := playground_setting.GetPlaygroundModelCatalog("VIP 会员")
+	require.Len(t, vip.Models, 1)
+	assert.Equal(t, "vip-model", vip.Models[0].Model)
+	assert.Equal(t, "vip-only", vip.Groups[0].ID)
+
+	empty := playground_setting.GetPlaygroundModelCatalog("empty-group")
+	assert.Empty(t, empty.Groups)
+	assert.Empty(t, empty.Models)
+
+	valid := `{
+		"groups": [{"id":"recommended","label":"Recommended"}],
+		"models": [{
+			"model":"gpt-4o","display_name":"GPT-4o","group":"recommended",
+			"capabilities":["vision","tools"],
+			"defaults":{"temperature":0,"top_p":1,"max_tokens":4096,"seed":0,"reasoning_effort":"high"},
+			"limits":{"context_length":128000,"max_output_tokens":16384}
+		}],
+		"group_overrides": {"vip":{"groups":[],"models":[]}}
+	}`
+	require.NoError(t, playground_setting.ValidatePlaygroundModelCatalogJSON(valid))
+
+	for name, payload := range map[string]string{
+		"duplicate model":    `{"groups":[],"models":[{"model":"m"},{"model":"m"}]}`,
+		"unknown group":      `{"groups":[],"models":[{"model":"m","group":"missing"}]}`,
+		"unknown capability": `{"groups":[],"models":[{"model":"m","capabilities":["audio"]}]}`,
+		"invalid default":    `{"groups":[],"models":[{"model":"m","defaults":{"temperature":3}}]}`,
+		"invalid limit":      `{"groups":[],"models":[{"model":"m","limits":{"context_length":0}}]}`,
+		"invalid group id":   `{"groups":[{"id":"space id","label":"Bad"}],"models":[]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.Error(t, playground_setting.ValidatePlaygroundModelCatalogJSON(payload))
+		})
+	}
+}
+
 func TestPlaygroundQuotaPolicyResolvesGroupDisplayNames(t *testing.T) {
 	configureGroupIdentity(t)
 	settings := playground_setting.GetPlaygroundSetting()

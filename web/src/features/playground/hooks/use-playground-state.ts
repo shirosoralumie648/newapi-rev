@@ -26,6 +26,7 @@ import {
   DEFAULT_DEVELOPER_OPTIONS,
   DEFAULT_PARAMETER_ENABLED,
 } from '../constants'
+import { modelCatalogDefaultConfig } from '../lib/model-catalog'
 import { normalizeSessionTags } from '../lib/session-organization'
 import {
   applyMessageStateUpdate,
@@ -50,6 +51,7 @@ import type {
   PlaygroundContextSettings,
   PlaygroundContextSummary,
   PlaygroundDeveloperOptions,
+  PlaygroundModelCatalogDefaults,
   PlaygroundSession,
   PlaygroundSessionOrganization,
 } from '../types'
@@ -466,6 +468,14 @@ export function usePlaygroundState() {
     (overrides?: {
       config?: PlaygroundConfig
       parameterEnabled?: ParameterEnabled
+      /** Model of the new conversation, overriding the remembered value. */
+      model?: string
+      /**
+       * Curated defaults of that model. They apply only while this session is
+       * created; switching models later or reopening an existing conversation
+       * never re-applies them.
+       */
+      modelDefaults?: PlaygroundModelCatalogDefaults
       systemPrompt?: string
       openingMessage?: string
       suggestedQuestions?: string[]
@@ -475,15 +485,29 @@ export function usePlaygroundState() {
         (session) => session.id === latestActiveSessionIdRef.current
       )
       const defaults = newSessionDefaultsRef.current
-      const nextSession = createEmptySession(
+      // An explicit config (a preset or a replay draft) already states every
+      // sampling value, so its choices win over an entry's catalog defaults.
+      const catalogDefaults = overrides?.config
+        ? null
+        : modelCatalogDefaultConfig(overrides?.modelDefaults)
+      const baseConfig =
         overrides?.config ??
-          defaults?.config ??
-          currentSession?.config ??
-          DEFAULT_CONFIG,
-        overrides?.parameterEnabled ??
-          defaults?.parameterEnabled ??
-          currentSession?.parameterEnabled ??
-          DEFAULT_PARAMETER_ENABLED,
+        defaults?.config ??
+        currentSession?.config ??
+        DEFAULT_CONFIG
+      const nextSession = createEmptySession(
+        {
+          ...baseConfig,
+          ...(catalogDefaults?.config ?? {}),
+          model: overrides?.model ?? baseConfig.model,
+        },
+        {
+          ...(overrides?.parameterEnabled ??
+            defaults?.parameterEnabled ??
+            currentSession?.parameterEnabled ??
+            DEFAULT_PARAMETER_ENABLED),
+          ...(catalogDefaults?.parameterEnabled ?? {}),
+        },
         overrides?.systemPrompt ?? defaults?.systemPrompt ?? '',
         DEFAULT_CONTEXT_SETTINGS,
         null,

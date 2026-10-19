@@ -103,6 +103,11 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.PATCH("/comparisons/:runId", controller.UpdatePlaygroundComparisonRun)
 			playgroundRoute.DELETE("/comparisons/:runId", controller.DeletePlaygroundComparisonRun)
 			playgroundRoute.GET("/settings", controller.GetPlaygroundSettings)
+			// The curated catalog is readable by every signed-in account and
+			// writable only by an administrator; it decorates the selector and
+			// never changes model routing or billing.
+			playgroundRoute.GET("/model-catalog", controller.GetPlaygroundModelCatalog)
+			playgroundRoute.PUT("/model-catalog", middleware.AdminAuth(), controller.UpdatePlaygroundModelCatalog)
 			playgroundRoute.GET("/mcp/servers", controller.ListPlaygroundMCPServers)
 			playgroundRoute.POST("/mcp/:serverId/call", controller.CallPlaygroundMCPTool)
 			playgroundRoute.POST("/search", middleware.SearchRateLimit(), controller.PlaygroundWebSearch)

@@ -2716,6 +2716,18 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	pat := model.UserAccessToken{Name: "artifact route denial", TokenHash: model.AccessTokenFingerprint(patRaw), TokenHint: model.AccessTokenHint(patRaw)}
 	require.NoError(t, pat.SetScopes([]string{"profile:read"}))
 	require.NoError(t, model.CreateUserAccessToken(user.Id, &pat, service.AccessTokenMaxPerUser))
+	admin := model.User{Id: 990088, Username: "catalog-admin", Role: common.RoleAdminUser, Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1}
+	require.NoError(t, db.Create(&admin).Error)
+	adminKey, err := common.GenerateRandomCharsKey(32)
+	require.NoError(t, err)
+	adminSession := model.UserSession{SID: adminKey, UserID: admin.Id, Version: 1, UserAuthVersion: 1, Status: model.UserSessionStatusActive,
+		RefreshHash: "unused-test-refresh-hash", LoginMethod: "password", LastActiveAt: now, ExpiresAt: now + 3600}
+	require.NoError(t, model.CreateUserSession(&adminSession))
+	adminToken, _, err := service.IssueAccessToken(service.AuthIdentity{UserID: admin.Id, SessionID: adminSession.SID, UserAuthVersion: 1, SessionVersion: 1})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = model.UpdateOption("playground_setting.model_catalog", `{"groups":[],"models":[]}`)
+	})
 	engine := gin.New()
 	router.SetApiRouter(engine)
 	router.SetRelayRouter(engine)
@@ -2802,6 +2814,7 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodPatch, "/api/playground/workflows/history/missing"},
 		{http.MethodDelete, "/api/playground/workflows/history/missing"},
 		{http.MethodPost, "/api/playground/workflows/node-cache"},
+		{http.MethodGet, "/api/playground/model-catalog"},
 	} {
 		response := playgroundAuthenticatedRequest(t, engine, "", route.method, route.path, input)
 		assert.Equal(t, 401, response.Code, response.Body.String())
@@ -2810,6 +2823,29 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		assert.Equal(t, 403, response.Code, response.Body.String())
 		assert.Contains(t, response.Body.String(), "AUTH_SESSION_REQUIRED")
 	}
+
+	// The catalog is readable by a normal account, writable only by an
+	// administrator, and the read path hides entries the admin withdrew.
+	catalogPath := "/api/playground/model-catalog"
+	catalogRead := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, catalogPath, nil)
+	require.Equal(t, 200, catalogRead.Code, catalogRead.Body.String())
+	assert.Contains(t, catalogRead.Body.String(), `"success":true`)
+	catalogDenied := playgroundAuthenticatedRequest(t, engine, token, http.MethodPut, catalogPath, map[string]any{"catalog": map[string]any{}})
+	assert.Equal(t, 403, catalogDenied.Code, catalogDenied.Body.String())
+	catalogSaved := playgroundAuthenticatedRequest(t, engine, adminToken, http.MethodPut, catalogPath, map[string]any{
+		"catalog": map[string]any{
+			"groups": []any{map[string]any{"id": "recommended", "label": "Recommended"}},
+			"models": []any{
+				map[string]any{"model": "gpt-4o", "display_name": "GPT-4o", "group": "recommended"},
+				map[string]any{"model": "hidden-model", "hidden": true},
+			},
+		},
+	})
+	require.Equal(t, 200, catalogSaved.Code, catalogSaved.Body.String())
+	catalogRead = playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, catalogPath, nil)
+	require.Equal(t, 200, catalogRead.Code, catalogRead.Body.String())
+	assert.Contains(t, catalogRead.Body.String(), `"display_name":"GPT-4o"`)
+	assert.NotContains(t, catalogRead.Body.String(), "hidden-model")
 
 	// The arena routes resolve the account from the real session middleware.
 	// Personal scope is available to the owner, while instance scope keeps the
