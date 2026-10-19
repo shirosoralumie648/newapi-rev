@@ -2726,6 +2726,20 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	settingsResponse := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, "/api/playground/settings", nil)
 	require.Equal(t, 200, settingsResponse.Code, settingsResponse.Body.String())
 	assert.Contains(t, settingsResponse.Body.String(), `"sandbox_preview_enabled":false`)
+	assert.Contains(t, settingsResponse.Body.String(), `"mcp_enabled":false`)
+
+	// MCP proxying is a dashboard-session capability. A personal access token
+	// is rejected even with the option scope, and an anonymous caller gets 401.
+	for _, route := range []struct{ method, path string }{
+		{http.MethodGet, "/api/playground/mcp/servers"},
+		{http.MethodPost, "/api/playground/mcp/docs/call"},
+	} {
+		response := playgroundAuthenticatedRequest(t, engine, "", route.method, route.path, input)
+		assert.Equal(t, 401, response.Code, response.Body.String())
+		response = playgroundAuthenticatedRequest(t, engine, patRaw, route.method, route.path, input)
+		assert.Equal(t, 403, response.Code, response.Body.String())
+		assert.Contains(t, response.Body.String(), "AUTH_SESSION_REQUIRED")
+	}
 
 	// Canvas routes share the same session-only authentication contract.
 	canvasBase := "/api/playground/canvases"
