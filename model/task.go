@@ -285,11 +285,15 @@ type SyncTaskQueryParams struct {
 // JSON private_data column, so each supported database reads it with its own
 // operator; every branch returns NULL for a missing field, which never
 // matches. Wildcard characters in the prompt are escaped so a literal search
-// term cannot turn into a broader pattern.
+// term cannot turn into a broader pattern. A prompt search ignores case, which
+// no database applies on its own here: MySQL's JSON extractor yields a
+// binary-collated string and PostgreSQL's LIKE stays case-sensitive even under
+// a non-C collation, so both the extracted value and the escaped pattern are
+// folded to lowercase.
 func applyTaskGenerationFilters(query *gorm.DB, params SyncTaskQueryParams) *gorm.DB {
 	if prompt := strings.TrimSpace(params.GenerationPrompt); prompt != "" {
-		pattern := "%" + escapeTaskGenerationLike(prompt) + "%"
-		query = query.Where(taskGenerationTextExpression("prompt")+" LIKE ? ESCAPE '!'", pattern)
+		pattern := "%" + escapeTaskGenerationLike(strings.ToLower(prompt)) + "%"
+		query = query.Where("LOWER("+taskGenerationTextExpression("prompt")+") LIKE ? ESCAPE '!'", pattern)
 	}
 	if modelName := strings.TrimSpace(params.GenerationModel); modelName != "" {
 		query = query.Where(taskGenerationTextExpression("model")+" = ?", modelName)
