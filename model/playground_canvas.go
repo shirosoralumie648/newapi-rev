@@ -652,9 +652,18 @@ func DeletePlaygroundCanvasProject(userID int, id string) error {
 		if err != nil {
 			return err
 		}
+		now := common.GetTimestamp()
+		// Public links stop resolving as soon as the board enters the trash.
+		// Restoring it later does not resurrect an old link; the owner has to
+		// create a new one deliberately.
+		if err := tx.Model(&PlaygroundSessionShare{}).
+			Where("canvas_id = ? AND user_id = ? AND revoked_at = 0", project.ID, userID).
+			Update("revoked_at", now).Error; err != nil {
+			return err
+		}
 		return tx.Model(&PlaygroundCanvasProject{}).
 			Where("id = ? AND user_id = ? AND deleted_at = 0", project.ID, userID).
-			Update("deleted_at", common.GetTimestamp()).Error
+			Update("deleted_at", now).Error
 	})
 }
 
@@ -737,6 +746,11 @@ func purgePlaygroundCanvasProjectTx(tx *gorm.DB, project *PlaygroundCanvasProjec
 		return nil, err
 	}
 	if err := tx.Where("canvas_id = ? AND user_id = ?", project.ID, project.UserID).Delete(&PlaygroundCanvasSnapshot{}).Error; err != nil {
+		return nil, err
+	}
+	// Share links are an access mechanism, not content: they are deleted with
+	// the board and their hashes never enter an export.
+	if err := tx.Where("canvas_id = ? AND user_id = ?", project.ID, project.UserID).Delete(&PlaygroundSessionShare{}).Error; err != nil {
 		return nil, err
 	}
 	if err := tx.Where("id = ? AND user_id = ?", project.ID, project.UserID).Delete(&PlaygroundCanvasProject{}).Error; err != nil {

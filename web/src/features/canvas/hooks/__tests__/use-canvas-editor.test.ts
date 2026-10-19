@@ -17,7 +17,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { act, fireEvent, renderHook } from '@testing-library/react'
-import type { MouseEvent as ReactMouseEvent } from 'react'
 import { expect, test, vi } from 'vitest'
 
 import { CANVAS_MAX_NODES } from '../../constants'
@@ -650,7 +649,7 @@ test('dragging snaps to a nearby edge and records one history entry', () => {
     ...hook.result.current.nodes[1],
     position: { x: 258, y: 0 },
   } as CanvasFlowNode
-  const event = new MouseEvent('mousedown') as unknown as ReactMouseEvent
+  const event = new MouseEvent('mousedown')
 
   act(() => hook.result.current.handleNodeDragStart(event, dragged, [dragged]))
   act(() => hook.result.current.handleNodeDrag(event, dragged, [dragged]))
@@ -738,6 +737,66 @@ test('addGraph refuses a graph that does not fit the canvas budget', () => {
   expect(created).toBeNull()
   expect(hook.result.current.nodes).toHaveLength(CANVAS_MAX_NODES)
   expect(onChange).not.toHaveBeenCalled()
+})
+
+test('setWorkflowPreferredResult switches a batch preference in one history entry', () => {
+  const document: CanvasServerDocument = {
+    nodes: [
+      {
+        id: 't1',
+        type: 'task',
+        position: { x: 0, y: 0 },
+        data: {
+          workflow: {
+            model: 'gpt-image-1',
+            generation: 'image',
+            preferredResultNodeId: 'r1',
+          },
+        },
+      },
+      {
+        id: 'r1',
+        type: 'task-result',
+        position: { x: 240, y: 0 },
+        data: { workflow: { sourceNodeId: 't1', preferred: true } },
+      },
+      {
+        id: 'r2',
+        type: 'task-result',
+        position: { x: 240, y: 220 },
+        data: { workflow: { sourceNodeId: 't1', preferred: false } },
+      },
+    ],
+    edges: [],
+  }
+  const onChange = vi.fn()
+  const hook = renderHook(() => useCanvasEditor(document, onChange))
+
+  act(() => hook.result.current.setWorkflowPreferredResult('r2'))
+
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 't1')?.data.workflow
+      ?.preferredResultNodeId
+  ).toBe('r2')
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 'r1')?.data.workflow
+      ?.preferred
+  ).toBe(false)
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 'r2')?.data.workflow
+      ?.preferred
+  ).toBe(true)
+  expect(onChange).toHaveBeenCalledTimes(1)
+
+  act(() => hook.result.current.undo())
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 't1')?.data.workflow
+      ?.preferredResultNodeId
+  ).toBe('r1')
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 'r1')?.data.workflow
+      ?.preferred
+  ).toBe(true)
 })
 
 test('selectNode marks exactly one node and stays out of the undo history', () => {

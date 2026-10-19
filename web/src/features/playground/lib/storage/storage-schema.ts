@@ -131,7 +131,7 @@ const sourceSchema = z.object({
 // Web-search snapshot of one user turn. The bounds mirror the server-side
 // validation of a stored message: exceeding one rejects the whole store
 // instead of silently dropping the replay context.
-const messageSearchSchema = z.object({
+export const messageSearchSchema = z.object({
   query: z.string().min(1).max(512),
   provider: z.string().max(32).optional(),
   results: z
@@ -229,6 +229,14 @@ export const playgroundSessionSchema = z.object({
   context: playgroundContextSchema.optional(),
   /** Absent or null when the conversation sends its full stored history. */
   contextSummary: playgroundContextSummarySchema.nullable().optional(),
+  /**
+   * Organization fields added after the first server sync. They stay optional
+   * for older snapshots, and a corrupt value degrades to the neutral state
+   * instead of rejecting the whole conversation.
+   */
+  pinned: z.boolean().catch(false).optional(),
+  archived: z.boolean().catch(false).optional(),
+  tags: z.array(z.string()).catch([]).optional(),
   messages: messagesSchema,
   server: z
     .object({

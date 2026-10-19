@@ -89,6 +89,9 @@ export function playgroundSnapshot(session: PlaygroundSession): string {
     knowledgeBaseIds: session.knowledgeBaseIds,
     context: session.context,
     contextSummary: session.contextSummary,
+    pinned: session.pinned,
+    archived: session.archived,
+    tags: session.tags,
     messages: normalizeMessagesForStorage(session.messages),
   })
 }
@@ -142,6 +145,9 @@ export async function hydratePlaygroundWorkspace(
       knowledgeBaseIds: session.knowledgeBaseIds,
       context: session.context,
       contextSummary: session.contextSummary,
+      pinned: session.pinned,
+      archived: session.archived,
+      tags: session.tags,
       messages,
       server: {
         id: session.id,
@@ -193,6 +199,9 @@ export async function savePlaygroundSession(
         knowledge_base_ids: draft.knowledgeBaseIds,
         context: draft.context,
         context_summary: draft.contextSummary,
+        pinned: draft.pinned,
+        archived: draft.archived,
+        tags: draft.tags,
         messages,
       },
       signal
@@ -230,7 +239,10 @@ export async function savePlaygroundSession(
         JSON.stringify(draft.knowledgeBaseIds) ||
       JSON.stringify(created.context) !== JSON.stringify(draft.context) ||
       JSON.stringify(created.contextSummary) !==
-        JSON.stringify(draft.contextSummary)
+        JSON.stringify(draft.contextSummary) ||
+      created.pinned !== draft.pinned ||
+      created.archived !== draft.archived ||
+      JSON.stringify(created.tags) !== JSON.stringify(draft.tags)
     ) {
       throw new Error(
         'Playground changed on another device. Reload before saving.'
@@ -252,6 +264,9 @@ export async function savePlaygroundSession(
       knowledge_base_ids: draft.knowledgeBaseIds,
       context: draft.context,
       context_summary: draft.contextSummary,
+      pinned: draft.pinned,
+      archived: draft.archived,
+      tags: draft.tags,
       revision: draft.server.revision,
     },
     signal

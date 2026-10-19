@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -34,6 +34,7 @@ import {
 } from '@/components/ai-elements/conversation'
 import { Loader } from '@/components/ai-elements/loader'
 import { Message } from '@/components/ai-elements/message'
+import { cn } from '@/lib/utils'
 
 import type { PlaygroundArtifactSummary } from '../../artifact-api'
 import { MESSAGE_ROLES } from '../../constants'
@@ -69,6 +70,12 @@ interface PlaygroundChatProps {
   /** Settled cost rows of the conversation's relay requests, by request id. */
   costs?: ReadonlyMap<string, PlaygroundMessageCost>
   onCopyMessage?: (message: MessageType) => void
+  /** Sets the message as the quote of the next composer turn. */
+  onQuoteMessage?: (message: MessageType) => void
+  /** Copies the conversation up to this message into a new conversation. */
+  onForkMessage?: (message: MessageType) => void
+  /** Message a cross-session search or a deep link wants the reader to see. */
+  highlightedMessageKey?: string | null
   onReadAloud?: (message: MessageType) => void
   onRegenerateMessage?: (message: MessageType) => void
   /** Continue the last reply when it was cut short by the token cap or a stop. */
@@ -113,6 +120,9 @@ export function PlaygroundChat({
   messages,
   costs,
   onCopyMessage,
+  onQuoteMessage,
+  onForkMessage,
+  highlightedMessageKey,
   onReadAloud,
   onRegenerateMessage,
   onContinueMessage,
@@ -147,11 +157,35 @@ export function PlaygroundChat({
   const [sourceMessageKeys, setSourceMessageKeys] = useState<
     ReadonlySet<string>
   >(() => new Set())
-  const visibleMessageOffset = Math.max(
+  const contentRef = useRef<HTMLDivElement | null>(null)
+  const defaultMessageOffset = Math.max(
     0,
     messages.length - MAX_RENDERED_HISTORY_MESSAGES
   )
+  // A highlighted message (cross-session search result or deep link) may sit
+  // outside the rendered tail, so the window starts far enough back to include
+  // it while still keeping the newest messages in view.
+  const highlightedMessageIndex = highlightedMessageKey
+    ? messages.findIndex((message) => message.key === highlightedMessageKey)
+    : -1
+  const visibleMessageOffset =
+    highlightedMessageIndex >= 0
+      ? Math.min(defaultMessageOffset, highlightedMessageIndex)
+      : defaultMessageOffset
   const visibleMessages = messages.slice(visibleMessageOffset)
+
+  // Scroll the highlighted message into view once it is rendered. The key is
+  // matched through the data attribute instead of a selector so an imported or
+  // deep-linked key with quotes or backslashes cannot break the lookup. jsdom
+  // and other environments without layout keep the highlight without a scroll.
+  useEffect(() => {
+    if (!highlightedMessageKey) return
+    const element = Array.from(
+      contentRef.current?.querySelectorAll<HTMLElement>('[data-message-key]') ??
+        []
+    ).find((node) => node.dataset.messageKey === highlightedMessageKey)
+    element?.scrollIntoView?.({ block: 'center' })
+  }, [highlightedMessageKey])
 
   function handleToggleMessageSource(message: MessageType): void {
     setSourceMessageKeys((currentKeys) => {
@@ -195,11 +229,14 @@ export function PlaygroundChat({
     const alignment = getMessageAlignment(message, messageLayoutMode)
     const isSourceVisible = sourceMessageKeys.has(message.key)
     const isLastMessage = messageIndex === messages.length - 1
+    const isHighlighted = message.key === highlightedMessageKey
     const messageActions = (
       <MessageActions
         canContinue={isLastMessage && isMessageTruncated(message)}
         message={message}
         onCopy={onCopyMessage}
+        onQuote={onQuoteMessage}
+        onFork={onForkMessage}
         onReadAloud={onReadAloud}
         onContinue={onContinueMessage}
         onRegenerate={onRegenerateMessage}
@@ -285,7 +322,12 @@ export function PlaygroundChat({
 
     return (
       <Message
-        className='group flex-row-reverse py-2.5'
+        className={cn(
+          'group flex-row-reverse py-2.5',
+          isHighlighted && 'bg-primary/5 ring-primary/40 rounded-lg ring-1'
+        )}
+        data-highlighted={isHighlighted ? 'true' : undefined}
+        data-message-key={message.key}
         from={message.from}
         key={message.key}
       >
@@ -356,7 +398,7 @@ export function PlaygroundChat({
     <Conversation>
       {/* Remove outer padding; apply padding to inner centered container to align with input */}
       <ConversationContent className='p-0'>
-        <div className='mx-auto w-full max-w-4xl px-4 py-4'>
+        <div className='mx-auto w-full max-w-4xl px-4 py-4' ref={contentRef}>
           {artifacts && onOpenArtifact ? (
             <PlaygroundArtifactLinks
               artifacts={artifacts}

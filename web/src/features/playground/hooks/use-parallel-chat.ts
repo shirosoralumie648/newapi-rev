@@ -39,6 +39,7 @@ import type {
   PlaygroundConfig,
   PlaygroundContextSettings,
   PlaygroundContextSummary,
+  PlaygroundPendingQuote,
   ParameterEnabled,
 } from '../types'
 
@@ -132,7 +133,9 @@ export function useParallelChat(options: UseParallelChatOptions) {
       groupMessageKey: string,
       entries: Array<{ model: string; versionIndex: number }>,
       contextSummary: PlaygroundContextSummary | null,
-      prepare?: (message: Message) => Message
+      prepare?: (message: Message) => Message,
+      /** Composer quote shared by every request of the comparison. */
+      quote?: PlaygroundPendingQuote | null
     ) => {
       const generation = generationRef.current + 1
       generationRef.current = generation
@@ -158,7 +161,8 @@ export function useParallelChat(options: UseParallelChatOptions) {
             latest.parameterEnabled,
             latest.systemPrompt,
             { settings: latest.contextSettings, summary: contextSummary },
-            latest.memoryBlock
+            latest.memoryBlock,
+            quote
           )
 
           let requestId: string | undefined
@@ -224,7 +228,7 @@ export function useParallelChat(options: UseParallelChatOptions) {
    * UI and the persisted snapshot already hold them.
    */
   const sendParallelChat = useCallback(
-    (messages: Message[]) => {
+    (messages: Message[], quote?: PlaygroundPendingQuote | null) => {
       const group = messages.at(-1)
       if (!isParallelMessage(group)) return
       const entries = group.versions
@@ -270,7 +274,9 @@ export function useParallelChat(options: UseParallelChatOptions) {
           prepared.slice(0, -1),
           group.key,
           entries,
-          contextSummary
+          contextSummary,
+          undefined,
+          quote
         )
       })()
     },

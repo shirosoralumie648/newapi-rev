@@ -44,6 +44,10 @@ var (
 	// ErrPlaygroundContextSummaryLimit is raised when a client tries to persist
 	// a compression node bigger than the stored contract allows.
 	ErrPlaygroundContextSummaryLimit = errors.New("Playground context summary limit exceeded.")
+	// ErrPlaygroundSessionArchived is raised when a client tries to pin a
+	// conversation that is already archived. Compressing both states into one
+	// row would make the client groups ambiguous, so the request is rejected.
+	ErrPlaygroundSessionArchived = errors.New("Cannot pin an archived Playground conversation.")
 	// errPlaygroundMessageSequence only guards the internal ordering contract of
 	// the snapshot compatibility writer; request handlers validate their own
 	// input before reaching it.
@@ -83,6 +87,14 @@ type playgroundStoredMessageReferences struct {
 	} `json:"versions"`
 }
 
+// PlaygroundSessionOrganization carries the two explicit state switches of a
+// conversation update. A nil pointer keeps the stored value; booleans are not
+// stored directly because the row records when each state began.
+type PlaygroundSessionOrganization struct {
+	Pinned   *bool
+	Archived *bool
+}
+
 type PlaygroundSession struct {
 	CreatedNow       bool    `json:"-" gorm:"-"`
 	ID               string  `json:"id" gorm:"size:128;primaryKey"`
@@ -118,6 +130,19 @@ type PlaygroundSession struct {
 	// JSON array of ids. Retrieval happens per send, so changing a base's
 	// documents affects the next turn without rewriting the conversation.
 	KnowledgeBaseIDs string `json:"-" gorm:"type:text"`
+	// PinnedAt is the timestamp the conversation was pinned, or 0 when it is
+	// not pinned. A pinned conversation stays in the pinned section of the
+	// client list; the server never reorders the list by it.
+	PinnedAt int64 `json:"pinned_at" gorm:"not null;default:0"`
+	// ArchivedAt is the timestamp the conversation was archived, or 0 when it
+	// is active. Archiving clears the pin in the same transaction; archived
+	// conversations stay in the ordinary list page so the client can group and
+	// restore them without a second endpoint.
+	ArchivedAt int64 `json:"archived_at" gorm:"not null;default:0"`
+	// Tags stores the conversation labels as a JSON array of strings. The
+	// column stays nullable so an existing installation can add it on every
+	// dialect; a NULL value reads back as no tags.
+	Tags string `json:"-" gorm:"type:text"`
 	// DeletedAt is the trash tombstone: 0 means the conversation is active, and
 	// a positive value is the timestamp it was soft-deleted. A trashed
 	// conversation keeps its messages, attachments and artifacts — and its
@@ -279,7 +304,7 @@ func ListPlaygroundSessions(userID int, offset, limit int) ([]PlaygroundSession,
 	return sessions, count, err
 }
 
-func UpdatePlaygroundSessionFields(userID int, id string, revision int64, updates map[string]any) (*PlaygroundSession, error) {
+func UpdatePlaygroundSessionFields(userID int, id string, revision int64, updates map[string]any, organization PlaygroundSessionOrganization) (*PlaygroundSession, error) {
 	var session PlaygroundSession
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		if err := lockForUpdate(tx).Where("id = ? AND user_id = ? AND deleted_at = 0", id, userID).First(&session).Error; err != nil {
@@ -288,7 +313,43 @@ func UpdatePlaygroundSessionFields(userID int, id string, revision int64, update
 		if session.Revision != revision {
 			return ErrPlaygroundConflict
 		}
-		updates["updated_at"] = common.GetTimestamp()
+		now := common.GetTimestamp()
+		if organization.Pinned != nil || organization.Archived != nil {
+			archived := session.ArchivedAt > 0
+			if organization.Archived != nil {
+				archived = *organization.Archived
+				if archived {
+					// An archived conversation never keeps a pin, so a client
+					// never has to reconcile two contradictory groups. Keep the
+					// original archive time when the client repeats the state.
+					if session.ArchivedAt == 0 {
+						updates["archived_at"] = now
+					}
+					updates["pinned_at"] = 0
+				} else {
+					updates["archived_at"] = 0
+				}
+			}
+			if organization.Pinned != nil {
+				switch {
+				case !*organization.Pinned:
+					updates["pinned_at"] = 0
+				case archived && (organization.Archived == nil || !*organization.Archived):
+					// Asking to pin a conversation that is already archived is
+					// contradictory; an archive request in the same update wins
+					// and leaves the conversation unpinned instead.
+					return ErrPlaygroundSessionArchived
+				case archived:
+					updates["pinned_at"] = 0
+				default:
+					// Repeating "pinned" keeps the original pin time.
+					if session.PinnedAt == 0 {
+						updates["pinned_at"] = now
+					}
+				}
+			}
+		}
+		updates["updated_at"] = now
 		updates["revision"] = revision + 1
 		result := tx.Model(&PlaygroundSession{}).Where("id = ? AND user_id = ? AND revision = ?", id, userID, revision).Updates(updates)
 		if result.Error != nil {
@@ -312,9 +373,18 @@ func DeletePlaygroundSession(userID int, id string) error {
 		if err != nil {
 			return err
 		}
+		now := common.GetTimestamp()
+		// A public link must stop resolving as soon as the conversation enters
+		// the trash. Restoring it later does not resurrect the old link; the
+		// owner has to create a new one deliberately.
+		if err := tx.Model(&PlaygroundSessionShare{}).
+			Where("session_id = ? AND user_id = ? AND revoked_at = 0", session.ID, userID).
+			Update("revoked_at", now).Error; err != nil {
+			return err
+		}
 		return tx.Model(&PlaygroundSession{}).
 			Where("id = ? AND user_id = ? AND deleted_at = 0", session.ID, userID).
-			Update("deleted_at", common.GetTimestamp()).Error
+			Update("deleted_at", now).Error
 	})
 }
 
@@ -413,6 +483,11 @@ func purgePlaygroundSessionTx(tx *gorm.DB, userID int, session *PlaygroundSessio
 		return nil, err
 	}
 	if err := tx.Where("session_id = ? AND user_id = ?", session.ID, userID).Delete(&PlaygroundMessage{}).Error; err != nil {
+		return nil, err
+	}
+	// Share links are an access mechanism, not content: they are deleted with
+	// the conversation and their hashes never enter an export.
+	if err := tx.Where("session_id = ? AND user_id = ?", session.ID, userID).Delete(&PlaygroundSessionShare{}).Error; err != nil {
 		return nil, err
 	}
 	// Memories outlive the conversation they were extracted from, but a purged

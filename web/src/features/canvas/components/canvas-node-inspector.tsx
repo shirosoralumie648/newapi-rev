@@ -50,6 +50,7 @@ import {
   isCanvasWorkflowResult,
   isCanvasWorkflowStep,
   type CanvasWorkflowMention,
+  type CanvasWorkflowModelCapability,
 } from '../lib/canvas-workflow'
 import type { CanvasFlowNode } from '../types'
 import { CanvasNodeResultFields } from './canvas-node-result-fields'
@@ -68,11 +69,18 @@ interface CanvasNodeInspectorProps {
   disabled?: boolean
   models?: ModelOption[]
   groups?: GroupOption[]
+  /** Endpoint and task-usage metadata keyed by model name, when available. */
+  modelCapabilities?: Record<string, CanvasWorkflowModelCapability>
   /** Directly connected upstream nodes the instruction can reference. */
   mentions?: CanvasWorkflowMention[]
   /** Transient run previews of the selected node; never persisted. */
   previews?: string[]
   runPhase?: CanvasWorkflowRunPhase
+  /** Whether the selected result is the preferred member of its batch. */
+  preferredResult?: boolean
+  /** Whether the selected result has a sibling to choose between. */
+  canPreferResult?: boolean
+  onPreferResult?: (nodeId: string) => void
   onUpdateData: (
     id: string,
     update: CanvasNodeDataUpdate,
@@ -149,6 +157,7 @@ export function CanvasNodeInspector(props: CanvasNodeInspectorProps) {
           disabled={props.disabled}
           groups={props.groups ?? []}
           mentions={props.mentions ?? []}
+          modelCapabilities={props.modelCapabilities}
           models={props.models ?? []}
           node={node}
           onRetry={props.onRetry}
@@ -160,9 +169,12 @@ export function CanvasNodeInspector(props: CanvasNodeInspectorProps) {
 
       {resultFieldsShown && props.onRetry ? (
         <CanvasNodeResultFields
+          canPrefer={props.canPreferResult}
           disabled={props.disabled}
           node={node}
+          onPrefer={props.onPreferResult}
           onRetry={props.onRetry}
+          preferred={props.preferredResult}
           runPhase={props.runPhase ?? 'idle'}
         />
       ) : null}

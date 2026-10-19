@@ -112,6 +112,7 @@ export const API_ENDPOINTS = {
   PLAYGROUND_SEARCH: '/api/playground/search',
   PLAYGROUND_MESSAGE_COSTS: '/api/playground/message-costs',
   PLAYGROUND_ASSETS: '/api/playground/assets',
+  PLAYGROUND_SHARED: '/api/playground/shared',
   PLAYGROUND_TASKS: '/api/playground/tasks',
   PLAYGROUND_WORKFLOW_ESTIMATE: '/api/playground/workflows/estimate',
   PLAYGROUND_WORKFLOW_RUNS: '/api/playground/workflows/runs',
@@ -247,6 +248,13 @@ export const PLAYGROUND_AUTO_TITLE_MAX_TOKENS = 64
 export const PLAYGROUND_AUTO_TITLE_SYSTEM_PROMPT = `Write a short title for the following conversation. Use the language of the conversation, keep it at most ${PLAYGROUND_AUTO_TITLE_MAX_LENGTH} characters, and reply with the title only, without quotes or ending punctuation.`
 
 export const MAX_STORED_SESSIONS = 20
+// Conversation tags are a client-side organizing aid. The server enforces the
+// same bounds and stays authoritative.
+export const MAX_SESSION_TAGS = 10
+export const MAX_SESSION_TAG_LENGTH = 24
+// Mirrors the server's stored-title bound: a longer title is refused instead of
+// stored trimmed, so a fork title is cut to the same rune count.
+export const PLAYGROUND_SESSION_TITLE_MAX_LENGTH = 200
 
 // Assistant preset display bounds. The server validates the same values and
 // owns the authoritative per-account quota (preset count and prompt bytes).
@@ -399,6 +407,12 @@ export const PLAYGROUND_IMAGE_SIZES = [
   '1024x1792',
 ] as const
 export const PLAYGROUND_VIDEO_DURATIONS = [5, 10] as const
+// The canvas custom-size and seed controls mirror these bounds. The server
+// validates the same WIDTHxHEIGHT and seed ranges on /pg before billing.
+export const PLAYGROUND_GENERATION_SIZE_MIN = 64
+export const PLAYGROUND_GENERATION_SIZE_MAX = 8192
+export const PLAYGROUND_GENERATION_SEED_MIN = 1
+export const PLAYGROUND_GENERATION_SEED_MAX = 2 ** 31 - 1
 // Mirrors `dto.MaxImageN` (image count is a billing multiplier) and
 // `relaycommon.MaxTaskDurationSeconds`; the client never sends a value outside
 // these bounds even though the relay validates the request again.
@@ -484,6 +498,8 @@ export const MESSAGE_ACTION_BUTTON_STYLES = {
 export const MESSAGE_ACTION_LABELS = {
   COPY: 'Copy',
   COPIED: 'Copied!',
+  QUOTE: 'Quote',
+  FORK: 'Fork from here',
   READ_ALOUD: 'Read aloud',
   REGENERATE: 'Regenerate',
   SHOW_PREVIEW: 'Show preview',
@@ -495,4 +511,19 @@ export const MESSAGE_ACTION_LABELS = {
   GENERATE_VIDEO: 'Generate video',
   NO_CONTENT: 'No content to copy',
   WAIT_GENERATION: 'Please wait for the current generation to complete',
+} as const
+
+// Composer quote. Quoting an earlier message carries a snapshot of its visible
+// text into the next request only, so the stored message contract stays
+// untouched. The protocol frame below is model input, not user interface text,
+// and the snapshot is bounded to keep one quote from dominating the request.
+export const PLAYGROUND_QUOTE_TEXT_MAX_CHARS = 4000
+export const PLAYGROUND_QUOTE_CONTEXT_OPEN = '[quoted message: {{key}}]'
+export const PLAYGROUND_QUOTE_CONTEXT_CLOSE = '[/quoted message]'
+
+// Conversation fork. The copy is rebuilt through the ordinary create/upload
+// chain, so the server enforces the same message and attachment quotas as a
+// manual conversation; a refusal leaves the source conversation untouched.
+export const PLAYGROUND_FORK_ERRORS = {
+  FAILED: 'Unable to fork the conversation.',
 } as const

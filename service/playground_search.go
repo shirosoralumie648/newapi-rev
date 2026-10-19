@@ -111,7 +111,7 @@ func RunPlaygroundWebSearch(ctx context.Context, query string) (PlaygroundSearch
 		return PlaygroundSearchResponse{}, ErrPlaygroundSearchInvalidQuery
 	}
 
-	provider := strings.TrimSpace(setting.Provider)
+	provider := strings.ToLower(strings.TrimSpace(setting.Provider))
 	endpoint, err := playgroundSearchEndpoint(provider, setting.BaseURL)
 	if err != nil {
 		return PlaygroundSearchResponse{}, err
