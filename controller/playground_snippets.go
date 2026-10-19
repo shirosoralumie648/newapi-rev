@@ -74,7 +74,8 @@ type playgroundSnippetResponse struct {
 
 // playgroundSnippetExportDocument is the portable template record. It carries
 // every immutable version plus the production pointer so a round trip restores
-// the exact history; ids, ownership and timestamps are deliberately omitted.
+// the exact history; ids and ownership are deliberately omitted, while each
+// version keeps its created_at so a re-export of imported data is stable.
 type playgroundSnippetExportDocument struct {
 	Format        string                    `json:"format"`
 	SchemaVersion int                       `json:"schema_version"`
@@ -351,6 +352,7 @@ func ImportPlaygroundSnippet(c *gin.Context) {
 	// Versions must be contiguous 1..N in ascending order: the stored history
 	// is append-only, so a file with gaps cannot be represented.
 	contents := make([]string, 0, len(document.Template.Versions))
+	versionCreatedAt := make([]int64, 0, len(document.Template.Versions))
 	for index := range document.Template.Versions {
 		if document.Template.Versions[index].Version != index+1 {
 			writePlaygroundError(c, common.NewMessage("Invalid prompt snippet file."))
@@ -363,26 +365,19 @@ func ImportPlaygroundSnippet(c *gin.Context) {
 			return
 		}
 		contents = append(contents, validated)
+		versionCreatedAt = append(versionCreatedAt, document.Template.Versions[index].CreatedAt)
 	}
 	production := document.Template.ProductionVersion
 	if production < 0 || production > len(contents) {
 		writePlaygroundError(c, common.NewMessage("Invalid prompt snippet file."))
 		return
 	}
-	snippet, err := model.ImportPlaygroundSnippet(c.GetInt("id"), name, contents, production)
+	snippet, versions, err := model.ImportPlaygroundSnippet(c.GetInt("id"), name, contents, versionCreatedAt, production)
 	if err != nil {
 		writePlaygroundError(c, err)
 		return
 	}
-	response := playgroundDecodeSnippet(snippet)
-	response.Versions = make([]playgroundSnippetVersionResponse, 0, len(contents))
-	for index := range contents {
-		response.Versions = append(response.Versions, playgroundSnippetVersionResponse{
-			Version: index + 1, Content: contents[index],
-			ByteSize: int64(len(contents[index])), CreatedAt: snippet.CreatedAt,
-		})
-	}
-	common.ApiSuccess(c, response)
+	common.ApiSuccess(c, playgroundDecodeSnippetDetail(snippet, versions))
 }
 
 func DeletePlaygroundSnippet(c *gin.Context) {

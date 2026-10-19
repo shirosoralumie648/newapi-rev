@@ -4504,6 +4504,18 @@ func TestPlaygroundSnippetPersistenceAndOwnership(t *testing.T) {
 			beforeExport := playgroundRequest(t, 7, http.MethodPost, "/api/playground/snippets/"+id+"/rollback", map[string]any{"version": 2}, controller.RollbackPlaygroundSnippet)
 			require.Equal(t, http.StatusOK, beforeExport.Code, beforeExport.Body.String())
 
+			// Give the stored revisions distinct historical timestamps. Importing
+			// a moment later would otherwise stamp every row with the same
+			// current second and hide whether the file times were preserved.
+			require.NoError(t, db.Where("snippet_id = ?", id).Order("version").Find(&versions).Error)
+			require.Len(t, versions, 3)
+			versionCreatedAt := make([]int64, len(versions))
+			for index := range versions {
+				versionCreatedAt[index] = 1_700_000_000 + int64(index)
+				require.NoError(t, db.Model(&model.PlaygroundSnippetVersion{}).Where("id = ?", versions[index].ID).
+					Update("created_at", versionCreatedAt[index]).Error)
+			}
+
 			// Export renders the full history, and importing the document
 			// restores it for the same account as a new template.
 			exported := playgroundRequest(t, 7, http.MethodGet, "/api/playground/snippets/"+id+"/export", nil, controller.ExportPlaygroundSnippet)
@@ -4542,6 +4554,9 @@ func TestPlaygroundSnippetPersistenceAndOwnership(t *testing.T) {
 			assert.Equal(t, "Check every endpoint for owner scoping.", document.Template.Versions[0].Content)
 			assert.Equal(t, second, document.Template.Versions[1].Content)
 			assert.Equal(t, third, document.Template.Versions[2].Content)
+			for index := range document.Template.Versions {
+				assert.Equal(t, versionCreatedAt[index], document.Template.Versions[index].CreatedAt)
+			}
 
 			imported := playgroundRequest(t, 7, http.MethodPost, "/api/playground/snippets/import", []byte(exportEnvelope.Data.Content), controller.ImportPlaygroundSnippet)
 			require.Equal(t, http.StatusOK, imported.Code, imported.Body.String())
@@ -4556,7 +4571,40 @@ func TestPlaygroundSnippetPersistenceAndOwnership(t *testing.T) {
 			assert.Equal(t, 3, importedEnvelope.Data.VersionCount)
 			assert.Equal(t, 2, importedEnvelope.Data.ProductionVersion)
 			assert.Equal(t, second, importedEnvelope.Data.Content)
+			assert.Equal(t, versionCreatedAt[0], importedEnvelope.Data.CreatedAt, "the template keeps its first revision's time")
 			require.Len(t, importedEnvelope.Data.Versions, 3)
+			for index := range importedEnvelope.Data.Versions {
+				assert.Equal(t, versionCreatedAt[index], importedEnvelope.Data.Versions[index].CreatedAt)
+			}
+			var importedVersions []model.PlaygroundSnippetVersion
+			require.NoError(t, db.Where("snippet_id = ?", importedEnvelope.Data.ID).Order("version").Find(&importedVersions).Error)
+			require.Len(t, importedVersions, 3)
+			for index := range importedVersions {
+				assert.Equal(t, versionCreatedAt[index], importedVersions[index].CreatedAt)
+			}
+			// Exporting the imported template produces the same portable history,
+			// timestamps included: the round trip is stable, not just lossless in
+			// content.
+			reexported := playgroundRequest(t, 7, http.MethodGet, "/api/playground/snippets/"+importedEnvelope.Data.ID+"/export", nil, controller.ExportPlaygroundSnippet)
+			require.Equal(t, http.StatusOK, reexported.Code, reexported.Body.String())
+			var reexportEnvelope struct {
+				Success bool
+				Data    struct {
+					Content string `json:"content"`
+				}
+			}
+			require.NoError(t, common.Unmarshal(reexported.Body.Bytes(), &reexportEnvelope))
+			var reexportDocument struct {
+				Template struct {
+					Name              string                  `json:"name"`
+					ProductionVersion int                     `json:"production_version"`
+					Versions          []snippetVersionPayload `json:"versions"`
+				} `json:"template"`
+			}
+			require.NoError(t, common.UnmarshalJsonStr(reexportEnvelope.Data.Content, &reexportDocument))
+			assert.Equal(t, document.Template.Name, reexportDocument.Template.Name)
+			assert.Equal(t, document.Template.ProductionVersion, reexportDocument.Template.ProductionVersion)
+			assert.Equal(t, document.Template.Versions, reexportDocument.Template.Versions)
 			require.NoError(t, db.Where("user_id = ?", 7).First(&usage).Error)
 			assert.EqualValues(t, 2, usage.Snippets)
 			assert.EqualValues(t, 6, usage.SnippetVersions)
@@ -4626,6 +4674,22 @@ func TestPlaygroundSnippetPersistenceAndOwnership(t *testing.T) {
 			countOverflow := playgroundRequest(t, 7, http.MethodPost, "/api/playground/snippets", map[string]any{"name": "One too many", "content": "x"}, controller.CreatePlaygroundSnippet)
 			assert.Equal(t, http.StatusUnprocessableEntity, countOverflow.Code, countOverflow.Body.String())
 			assert.Contains(t, countOverflow.Body.String(), "PLAYGROUND_SNIPPET_LIMIT_EXCEEDED")
+			// A positive group override replaces the global default for the
+			// owner's whole snippet budget, and both the listing and the write
+			// path resolve it through the same policy.
+			usePlaygroundGroupQuota(t, "default", playground_setting.PlaygroundQuotaPolicy{SnippetUserMaxCount: 2})
+			var groupListing struct {
+				Success bool
+				Data    struct {
+					Limit int `json:"limit"`
+				}
+			}
+			groupLimited := playgroundRequest(t, 7, http.MethodGet, "/api/playground/snippets", nil, controller.ListPlaygroundSnippets)
+			require.NoError(t, common.Unmarshal(groupLimited.Body.Bytes(), &groupListing))
+			assert.Equal(t, 2, groupListing.Data.Limit, "the group override wins over the tighter global default")
+			groupOverflow := playgroundRequest(t, 7, http.MethodPost, "/api/playground/snippets", map[string]any{"name": "Group overflow", "content": "x"}, controller.CreatePlaygroundSnippet)
+			assert.Equal(t, http.StatusUnprocessableEntity, groupOverflow.Code, groupOverflow.Body.String())
+			assert.Contains(t, groupOverflow.Body.String(), "PLAYGROUND_SNIPPET_LIMIT_EXCEEDED")
 
 			// Deleting the template releases its versions and both counters.
 			deleted := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/snippets/"+id, nil, controller.DeletePlaygroundSnippet)
