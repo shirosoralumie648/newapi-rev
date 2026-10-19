@@ -34,6 +34,7 @@ import type {
   Message,
   MessageAttachment,
   MessageSearchSnapshot,
+  PlaygroundPendingQuote,
 } from '../types'
 
 type UsePlaygroundConversationOptions = {
@@ -41,7 +42,7 @@ type UsePlaygroundConversationOptions = {
   updateMessages: (
     updater: Message[] | ((prev: Message[]) => Message[])
   ) => void
-  sendChat: (messages: Message[]) => void
+  sendChat: (messages: Message[], quote?: PlaygroundPendingQuote | null) => void
   /**
    * Continue the last truncated assistant reply: the prefill form is tried
    * first, the fallback form appends one user instruction.
@@ -71,7 +72,8 @@ export function usePlaygroundConversation({
     (
       text: string,
       attachments?: MessageAttachment[],
-      search?: MessageSearchSnapshot
+      search?: MessageSearchSnapshot,
+      quote?: PlaygroundPendingQuote | null
     ) => {
       const nextMessages = appendUserMessagePair(
         messagesRef.current,
@@ -80,7 +82,7 @@ export function usePlaygroundConversation({
         search
       )
       updateMessages(nextMessages)
-      sendChat(nextMessages)
+      sendChat(nextMessages, quote)
     },
     [updateMessages, sendChat]
   )

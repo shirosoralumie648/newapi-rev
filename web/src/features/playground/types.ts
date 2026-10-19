@@ -300,6 +300,17 @@ export interface PlaygroundMemoryExtractionSettings {
 }
 
 /**
+ * Composer-level quote of an earlier message: the key the quote points at plus
+ * the text snapshot shown in the quote bar. The stored message contract has no
+ * quote field, so the snapshot travels with the next request only and is
+ * discarded once that send starts.
+ */
+export interface PlaygroundPendingQuote {
+  messageKey: string
+  text: string
+}
+
+/**
  * Deep-link target for the Playground route. `session` is the canonical server
  * session id a canvas node points back to; `artifact` selects a saved artifact
  * inside that session.

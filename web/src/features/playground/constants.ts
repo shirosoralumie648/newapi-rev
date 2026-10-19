@@ -247,6 +247,9 @@ export const PLAYGROUND_AUTO_TITLE_MAX_TOKENS = 64
 export const PLAYGROUND_AUTO_TITLE_SYSTEM_PROMPT = `Write a short title for the following conversation. Use the language of the conversation, keep it at most ${PLAYGROUND_AUTO_TITLE_MAX_LENGTH} characters, and reply with the title only, without quotes or ending punctuation.`
 
 export const MAX_STORED_SESSIONS = 20
+// Mirrors the server's stored-title bound: a longer title is refused instead of
+// stored trimmed, so a fork title is cut to the same rune count.
+export const PLAYGROUND_SESSION_TITLE_MAX_LENGTH = 200
 
 // Assistant preset display bounds. The server validates the same values and
 // owns the authoritative per-account quota (preset count and prompt bytes).
@@ -484,6 +487,8 @@ export const MESSAGE_ACTION_BUTTON_STYLES = {
 export const MESSAGE_ACTION_LABELS = {
   COPY: 'Copy',
   COPIED: 'Copied!',
+  QUOTE: 'Quote',
+  FORK: 'Fork from here',
   READ_ALOUD: 'Read aloud',
   REGENERATE: 'Regenerate',
   SHOW_PREVIEW: 'Show preview',
@@ -495,4 +500,19 @@ export const MESSAGE_ACTION_LABELS = {
   GENERATE_VIDEO: 'Generate video',
   NO_CONTENT: 'No content to copy',
   WAIT_GENERATION: 'Please wait for the current generation to complete',
+} as const
+
+// Composer quote. Quoting an earlier message carries a snapshot of its visible
+// text into the next request only, so the stored message contract stays
+// untouched. The protocol frame below is model input, not user interface text,
+// and the snapshot is bounded to keep one quote from dominating the request.
+export const PLAYGROUND_QUOTE_TEXT_MAX_CHARS = 4000
+export const PLAYGROUND_QUOTE_CONTEXT_OPEN = '[quoted message: {{key}}]'
+export const PLAYGROUND_QUOTE_CONTEXT_CLOSE = '[/quoted message]'
+
+// Conversation fork. The copy is rebuilt through the ordinary create/upload
+// chain, so the server enforces the same message and attachment quotas as a
+// manual conversation; a refusal leaves the source conversation untouched.
+export const PLAYGROUND_FORK_ERRORS = {
+  FAILED: 'Unable to fork the conversation.',
 } as const
