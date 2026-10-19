@@ -23,6 +23,7 @@ import {
   Download,
   FileText,
   FolderOpen,
+  LayoutTemplate,
   Pencil,
   Play,
   Plus,
@@ -93,6 +94,7 @@ interface CanvasToolbarProps {
   onExportSelectionPng: () => void
   onExportArchive: () => void
   onExportSelectionArchive: () => void
+  onOpenTemplates: () => void
   onToggleInspectorView: (view: CanvasToolbarInspectorView) => void
   onRunWorkflow: () => void
   onCancelRun: () => void
@@ -208,6 +210,17 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <Button
+        disabled={props.disabled}
+        onClick={props.onOpenTemplates}
+        size='sm'
+        type='button'
+        variant='outline'
+      >
+        <LayoutTemplate aria-hidden='true' />
+        {t('Templates')}
+      </Button>
 
       {inspectorSwitches.map((entry) => {
         const Icon = entry.icon

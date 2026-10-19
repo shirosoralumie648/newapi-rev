@@ -343,6 +343,16 @@ func writePlaygroundError(c *gin.Context, err error) {
 		code = "PLAYGROUND_NOT_FOUND"
 		err = common.NewMessage(err.Error())
 	}
+	if errors.Is(err, model.ErrPlaygroundCanvasTemplateNotFound) {
+		status = http.StatusNotFound
+		code = "PLAYGROUND_NOT_FOUND"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundCanvasTemplateInvalid) {
+		status = http.StatusBadRequest
+		code = "PLAYGROUND_INVALID_REQUEST"
+		err = common.NewMessage(err.Error())
+	}
 	if errors.Is(err, model.ErrPlaygroundSnippetNotFound) {
 		status = http.StatusNotFound
 		code = "PLAYGROUND_NOT_FOUND"
@@ -383,6 +393,11 @@ func writePlaygroundError(c *gin.Context, err error) {
 	if errors.Is(err, model.ErrPlaygroundPresetLimit) {
 		status = http.StatusUnprocessableEntity
 		code = "PLAYGROUND_PRESET_LIMIT_EXCEEDED"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundCanvasTemplateLimit) {
+		status = http.StatusUnprocessableEntity
+		code = "PLAYGROUND_CANVAS_TEMPLATE_LIMIT_EXCEEDED"
 		err = common.NewMessage(err.Error())
 	}
 	if errors.Is(err, model.ErrPlaygroundSnippetLimit) {

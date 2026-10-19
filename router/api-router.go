@@ -187,6 +187,26 @@ func SetApiRouter(router *gin.Engine) {
 			// A canvas owns its own attachment partition, so a file dropped on
 			// the board is uploaded without inventing a conversation for it.
 			playgroundRoute.POST("/canvases/:canvasId/attachments", controller.CreatePlaygroundCanvasAttachment)
+			// Canvas templates are structure-level copies of a saved document
+			// with optional inline attachment bytes. The collection routes stay
+			// next to canvas routes; the static market/global segments are
+			// registered before the parameterized template routes.
+			playgroundRoute.GET("/canvas-templates", controller.ListPlaygroundCanvasTemplates)
+			playgroundRoute.POST("/canvas-templates", controller.CreatePlaygroundCanvasTemplate)
+			playgroundRoute.GET("/canvas-templates/market", controller.ListPlaygroundCanvasTemplateMarket)
+			playgroundRoute.POST("/canvas-templates/market/:templateId/copy", controller.CopyPlaygroundCanvasTemplateFromMarket)
+			playgroundRoute.POST("/canvas-templates/import", controller.ImportPlaygroundCanvasTemplate)
+			playgroundRoute.GET("/canvas-templates/global", middleware.AdminAuth(), controller.ListGlobalPlaygroundCanvasTemplates)
+			playgroundRoute.POST("/canvas-templates/global/import", middleware.AdminAuth(), controller.ImportGlobalPlaygroundCanvasTemplate)
+			playgroundRoute.GET("/canvas-templates/global/:templateId", middleware.AdminAuth(), controller.GetGlobalPlaygroundCanvasTemplate)
+			playgroundRoute.PATCH("/canvas-templates/global/:templateId", middleware.AdminAuth(), controller.UpdateGlobalPlaygroundCanvasTemplate)
+			playgroundRoute.DELETE("/canvas-templates/global/:templateId", middleware.AdminAuth(), controller.DeleteGlobalPlaygroundCanvasTemplate)
+			playgroundRoute.GET("/canvas-templates/global/:templateId/export", middleware.AdminAuth(), controller.ExportPlaygroundCanvasTemplate)
+			playgroundRoute.GET("/canvas-templates/:templateId", controller.GetPlaygroundCanvasTemplate)
+			playgroundRoute.PATCH("/canvas-templates/:templateId", controller.UpdatePlaygroundCanvasTemplate)
+			playgroundRoute.DELETE("/canvas-templates/:templateId", controller.DeletePlaygroundCanvasTemplate)
+			playgroundRoute.GET("/canvas-templates/:templateId/export", controller.ExportPlaygroundCanvasTemplate)
+			playgroundRoute.GET("/canvas-templates/:templateId/assets/:assetId/content", controller.GetPlaygroundCanvasTemplateAssetContent)
 			// Large files and the extended kinds (video, audio, PDF) upload in
 			// two steps: a reservation returns a presigned PUT when the object
 			// store can sign one (otherwise the content route relays the bytes),

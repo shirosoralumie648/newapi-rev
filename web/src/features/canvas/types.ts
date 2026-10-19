@@ -220,3 +220,39 @@ export type CanvasSnapshotSummary = {
   byteSize: number
   createdAt: number
 }
+
+/** One attachment byte snapshot stored inside an inline canvas template. */
+export type CanvasTemplateAsset = {
+  id: string
+  /** The attachment id the template document still references. */
+  sourceAttachmentId: string
+  filename: string
+  mediaType: string
+  byteSize: number
+  contentHash: string
+}
+
+export type CanvasTemplateVisibility = 'private' | 'global'
+
+/** The list metadata of one personal, official or administrator template. */
+export type CanvasTemplateSummary = {
+  id: string
+  name: string
+  description: string
+  category: string
+  visibility: CanvasTemplateVisibility
+  inlineAssets: boolean
+  nodeCount: number
+  edgeCount: number
+  documentBytes: number
+  assetCount: number
+  assetBytes: number
+  createdAt: number
+  updatedAt: number
+}
+
+/** One template with its stored document and asset metadata (not the bytes). */
+export type CanvasTemplateDetail = CanvasTemplateSummary & {
+  document: CanvasServerDocument
+  assets: CanvasTemplateAsset[]
+}

@@ -56,6 +56,7 @@ import {
   type CanvasAddedNode,
 } from '../hooks/use-canvas-editor'
 import { useCanvasImageTools } from '../hooks/use-canvas-image-tools'
+import { useCanvasTemplateActions } from '../hooks/use-canvas-template-actions'
 import { useCanvasWorkflowOptions } from '../hooks/use-canvas-workflow-options'
 import { useCanvasWorkflowRunner } from '../hooks/use-canvas-workflow-runner'
 import type {
@@ -108,6 +109,7 @@ import { CanvasFlowNodeView, CanvasGroupNodeView } from './canvas-node'
 import { CanvasNodeInspector } from './canvas-node-inspector'
 import { CanvasPngExportDialog } from './canvas-png-export-dialog'
 import { CanvasRunBudgetDialog } from './canvas-run-budget-dialog'
+import { CanvasTemplateLibraryDialog } from './canvas-template-library-dialog'
 import { CanvasToolbar } from './canvas-toolbar'
 import type { CanvasToolbarInspectorView } from './canvas-toolbar'
 import { CanvasViewportControls } from './canvas-viewport-controls'
@@ -160,6 +162,8 @@ interface CanvasEditorProps {
   onOpenSource?: (target: CanvasSourceTarget) => void
   /** Opens a conversation the artifact browser or library points back at. */
   onOpenConversation?: (sessionId: string) => void
+  /** Switches the workspace to a canvas created from a template. */
+  onOpenProject: (projectId: string) => void
 }
 
 /** Saves one generated canvas file through a transient object URL. */
@@ -198,6 +202,14 @@ export function CanvasEditor(props: CanvasEditorProps) {
     onRejectedConnection: (messageKey) => toast.error(t(messageKey)),
   })
 
+  const templateActions = useCanvasTemplateActions({
+    projectId: props.project.id,
+    nodes: editor.nodes,
+    addGraph: editor.addGraph,
+    selectNode: editor.selectNode,
+    onOpenProject: props.onOpenProject,
+  })
+
   const workflow = useCanvasWorkflowRunner({
     nodes: editor.nodes,
     edges: editor.edges,
@@ -209,6 +221,7 @@ export function CanvasEditor(props: CanvasEditorProps) {
   // The validated run the run-budget dialog is confirming; the dialog opens
   // only when the same click would also start a run.
   const [runPlan, setRunPlan] = useState<CanvasWorkflowRunPlan | null>(null)
+  const [templatesOpen, setTemplatesOpen] = useState(false)
 
   const [inspectorView, setInspectorView] =
     useState<CanvasInspectorView>('details')
@@ -737,6 +750,7 @@ export function CanvasEditor(props: CanvasEditorProps) {
                       void handleExportPng('selection')
                     }
                     onGroupChange={workflowOptions.setGroup}
+                    onOpenTemplates={() => setTemplatesOpen(true)}
                     onGroupSelection={() => void editor.groupSelection()}
                     onImportArchiveFile={(file) => props.onImportArchive(file)}
                     onImportFile={handleImportFile}
@@ -791,6 +805,17 @@ export function CanvasEditor(props: CanvasEditorProps) {
         result={pngExport}
         saved={pngSaved}
         saving={pngSaving}
+      />
+
+      <CanvasTemplateLibraryDialog
+        canvasId={props.project.id}
+        canvasTitle={props.project.title}
+        disabled={props.disabled}
+        onApplyToCurrent={templateActions.applyToCurrent}
+        onCreateFromTemplate={templateActions.createFromTemplate}
+        onFlush={props.onBeforeExportArchive ?? (async () => undefined)}
+        onOpenChange={setTemplatesOpen}
+        open={templatesOpen}
       />
 
       <CanvasRunBudgetDialog

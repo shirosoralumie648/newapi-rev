@@ -118,14 +118,14 @@ func playgroundTestDB(t *testing.T, dialect string) *gorm.DB {
 	common.SetDatabaseTypes(common.DatabaseType(dialect), previousLog)
 	model.DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundKnowledgeChunk{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundUserUsage{}, &model.PlaygroundUpload{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundMessage{}, &model.PlaygroundSessionShare{}, &model.PlaygroundSession{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundKnowledgeChunk{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasTemplateAsset{}, &model.PlaygroundCanvasTemplate{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundUserUsage{}, &model.PlaygroundUpload{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundMessage{}, &model.PlaygroundSessionShare{}, &model.PlaygroundSession{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
 		model.DB = previous
 		common.SetDatabaseTypes(previousMain, previousLog)
 	})
-	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundSessionShare{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUpload{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeChunk{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundSessionShare{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUpload{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasTemplate{}, &model.PlaygroundCanvasTemplateAsset{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeChunk{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -164,6 +164,16 @@ func playgroundRequest(t *testing.T, user int, method, path string, body any, ha
 		}
 		if parts[3] == "canvases" {
 			c.Params = append(c.Params, gin.Param{Key: "canvasId", Value: parts[4]})
+		}
+		if parts[3] == "canvas-templates" {
+			templateID := parts[4]
+			if (templateID == "global" || templateID == "market") && len(parts) > 5 {
+				templateID = parts[5]
+			}
+			c.Params = append(c.Params, gin.Param{Key: "templateId", Value: templateID})
+			if len(parts) > 6 && parts[5] == "assets" {
+				c.Params = append(c.Params, gin.Param{Key: "assetId", Value: parts[6]})
+			}
 		}
 		if parts[3] == "presets" {
 			presetID := parts[4]
@@ -2358,6 +2368,12 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodPatch, "/api/playground/presets/global/missing"},
 		{http.MethodDelete, "/api/playground/presets/global/missing"},
 		{http.MethodGet, "/api/playground/presets/global/missing/export"},
+		{http.MethodGet, "/api/playground/canvas-templates/global"},
+		{http.MethodPost, "/api/playground/canvas-templates/global/import"},
+		{http.MethodGet, "/api/playground/canvas-templates/global/missing"},
+		{http.MethodPatch, "/api/playground/canvas-templates/global/missing"},
+		{http.MethodDelete, "/api/playground/canvas-templates/global/missing"},
+		{http.MethodGet, "/api/playground/canvas-templates/global/missing/export"},
 	} {
 		response := playgroundAuthenticatedRequest(t, engine, "", route.method, route.path, input)
 		assert.Equal(t, 401, response.Code, route.method+" "+route.path+": "+response.Body.String())
@@ -2461,6 +2477,51 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	require.NotEmpty(t, canvasEnvelope.Data.ID)
 	canvasDetail := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, canvasBase+"/"+canvasEnvelope.Data.ID, nil)
 	require.Equal(t, 200, canvasDetail.Code, canvasDetail.Body.String())
+
+	// Canvas templates share the same session-only contract. The static
+	// market/global routes and the parameterized template routes all reject an
+	// anonymous request and a personal access token before a handler runs.
+	templateBase := "/api/playground/canvas-templates"
+	for _, route := range []struct{ method, path string }{
+		{http.MethodGet, templateBase}, {http.MethodPost, templateBase},
+		{http.MethodGet, templateBase + "/market"},
+		{http.MethodPost, templateBase + "/market/missing/copy"},
+		{http.MethodPost, templateBase + "/import"},
+		{http.MethodGet, templateBase + "/missing"},
+		{http.MethodPatch, templateBase + "/missing"},
+		{http.MethodDelete, templateBase + "/missing"},
+		{http.MethodGet, templateBase + "/missing/export"},
+		{http.MethodGet, templateBase + "/missing/assets/missing/content"},
+	} {
+		response := playgroundAuthenticatedRequest(t, engine, "", route.method, route.path, upload)
+		assert.Equal(t, 401, response.Code, route.method+" "+route.path+": "+response.Body.String())
+		assert.Contains(t, response.Header().Get("Cache-Control"), "no-store")
+		response = playgroundAuthenticatedRequest(t, engine, patRaw, route.method, route.path, upload)
+		assert.Equal(t, 403, response.Code, route.method+" "+route.path+": "+response.Body.String())
+		assert.Contains(t, response.Body.String(), "AUTH_SESSION_REQUIRED")
+	}
+	templateCreated := playgroundAuthenticatedRequest(t, engine, token, http.MethodPost, templateBase, map[string]any{
+		"canvas_id": canvasEnvelope.Data.ID, "name": "Router template", "inline_assets": false,
+	})
+	require.Equal(t, 200, templateCreated.Code, templateCreated.Body.String())
+	var templateEnvelope struct {
+		Data struct {
+			Template struct{ ID string } `json:"template"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(templateCreated.Body.Bytes(), &templateEnvelope))
+	require.NotEmpty(t, templateEnvelope.Data.Template.ID)
+	templateList := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, templateBase, nil)
+	require.Equal(t, 200, templateList.Code, templateList.Body.String())
+	assert.Contains(t, templateList.Body.String(), `"total":1`)
+	templateRead := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, templateBase+"/"+templateEnvelope.Data.Template.ID, nil)
+	require.Equal(t, 200, templateRead.Code, templateRead.Body.String())
+	assert.Contains(t, templateRead.Body.String(), `"name":"Router template"`)
+	templateExport := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, templateBase+"/"+templateEnvelope.Data.Template.ID+"/export", nil)
+	require.Equal(t, 200, templateExport.Code, templateExport.Body.String())
+	assert.Equal(t, "application/zip", templateExport.Header().Get("Content-Type"))
+	require.Equal(t, 200, playgroundAuthenticatedRequest(t, engine, token, http.MethodDelete, templateBase+"/"+templateEnvelope.Data.Template.ID, nil).Code)
+
 	require.Equal(t, 200, playgroundAuthenticatedRequest(t, engine, token, http.MethodDelete, canvasBase+"/"+canvasEnvelope.Data.ID, nil).Code)
 
 	// Assistant presets share the same session-only contract and stay
