@@ -716,6 +716,9 @@ export async function importPlaygroundSessionDocument(
         suggestedQuestions: document.suggestedQuestions,
         context: document.context,
         contextSummary: document.contextSummary,
+        pinned: created.pinned,
+        archived: created.archived,
+        tags: [...created.tags],
         messages,
         server: {
           id: created.id,
@@ -830,6 +833,9 @@ export async function forkPlaygroundSession(options: {
         suggestedQuestions: [...options.sourceSession.suggestedQuestions],
         context: options.sourceSession.context,
         contextSummary: null,
+        pinned: created.pinned,
+        archived: created.archived,
+        tags: [...created.tags],
         messages,
         server: {
           id: created.id,

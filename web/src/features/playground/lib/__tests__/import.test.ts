@@ -170,6 +170,9 @@ function mockCreatedSession(messageRevision = 0) {
     title: 'Imported chat',
     revision: 3,
     messageRevision,
+    pinned: false,
+    archived: false,
+    tags: [],
   } as never)
 }
 

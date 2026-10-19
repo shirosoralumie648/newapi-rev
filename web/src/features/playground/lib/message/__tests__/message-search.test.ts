@@ -53,6 +53,9 @@ function session(
     suggestedQuestions: [],
     context: { ...DEFAULT_CONTEXT_SETTINGS },
     contextSummary: null,
+    pinned: false,
+    archived: false,
+    tags: [],
     messages,
   }
 }
