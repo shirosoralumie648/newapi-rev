@@ -152,6 +152,13 @@ export const STATIC_I18N_KEYS = [
   'Some cells have no configured price; they still run and are charged when they finish.',
   'The table prices each prompt with the chat pre-charge; the final cost is settled per reply.',
   'The cap is below the estimate; the run may stop before the last cell.',
+  // Compare-run API messages returned as English source keys by Go.
+  'Comparison run not found.',
+  'The comparison run changed. Reload it and try again.',
+  'Invalid comparison run.',
+  'Comparison run limit exceeded.',
+  'Comparison run storage limit exceeded.',
+  'Comparison runs are unavailable.',
   'Assistant preset name must contain 1 to 100 characters.',
   'Assistant preset avatar must be an emoji or an http(s) image URL.',
   'Invalid assistant preset.',
