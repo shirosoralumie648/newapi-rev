@@ -243,16 +243,8 @@ export function buildKnowledgeSearchToolResult(
 export function getPendingExecutableToolCalls(
   message: Message
 ): MessageToolCall[] {
-  return getMessageToolCalls(message).filter(
-    (call) =>
-      call.status === TOOL_CALL_STATUS.PENDING &&
-      getExecutableToolKind(call.name) !== null
-  )
-}
-
-export function getPendingToolCalls(message: Message): MessageToolCall[] {
-  return getMessageToolCalls(message).filter(
-    (call) => call.status === TOOL_CALL_STATUS.PENDING
+  return getPendingToolCalls(message).filter(
+    (call) => getExecutableToolKind(call.name) !== null
   )
 }
 
