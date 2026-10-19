@@ -23,6 +23,8 @@ import { requireServerSuccess } from '@/lib/server-error-message'
 
 import {
   API_ENDPOINTS,
+  PLAYGROUND_GENERATION_SEED_MAX,
+  PLAYGROUND_GENERATION_SEED_MIN,
   PLAYGROUND_IMAGE_MAX_COUNT,
   PLAYGROUND_VIDEO_MAX_DURATION_SECONDS,
   PLAYGROUND_WORKFLOW_RUN_HEADER,
@@ -42,6 +44,8 @@ export interface PlaygroundImageGenerationInput {
   quality?: string
   /** Requested image count (the relay `n`); a bounded billing multiplier. */
   count?: number
+  /** Explicit sampling seed; absent means the caller sends no seed. */
+  seed?: number
   /** Reference image URLs or data URLs read from connected resources. */
   images?: string[]
 }
@@ -52,6 +56,8 @@ export interface PlaygroundVideoGenerationInput {
   group: string
   duration?: number
   size?: string
+  /** Explicit sampling seed; absent means the caller sends no seed. */
+  seed?: number
   /** Reference images for an image-to-video submission. */
   images?: string[]
 }
@@ -140,6 +146,18 @@ function boundedDurationSeconds(
 }
 
 /**
+ * Drops a malformed seed instead of turning a canvas request into a relay
+ * validation error. The server still enforces the same range on /pg.
+ */
+function boundedSeed(seed: number | undefined): number | undefined {
+  if (seed === undefined) return undefined
+  if (!Number.isInteger(seed)) return undefined
+  if (seed < PLAYGROUND_GENERATION_SEED_MIN) return undefined
+  if (seed > PLAYGROUND_GENERATION_SEED_MAX) return undefined
+  return seed
+}
+
+/**
  * One image generation either answered with its images inside the response or
  * became a durable task whose result the task list and its stored artifacts
  * carry. A model served by a task plugin (a long-running upstream image job)
@@ -162,6 +180,7 @@ export async function submitImageGeneration(
   workflowRunId?: string
 ): Promise<PlaygroundImageGenerationOutcome> {
   const count = boundedImageCount(input.count)
+  const seed = boundedSeed(input.seed)
   const images = (input.images ?? []).filter(Boolean)
   const response = await api.post(
     API_ENDPOINTS.IMAGE_GENERATIONS,
@@ -172,6 +191,7 @@ export async function submitImageGeneration(
       ...(input.size ? { size: input.size } : {}),
       ...(input.quality ? { quality: input.quality } : {}),
       ...(count ? { n: count } : {}),
+      ...(seed ? { seed } : {}),
       ...(images.length > 0 ? { images } : {}),
     },
     {
@@ -238,6 +258,7 @@ export async function submitVideoGeneration(
   workflowRunId?: string
 ): Promise<string> {
   const duration = boundedDurationSeconds(input.duration)
+  const seed = boundedSeed(input.seed)
   const images = (input.images ?? []).filter(Boolean)
   const response = await api.post(
     API_ENDPOINTS.VIDEO_GENERATIONS,
@@ -247,6 +268,7 @@ export async function submitVideoGeneration(
       group: input.group,
       ...(duration ? { duration } : {}),
       ...(input.size ? { size: input.size } : {}),
+      ...(seed ? { seed } : {}),
       ...(images.length > 0 ? { images } : {}),
     },
     {

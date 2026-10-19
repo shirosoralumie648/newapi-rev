@@ -24,10 +24,12 @@ import {
   CANVAS_WORKFLOW_ERROR_MAX_CHARS,
   CANVAS_WORKFLOW_IMAGE_COUNTS,
   CANVAS_WORKFLOW_IMAGE_QUALITIES,
-  CANVAS_WORKFLOW_IMAGE_SIZE_RATIOS,
   CANVAS_WORKFLOW_INPUT_MAX_CHARS,
   CANVAS_WORKFLOW_MENTION_MAX_MATCHES,
-  CANVAS_WORKFLOW_VIDEO_SIZE_RATIOS,
+  CANVAS_WORKFLOW_SEED_MAX,
+  CANVAS_WORKFLOW_SEED_MIN,
+  CANVAS_WORKFLOW_SIZE_MAX,
+  CANVAS_WORKFLOW_SIZE_MIN,
 } from '../constants'
 import type {
   CanvasFlowEdge,
@@ -91,6 +93,89 @@ export function canvasWorkflowResultKind(
   return 'task-result'
 }
 
+/**
+ * The channel/model metadata the parameter panel reads from `/api/pricing`.
+ * Endpoint types come from the model's enabled channels; usage fields come
+ * from task plugin billing schemas. The map is optional: when pricing is
+ * unavailable the panel keeps every control enabled instead of guessing.
+ */
+export type CanvasWorkflowModelCapability = {
+  endpointTypes?: string[]
+  usageFields?: string[]
+}
+
+export type CanvasWorkflowGenerationSupport = {
+  image: boolean
+  video: boolean
+}
+
+export function canvasWorkflowGenerationSupport(
+  capability?: CanvasWorkflowModelCapability
+): CanvasWorkflowGenerationSupport | null {
+  if (!capability) return null
+  const endpoints = capability.endpointTypes ?? []
+  const usageFields = capability.usageFields ?? []
+  // A catalog row without either metadata source cannot prove a capability
+  // gap, so keep the controls enabled instead of hiding valid parameters.
+  if (endpoints.length === 0 && usageFields.length === 0) return null
+  const hasImageUsage = usageFields.some((field) => field === 'image_count')
+  const hasVideoUsage = usageFields.some(
+    (field) =>
+      field === 'seconds' || field === 'duration' || field === 'video_count'
+  )
+  return {
+    image: endpoints.includes('image-generation') || hasImageUsage,
+    video: endpoints.includes('openai-video') || hasVideoUsage,
+  }
+}
+
+/**
+ * Parses an explicit custom size. Only WIDTHxHEIGHT is a canvas custom size;
+ * provider labels such as `auto` stay out of this helper and are never sent
+ * from a canvas run.
+ */
+export function parseCanvasWorkflowSize(
+  value: string
+): { width: number; height: number } | null {
+  const match = /^([0-9]+)[xX]([0-9]+)$/.exec(value.trim())
+  if (!match) return null
+  const width = Number(match[1])
+  const height = Number(match[2])
+  if (
+    !Number.isSafeInteger(width) ||
+    !Number.isSafeInteger(height) ||
+    width < CANVAS_WORKFLOW_SIZE_MIN ||
+    width > CANVAS_WORKFLOW_SIZE_MAX ||
+    height < CANVAS_WORKFLOW_SIZE_MIN ||
+    height > CANVAS_WORKFLOW_SIZE_MAX
+  ) {
+    return null
+  }
+  return { width, height }
+}
+
+export function normalizeCanvasWorkflowSize(value: string): string | null {
+  const parsed = parseCanvasWorkflowSize(value)
+  return parsed ? `${parsed.width}x${parsed.height}` : null
+}
+
+/**
+ * A fresh seed for a blank (random) step. The canvas sends it explicitly so
+ * the value can be shown and inherited later; it is not a billing multiplier.
+ */
+export function randomCanvasWorkflowSeed(): number {
+  const values = new Uint32Array(1)
+  if (
+    typeof crypto !== 'undefined' &&
+    typeof crypto.getRandomValues === 'function'
+  ) {
+    crypto.getRandomValues(values)
+  } else {
+    values[0] = Math.floor(Math.random() * 0xffffffff)
+  }
+  return (values[0] % CANVAS_WORKFLOW_SEED_MAX) + CANVAS_WORKFLOW_SEED_MIN
+}
+
 export function truncateCanvasWorkflowText(
   value: string,
   limit: number
@@ -141,6 +226,55 @@ export function canvasWorkflowNodeHasImage(data: CanvasNodeData): boolean {
 }
 
 /**
+ * The result node chosen as the preferred member of a batch. The step keeps
+ * the id; imported documents may only carry the per-result flag, so that is
+ * the fallback. A missing preferred id means the connected result is used.
+ */
+export function canvasWorkflowPreferredResultId(
+  sourceNodeId: string,
+  nodes: CanvasFlowNode[]
+): string | null {
+  const step = nodes.find((node) => node.id === sourceNodeId)
+  const preferredId = step?.data.workflow?.preferredResultNodeId?.trim() ?? ''
+  const candidates = nodes.filter(
+    (node) =>
+      isCanvasWorkflowResult(node.data.kind) &&
+      node.data.workflow?.sourceNodeId?.trim() === sourceNodeId
+  )
+  if (
+    preferredId &&
+    candidates.some((candidate) => candidate.id === preferredId)
+  ) {
+    return preferredId
+  }
+  return (
+    candidates.find((candidate) => candidate.data.workflow?.preferred === true)
+      ?.id ?? null
+  )
+}
+
+export function canvasWorkflowPreferredSibling(
+  node: CanvasFlowNode,
+  nodes: CanvasFlowNode[]
+): CanvasFlowNode | null {
+  if (!isCanvasWorkflowResult(node.data.kind)) return null
+  const sourceNodeId = node.data.workflow?.sourceNodeId?.trim()
+  if (!sourceNodeId) return null
+  const preferredId = canvasWorkflowPreferredResultId(sourceNodeId, nodes)
+  if (!preferredId || preferredId === node.id) return null
+  return nodes.find((candidate) => candidate.id === preferredId) ?? null
+}
+
+export function canvasWorkflowIsPreferredResult(
+  node: CanvasFlowNode,
+  nodes: CanvasFlowNode[]
+): boolean {
+  const sourceNodeId = node.data.workflow?.sourceNodeId?.trim()
+  if (!sourceNodeId) return node.data.workflow?.preferred === true
+  return canvasWorkflowPreferredResultId(sourceNodeId, nodes) === node.id
+}
+
+/**
  * A connected upstream node a step's instruction can reference with `@`. Only
  * directly connected nodes are offered, so a mention can never name a resource
  * the step does not already consume through an edge.
@@ -171,12 +305,17 @@ export function canvasWorkflowMentions(
     const upstream = byID.get(edge.source)
     if (!upstream) continue
     seen.add(edge.source)
+    const preferred = canvasWorkflowPreferredSibling(upstream, nodes)
+    const imageNode =
+      preferred && canvasWorkflowNodeHasImage(preferred.data)
+        ? preferred
+        : upstream
     mentions.push({
       nodeId: upstream.id,
       label: canvasWorkflowNodeLabel(upstream.data),
       kind: upstream.data.kind,
       hasText: canvasWorkflowNodeHasText(upstream.data),
-      hasImage: canvasWorkflowNodeHasImage(upstream.data),
+      hasImage: canvasWorkflowNodeHasImage(imageNode.data),
     })
   }
   return mentions
@@ -458,25 +597,31 @@ export function resolveCanvasWorkflowImageSources(
     if (edge.target !== node.id || seen.has(edge.source)) continue
     const upstream = byID.get(edge.source)
     if (!upstream || upstream.data.sourceDeleted === true) continue
-    const reference = upstream.data.ref
+    const preferred = canvasWorkflowPreferredSibling(upstream, nodes)
+    const source =
+      preferred && canvasWorkflowNodeHasImage(preferred.data)
+        ? preferred
+        : upstream
+    if (seen.has(source.id)) continue
+    seen.add(upstream.id)
+    seen.add(source.id)
+    const reference = source.data.ref
     const isImageAttachment =
-      upstream.data.kind === 'image' ||
-      (upstream.data.kind === 'attachment' &&
-        playgroundAttachmentKind(upstream.data.mediaType) === 'image')
+      source.data.kind === 'image' ||
+      (source.data.kind === 'attachment' &&
+        playgroundAttachmentKind(source.data.mediaType) === 'image')
     if (isImageAttachment && reference?.sessionId && reference.attachmentId) {
-      seen.add(upstream.id)
       sources.push({
-        nodeId: upstream.id,
+        nodeId: source.id,
         kind: 'attachment',
         sessionId: reference.sessionId,
         attachmentId: reference.attachmentId,
       })
       continue
     }
-    if (upstream.data.kind === 'task-result' && reference?.taskId) {
-      seen.add(upstream.id)
+    if (source.data.kind === 'task-result' && reference?.taskId) {
       sources.push({
-        nodeId: upstream.id,
+        nodeId: source.id,
         kind: 'task-result',
         taskId: reference.taskId,
         ...(reference.taskArtifactKey
@@ -500,6 +645,7 @@ export type CanvasWorkflowGenerationConfig = {
   quality?: string
   imageCount?: number
   duration?: number
+  seed?: number
 }
 
 export function resolveCanvasWorkflowGeneration(
@@ -509,10 +655,20 @@ export function resolveCanvasWorkflowGeneration(
   const generation: CanvasWorkflowGenerationKind =
     workflow.generation === 'video' ? 'video' : 'image'
   const size = workflow.size?.trim()
+  const normalizedSize = size ? normalizeCanvasWorkflowSize(size) : null
+  const seed = workflow.seed
+  const config: CanvasWorkflowGenerationConfig = {
+    generation,
+    ...(normalizedSize ? { size: normalizedSize } : {}),
+    ...(Number.isInteger(seed) &&
+    (seed ?? 0) >= CANVAS_WORKFLOW_SEED_MIN &&
+    (seed ?? 0) <= CANVAS_WORKFLOW_SEED_MAX
+      ? { seed }
+      : {}),
+  }
   if (generation === 'video') {
     return {
-      generation,
-      ...(size && size in CANVAS_WORKFLOW_VIDEO_SIZE_RATIOS ? { size } : {}),
+      ...config,
       ...(Number.isInteger(workflow.duration) &&
       (workflow.duration ?? 0) > 0 &&
       (workflow.duration ?? 0) <= CANVAS_WORKFLOW_DURATION_MAX_SECONDS
@@ -524,8 +680,7 @@ export function resolveCanvasWorkflowGeneration(
   const maxCount = Math.max(...CANVAS_WORKFLOW_IMAGE_COUNTS)
   const imageCount = workflow.imageCount
   return {
-    generation,
-    ...(size && size in CANVAS_WORKFLOW_IMAGE_SIZE_RATIOS ? { size } : {}),
+    ...config,
     ...(quality &&
     (CANVAS_WORKFLOW_IMAGE_QUALITIES as readonly string[]).includes(quality)
       ? { quality }
@@ -555,7 +710,8 @@ export function canvasWorkflowRetrySource(node: CanvasFlowNode): string | null {
  * The retry record a result node keeps: the prompt, model, generation
  * parameters and the id of the step that produced it. Nothing here is a URL or
  * a credential, so retrying re-issues the same request through /pg and the
- * server applies its own validation and billing again.
+ * server applies its own validation and billing again. `seed` is the concrete
+ * seed the attempt sent, which gives a batch result a reproducible variant.
  */
 export function canvasWorkflowRetryRecord(
   step: CanvasFlowNode,
@@ -563,6 +719,7 @@ export function canvasWorkflowRetryRecord(
     inputText: string
     group: string
     inputImageCount: number
+    seed?: number
   }
 ): CanvasNodeWorkflowState {
   const workflow = step.data.workflow ?? {}
@@ -574,6 +731,9 @@ export function canvasWorkflowRetryRecord(
     ...(workflow.quality ? { quality: workflow.quality } : {}),
     ...(workflow.imageCount ? { imageCount: workflow.imageCount } : {}),
     ...(workflow.duration ? { duration: workflow.duration } : {}),
+    // The attempt's concrete seed wins over the step's optional fixed value so
+    // a random batch member can be reproduced from its own result node.
+    ...(Number.isInteger(resolved.seed) ? { seed: resolved.seed } : {}),
     ...(resolved.group ? { group: resolved.group } : {}),
     ...(resolved.inputText ? { inputText: resolved.inputText } : {}),
     inputImageCount: resolved.inputImageCount,

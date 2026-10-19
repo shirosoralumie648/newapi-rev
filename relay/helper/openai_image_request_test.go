@@ -157,9 +157,26 @@ func TestImageBillingRequestValidatesProviderCountWithoutOverriding(t *testing.T
 	}
 }
 
-// TestGetAndValidOpenAIImageRequestNBounds guards the billing invariant that
-// the image generation count can never reach quota calculation with a value
-// large enough to overflow int64 into a negative charge.
+// TestGetAndValidOpenAIImageRequestRetainsSeed guards the canvas seed
+// parameter: it must be a typed request field (and therefore reach upstream),
+// not an anonymous Extra field that ImageRequest deliberately drops.
+func TestGetAndValidOpenAIImageRequestRetainsSeed(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewBufferString(`{"model":"gpt-image-1","prompt":"a cat","seed":12345}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	request, err := GetAndValidOpenAIImageRequest(c, relayconstant.RelayModeImagesGenerations)
+	require.NoError(t, err)
+	require.NotNil(t, request.Seed)
+	assert.Equal(t, int64(12345), *request.Seed)
+	_, anonymous := request.Extra["seed"]
+	assert.False(t, anonymous)
+
+	body, err := common.Marshal(request)
+	require.NoError(t, err)
+	assert.Contains(t, string(body), `"seed":12345`)
+}
+
 func TestGetAndValidOpenAIImageRequestNBounds(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

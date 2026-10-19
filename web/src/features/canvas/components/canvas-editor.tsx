@@ -87,7 +87,10 @@ import {
   buildAttachmentCanvasSeeds,
   type CanvasSendSeed,
 } from '../lib/canvas-send'
-import { canvasWorkflowMentions } from '../lib/canvas-workflow'
+import {
+  canvasWorkflowIsPreferredResult,
+  canvasWorkflowMentions,
+} from '../lib/canvas-workflow'
 import type {
   CanvasFlowEdge,
   CanvasFlowNode,
@@ -543,6 +546,15 @@ export function CanvasEditor(props: CanvasEditorProps) {
   else if (inspectorView === 'library') inspectorTitle = t('Asset library')
   else if (inspectorView === 'artifacts') inspectorTitle = t('Artifacts')
 
+  const selectedResultSourceId =
+    editor.selectedNode?.data.workflow?.sourceNodeId?.trim() ?? ''
+  const selectedResultSiblingCount = selectedResultSourceId
+    ? editor.nodes.filter(
+        (node) =>
+          node.data.workflow?.sourceNodeId?.trim() === selectedResultSourceId
+      ).length
+    : 0
+
   let inspectorBody: ReactNode
   if (inspectorView === 'assistant') {
     inspectorBody = (
@@ -624,17 +636,25 @@ export function CanvasEditor(props: CanvasEditorProps) {
   } else {
     inspectorBody = (
       <CanvasNodeInspector
+        canPreferResult={selectedResultSiblingCount > 1}
         disabled={props.disabled}
         groups={workflowOptions.groups}
         mentions={mentions}
+        modelCapabilities={workflowOptions.modelCapabilities}
         models={workflowOptions.models}
         node={editor.selectedNode}
         onDelete={editor.deleteNode}
         onOpenImageTools={imageTools.open}
         onOpenArtifact={handleOpenArtifact}
         onOpenSource={props.onOpenSource}
+        onPreferResult={editor.setWorkflowPreferredResult}
         onRetry={workflow.retry}
         onUpdateData={editor.updateNodeData}
+        preferredResult={
+          editor.selectedNode
+            ? canvasWorkflowIsPreferredResult(editor.selectedNode, editor.nodes)
+            : false
+        }
         previews={
           editor.selectedNode
             ? (workflow.results[editor.selectedNode.id] ?? [])

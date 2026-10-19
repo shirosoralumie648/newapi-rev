@@ -8579,6 +8579,25 @@
     "You": "You",
     "Attachment content is not available in shared conversations.": "Attachment content is not available in shared conversations.",
     "Share link expiration must be between 0 and 365 days.": "Share link expiration must be between 0 and 365 days.",
-    "Shared conversation not found.": "Shared conversation not found."
+    "Shared conversation not found.": "Shared conversation not found.",
+    "Custom size": "Custom size",
+    "Size (WIDTHxHEIGHT)": "Size (WIDTHxHEIGHT)",
+    "WIDTHxHEIGHT, 64 to 8192 pixels per side.": "WIDTHxHEIGHT, 64 to 8192 pixels per side.",
+    "Each generated image gets its own result node.": "Each generated image gets its own result node.",
+    "Leave empty for a random seed.": "Leave empty for a random seed.",
+    "The same seed will be reused on every run.": "The same seed will be reused on every run.",
+    "Use last result": "Use last result",
+    "Last seed: {{seed}}": "Last seed: {{seed}}",
+    "Connect at most {{count}} reference images to one step.": "Connect at most {{count}} reference images to one step.",
+    "Preferred result": "Preferred result",
+    "Preferred": "Preferred",
+    "Set as preferred result": "Set as preferred result",
+    "Downstream steps use the preferred result.": "Downstream steps use the preferred result.",
+    "Too many reference images are connected to this step.": "Too many reference images are connected to this step.",
+    "The size must use WIDTHxHEIGHT with each side between 64 and 8192 pixels.": "The size must use WIDTHxHEIGHT with each side between 64 and 8192 pixels.",
+    "The seed must be an integer between 1 and 2147483647.": "The seed must be an integer between 1 and 2147483647.",
+    "This model's channel metadata does not list image generation.": "This model's channel metadata does not list image generation.",
+    "This model's channel metadata does not list video generation.": "This model's channel metadata does not list video generation.",
+    "This model's channel metadata lists neither image nor video generation.": "This model's channel metadata lists neither image nor video generation."
   }
 }

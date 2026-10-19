@@ -28,6 +28,7 @@ import { getTaskArtifacts } from '@/features/usage-logs/api'
 
 import {
   CANVAS_WORKFLOW_IMAGE_INPUT_MAX_BYTES,
+  CANVAS_WORKFLOW_IMAGE_INPUT_MAX_COUNT,
   CANVAS_WORKFLOW_MESSAGES,
 } from '../constants'
 import type { CanvasWorkflowImageSource } from './canvas-workflow'
@@ -114,12 +115,18 @@ export async function readCanvasWorkflowImage(
 
 /**
  * Reads every reference image of one step in order. A failed read fails the
- * step instead of silently dropping the user's input.
+ * step instead of silently dropping the user's input. An over-limit set is
+ * rejected before any bytes are read, so the reported reason is stable.
  */
 export async function readCanvasWorkflowImages(
   sources: CanvasWorkflowImageSource[],
   signal?: AbortSignal
 ): Promise<string[]> {
+  if (sources.length > CANVAS_WORKFLOW_IMAGE_INPUT_MAX_COUNT) {
+    throw new CanvasWorkflowImageError(
+      CANVAS_WORKFLOW_MESSAGES.IMAGE_INPUT_LIMIT
+    )
+  }
   const images: string[] = []
   for (const source of sources) {
     images.push(await readCanvasWorkflowImage(source, signal))

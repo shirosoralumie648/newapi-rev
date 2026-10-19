@@ -126,6 +126,9 @@ export function CanvasFlowNodeView(props: NodeProps) {
           {t(CANVAS_NODE_KIND_LABELS[kind])}
         </NodeTitle>
         <div className='flex items-center gap-1'>
+          {workflow?.preferred ? (
+            <Badge variant='secondary'>{t('Preferred')}</Badge>
+          ) : null}
           {workflow?.status ? (
             <CanvasWorkflowStatusBadge status={workflow.status} />
           ) : null}

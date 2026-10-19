@@ -8579,6 +8579,25 @@
     "You": "Vous",
     "Attachment content is not available in shared conversations.": "Le contenu des pièces jointes n’est pas disponible dans les conversations partagées.",
     "Share link expiration must be between 0 and 365 days.": "L’expiration du lien de partage doit être comprise entre 0 et 365 jours.",
-    "Shared conversation not found.": "Conversation partagée introuvable."
+    "Shared conversation not found.": "Conversation partagée introuvable.",
+    "Custom size": "Taille personnalisée",
+    "Size (WIDTHxHEIGHT)": "Taille (LARGEURxHAUTEUR)",
+    "WIDTHxHEIGHT, 64 to 8192 pixels per side.": "LARGEURxHAUTEUR, de 64 à 8192 pixels par côté.",
+    "Each generated image gets its own result node.": "Chaque image générée obtient son propre nœud de résultat.",
+    "Leave empty for a random seed.": "Laissez vide pour un seed aléatoire.",
+    "The same seed will be reused on every run.": "Le même seed sera réutilisé à chaque exécution.",
+    "Use last result": "Utiliser le dernier résultat",
+    "Last seed: {{seed}}": "Dernier seed : {{seed}}",
+    "Connect at most {{count}} reference images to one step.": "Connectez au maximum {{count}} images de référence à une étape.",
+    "Preferred result": "Résultat préféré",
+    "Preferred": "Préféré",
+    "Set as preferred result": "Définir comme résultat préféré",
+    "Downstream steps use the preferred result.": "Les étapes suivantes utilisent le résultat préféré.",
+    "Too many reference images are connected to this step.": "Trop d'images de référence sont connectées à cette étape.",
+    "The size must use WIDTHxHEIGHT with each side between 64 and 8192 pixels.": "La taille doit utiliser le format LARGEURxHAUTEUR, chaque côté entre 64 et 8192 pixels.",
+    "The seed must be an integer between 1 and 2147483647.": "Le seed doit être un entier compris entre 1 et 2147483647.",
+    "This model's channel metadata does not list image generation.": "Les métadonnées du canal de ce modèle n'indiquent pas la génération d'images.",
+    "This model's channel metadata does not list video generation.": "Les métadonnées du canal de ce modèle n'indiquent pas la génération de vidéos.",
+    "This model's channel metadata lists neither image nor video generation.": "Les métadonnées du canal de ce modèle n'indiquent ni génération d'images ni génération de vidéos."
   }
 }

@@ -8579,6 +8579,25 @@
     "You": "Bạn",
     "Attachment content is not available in shared conversations.": "Nội dung tệp đính kèm không có trong cuộc trò chuyện được chia sẻ.",
     "Share link expiration must be between 0 and 365 days.": "Thời hạn liên kết chia sẻ phải từ 0 đến 365 ngày.",
-    "Shared conversation not found.": "Không tìm thấy cuộc trò chuyện được chia sẻ."
+    "Shared conversation not found.": "Không tìm thấy cuộc trò chuyện được chia sẻ.",
+    "Custom size": "Kích thước tùy chỉnh",
+    "Size (WIDTHxHEIGHT)": "Kích thước (RỘNGxCAO)",
+    "WIDTHxHEIGHT, 64 to 8192 pixels per side.": "RỘNGxCAO, mỗi cạnh từ 64 đến 8192 pixel.",
+    "Each generated image gets its own result node.": "Mỗi ảnh được tạo có một nút kết quả riêng.",
+    "Leave empty for a random seed.": "Để trống để dùng seed ngẫu nhiên.",
+    "The same seed will be reused on every run.": "Seed này sẽ được dùng lại trong mỗi lần chạy.",
+    "Use last result": "Dùng kết quả trước",
+    "Last seed: {{seed}}": "Seed trước: {{seed}}",
+    "Connect at most {{count}} reference images to one step.": "Kết nối tối đa {{count}} ảnh tham chiếu cho một bước.",
+    "Preferred result": "Kết quả ưu tiên",
+    "Preferred": "Ưu tiên",
+    "Set as preferred result": "Đặt làm kết quả ưu tiên",
+    "Downstream steps use the preferred result.": "Các bước sau sẽ dùng kết quả ưu tiên.",
+    "Too many reference images are connected to this step.": "Quá nhiều ảnh tham chiếu được kết nối với bước này.",
+    "The size must use WIDTHxHEIGHT with each side between 64 and 8192 pixels.": "Kích thước phải ở dạng RỘNGxCAO, mỗi cạnh từ 64 đến 8192 pixel.",
+    "The seed must be an integer between 1 and 2147483647.": "Seed phải là số nguyên từ 1 đến 2147483647.",
+    "This model's channel metadata does not list image generation.": "Siêu dữ liệu kênh của mô hình này không liệt kê tạo ảnh.",
+    "This model's channel metadata does not list video generation.": "Siêu dữ liệu kênh của mô hình này không liệt kê tạo video.",
+    "This model's channel metadata lists neither image nor video generation.": "Siêu dữ liệu kênh của mô hình này không liệt kê cả tạo ảnh lẫn tạo video."
   }
 }
