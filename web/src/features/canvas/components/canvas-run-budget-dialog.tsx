@@ -50,8 +50,14 @@ interface CanvasRunBudgetDialogProps {
   group: string
   /** The steps of the run a click would start, in run order. */
   steps: CanvasWorkflowEstimateStepInput[]
-  /** Starts the run; a run id bills its steps inside the opened budget. */
-  onRun: (budget?: CanvasWorkflowRunBudgetRef) => void
+  /**
+   * Starts the run. A run id bills its steps inside the opened budget; the
+   * start metadata is recorded on the run-history row when history is on.
+   */
+  onRun: (
+    budget?: CanvasWorkflowRunBudgetRef,
+    start?: { estimateQuota: number; budgetCap: number }
+  ) => void
 }
 
 /**
@@ -118,7 +124,10 @@ export function CanvasRunBudgetDialog(props: CanvasRunBudgetDialogProps) {
     // Start while the parent can still read the plan the dialog was opened
     // for, then close; the scope of a selection run must not depend on state
     // teardown order.
-    props.onRun(budget)
+    props.onRun(budget, {
+      estimateQuota: estimate?.totalQuota ?? 0,
+      budgetCap: budget ? capQuota : 0,
+    })
     props.onOpenChange(false)
   }
 

@@ -44,6 +44,7 @@ export function CanvasInspectorViewToggle(
     { value: 'generate', label: t('Generate') },
     { value: 'library', label: t('Library') },
     { value: 'artifacts', label: t('Artifacts') },
+    { value: 'history', label: t('Run history') },
   ]
 
   return (

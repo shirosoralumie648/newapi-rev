@@ -46,11 +46,12 @@ test('offers the creation-domain panels the canvas owns', async () => {
     <CanvasInspectorViewToggle onViewChange={onViewChange} view='details' />
   )
 
-  for (const name of ['Generate', 'Library', 'Artifacts']) {
+  for (const name of ['Generate', 'Library', 'Artifacts', 'Run history']) {
     await user.click(screen.getByRole('button', { name }))
   }
 
   expect(onViewChange).toHaveBeenNthCalledWith(1, 'generate')
   expect(onViewChange).toHaveBeenNthCalledWith(2, 'library')
   expect(onViewChange).toHaveBeenNthCalledWith(3, 'artifacts')
+  expect(onViewChange).toHaveBeenNthCalledWith(4, 'history')
 })

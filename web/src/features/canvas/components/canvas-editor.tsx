@@ -59,10 +59,7 @@ import { useCanvasImageTools } from '../hooks/use-canvas-image-tools'
 import { useCanvasTemplateActions } from '../hooks/use-canvas-template-actions'
 import { useCanvasWorkflowOptions } from '../hooks/use-canvas-workflow-options'
 import { useCanvasWorkflowRunner } from '../hooks/use-canvas-workflow-runner'
-import type {
-  CanvasWorkflowRunBudgetRef,
-  CanvasWorkflowRunPlan,
-} from '../hooks/use-canvas-workflow-runner'
+import type { CanvasWorkflowRunPlan } from '../hooks/use-canvas-workflow-runner'
 import {
   CANVAS_ERRORS,
   parseCanvasImport,
@@ -119,6 +116,7 @@ import { CanvasTemplateLibraryDialog } from './canvas-template-library-dialog'
 import { CanvasToolbar } from './canvas-toolbar'
 import type { CanvasToolbarInspectorView } from './canvas-toolbar'
 import { CanvasViewportControls } from './canvas-viewport-controls'
+import { CanvasWorkflowRunHistory } from './canvas-workflow-run-history'
 import { CanvasGenerationPanel } from './generation/canvas-generation-panel'
 
 const canvasNodeTypes: NodeTypes = {
@@ -222,6 +220,8 @@ export function CanvasEditor(props: CanvasEditorProps) {
     group: workflowOptions.group,
     updateNodeData: editor.updateNodeData,
     addLinkedNode: editor.addLinkedNode,
+    canvasId: props.project.id,
+    workflowRevision: props.project.revision,
   })
 
   // The validated run the run-budget dialog is confirming; the dialog opens
@@ -354,6 +354,16 @@ export function CanvasEditor(props: CanvasEditorProps) {
     editor.clearSelection()
     setInspectorView('details')
   }, [editor])
+
+  /**
+   * A history rerun prices the current board again but forces every step to
+   * execute, so the new run can be compared with the run the user selected.
+   */
+  const handleRerunRun = useCallback(() => {
+    const plan = workflow.estimate()
+    if (!plan) return
+    setRunPlan({ ...plan, force: true })
+  }, [workflow])
 
   // A generation prefill arrives from a conversation message action. The task
   // node carries the prompt and the message's reference images become attached
@@ -594,6 +604,7 @@ export function CanvasEditor(props: CanvasEditorProps) {
   else if (inspectorView === 'generate') inspectorTitle = t('Generate')
   else if (inspectorView === 'library') inspectorTitle = t('Asset library')
   else if (inspectorView === 'artifacts') inspectorTitle = t('Artifacts')
+  else if (inspectorView === 'history') inspectorTitle = t('Run history')
 
   const selectedResultSourceId =
     editor.selectedNode?.data.workflow?.sourceNodeId?.trim() ?? ''
@@ -680,6 +691,19 @@ export function CanvasEditor(props: CanvasEditorProps) {
         }
         onClose={handleCloseInspector}
         userId={props.userId}
+      />
+    )
+  } else if (inspectorView === 'history') {
+    inspectorBody = (
+      <CanvasWorkflowRunHistory
+        active
+        canvasId={props.project.id}
+        disabled={props.disabled}
+        lastRunId={workflow.historyRunId}
+        onRerun={handleRerunRun}
+        onRestoreCache={workflow.restoreCacheBaseline}
+        refreshKey={workflow.historyRevision}
+        running={workflow.phase === 'running'}
       />
     )
   } else {
@@ -895,15 +919,21 @@ export function CanvasEditor(props: CanvasEditorProps) {
         onOpenChange={(open) => {
           if (!open) setRunPlan(null)
         }}
-        onRun={(budget?: CanvasWorkflowRunBudgetRef) => {
+        onRun={(budget, start) => {
           const scope = runPlan?.scope
+          const force = runPlan?.force
           setRunPlan(null)
           if (!scope) return
+          const runOptions = {
+            force,
+            estimateQuota: start?.estimateQuota,
+            budgetCap: start?.budgetCap,
+          }
           if (scope === 'selection') {
-            workflow.runSelection(budget)
+            workflow.runSelection(budget, runOptions)
             return
           }
-          workflow.run(undefined, budget)
+          workflow.run(undefined, budget, runOptions)
         }}
         open={runPlan !== null}
         steps={runPlan?.steps ?? []}
