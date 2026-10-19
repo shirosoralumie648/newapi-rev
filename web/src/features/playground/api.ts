@@ -1039,6 +1039,7 @@ const playgroundUsageSchema = z.object({
   storage: playgroundUsageMetricSchema,
   tasks: playgroundUsageMetricSchema,
   comparison_runs: playgroundUsageMetricSchema,
+  workflow_runs: playgroundUsageMetricSchema,
 })
 
 const playgroundSettingsSchema = z.object({
@@ -1073,6 +1074,7 @@ export interface PlaygroundResourceUsage {
   storage: PlaygroundUsageMetric
   tasks: PlaygroundUsageMetric
   comparisonRuns: PlaygroundUsageMetric
+  workflowRuns: PlaygroundUsageMetric
 }
 
 /**
@@ -1212,6 +1214,7 @@ export async function getPlaygroundUsage(
     storage: toMetric(metrics.storage),
     tasks: toMetric(metrics.tasks),
     comparisonRuns: toMetric(metrics.comparison_runs),
+    workflowRuns: toMetric(metrics.workflow_runs),
   }
 }
 

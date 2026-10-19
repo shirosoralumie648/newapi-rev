@@ -35,6 +35,7 @@ import type {
   CanvasFlowNode,
   CanvasNodeData,
   CanvasNodeWorkflowState,
+  CanvasWorkflowRun,
 } from '../../types'
 import type { CanvasNodeDataUpdate } from '../use-canvas-editor'
 import {
@@ -1516,4 +1517,199 @@ test('an unchanged step adopts the stored cache entry and skips the relay', asyn
     expect.objectContaining({ canvas_id: 'pgc_1' }),
     expect.anything()
   )
+})
+
+function mockHistoryBackedRun() {
+  const nowSeconds = Math.floor(Date.now() / 1000)
+  const state = {
+    cacheLookups: 0,
+    chatCalls: 0,
+    createdCount: 0,
+    revision: 1,
+    latestNodes: [] as Array<Record<string, unknown>>,
+  }
+  const runPayload = (nodes: Array<Record<string, unknown>>) => ({
+    id: `pgwr_${state.createdCount}`,
+    canvas_id: 'pgc_1',
+    session_id: '',
+    workflow_revision: 3,
+    status: 'running',
+    node_count: nodes.length,
+    cache_hits: nodes.filter((node) => node.cache_hit === true).length,
+    total_quota: 0,
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    total_tokens: 0,
+    duration_ms: 0,
+    estimate_quota: 0,
+    budget_cap: 0,
+    byte_size: 64,
+    revision: state.revision,
+    created_at: nowSeconds,
+    updated_at: nowSeconds,
+    nodes,
+  })
+
+  vi.spyOn(api, 'post').mockImplementation(async (url, body) => {
+    if (url === '/pg/chat/completions') {
+      state.chatCalls += 1
+      return {
+        data: {
+          choices: [{ message: { role: 'assistant', content: 'fresh fox' } }],
+          usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+        },
+      }
+    }
+    if (url === '/api/playground/workflows/history') {
+      state.createdCount += 1
+      return { data: { success: true, data: runPayload([]) } }
+    }
+    if (url === '/api/playground/workflows/node-cache') {
+      state.cacheLookups += 1
+      return { data: { success: true, data: { items: [] } } }
+    }
+    throw new Error(`Unexpected POST ${url}`)
+  })
+  vi.spyOn(api, 'patch').mockImplementation(async (_url, body) => {
+    state.latestNodes = (
+      body as { nodes: Array<Record<string, unknown>> }
+    ).nodes
+    state.revision += 1
+    return {
+      data: {
+        success: true,
+        data: {
+          ...runPayload(state.latestNodes),
+          status: (body as { status: string }).status,
+        },
+      },
+    }
+  })
+
+  return state
+}
+
+function historyBoard() {
+  return {
+    nodes: [
+      graphNode('p1', 'prompt', { text: 'a red fox' }),
+      graphNode('m1', 'model', {
+        workflow: { model: 'gpt-4o' },
+      }),
+    ],
+    edges: [{ id: 'e1', source: 'p1', target: 'm1' }] as CanvasFlowEdge[],
+  }
+}
+
+test('a forced rerun skips the node cache for every step', async () => {
+  const state = mockHistoryBackedRun()
+  const board = historyBoard()
+  const hook = renderHook(() =>
+    useRunnerHarness(
+      board.nodes,
+      board.edges,
+      'default',
+      Number.POSITIVE_INFINITY,
+      'pgc_1'
+    )
+  )
+
+  act(() => hook.result.current.runner.run())
+  await waitFor(() => expect(hook.result.current.runner.phase).toBe('idle'))
+  expect(state.chatCalls).toBe(1)
+  expect(state.cacheLookups).toBe(1)
+
+  act(() =>
+    hook.result.current.runner.run(undefined, undefined, { force: true })
+  )
+  await waitFor(() => expect(hook.result.current.runner.phase).toBe('idle'))
+
+  // The second run neither asks the server for cached rows nor adopts one, so
+  // every step goes back to the relay even though the board did not change.
+  expect(state.cacheLookups).toBe(1)
+  expect(state.chatCalls).toBe(2)
+  expect(state.latestNodes[0]).toMatchObject({
+    node_id: 'm1',
+    output: 'fresh fox',
+    cache_hit: false,
+  })
+})
+
+test('restoring a historical run makes its successful steps the next baseline', async () => {
+  const state = mockHistoryBackedRun()
+  const board = historyBoard()
+  const hook = renderHook(() =>
+    useRunnerHarness(
+      board.nodes,
+      board.edges,
+      'default',
+      Number.POSITIVE_INFINITY,
+      'pgc_1'
+    )
+  )
+
+  act(() => hook.result.current.runner.run())
+  await waitFor(() => expect(hook.result.current.runner.phase).toBe('idle'))
+  expect(state.chatCalls).toBe(1)
+  const fingerprint = String(state.latestNodes[0].fingerprint)
+  expect(fingerprint).not.toBe('')
+  const startedAt = Math.floor(Date.now() / 1000)
+
+  const historicalRun: CanvasWorkflowRun = {
+    id: 'pgwr_old',
+    canvasId: 'pgc_1',
+    sessionId: '',
+    workflowRevision: 3,
+    status: 'completed',
+    nodeCount: 1,
+    cacheHits: 0,
+    totalQuota: 0,
+    promptTokens: 3,
+    completionTokens: 2,
+    totalTokens: 5,
+    durationMs: 900,
+    estimateQuota: 0,
+    budgetCap: 0,
+    byteSize: 64,
+    revision: 2,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    nodes: [
+      {
+        nodeId: 'm1',
+        kind: 'model',
+        model: 'gpt-4o',
+        group: 'default',
+        status: 'succeeded',
+        fingerprint,
+        cacheHit: false,
+        output: 'restored fox',
+        taskId: '',
+        artifactKeys: [],
+        resultCount: 0,
+        promptTokens: 3,
+        completionTokens: 2,
+        totalTokens: 5,
+        quota: 0,
+        durationMs: 900,
+        error: '',
+        startedAt,
+        finishedAt: startedAt,
+      },
+    ],
+  }
+
+  act(() => hook.result.current.runner.restoreCacheBaseline(historicalRun))
+  act(() => hook.result.current.runner.run())
+  await waitFor(() => expect(hook.result.current.runner.phase).toBe('idle'))
+
+  // The server has no cache row, but the restored baseline still wins: the
+  // relay is never called and the historical output is reused.
+  expect(state.cacheLookups).toBe(2)
+  expect(state.chatCalls).toBe(1)
+  expect(state.latestNodes[0]).toMatchObject({
+    node_id: 'm1',
+    output: 'restored fox',
+    cache_hit: true,
+  })
 })

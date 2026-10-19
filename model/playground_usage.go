@@ -55,8 +55,11 @@ type PlaygroundResourceUsage struct {
 	// ComparisonRuns is the persisted compare-run matrix count and snapshot
 	// bytes of the account.
 	ComparisonRuns PlaygroundUsageMetric `json:"comparison_runs"`
-	Storage        PlaygroundUsageMetric `json:"storage"`
-	Tasks          PlaygroundUsageMetric `json:"tasks"`
+	// WorkflowRuns is the persisted canvas workflow run count and node-snapshot
+	// bytes of the account.
+	WorkflowRuns PlaygroundUsageMetric `json:"workflow_runs"`
+	Storage      PlaygroundUsageMetric `json:"storage"`
+	Tasks        PlaygroundUsageMetric `json:"tasks"`
 }
 
 // PlaygroundUsageForUser reports the caller's Playground storage against the
@@ -113,6 +116,10 @@ func PlaygroundUsageForUser(userID int) (*PlaygroundResourceUsage, error) {
 			Limit:      int64(policy.ComparisonRunUserMaxCount),
 			LimitBytes: policy.ComparisonRunUserMaxBytes,
 		},
+		WorkflowRuns: PlaygroundUsageMetric{
+			Limit:      int64(policy.WorkflowRunUserMaxCount),
+			LimitBytes: policy.WorkflowRunUserMaxBytes,
+		},
 		Storage: PlaygroundUsageMetric{
 			LimitBytes: policy.ObjectUserMaxBytes,
 		},
@@ -144,6 +151,8 @@ func PlaygroundUsageForUser(userID int) (*PlaygroundResourceUsage, error) {
 	usage.KnowledgeBaseChunks.UsedBytes = counters.KnowledgeBaseBytes
 	usage.ComparisonRuns.Used = counters.ComparisonRunCount
 	usage.ComparisonRuns.UsedBytes = counters.ComparisonRunBytes
+	usage.WorkflowRuns.Used = counters.WorkflowRunCount
+	usage.WorkflowRuns.UsedBytes = counters.WorkflowRunBytes
 	// Storage counts the bytes that live in the object store, the same figure
 	// the upload path checks against ObjectUserMaxBytes.
 	usage.Storage.UsedBytes = counters.ObjectBytes

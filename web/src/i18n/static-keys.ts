@@ -1129,6 +1129,12 @@ export const STATIC_I18N_KEYS = [
   'Compare run size limit',
   'Compare runs per user',
   'Compare run storage per user',
+  // Canvas workflow-run quota labels and group heading.
+  'Workflow runs',
+  'Steps per workflow run',
+  'Workflow run size limit',
+  'Workflow runs per user',
+  'Workflow run storage per user',
   // Channel priority ordering API errors.
   'Channel priorities changed. Refresh and try again.',
   'Invalid channel priority move',
@@ -1164,6 +1170,20 @@ export const STATIC_I18N_KEYS = [
   "This model's channel metadata does not list image generation.",
   "This model's channel metadata does not list video generation.",
   "This model's channel metadata lists neither image nor video generation.",
+  // Canvas workflow run history: status/kind labels and rerun diff reasons
+  // render from maps, and the toast fallbacks sit inside helper calls, so the
+  // literal scan cannot see them.
+  'Generation',
+  'Skipped',
+  'Only in the newer run',
+  'Only in the older run',
+  'Status changed',
+  'Cost changed',
+  'Duration changed',
+  'Cache use changed',
+  'Output changed',
+  'The workflow run could not be loaded.',
+  'The workflow run could not be deleted.',
   // Canvas workflow run budget feedback (BL-03): the estimate dialog reports
   // these keys from constants, so the literal scan cannot see them.
   'The run budget could not be opened.',
