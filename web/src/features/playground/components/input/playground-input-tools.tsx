@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Code2, GlobeIcon, Table2Icon, Trash2Icon } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -35,6 +35,8 @@ import {
 import { DEFAULT_DEVELOPER_OPTIONS } from '../../constants'
 import type { KnowledgeBase } from '../../knowledge-api'
 import type { PlaygroundContextPlan } from '../../lib'
+import { playgroundProtocolUnsupportedFields } from '../../lib/protocol/protocol-payload'
+import { buildChatCompletionPayload } from '../../lib/streaming/payload-builder'
 import type {
   ModelOption,
   ParameterEnabled,
@@ -197,6 +199,26 @@ export function PlaygroundInputTools({
 }: PlaygroundInputToolsProps) {
   const { t } = useTranslation()
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
+  // Probe the payload of the next send so the warning names exactly what the
+  // selected protocol drops; a disabled parameter never appears because the
+  // real builder is used instead of a static per-protocol list.
+  const unsupportedFields = useMemo(
+    () =>
+      playgroundProtocolUnsupportedFields(
+        buildChatCompletionPayload(
+          [],
+          config,
+          parameterEnabled,
+          '',
+          undefined,
+          '',
+          null,
+          developerOptions
+        ),
+        config.protocol
+      ),
+    [config, parameterEnabled, developerOptions]
+  )
 
   const handleClearMessages = () => {
     onClearMessages?.()
@@ -311,6 +333,7 @@ export function PlaygroundInputTools({
         <PlaygroundProtocolSelect
           disabled={disabled}
           onChange={(protocol) => onConfigChange('protocol', protocol)}
+          unsupportedFields={unsupportedFields}
           value={config.protocol}
         />
 
@@ -331,6 +354,8 @@ export function PlaygroundInputTools({
         <PlaygroundSnippetPanel
           disabled={disabled}
           onInsertSnippet={onInsertText}
+          onSystemPromptChange={onSystemPromptChange}
+          systemPrompt={systemPrompt}
         />
 
         <PlaygroundContextPanel

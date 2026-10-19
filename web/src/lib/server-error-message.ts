@@ -109,6 +109,11 @@ const serverErrorMessageKeys = {
     'Playground memory limit reached. Delete an old memory or ask your administrator for a larger limit.',
   PLAYGROUND_MEMORY_CONTENT_LIMIT_EXCEEDED:
     'This memory is longer than the allowed size.',
+  PLAYGROUND_SNIPPET_LIMIT_EXCEEDED: 'Prompt snippet limit exceeded.',
+  PLAYGROUND_SNIPPET_CONTENT_LIMIT_EXCEEDED:
+    'Prompt snippet content limit exceeded.',
+  PLAYGROUND_SNIPPET_VERSION_LIMIT_EXCEEDED:
+    'Prompt snippet version limit exceeded.',
   PLAYGROUND_WALLET_DEBT_READ_ONLY:
     'Your wallet has unsettled debt. Top up to restore access; reading and exporting data stays available.',
   PLAYGROUND_WALLET_DEBT_UNAVAILABLE:

@@ -162,7 +162,7 @@ export function PlaygroundSnippetHistoryDialog(
                           </Badge>
                         ) : null}
                         <span className='text-muted-foreground text-xs'>
-                          {t('{{count}} characters', {
+                          {t('{{count}} bytes', {
                             count: version.byteSize,
                           })}
                         </span>

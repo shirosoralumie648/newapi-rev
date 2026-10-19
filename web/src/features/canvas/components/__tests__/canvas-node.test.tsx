@@ -119,6 +119,33 @@ test('shows the run state, output and failure of a workflow step', () => {
   expect(screen.getByText('upstream exploded')).toBeInTheDocument()
 })
 
+test('marks a succeeded workflow step served from the node cache', () => {
+  renderNode({
+    kind: 'model',
+    workflow: {
+      status: 'succeeded',
+      model: 'gpt-4o',
+      output: 'cached answer',
+      cacheHit: true,
+    },
+  })
+
+  expect(screen.getByText('Cached')).toBeInTheDocument()
+})
+
+test('does not mark a running step that still carries a cached flag', () => {
+  renderNode({
+    kind: 'model',
+    workflow: {
+      status: 'running',
+      model: 'gpt-4o',
+      cacheHit: true,
+    },
+  })
+
+  expect(screen.queryByText('Cached')).not.toBeInTheDocument()
+})
+
 test('shows the durable task id of a generation step', () => {
   renderNode({
     kind: 'task',

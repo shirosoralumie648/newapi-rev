@@ -43,6 +43,7 @@ import {
   type PlaygroundRequestCodeTab,
   resolvePlaygroundRequestBaseUrl,
 } from '../../lib/developer/request-code'
+import { playgroundProtocolUnsupportedFields } from '../../lib/protocol/protocol-payload'
 import type { ChatCompletionRequest, PlaygroundProtocol } from '../../types'
 
 interface PlaygroundRequestCodeTabDefinition {
@@ -133,6 +134,11 @@ export function PlaygroundRequestViewer(props: PlaygroundRequestViewerProps) {
       ?.labelKey ?? 'Chat Completions'
   const rawResponse = props.request?.rawResponse
   const hasRawResponse = Boolean(rawResponse)
+  // Dropped parameters are reported next to the export note so the preview
+  // never implies a field travels upstream when the conversion removes it.
+  const unsupportedFields = payload
+    ? playgroundProtocolUnsupportedFields(payload, protocol)
+    : []
   // A new send without a captured reply must not leave the viewer on a tab
   // whose trigger is no longer rendered.
   const activeTab: PlaygroundRequestViewerTab =
@@ -201,6 +207,13 @@ export function PlaygroundRequestViewer(props: PlaygroundRequestViewerProps) {
                   {t(
                     '"group" is a Playground-only routing field; the /v1 endpoint uses the API token group instead.'
                   )}
+                </p>
+              )}
+              {unsupportedFields.length > 0 && (
+                <p className='text-xs text-amber-600 dark:text-amber-400'>
+                  {t('Not sent with this protocol: {{fields}}', {
+                    fields: unsupportedFields.join(', '),
+                  })}
                 </p>
               )}
             </div>

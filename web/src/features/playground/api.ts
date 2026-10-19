@@ -1070,6 +1070,8 @@ const playgroundMessageCostLookupSchema = z.object({
 const playgroundUsageSchema = z.object({
   group: z.string(),
   sessions: playgroundUsageMetricSchema,
+  snippets: playgroundUsageMetricSchema,
+  snippet_versions: playgroundUsageMetricSchema,
   memories: playgroundUsageMetricSchema,
   attachments: playgroundUsageMetricSchema,
   artifacts: playgroundUsageMetricSchema,
@@ -1082,6 +1084,7 @@ const playgroundUsageSchema = z.object({
   storage: playgroundUsageMetricSchema,
   tasks: playgroundUsageMetricSchema,
   comparison_runs: playgroundUsageMetricSchema,
+  workflow_runs: playgroundUsageMetricSchema,
 })
 
 const playgroundSettingsSchema = z.object({
@@ -1105,6 +1108,8 @@ export interface PlaygroundUsageMetric {
 export interface PlaygroundResourceUsage {
   group: string
   sessions: PlaygroundUsageMetric
+  snippets: PlaygroundUsageMetric
+  snippetVersions: PlaygroundUsageMetric
   memories: PlaygroundUsageMetric
   attachments: PlaygroundUsageMetric
   artifacts: PlaygroundUsageMetric
@@ -1117,6 +1122,7 @@ export interface PlaygroundResourceUsage {
   storage: PlaygroundUsageMetric
   tasks: PlaygroundUsageMetric
   comparisonRuns: PlaygroundUsageMetric
+  workflowRuns: PlaygroundUsageMetric
 }
 
 /**
@@ -1244,6 +1250,8 @@ export async function getPlaygroundUsage(
   return {
     group: metrics.group,
     sessions: toMetric(metrics.sessions),
+    snippets: toMetric(metrics.snippets),
+    snippetVersions: toMetric(metrics.snippet_versions),
     memories: toMetric(metrics.memories),
     attachments: toMetric(metrics.attachments),
     artifacts: toMetric(metrics.artifacts),
@@ -1256,6 +1264,7 @@ export async function getPlaygroundUsage(
     storage: toMetric(metrics.storage),
     tasks: toMetric(metrics.tasks),
     comparisonRuns: toMetric(metrics.comparison_runs),
+    workflowRuns: toMetric(metrics.workflow_runs),
   }
 }
 

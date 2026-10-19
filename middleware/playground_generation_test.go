@@ -101,6 +101,27 @@ func TestPlaygroundGenerationParametersBoundCustomSizesAndSeeds(t *testing.T) {
 	}
 }
 
+func TestValidPlaygroundWorkflowRunId(t *testing.T) {
+	tests := []struct {
+		name  string
+		runId string
+		valid bool
+	}{
+		{name: "generated id", runId: "pgw_" + strings.Repeat("a1B2", 8), valid: true},
+		{name: "history id namespace", runId: "pgwr_" + strings.Repeat("a", 32)},
+		{name: "short suffix", runId: "pgw_" + strings.Repeat("a", 31)},
+		{name: "long suffix", runId: "pgw_" + strings.Repeat("a", 33)},
+		{name: "missing suffix", runId: "pgw_"},
+		{name: "invalid character", runId: "pgw_" + strings.Repeat("a", 31) + "-"},
+		{name: "embedded separator", runId: "pgw_" + strings.Repeat("a", 15) + "_" + strings.Repeat("a", 16)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.valid, validPlaygroundWorkflowRunId(tt.runId))
+		})
+	}
+}
+
 func TestPlaygroundGenerationParameterValidationKeepsBodyReplayable(t *testing.T) {
 	router := newPlaygroundGenerationTestRouter()
 	recorder := httptest.NewRecorder()
