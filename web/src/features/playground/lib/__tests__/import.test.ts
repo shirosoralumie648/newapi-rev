@@ -27,6 +27,7 @@ import {
 import {
   DEFAULT_CONFIG,
   DEFAULT_CONTEXT_SETTINGS,
+  DEFAULT_DEVELOPER_OPTIONS,
   DEFAULT_PARAMETER_ENABLED,
   PLAYGROUND_SESSION_TITLE_MAX_LENGTH,
 } from '../../constants'
@@ -298,6 +299,7 @@ function forkSourceSession(): PlaygroundSession {
       model: 'fork-model',
       createdAt: 3,
     },
+    developerOptions: { ...DEFAULT_DEVELOPER_OPTIONS, tools: [] },
     pinned: false,
     archived: false,
     tags: [],

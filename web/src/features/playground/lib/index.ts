@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 export * from './artifact-utils'
 export * from './attachment-store'
 export * from './attachment-upload'
+export * from './comparison/playground-comparison'
 export * from './context/playground-context'
 export * from './cost/estimate-playground-cost'
 export * from './developer/request-code'

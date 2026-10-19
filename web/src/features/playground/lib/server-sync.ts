@@ -31,6 +31,7 @@ import type {
   PlaygroundSession,
   PlaygroundServerSession,
 } from '../types'
+import { serializeDeveloperOptions } from './developer/developer-options'
 import { normalizeMessagesForStorage } from './storage/storage'
 
 /**
@@ -89,6 +90,7 @@ export function playgroundSnapshot(session: PlaygroundSession): string {
     knowledgeBaseIds: session.knowledgeBaseIds,
     context: session.context,
     contextSummary: session.contextSummary,
+    developerOptions: serializeDeveloperOptions(session.developerOptions),
     pinned: session.pinned,
     archived: session.archived,
     tags: session.tags,
@@ -145,6 +147,7 @@ export async function hydratePlaygroundWorkspace(
       knowledgeBaseIds: session.knowledgeBaseIds,
       context: session.context,
       contextSummary: session.contextSummary,
+      developerOptions: session.developerOptions,
       pinned: session.pinned,
       archived: session.archived,
       tags: session.tags,
@@ -199,6 +202,7 @@ export async function savePlaygroundSession(
         knowledge_base_ids: draft.knowledgeBaseIds,
         context: draft.context,
         context_summary: draft.contextSummary,
+        developer_options: serializeDeveloperOptions(draft.developerOptions),
         pinned: draft.pinned,
         archived: draft.archived,
         tags: draft.tags,
@@ -240,6 +244,8 @@ export async function savePlaygroundSession(
       JSON.stringify(created.context) !== JSON.stringify(draft.context) ||
       JSON.stringify(created.contextSummary) !==
         JSON.stringify(draft.contextSummary) ||
+      JSON.stringify(serializeDeveloperOptions(created.developerOptions)) !==
+        JSON.stringify(serializeDeveloperOptions(draft.developerOptions)) ||
       created.pinned !== draft.pinned ||
       created.archived !== draft.archived ||
       JSON.stringify(created.tags) !== JSON.stringify(draft.tags)
@@ -264,6 +270,7 @@ export async function savePlaygroundSession(
       knowledge_base_ids: draft.knowledgeBaseIds,
       context: draft.context,
       context_summary: draft.contextSummary,
+      developer_options: serializeDeveloperOptions(draft.developerOptions),
       pinned: draft.pinned,
       archived: draft.archived,
       tags: draft.tags,

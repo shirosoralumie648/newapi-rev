@@ -319,8 +319,13 @@ func TestPlaygroundShareCanvasColumnMigration(t *testing.T) {
 				quoted[index] = q(name)
 			}
 			require.NoError(t, db.Exec("CREATE TABLE "+q(table)+" ("+strings.Join(definitions, ", ")+")").Error)
-			require.NoError(t, db.Exec("INSERT INTO "+q(table)+" ("+strings.Join(quoted, ", ")+") VALUES ("+strings.Repeat("?,", len(legacyColumns)-1)+"?)",
-				1, "pgs_legacy", 7, "legacy-token-hash", 0, 0, 111).Error)
+			// The id column is left out of the insert so every dialect's own
+			// generator advances: writing an explicit id into a PostgreSQL
+			// bigserial leaves the sequence behind and the next generated row
+			// collides with the fixture.
+			insertColumns := quoted[1:]
+			require.NoError(t, db.Exec("INSERT INTO "+q(table)+" ("+strings.Join(insertColumns, ", ")+") VALUES ("+strings.Repeat("?,", len(insertColumns)-1)+"?)",
+				"pgs_legacy", 7, "legacy-token-hash", 0, 0, 111).Error)
 
 			for range 2 {
 				require.NoError(t, db.AutoMigrate(&PlaygroundSessionShare{}))
