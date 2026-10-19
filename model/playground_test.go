@@ -7011,7 +7011,7 @@ func TestPlaygroundLogCapture(t *testing.T) {
 				require.NoError(t, db.Migrator().DropTable(&model.Log{}, &model.PlaygroundLogCapture{}))
 			})
 			require.NoError(t, db.Create(&[]model.Log{
-				{UserId: 7, Type: model.LogTypeConsume, RequestId: "pg-replay-owner", ModelName: "replay-model", Group: "default", Quota: 42, PromptTokens: 10, CompletionTokens: 20, CreatedAt: 1000,
+				{UserId: 7, Type: model.LogTypeConsume, RequestId: "pg-replay-owner", ModelName: "replay-model", Group: "default", IsStream: true, Quota: 42, PromptTokens: 10, CompletionTokens: 20, CreatedAt: 1000,
 					Other: `{"request_path":"/pg/chat/completions","reasoning_effort":"high","po":["set temperature = 0.2"]}`},
 				{UserId: 8, Type: model.LogTypeConsume, RequestId: "pg-replay-other", ModelName: "other-model", Group: "default", CreatedAt: 1000},
 				{UserId: 7, Type: model.LogTypeConsume, RequestId: "pg-replay-expired", ModelName: "replay-model", Group: "default", CreatedAt: 1000},
