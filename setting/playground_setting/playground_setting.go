@@ -237,13 +237,22 @@ type PlaygroundQuotaPolicy struct {
 	ComparisonRunMaxBytes       int64 `json:"comparison_run_max_bytes"`
 	ComparisonRunUserMaxCount   int   `json:"comparison_run_user_max_count"`
 	ComparisonRunUserMaxBytes   int64 `json:"comparison_run_user_max_bytes"`
-	ToolCallMaxCount            int   `json:"tool_call_max_count"`
-	ToolCallArgumentsMaxBytes   int64 `json:"tool_call_arguments_max_bytes"`
-	ToolCallResultMaxBytes      int64 `json:"tool_call_result_max_bytes"`
-	AttachmentMaxCount          int   `json:"attachment_max_count"`
-	AttachmentMaxFileBytes      int64 `json:"attachment_max_file_bytes"`
-	AttachmentUserMaxBytes      int64 `json:"attachment_user_max_bytes"`
-	AttachmentUserMaxCount      int   `json:"attachment_user_max_count"`
+	// Workflow run history (PG2-07) persists one bounded node snapshot per
+	// canvas run. These limits bound the snapshot: nodes per run, one stored
+	// run, and the account's run count and snapshot bytes. The steps still bill
+	// through the ordinary /pg and task paths, and the run budget stays on the
+	// BL-03 workflow estimate/run endpoints.
+	WorkflowRunNodeMaxCount   int   `json:"workflow_run_node_max_count"`
+	WorkflowRunMaxBytes       int64 `json:"workflow_run_max_bytes"`
+	WorkflowRunUserMaxCount   int   `json:"workflow_run_user_max_count"`
+	WorkflowRunUserMaxBytes   int64 `json:"workflow_run_user_max_bytes"`
+	ToolCallMaxCount          int   `json:"tool_call_max_count"`
+	ToolCallArgumentsMaxBytes int64 `json:"tool_call_arguments_max_bytes"`
+	ToolCallResultMaxBytes    int64 `json:"tool_call_result_max_bytes"`
+	AttachmentMaxCount        int   `json:"attachment_max_count"`
+	AttachmentMaxFileBytes    int64 `json:"attachment_max_file_bytes"`
+	AttachmentUserMaxBytes    int64 `json:"attachment_user_max_bytes"`
+	AttachmentUserMaxCount    int   `json:"attachment_user_max_count"`
 	// The extended attachment kinds have their own per-file ceilings: a video is
 	// legitimately much larger than a chat image, while the account byte budgets
 	// above still bound the total an account may store. The classic limit
@@ -475,13 +484,21 @@ func builtinPlaygroundQuotaPolicy() PlaygroundQuotaPolicy {
 		ComparisonRunMaxBytes:       1 << 20,
 		ComparisonRunUserMaxCount:   50,
 		ComparisonRunUserMaxBytes:   32 << 20,
-		ToolCallMaxCount:            16,
-		ToolCallArgumentsMaxBytes:   64 << 10,
-		ToolCallResultMaxBytes:      256 << 10,
-		AttachmentMaxCount:          8,
-		AttachmentMaxFileBytes:      8 << 20,
-		AttachmentUserMaxBytes:      64 << 20,
-		AttachmentUserMaxCount:      500,
+		// Workflow run history starts at 64 stored runs / 32 MiB of snapshots
+		// per account: enough to rerun and diff recent boards while keeping the
+		// cache scan and the reconciliation cheap. A single run is capped at
+		// 1 MiB like a compare-run snapshot.
+		WorkflowRunNodeMaxCount:   256,
+		WorkflowRunMaxBytes:       1 << 20,
+		WorkflowRunUserMaxCount:   64,
+		WorkflowRunUserMaxBytes:   32 << 20,
+		ToolCallMaxCount:          16,
+		ToolCallArgumentsMaxBytes: 64 << 10,
+		ToolCallResultMaxBytes:    256 << 10,
+		AttachmentMaxCount:        8,
+		AttachmentMaxFileBytes:    8 << 20,
+		AttachmentUserMaxBytes:    64 << 20,
+		AttachmentUserMaxCount:    500,
 		// The extended kinds start at the ceilings the upload endpoint already
 		// enforced for generated media: video is capped at 64 MiB, audio and
 		// documents at 16 MiB, and the account byte budgets above still bound
@@ -696,6 +713,18 @@ func applyPlaygroundQuotaOverrides(policy *PlaygroundQuotaPolicy, override *Play
 	}
 	if override.ComparisonRunUserMaxBytes > 0 {
 		policy.ComparisonRunUserMaxBytes = override.ComparisonRunUserMaxBytes
+	}
+	if override.WorkflowRunNodeMaxCount > 0 {
+		policy.WorkflowRunNodeMaxCount = override.WorkflowRunNodeMaxCount
+	}
+	if override.WorkflowRunMaxBytes > 0 {
+		policy.WorkflowRunMaxBytes = override.WorkflowRunMaxBytes
+	}
+	if override.WorkflowRunUserMaxCount > 0 {
+		policy.WorkflowRunUserMaxCount = override.WorkflowRunUserMaxCount
+	}
+	if override.WorkflowRunUserMaxBytes > 0 {
+		policy.WorkflowRunUserMaxBytes = override.WorkflowRunUserMaxBytes
 	}
 	if override.ToolCallMaxCount > 0 {
 		policy.ToolCallMaxCount = override.ToolCallMaxCount

@@ -494,6 +494,7 @@ func migrateDB() error {
 		&PlaygroundStorageLedger{},
 		&PlaygroundObjectDeleteOutbox{},
 		&PlaygroundComparisonRun{},
+		&PlaygroundWorkflowRun{},
 		&WalletLedgerEntry{},
 		&WalletHold{},
 		&WalletHoldGrant{},
