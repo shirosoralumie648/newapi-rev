@@ -135,16 +135,21 @@ func RedactPlaygroundMCPJSON(value string) string {
 	if err := common.UnmarshalJsonStr(value, &setting); err != nil {
 		return `{"enabled":false,"servers":[]}`
 	}
+	if setting.Servers == nil {
+		setting.Servers = []PlaygroundMCPServerSetting{}
+	}
 	for i := range setting.Servers {
 		setting.Servers[i].HasToken = setting.Servers[i].AuthToken != ""
 		setting.Servers[i].AuthToken = ""
 		setting.Servers[i].ClearToken = false
 	}
-	redacted, err := EncodePlaygroundMCPSetting(setting)
+	// The console shape keeps HasToken, so the encoder for the stored shape is
+	// deliberately not used here.
+	redacted, err := common.Marshal(setting)
 	if err != nil {
 		return `{"enabled":false,"servers":[]}`
 	}
-	return redacted
+	return string(redacted)
 }
 
 // MergePlaygroundMCPJSON merges an edited configuration with the stored one:

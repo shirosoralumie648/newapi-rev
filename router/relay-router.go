@@ -78,10 +78,25 @@ func SetRelayRouter(router *gin.Engine) {
 	// task plugins, model grouping and billing see the canonical request.
 	playgroundMediaRouter := router.Group("/pg")
 	playgroundMediaRouter.Use(middleware.RouteTag("relay"))
+	playgroundMediaRouter.Use(middleware.RequestTiming())
 	playgroundMediaRouter.Use(middleware.DisableCache())
 	playgroundMediaRouter.Use(middleware.SystemPerformanceCheck())
 	playgroundMediaRouter.Use(middleware.UserAuth())
 	{
+		// The chat, Responses and Messages protocols share one Relay pipeline.
+		// The bridge rewrites the playground path before relay-mode detection,
+		// channel selection and billing, so each protocol behaves exactly like
+		// its direct /v1 endpoint.
+		playgroundMediaRouter.POST("/responses",
+			middleware.PlaygroundRelayBridge("/v1/responses"),
+			middleware.Distribute(),
+			controller.PlaygroundResponses,
+		)
+		playgroundMediaRouter.POST("/messages",
+			middleware.PlaygroundRelayBridge("/v1/messages"),
+			middleware.Distribute(),
+			controller.PlaygroundMessages,
+		)
 		playgroundMediaRouter.POST("/images/generations",
 			middleware.PlaygroundRelayBridge("/v1/images/generations"),
 			middleware.PinTaskPluginEndpoint(),
@@ -110,6 +125,18 @@ func SetRelayRouter(router *gin.Engine) {
 			middleware.PlaygroundRelayBridge("/v1/embeddings"),
 			middleware.Distribute(),
 			controller.PlaygroundEmbeddings,
+		)
+		// The non-chat workbench shares the same bridge and billing path:
+		// only the canonical relay format differs.
+		playgroundMediaRouter.POST("/rerank",
+			middleware.PlaygroundRelayBridge("/v1/rerank"),
+			middleware.Distribute(),
+			controller.PlaygroundRerank,
+		)
+		playgroundMediaRouter.POST("/moderations",
+			middleware.PlaygroundRelayBridge("/v1/moderations"),
+			middleware.Distribute(),
+			controller.PlaygroundModerations,
 		)
 		playgroundMediaRouter.POST("/audio/speech",
 			middleware.PlaygroundRelayBridge("/v1/audio/speech"),

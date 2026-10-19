@@ -71,7 +71,7 @@ func playgroundMigrationDB(t *testing.T, dialect string) *gorm.DB {
 		sqlDB.SetMaxOpenConns(1)
 	}
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&PlaygroundMessage{}, &PlaygroundAttachment{}, &PlaygroundUserUsage{}, &PlaygroundPreset{}, &PlaygroundSession{}, &PlaygroundSessionShare{}, &PlaygroundCanvasProject{}))
+		require.NoError(t, db.Migrator().DropTable(&PlaygroundMessage{}, &PlaygroundAttachment{}, &PlaygroundUserUsage{}, &PlaygroundSnippetVersion{}, &PlaygroundSnippet{}, &PlaygroundPreset{}, &PlaygroundSession{}, &PlaygroundSessionShare{}, &PlaygroundCanvasProject{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
@@ -515,6 +515,92 @@ func TestPlaygroundCanvasModeColumnMigration(t *testing.T) {
 			var stored PlaygroundCanvasProject
 			require.NoError(t, db.Where("id = ?", "pgc_image").First(&stored).Error)
 			assert.Equal(t, PlaygroundCanvasModeImage, NormalizePlaygroundCanvasMode(stored.Mode))
+		})
+	}
+}
+
+// A database written before the prompt template library had versions has
+// snippet rows without a history. The pointer columns must arrive with a
+// default before AutoMigrate sees the table, the backfill must store the
+// stored text as version 1, point both markers at it and refresh the owner's
+// version counter, and repeating both migrations must change nothing.
+func TestPlaygroundSnippetVersionMigration(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundMigrationDB(t, dialect)
+			// A fresh database has no prompt tables: both migrations are
+			// no-ops and leave the creation to AutoMigrate.
+			require.NoError(t, migratePlaygroundSnippetVersionColumns(db))
+			require.NoError(t, migratePlaygroundSnippetVersions(db))
+			require.False(t, db.Migrator().HasTable(&PlaygroundSnippet{}))
+			require.False(t, db.Migrator().HasTable(&PlaygroundSnippetVersion{}))
+
+			quote := "`"
+			if dialect == "postgres" {
+				quote = `"`
+			}
+			q := func(name string) string { return quote + name + quote }
+			table := db.NamingStrategy.TableName("PlaygroundSnippet")
+			legacyColumns := []string{"id", "user_id", "name", "content", "created_at", "updated_at"}
+			legacyTypes := []string{"varchar(32) PRIMARY KEY", "bigint NOT NULL", "varchar(100) NOT NULL", "text NOT NULL", "bigint NOT NULL", "bigint NOT NULL"}
+			definitions := make([]string, len(legacyColumns))
+			quoted := make([]string, len(legacyColumns))
+			for index, name := range legacyColumns {
+				definitions[index] = q(name) + " " + legacyTypes[index]
+				quoted[index] = q(name)
+			}
+			require.NoError(t, db.Exec("CREATE TABLE "+q(table)+" ("+strings.Join(definitions, ", ")+")").Error)
+			require.NoError(t, db.Exec("INSERT INTO "+q(table)+" ("+strings.Join(quoted, ", ")+") VALUES ("+strings.Repeat("?,", len(legacyColumns)-1)+"?)",
+				"pgs_legacy", 7, "Legacy template", "Legacy template body", 111, 111).Error)
+
+			// The pointer columns arrive with a default on the non-empty table,
+			// and the same call repeated changes nothing.
+			for range 2 {
+				require.NoError(t, migratePlaygroundSnippetVersionColumns(db))
+			}
+			for _, column := range playgroundSnippetVersionColumns {
+				assert.True(t, db.Migrator().HasColumn(&PlaygroundSnippet{}, column), column)
+			}
+			require.NoError(t, db.AutoMigrate(&PlaygroundSnippet{}, &PlaygroundSnippetVersion{}))
+			// The backfill refreshes the owner's counters, so the tables the
+			// accounting snapshot measures must exist as they do after the real
+			// AutoMigrate.
+			require.NoError(t, db.AutoMigrate(
+				&PlaygroundUserUsage{}, &PlaygroundSession{}, &PlaygroundPreset{}, &PlaygroundMemory{},
+				&PlaygroundAttachment{}, &PlaygroundUpload{}, &PlaygroundArtifact{}, &PlaygroundArtifactVersion{},
+				&PlaygroundCanvasProject{}, &PlaygroundCanvasTemplate{}, &PlaygroundCanvasSnapshot{},
+				&PlaygroundKnowledgeBase{}, &PlaygroundKnowledgeDocument{}, &PlaygroundKnowledgeChunk{},
+				&PlaygroundComparisonRun{}, &PlaygroundWorkflowRun{},
+			))
+			require.True(t, db.Migrator().HasIndex(&PlaygroundSnippetVersion{}, "uk_playground_snippet_version"))
+
+			var legacy PlaygroundSnippet
+			require.NoError(t, db.Where("id = ?", "pgs_legacy").First(&legacy).Error)
+			assert.Zero(t, legacy.CurrentVersion)
+			assert.Equal(t, "Legacy template body", string(legacy.Content))
+
+			for range 2 {
+				require.NoError(t, migratePlaygroundSnippetVersions(db))
+			}
+			require.NoError(t, db.Where("id = ?", "pgs_legacy").First(&legacy).Error)
+			assert.Equal(t, 1, legacy.CurrentVersion)
+			assert.Equal(t, 1, legacy.ProductionVersion)
+			assert.Equal(t, "Legacy template body", string(legacy.Content))
+
+			var versions []PlaygroundSnippetVersion
+			require.NoError(t, db.Where("snippet_id = ?", "pgs_legacy").Order("version").Find(&versions).Error)
+			require.Len(t, versions, 1)
+			assert.True(t, strings.HasPrefix(versions[0].ID, "pgsv_"), versions[0].ID)
+			assert.Equal(t, 1, versions[0].Version)
+			assert.Equal(t, "Legacy template body", string(versions[0].Content))
+			assert.EqualValues(t, len("Legacy template body"), versions[0].ByteSize)
+			assert.EqualValues(t, 111, versions[0].CreatedAt)
+
+			// The version budget is exact right after the upgrade.
+			var usage PlaygroundUserUsage
+			require.NoError(t, db.Where("user_id = ?", 7).First(&usage).Error)
+			assert.EqualValues(t, 1, usage.Snippets)
+			assert.EqualValues(t, 1, usage.SnippetVersions)
 		})
 	}
 }

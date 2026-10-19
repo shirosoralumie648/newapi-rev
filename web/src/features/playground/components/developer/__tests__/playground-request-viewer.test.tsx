@@ -162,3 +162,54 @@ test('every export tab copies its own snippet without attachment bytes', async (
     writeText.mockClear()
   }
 })
+
+test('shows the captured raw response only when the transport recorded one', async () => {
+  const user = userEvent.setup()
+  const { rerender } = render(
+    <PlaygroundRequestViewer
+      open
+      onOpenChange={() => undefined}
+      request={{ payload, capturedAt: Date.now() }}
+    />
+  )
+
+  expect(screen.queryByRole('tab', { name: 'Raw response' })).toBeNull()
+
+  rerender(
+    <PlaygroundRequestViewer
+      open
+      onOpenChange={() => undefined}
+      request={{
+        payload,
+        capturedAt: Date.now(),
+        protocol: 'messages',
+        rawResponse:
+          'event: content_block_delta\ndata: {"type":"content_block_delta"}',
+      }}
+    />
+  )
+
+  await user.click(screen.getByRole('tab', { name: 'Raw response' }))
+  expect(
+    await screen.findByRole('textbox', { name: 'Raw response' })
+  ).toHaveTextContent('content_block_delta')
+})
+
+test('exports the Messages protocol through its own endpoint and auth header', async () => {
+  const user = userEvent.setup()
+  render(
+    <PlaygroundRequestViewer
+      open
+      onOpenChange={() => undefined}
+      request={{ payload, capturedAt: Date.now(), protocol: 'messages' }}
+    />
+  )
+
+  expect(screen.getByText('Protocol: Anthropic Messages')).toBeVisible()
+  await user.click(screen.getByRole('tab', { name: 'cURL' }))
+
+  const panel = await screen.findByRole('textbox', { name: 'cURL' })
+  expect(panel).toHaveTextContent('/v1/messages')
+  expect(panel).toHaveTextContent('x-api-key')
+  expect(panel).toHaveTextContent('anthropic-version')
+})

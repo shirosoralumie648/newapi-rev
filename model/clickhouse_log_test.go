@@ -152,3 +152,39 @@ func TestAssignDisplayLogIds(t *testing.T) {
 
 	assert.NotPanics(t, func() { assignDisplayLogIds(nil, 0) })
 }
+
+// The usage analytics query is rendered from the configured log database
+// dialect, so the JSON marker, the cached-token figure, the legacy first-token
+// field and the day bucket each use the expression that database supports.
+func TestPlaygroundUsageAnalyticsDialectSQL(t *testing.T) {
+	originalLogDatabaseType := common.LogDatabaseType()
+	t.Cleanup(func() {
+		common.SetLogDatabaseType(originalLogDatabaseType)
+	})
+
+	common.SetLogDatabaseType(common.DatabaseTypeSQLite)
+	sqliteQuery := playgroundUsageAnalyticsSelect()
+	assert.Contains(t, sqliteQuery, "json_valid(other)")
+	assert.Contains(t, sqliteQuery, `'$.playground_origin'`)
+	assert.Contains(t, sqliteQuery, "(created_at / 86400) * 86400")
+
+	common.SetLogDatabaseType(common.DatabaseTypeMySQL)
+	mysqlQuery := playgroundUsageAnalyticsSelect()
+	assert.Contains(t, mysqlQuery, "JSON_VALID(other)")
+	assert.Contains(t, mysqlQuery, "JSON_UNQUOTE(JSON_EXTRACT(other, '$.playground_origin')) = 'true'")
+	assert.Contains(t, mysqlQuery, "CAST(JSON_UNQUOTE(JSON_EXTRACT(other, '$.cache_tokens')) AS SIGNED)")
+	assert.Contains(t, mysqlQuery, "FLOOR(created_at / 86400) * 86400")
+
+	common.SetLogDatabaseType(common.DatabaseTypePostgreSQL)
+	postgresQuery := playgroundUsageAnalyticsSelect()
+	assert.Contains(t, postgresQuery, `"playground_origin"[[:space:]]*:[[:space:]]*true`)
+	assert.Contains(t, postgresQuery, `substring(other from '"cache_tokens"[[:space:]]*:[[:space:]]*([0-9]+)')::bigint`)
+	assert.NotContains(t, postgresQuery, "json_valid")
+
+	common.SetLogDatabaseType(common.DatabaseTypeClickHouse)
+	clickHouseQuery := playgroundUsageAnalyticsSelect()
+	assert.Contains(t, clickHouseQuery, `match(other, '"playground_origin"[[:space:]]*:[[:space:]]*true')`)
+	assert.Contains(t, clickHouseQuery, `toInt64OrZero(extract(other, '"cache_tokens"[[:space:]]*:[[:space:]]*([0-9]+)'))`)
+	assert.Contains(t, clickHouseQuery, `toInt64OrZero(extract(other, '"first_token_ms"[[:space:]]*:[[:space:]]*([0-9]+)'))`)
+	assert.Contains(t, clickHouseQuery, "intDiv(created_at, 86400) * 86400")
+}

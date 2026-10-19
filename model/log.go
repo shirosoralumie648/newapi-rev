@@ -7,6 +7,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/common/admission"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/types"
 
@@ -276,12 +277,29 @@ func RecordTopupLog(userId int, content *common.Message, callerIp string, paymen
 	}
 }
 
+// applyPlaygroundOriginMarker records the Playground origin on a log row's
+// public metadata when the request entered through the Playground workspace.
+// The marker is a public field of the stored `other` document, so usage
+// analytics can split Playground spend from direct API spend without a schema
+// change; a direct API call keeps exactly the metadata it had before.
+func applyPlaygroundOriginMarker(c *gin.Context, other *LogOther) *LogOther {
+	if c == nil || !common.GetContextKeyBool(c, constant.ContextKeyPlaygroundOrigin) {
+		return other
+	}
+	if other == nil {
+		other = NewLogOther()
+	}
+	other.SetPublic(PlaygroundOriginLogOtherKey, true)
+	return other
+}
+
 func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string, tokenName string, content string, tokenId int, useTimeSeconds int,
 	isStream bool, group string, other *LogOther) {
 	logger.LogInfo(c, common.LogText("record error log: userId=%d, channelId=%d, modelName=%s, tokenName=%s, content=%s", userId, channelId, modelName, tokenName, common.LocalLogPreview(content)))
 	username := c.GetString("username")
 	requestId := c.GetString(common.RequestIdKey)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
+	other = applyPlaygroundOriginMarker(c, other)
 	otherStr := other.JSONString()
 	// 判断是否需要记录 IP
 	needRecordIp := false
@@ -351,7 +369,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	requestId := c.GetString(common.RequestIdKey)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
 	createdAt := common.GetTimestamp()
-	other := params.Other
+	other := applyPlaygroundOriginMarker(c, params.Other)
 	content := other.setContent(params.Content)
 	otherStr := other.JSONString()
 	// 判断是否需要记录 IP

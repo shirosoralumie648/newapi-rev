@@ -204,6 +204,9 @@ func PlaygroundRelayBridge(canonicalPath string) gin.HandlerFunc {
 		if !validatePlaygroundGenerationParameters(c, canonicalPath) {
 			return
 		}
+		if !validatePlaygroundNonChatParameters(c, canonicalPath) {
+			return
+		}
 		requestedGroup := strings.TrimSpace(c.Request.Header.Get("X-Playground-Group"))
 		c.Request.Header.Del("X-Playground-Group")
 		if requestedGroup == "" && strings.HasPrefix(c.Request.Header.Get("Content-Type"), "application/json") {

@@ -29,12 +29,6 @@ import { LoadingState } from '@/components/loading-state'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { CanvasSendSeed } from '@/features/canvas/lib/canvas-send'
-import { useDebounce } from '@/hooks/use-debounce'
-import {
-  getServerErrorMessage,
-  getServerMessage,
-} from '@/lib/server-error-message'
-
 import type { PlaygroundAssetItem } from '@/features/playground/asset-api'
 import {
   PLAYGROUND_ASSET_PAGE_SIZE,
@@ -44,6 +38,12 @@ import {
   useDeletePlaygroundAsset,
   usePlaygroundAssets,
 } from '@/features/playground/hooks'
+import { useDebounce } from '@/hooks/use-debounce'
+import {
+  getServerErrorMessage,
+  getServerMessage,
+} from '@/lib/server-error-message'
+
 import { CanvasTaskList } from '../generation/canvas-task-list'
 import { CanvasAssetCard } from './canvas-asset-card'
 import { CanvasAssetPreviewDialog } from './canvas-asset-preview-dialog'
@@ -132,6 +132,7 @@ export function CanvasAssetLibrary(props: CanvasAssetLibraryProps) {
         active={props.active}
         onSendToCanvas={props.onSendSeedsToCanvas}
         search={debouncedSearch}
+        showFilters
       />
     )
   } else if (assetsQuery.isError) {

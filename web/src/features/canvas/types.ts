@@ -81,6 +81,7 @@ export type CanvasInspectorView =
   | 'generate'
   | 'library'
   | 'artifacts'
+  | 'history'
 
 /**
  * The workflow configuration and last-run state of one step node. Only
@@ -132,6 +133,8 @@ export type CanvasNodeWorkflowState = {
   sourceNodeId?: string
   /** Bounded failure message of the last attempt. */
   error?: string
+  /** Set on a step whose last attempt adopted a cached output. */
+  cacheHit?: boolean
   /** Attempts made so far, so a retry keeps its history count. */
   attempts?: number
   /** Timestamp (ms) of the last state change. */
@@ -301,4 +304,103 @@ export type CanvasTemplateSummary = {
 export type CanvasTemplateDetail = CanvasTemplateSummary & {
   document: CanvasServerDocument
   assets: CanvasTemplateAsset[]
+}
+
+/** The terminal status stored for one workflow run. */
+export type CanvasWorkflowRunStatus =
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'canceled'
+
+/** The final status of one step record inside a stored run. */
+export type CanvasWorkflowRunNodeStatus =
+  | 'succeeded'
+  | 'failed'
+  | 'canceled'
+  | 'skipped'
+
+/**
+ * One step record the browser reports to run history. A cached step carries
+ * no new tokens or quota; a task step references its durable task and artifact
+ * keys instead of storing bytes.
+ */
+export type CanvasWorkflowRunNodeRecord = {
+  nodeId: string
+  kind: 'model' | 'task'
+  model: string
+  group: string
+  status: CanvasWorkflowRunNodeStatus
+  fingerprint: string
+  cacheHit: boolean
+  output: string
+  taskId: string
+  artifactKeys: string[]
+  resultCount: number
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  quota: number
+  durationMs: number
+  error: string
+  startedAt: number
+  finishedAt: number
+}
+
+/** The list projection of one stored run; it never carries node snapshots. */
+export type CanvasWorkflowRunSummary = {
+  id: string
+  canvasId: string
+  sessionId: string
+  workflowRevision: number
+  status: CanvasWorkflowRunStatus
+  nodeCount: number
+  cacheHits: number
+  totalQuota: number
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  durationMs: number
+  estimateQuota: number
+  budgetCap: number
+  byteSize: number
+  revision: number
+  createdAt: number
+  updatedAt: number
+}
+
+/** One stored run with its per-node waterfall. */
+export type CanvasWorkflowRun = CanvasWorkflowRunSummary & {
+  nodes: CanvasWorkflowRunNodeRecord[]
+}
+
+/** One reusable node output returned by the owner-scoped node cache lookup. */
+export type CanvasWorkflowCacheEntry = {
+  fingerprint: string
+  nodeId: string
+  kind: 'model' | 'task'
+  model: string
+  output: string
+  taskId: string
+  artifactKeys: string[]
+  resultCount: number
+  quota: number
+  runId: string
+  updatedAt: number
+}
+
+/** The wire input of one run history row. */
+export type CanvasWorkflowRunCreateInput = {
+  canvasId: string
+  sessionId?: string
+  workflowRevision: number
+  estimateQuota: number
+  budgetCap: number
+}
+
+/** The bounded snapshot update of one run history row. */
+export type CanvasWorkflowRunUpdateInput = {
+  revision: number
+  status: CanvasWorkflowRunStatus
+  nodes: CanvasWorkflowRunNodeRecord[]
 }

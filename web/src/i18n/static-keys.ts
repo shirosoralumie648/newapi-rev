@@ -152,6 +152,13 @@ export const STATIC_I18N_KEYS = [
   'Some cells have no configured price; they still run and are charged when they finish.',
   'The table prices each prompt with the chat pre-charge; the final cost is settled per reply.',
   'The cap is below the estimate; the run may stop before the last cell.',
+  // Compare-run API messages returned as English source keys by Go.
+  'Comparison run not found.',
+  'The comparison run changed. Reload it and try again.',
+  'Invalid comparison run.',
+  'Comparison run limit exceeded.',
+  'Comparison run storage limit exceeded.',
+  'Comparison runs are unavailable.',
   'Assistant preset name must contain 1 to 100 characters.',
   'Assistant preset avatar must be an emoji or an http(s) image URL.',
   'Invalid assistant preset.',
@@ -1217,6 +1224,11 @@ export const STATIC_I18N_KEYS = [
   'High',
   'Extra high',
   'Maximum',
+  // Protocol labels render through t(labelKey) from
+  // PLAYGROUND_PROTOCOL_OPTIONS; the value also selects the relay route.
+  'Chat Completions',
+  'Responses',
+  'Anthropic Messages',
   // Prompt snippet failure messages render from PLAYGROUND_SNIPPET_ERRORS and
   // the server returns the rest through message_key, so the literal scan
   // cannot see them.
@@ -1447,4 +1459,19 @@ export const STATIC_I18N_KEYS = [
   'This header is reserved by the MCP client.',
   'The token is invalid.',
   'Choose a header before storing a token.',
+  'cURL',
+  'Python',
+  'Node.js',
+  'JSON',
+  'Copy cURL',
+  'Copy Python',
+  'Copy Node.js',
+  'Copy JSON',
+  '{{count}} inputs',
+  '{{count}} dimensions',
+  '{{count}} results',
+  'Input {{index}}',
+  'Embedding requests accept up to 64 inputs of 16,000 characters each.',
+  'Rerank requests accept a query of up to 16,000 characters and up to 32 candidates of 16,000 characters each.',
+  'Moderation requests accept up to 64 inputs of 16,000 characters each.',
 ] as const

@@ -21,31 +21,34 @@ import { useTranslation } from 'react-i18next'
 
 import { handleServerError } from '@/lib/handle-server-error'
 
-import { sendChatCompletion } from '../api'
+import { sendChatCompletion, sendPlaygroundProtocolCompletion } from '../api'
 import { ERROR_MESSAGES, MESSAGE_STATUS } from '../constants'
 import {
+  applyChatCompletionResponse,
   applyStreamingChunk,
   applyToolCallDelta,
   attachMessageVersionUsage,
   buildChatCompletionPayload,
+  buildPlaygroundProtocolRequest,
+  completeAssistantMessage,
   ensurePlaygroundDocumentTexts,
   ensurePlaygroundMessageAttachments,
   getCurrentVersion,
+  hasChatCompletionChoice,
+  isAssistantMessageFinal,
+  isAssistantMessagePending,
   MESSAGE_FINISH_REASON,
+  parseRequestErrorDetails,
+  playgroundProtocolUnsupportedHint,
   setCurrentVersionFinishReason,
   toMessageUsage,
   updateAssistantMessageWithError,
   updateCurrentVersionContent,
   updateLastAssistantMessage,
-  parseRequestErrorDetails,
-  applyChatCompletionResponse,
-  completeAssistantMessage,
-  hasChatCompletionChoice,
-  isAssistantMessageFinal,
-  isAssistantMessagePending,
 } from '../lib'
 import type { PlaygroundCapturedRequest, ToolCallDelta } from '../lib'
 import type {
+  ChatCompletionResponse,
   ChatCompletionTool,
   Message,
   MessageUsage,
@@ -56,7 +59,10 @@ import type {
   PlaygroundPendingQuote,
   ParameterEnabled,
 } from '../types'
-import { useStreamRequest } from './use-stream-request'
+import {
+  useStreamRequest,
+  type StreamRequestCallbacks,
+} from './use-stream-request'
 
 interface UseChatHandlerOptions {
   config: PlaygroundConfig
@@ -150,7 +156,12 @@ export function useChatHandler({
   sessionId,
 }: UseChatHandlerOptions) {
   const { t } = useTranslation()
-  const { sendStreamRequest, stopStream, isStreaming } = useStreamRequest()
+  const {
+    sendStreamRequest,
+    sendProtocolStreamRequest,
+    stopStream,
+    isStreaming,
+  } = useStreamRequest()
   const [isRequesting, setIsRequesting] = useState(false)
   // Final payload of the most recent send, kept in memory only for the request
   // viewer. Nothing is persisted and a reload clears it.
@@ -304,6 +315,18 @@ export function useChatHandler({
     [t]
   )
 
+  // The request viewer shows the raw reply only after the transport received
+  // it; the payload itself is captured when the send starts.
+  const handleRawResponse = useCallback(
+    (generation: number, rawResponse: string) => {
+      if (generation !== requestGenerationRef.current) return
+      setCapturedRequest((previous) =>
+        previous ? { ...previous, rawResponse } : previous
+      )
+    },
+    []
+  )
+
   // Handle stream update
   const handleStreamUpdate = useCallback(
     (generation: number, type: 'reasoning' | 'content', chunk: string) => {
@@ -455,7 +478,18 @@ export function useChatHandler({
       }
       flushStreamUpdates(generation)
       setIsRequesting(false)
-      const displayError = getDisplayError(error)
+      // A conversion failure means the selected protocol is the limiting
+      // factor; append the actionable hint so "switch to Chat Completions"
+      // is not something the caller has to infer from the raw error.
+      const unsupportedHint = playgroundProtocolUnsupportedHint(
+        config.protocol,
+        errorCode,
+        error
+      )
+      const baseError = getDisplayError(error)
+      const displayError = unsupportedHint
+        ? `${baseError}\n\n${t(unsupportedHint)}`
+        : baseError
       handleServerError(new Error(displayError))
       const errorTitle = t(ERROR_MESSAGES.API_REQUEST_ERROR)
       // A failed attempt can still be billed, so the recorded request id is
@@ -482,6 +516,7 @@ export function useChatHandler({
       getDisplayError,
       onMessageUpdate,
       t,
+      config.protocol,
     ]
   )
 
@@ -513,8 +548,16 @@ export function useChatHandler({
         developerOptions,
         mcpTools
       )
-      setCapturedRequest({ payload, capturedAt: Date.now() })
-      void sendStreamRequest(payload, {
+      const protocolRequest = buildPlaygroundProtocolRequest(
+        payload,
+        config.protocol
+      )
+      setCapturedRequest({
+        payload,
+        capturedAt: Date.now(),
+        protocol: config.protocol,
+      })
+      const callbacks: StreamRequestCallbacks = {
         onUpdate: (type, chunk) => handleStreamUpdate(generation, type, chunk),
         onToolCalls: (deltas) => handleToolCallDeltas(generation, deltas),
         onRequestId: (requestId) =>
@@ -522,10 +565,16 @@ export function useChatHandler({
         onUsage: (usage) => handleStreamUsage(generation, usage),
         onFinishReason: (finishReason) =>
           handleStreamFinishReason(generation, finishReason),
+        onRawResponse: (raw) => handleRawResponse(generation, raw),
         onComplete: () => handleStreamComplete(generation),
         onError: (error, errorCode) =>
           handleStreamError(generation, error, errorCode),
-      })
+      }
+      if (config.protocol === 'chat') {
+        void sendStreamRequest(payload, callbacks)
+      } else {
+        void sendProtocolStreamRequest(protocolRequest, callbacks)
+      }
     },
     [
       config,
@@ -536,6 +585,8 @@ export function useChatHandler({
       developerOptions,
       mcpTools,
       sendStreamRequest,
+      sendProtocolStreamRequest,
+      handleRawResponse,
       discardPendingStreamUpdates,
       handleStreamUpdate,
       handleToolCallDeltas,
@@ -573,7 +624,15 @@ export function useChatHandler({
         developerOptions,
         mcpTools
       )
-      setCapturedRequest({ payload, capturedAt: Date.now() })
+      const protocolRequest = buildPlaygroundProtocolRequest(
+        payload,
+        config.protocol
+      )
+      setCapturedRequest({
+        payload,
+        capturedAt: Date.now(),
+        protocol: config.protocol,
+      })
       const generation = requestGenerationRef.current + 1
       const abortController = new AbortController()
 
@@ -589,10 +648,25 @@ export function useChatHandler({
 
       try {
         setIsRequesting(true)
-        const { response, requestId } = await sendChatCompletion(
-          payload,
-          abortController.signal
-        )
+        let response: ChatCompletionResponse
+        let requestId: string | undefined
+        let rawResponse = ''
+        if (config.protocol === 'chat') {
+          const result = await sendChatCompletion(
+            payload,
+            abortController.signal
+          )
+          response = result.response
+          requestId = result.requestId
+        } else {
+          const result = await sendPlaygroundProtocolCompletion(
+            protocolRequest,
+            abortController.signal
+          )
+          response = result.response
+          requestId = result.requestId
+          rawResponse = result.rawResponse
+        }
         if (
           abortController.signal.aborted ||
           requestGenerationRef.current !== generation
@@ -600,6 +674,9 @@ export function useChatHandler({
           return
         }
 
+        if (rawResponse !== '') {
+          handleRawResponse(generation, rawResponse)
+        }
         // The failed-attempt path below reads the pending record, so the
         // request id stays attached even when the response is unusable.
         pendingRequestIdRef.current = requestId ?? null
@@ -684,6 +761,7 @@ export function useChatHandler({
       mcpTools,
       stopStream,
       discardPendingStreamUpdates,
+      handleRawResponse,
       onMessageUpdate,
       handleStreamError,
       onResponseComplete,

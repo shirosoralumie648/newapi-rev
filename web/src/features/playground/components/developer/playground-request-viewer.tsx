@@ -31,14 +31,19 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { cn } from '@/lib/utils'
 
+import {
+  PLAYGROUND_PROTOCOL_API_PATHS,
+  PLAYGROUND_PROTOCOL_OPTIONS,
+} from '../../constants'
 import {
   buildPlaygroundRequestCode,
   type PlaygroundCapturedRequest,
   type PlaygroundRequestCodeTab,
   resolvePlaygroundRequestBaseUrl,
 } from '../../lib/developer/request-code'
-import type { ChatCompletionRequest } from '../../types'
+import type { ChatCompletionRequest, PlaygroundProtocol } from '../../types'
 
 interface PlaygroundRequestCodeTabDefinition {
   value: PlaygroundRequestCodeTab
@@ -81,16 +86,20 @@ interface PlaygroundRequestViewerProps {
   request: PlaygroundCapturedRequest | null
 }
 
+type PlaygroundRequestViewerTab = PlaygroundRequestCodeTab | 'raw-response'
+
 function RequestCodePanel(props: {
   baseUrl: string
   payload: ChatCompletionRequest
+  protocol: PlaygroundProtocol
   tab: PlaygroundRequestCodeTabDefinition
 }) {
   const { t } = useTranslation()
   const code = buildPlaygroundRequestCode(
     props.tab.value,
     props.payload,
-    props.baseUrl
+    props.baseUrl,
+    props.protocol
   )
   const label = t(props.tab.copyLabel)
 
@@ -115,9 +124,19 @@ function RequestCodePanel(props: {
  */
 export function PlaygroundRequestViewer(props: PlaygroundRequestViewerProps) {
   const { t } = useTranslation()
-  const [tab, setTab] = useState<PlaygroundRequestCodeTab>('messages')
+  const [tab, setTab] = useState<PlaygroundRequestViewerTab>('messages')
   const baseUrl = resolvePlaygroundRequestBaseUrl()
   const payload = props.request ? props.request.payload : null
+  const protocol: PlaygroundProtocol = props.request?.protocol ?? 'chat'
+  const protocolLabelKey =
+    PLAYGROUND_PROTOCOL_OPTIONS.find((option) => option.value === protocol)
+      ?.labelKey ?? 'Chat Completions'
+  const rawResponse = props.request?.rawResponse
+  const hasRawResponse = Boolean(rawResponse)
+  // A new send without a captured reply must not leave the viewer on a tab
+  // whose trigger is no longer rendered.
+  const activeTab: PlaygroundRequestViewerTab =
+    tab === 'raw-response' && !hasRawResponse ? 'messages' : tab
 
   return (
     <Sheet onOpenChange={props.onOpenChange} open={props.open}>
@@ -133,11 +152,18 @@ export function PlaygroundRequestViewer(props: PlaygroundRequestViewerProps) {
         {payload ? (
           <Tabs
             className='min-h-0 flex-1 gap-0'
-            onValueChange={(value) => setTab(value as PlaygroundRequestCodeTab)}
-            value={tab}
+            onValueChange={(value) =>
+              setTab(value as PlaygroundRequestViewerTab)
+            }
+            value={activeTab}
           >
             <div className='shrink-0 space-y-2 border-b px-4 py-2'>
-              <TabsList className='grid w-full grid-cols-4'>
+              <TabsList
+                className={cn(
+                  'grid w-full',
+                  hasRawResponse ? 'grid-cols-5' : 'grid-cols-4'
+                )}
+              >
                 {REQUEST_CODE_TABS.map((definition) => (
                   <TabsTrigger
                     className='text-xs'
@@ -147,11 +173,28 @@ export function PlaygroundRequestViewer(props: PlaygroundRequestViewerProps) {
                     {t(definition.label)}
                   </TabsTrigger>
                 ))}
+                {hasRawResponse && (
+                  <TabsTrigger className='text-xs' value='raw-response'>
+                    {t('Raw response')}
+                  </TabsTrigger>
+                )}
               </TabsList>
               <p className='text-muted-foreground text-xs'>
-                {t(
-                  'Exports target the OpenAI-compatible /v1/chat/completions endpoint with a placeholder key. Attachments are replaced by file placeholders instead of base64 bytes.'
-                )}
+                {t('Protocol: {{protocol}}', {
+                  protocol: t(protocolLabelKey),
+                })}
+              </p>
+              <p className='text-muted-foreground text-xs'>
+                {protocol === 'chat'
+                  ? t(
+                      'Exports target the OpenAI-compatible /v1/chat/completions endpoint with a placeholder key. Attachments are replaced by file placeholders instead of base64 bytes.'
+                    )
+                  : t(
+                      'Exports target the {{path}} endpoint with a placeholder key. Attachments are replaced by file placeholders instead of base64 bytes.',
+                      {
+                        path: PLAYGROUND_PROTOCOL_API_PATHS[protocol],
+                      }
+                    )}
               </p>
               {payload.group !== undefined && (
                 <p className='text-muted-foreground text-xs'>
@@ -171,10 +214,28 @@ export function PlaygroundRequestViewer(props: PlaygroundRequestViewerProps) {
                   <RequestCodePanel
                     baseUrl={baseUrl}
                     payload={payload}
+                    protocol={protocol}
                     tab={definition}
                   />
                 </TabsContent>
               ))}
+              {rawResponse && (
+                <TabsContent className='px-4 pb-4' value='raw-response'>
+                  <CodeBlock
+                    code={rawResponse}
+                    language='text'
+                    maxExpandedLines={40}
+                    showToolbar
+                    title={t('Raw response')}
+                  >
+                    <CopyButton
+                      aria-label={t('Copy raw response')}
+                      tooltip={t('Copy raw response')}
+                      value={rawResponse}
+                    />
+                  </CodeBlock>
+                </TabsContent>
+              )}
             </div>
           </Tabs>
         ) : (

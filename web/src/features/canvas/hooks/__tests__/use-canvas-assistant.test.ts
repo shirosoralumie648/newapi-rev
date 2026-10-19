@@ -60,6 +60,7 @@ beforeEach(() => {
   stopStream.mockReset()
   vi.mocked(useStreamRequest).mockReturnValue({
     sendStreamRequest,
+    sendProtocolStreamRequest: vi.fn(),
     stopStream,
     isStreaming: false,
   })
