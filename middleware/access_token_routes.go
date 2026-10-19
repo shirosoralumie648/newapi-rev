@@ -117,9 +117,12 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"PUT /api/playground/knowledge-bases/:kbId/documents/:documentId/chunks":     accessTokenSessionRule,
 	"GET /api/playground/snippets":                                               accessTokenSessionRule,
 	"POST /api/playground/snippets":                                              accessTokenSessionRule,
+	"POST /api/playground/snippets/import":                                       accessTokenSessionRule,
 	"GET /api/playground/snippets/:snippetId":                                    accessTokenSessionRule,
 	"PATCH /api/playground/snippets/:snippetId":                                  accessTokenSessionRule,
 	"DELETE /api/playground/snippets/:snippetId":                                 accessTokenSessionRule,
+	"GET /api/playground/snippets/:snippetId/export":                             accessTokenSessionRule,
+	"POST /api/playground/snippets/:snippetId/rollback":                          accessTokenSessionRule,
 	"GET /api/playground/memories":                                               accessTokenSessionRule,
 	"POST /api/playground/memories":                                              accessTokenSessionRule,
 	"GET /api/playground/memories/:memoryId":                                     accessTokenSessionRule,
@@ -465,6 +468,8 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	// router/relay-router.go: the Playground workspace, chat and media
 	// bridges alike, is session-only.
 	"POST /pg/chat/completions":     accessTokenSessionRule,
+	"POST /pg/responses":            accessTokenSessionRule,
+	"POST /pg/messages":             accessTokenSessionRule,
 	"POST /pg/images/generations":   accessTokenSessionRule,
 	"POST /pg/images/edits":         accessTokenSessionRule,
 	"POST /pg/videos":               accessTokenSessionRule,

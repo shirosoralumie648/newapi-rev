@@ -24,6 +24,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // playgroundMessageClientIndex is the unique index that makes one
@@ -155,12 +156,12 @@ func migratePlaygroundTrashColumns(db *gorm.DB) error {
 // later releases added to the account counter row. PostgreSQL refuses to add a
 // NOT NULL column to a non-empty table without a default, so they are created
 // with DEFAULT 0 before AutoMigrate sees them.
-var playgroundUserUsageCounterColumns = []string{"snippets", "memories", "canvas_snapshot_count", "canvas_snapshot_bytes", "attachment_pending_count", "attachment_pending_bytes", "knowledge_base_count", "knowledge_base_document_count", "knowledge_base_chunk_count", "knowledge_base_bytes", "comparison_run_count", "comparison_run_bytes", "workflow_run_count", "workflow_run_bytes"}
+var playgroundUserUsageCounterColumns = []string{"snippets", "snippet_versions", "memories", "canvas_snapshot_count", "canvas_snapshot_bytes", "attachment_pending_count", "attachment_pending_bytes", "knowledge_base_count", "knowledge_base_document_count", "knowledge_base_chunk_count", "knowledge_base_bytes", "comparison_run_count", "comparison_run_bytes", "workflow_run_count", "workflow_run_bytes"}
 
 // migratePlaygroundUserUsageCounters adds the counters that later releases
-// introduced (prompt snippets, canvas snapshots and in-flight upload
-// reservations) to an installation that predates them. The migration is a
-// no-op on a fresh database and once the columns exist.
+// introduced (prompt snippets, snippet versions, canvas snapshots and in-flight
+// upload reservations) to an installation that predates them. The migration is
+// a no-op on a fresh database and once the columns exist.
 func migratePlaygroundUserUsageCounters(db *gorm.DB) error {
 	if db == nil {
 		return fmt.Errorf("migrate playground user usage counters: database is nil")
@@ -208,6 +209,103 @@ func ensurePlaygroundAttachmentStorageBackend(db *gorm.DB) error {
 	if err := db.Model(&PlaygroundAttachment{}).Where(unmarked, "").
 		UpdateColumn("storage_backend", system_setting.ObjectStoreBackendDB).Error; err != nil {
 		return fmt.Errorf("mark legacy playground attachments as database-backed: %w", err)
+	}
+	return nil
+}
+
+// playgroundSnippetVersionColumns are the version pointer columns a later
+// release appended to the prompt snippet table. PostgreSQL refuses to add a
+// NOT NULL column to a non-empty table without a default, so they are created
+// with DEFAULT 0 before AutoMigrate sees them.
+var playgroundSnippetVersionColumns = []string{"current_version", "production_version"}
+
+// migratePlaygroundSnippetVersionColumns adds the version pointer columns to
+// an installation that predates the prompt template library. The migration is
+// a no-op on a fresh database and once the columns exist.
+func migratePlaygroundSnippetVersionColumns(db *gorm.DB) error {
+	if db == nil {
+		return fmt.Errorf("migrate playground snippet version columns: database is nil")
+	}
+	target := &PlaygroundSnippet{}
+	if !db.Migrator().HasTable(target) {
+		return nil
+	}
+	statement := &gorm.Statement{DB: db}
+	if err := statement.Parse(target); err != nil {
+		return fmt.Errorf("resolve playground snippet table: %w", err)
+	}
+	if statement.Table == "" {
+		return fmt.Errorf("resolve playground snippet table: empty table name")
+	}
+	for _, column := range playgroundSnippetVersionColumns {
+		if db.Migrator().HasColumn(target, column) {
+			continue
+		}
+		if err := db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s bigint NOT NULL DEFAULT 0", statement.Table, column)).Error; err != nil {
+			return fmt.Errorf("add %s.%s: %w", statement.Table, column, err)
+		}
+	}
+	return nil
+}
+
+// migratePlaygroundSnippetVersions backfills the first immutable version of
+// every prompt snippet written before versions existed and points the current
+// and production markers at it. The account counters of the affected owners are
+// refreshed so the version budget is exact right after the upgrade.
+//
+// The migration runs after AutoMigrate (it needs the version table and the
+// pointer columns), is chunked by plucked snippet ids, idempotent (a snippet
+// whose current_version is already set is skipped and the unique
+// (snippet_id, version) index makes a concurrent backfill a no-op instead of a
+// duplicate) and a no-op on a fresh database.
+func migratePlaygroundSnippetVersions(db *gorm.DB) error {
+	if db == nil {
+		return fmt.Errorf("migrate playground snippet versions: database is nil")
+	}
+	if !db.Migrator().HasTable(&PlaygroundSnippet{}) || !db.Migrator().HasTable(&PlaygroundSnippetVersion{}) {
+		return nil
+	}
+	ids := make([]string, 0)
+	if err := db.Model(&PlaygroundSnippet{}).Where("current_version = 0").Order("created_at ASC, id ASC").Pluck("id", &ids).Error; err != nil {
+		return fmt.Errorf("inspect versionless playground snippets: %w", err)
+	}
+	owners := map[int]bool{}
+	for _, id := range ids {
+		var snippet PlaygroundSnippet
+		if err := db.Where("id = ?", id).First(&snippet).Error; err != nil {
+			return fmt.Errorf("load versionless playground snippet %s: %w", id, err)
+		}
+		versionID, err := newPlaygroundSnippetVersionID()
+		if err != nil {
+			return err
+		}
+		createdAt := snippet.UpdatedAt
+		if createdAt <= 0 {
+			createdAt = snippet.CreatedAt
+		}
+		version := PlaygroundSnippetVersion{
+			ID: versionID, SnippetID: snippet.ID, UserID: snippet.UserID, Version: 1,
+			Content: snippet.Content, ByteSize: int64(len(snippet.Content)), CreatedAt: createdAt,
+		}
+		// DoNothing keeps a version a concurrent startup already wrote; the
+		// pointer update below then observes it instead of failing.
+		if err := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&version).Error; err != nil {
+			return fmt.Errorf("backfill playground snippet %s version 1: %w", id, err)
+		}
+		// UpdateColumns skips the updated_at bump: the migration must not look
+		// like a user edit to the listing order.
+		if err := db.Model(&PlaygroundSnippet{}).Where("id = ? AND current_version = 0", id).
+			UpdateColumns(map[string]any{"current_version": 1, "production_version": 1}).Error; err != nil {
+			return fmt.Errorf("mark playground snippet %s as versioned: %w", id, err)
+		}
+		if snippet.UserID > 0 {
+			owners[snippet.UserID] = true
+		}
+	}
+	for userID := range owners {
+		if err := refreshPlaygroundUserUsage(db, userID); err != nil {
+			return fmt.Errorf("refresh playground counters for user %d: %w", userID, err)
+		}
 	}
 	return nil
 }

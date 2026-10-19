@@ -120,14 +120,14 @@ func playgroundTestDB(t *testing.T, dialect string) *gorm.DB {
 	common.SetDatabaseTypes(common.DatabaseType(dialect), previousLog)
 	model.DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundKnowledgeChunk{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasTemplateAsset{}, &model.PlaygroundCanvasTemplate{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundComparisonRun{}, &model.PlaygroundWorkflowRun{}, &model.PlaygroundUserUsage{}, &model.PlaygroundUpload{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundMessage{}, &model.PlaygroundSessionShare{}, &model.PlaygroundSession{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundKnowledgeChunk{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasTemplateAsset{}, &model.PlaygroundCanvasTemplate{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundComparisonRun{}, &model.PlaygroundWorkflowRun{}, &model.PlaygroundUserUsage{}, &model.PlaygroundUpload{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippetVersion{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundMessage{}, &model.PlaygroundSessionShare{}, &model.PlaygroundSession{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
 		model.DB = previous
 		common.SetDatabaseTypes(previousMain, previousLog)
 	})
-	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundSessionShare{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUpload{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasTemplate{}, &model.PlaygroundCanvasTemplateAsset{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeChunk{}, &model.PlaygroundComparisonRun{}, &model.PlaygroundWorkflowRun{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundSessionShare{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundSnippetVersion{}, &model.PlaygroundMemory{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUpload{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasTemplate{}, &model.PlaygroundCanvasTemplateAsset{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeChunk{}, &model.PlaygroundComparisonRun{}, &model.PlaygroundWorkflowRun{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -2530,6 +2530,8 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodPost, "/api/playground/sessions/" + sessionID + "/restore"},
 		{http.MethodPost, "/api/playground/tasks/missing/cancel"},
 		{http.MethodPost, "/pg/embeddings"},
+		{http.MethodPost, "/pg/responses"},
+		{http.MethodPost, "/pg/messages"},
 		{http.MethodPost, "/pg/rerank"},
 		{http.MethodPost, "/pg/moderations"},
 		{http.MethodGet, "/api/playground/presets"},
@@ -4316,45 +4318,76 @@ func TestPlaygroundPresetMarketAndGlobalManagement(t *testing.T) {
 	}
 }
 
-// Prompt snippets are owner-scoped server resources: another account can
-
-// neither list nor mutate them, every field is validated on write, and the
-// per-account budget and per-snippet text bound come from the shared resource
-// quota policy.
+// Prompt snippets are owner-scoped server resources with an immutable version
+// history: another account can neither list nor mutate them, every field is
+// validated on write, saving changed text appends a revision and moves the
+// production pointer, rollback only moves the pointer, JSON export/import round
+// trips the full history, and the per-account budgets and per-snippet bounds
+// come from the shared resource quota policy.
 func TestPlaygroundSnippetPersistenceAndOwnership(t *testing.T) {
+	type snippetVersionPayload struct {
+		Version   int    `json:"version"`
+		Content   string `json:"content"`
+		ByteSize  int64  `json:"byte_size"`
+		CreatedAt int64  `json:"created_at"`
+	}
+	type snippetPayload struct {
+		ID                string                  `json:"id"`
+		Name              string                  `json:"name"`
+		Content           string                  `json:"content"`
+		CurrentVersion    int                     `json:"current_version"`
+		ProductionVersion int                     `json:"production_version"`
+		VersionCount      int                     `json:"version_count"`
+		Versions          []snippetVersionPayload `json:"versions"`
+		CreatedAt         int64                   `json:"created_at"`
+		UpdatedAt         int64                   `json:"updated_at"`
+	}
 	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
 		t.Run(dialect, func(t *testing.T) {
 			db := playgroundTestDB(t, dialect)
-			// The new table is part of the migration contract and must stay
+			// The version table is part of the migration contract and must stay
 			// idempotent on every dialect.
-			require.NoError(t, db.AutoMigrate(&model.PlaygroundSnippet{}))
+			require.NoError(t, db.AutoMigrate(&model.PlaygroundSnippet{}, &model.PlaygroundSnippetVersion{}))
 
+			var envelope struct {
+				Success bool
+				Data    snippetPayload
+			}
 			created := playgroundRequest(t, 7, http.MethodPost, "/api/playground/snippets", map[string]any{
 				"name": "  Review checklist  ", "content": "Check every endpoint for owner scoping.",
 			}, controller.CreatePlaygroundSnippet)
 			require.Equal(t, http.StatusOK, created.Code, created.Body.String())
-			var envelope struct {
-				Success bool
-				Data    struct {
-					ID        string `json:"id"`
-					Name      string `json:"name"`
-					Content   string `json:"content"`
-					CreatedAt int64  `json:"created_at"`
-					UpdatedAt int64  `json:"updated_at"`
-				}
-			}
 			require.NoError(t, common.Unmarshal(created.Body.Bytes(), &envelope))
 			require.True(t, envelope.Success, created.Body.String())
 			id := envelope.Data.ID
 			require.True(t, strings.HasPrefix(id, "pgs_"), id)
 			assert.Equal(t, "Review checklist", envelope.Data.Name)
 			assert.Equal(t, "Check every endpoint for owner scoping.", envelope.Data.Content)
+			assert.Equal(t, 1, envelope.Data.CurrentVersion)
+			assert.Equal(t, 1, envelope.Data.ProductionVersion)
+			assert.Equal(t, 1, envelope.Data.VersionCount)
 			assert.NotZero(t, envelope.Data.CreatedAt)
 
-			// The write keeps the account counter row exact.
+			// The write stores the first immutable version and keeps both
+			// account counters exact.
+			var versions []model.PlaygroundSnippetVersion
+			require.NoError(t, db.Where("snippet_id = ?", id).Order("version").Find(&versions).Error)
+			require.Len(t, versions, 1)
+			assert.True(t, strings.HasPrefix(versions[0].ID, "pgsv_"), versions[0].ID)
+			assert.Equal(t, 1, versions[0].Version)
+			assert.Equal(t, "Check every endpoint for owner scoping.", string(versions[0].Content))
+			assert.EqualValues(t, len("Check every endpoint for owner scoping."), versions[0].ByteSize)
 			var usage model.PlaygroundUserUsage
 			require.NoError(t, db.Where("user_id = ?", 7).First(&usage).Error)
 			assert.EqualValues(t, 1, usage.Snippets)
+			assert.EqualValues(t, 1, usage.SnippetVersions)
+
+			// The detail response carries the full history beside the pointer.
+			detail := playgroundRequest(t, 7, http.MethodGet, "/api/playground/snippets/"+id, nil, controller.GetPlaygroundSnippet)
+			require.Equal(t, http.StatusOK, detail.Code, detail.Body.String())
+			require.NoError(t, common.Unmarshal(detail.Body.Bytes(), &envelope))
+			require.Len(t, envelope.Data.Versions, 1)
+			assert.Equal(t, 1, envelope.Data.Versions[0].Version)
 
 			// The listing is owner-scoped and reports the effective budget.
 			listed := playgroundRequest(t, 7, http.MethodGet, "/api/playground/snippets", nil, controller.ListPlaygroundSnippets)
@@ -4375,18 +4408,154 @@ func TestPlaygroundSnippetPersistenceAndOwnership(t *testing.T) {
 			foreignList := playgroundRequest(t, 8, http.MethodGet, "/api/playground/snippets", nil, controller.ListPlaygroundSnippets)
 			assert.Contains(t, foreignList.Body.String(), `"total":0`)
 
-			// Mutation is owner-scoped; another account gets the same 404.
+			// Mutation is owner-scoped; another account gets the same 404 on
+			// every route, rollback and export included.
 			foreignRead := playgroundRequest(t, 8, http.MethodGet, "/api/playground/snippets/"+id, nil, controller.GetPlaygroundSnippet)
 			assert.Equal(t, http.StatusNotFound, foreignRead.Code, foreignRead.Body.String())
 			foreignUpdate := playgroundRequest(t, 8, http.MethodPatch, "/api/playground/snippets/"+id, map[string]any{"name": "Hijacked"}, controller.UpdatePlaygroundSnippet)
 			assert.Equal(t, http.StatusNotFound, foreignUpdate.Code, foreignUpdate.Body.String())
 			foreignDelete := playgroundRequest(t, 8, http.MethodDelete, "/api/playground/snippets/"+id, nil, controller.DeletePlaygroundSnippet)
 			assert.Equal(t, http.StatusNotFound, foreignDelete.Code, foreignDelete.Body.String())
+			foreignRollback := playgroundRequest(t, 8, http.MethodPost, "/api/playground/snippets/"+id+"/rollback", map[string]any{"version": 1}, controller.RollbackPlaygroundSnippet)
+			assert.Equal(t, http.StatusNotFound, foreignRollback.Code, foreignRollback.Body.String())
+			foreignExport := playgroundRequest(t, 8, http.MethodGet, "/api/playground/snippets/"+id+"/export", nil, controller.ExportPlaygroundSnippet)
+			assert.Equal(t, http.StatusNotFound, foreignExport.Code, foreignExport.Body.String())
 
-			updated := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/snippets/"+id, map[string]any{"name": "Checklist"}, controller.UpdatePlaygroundSnippet)
-			require.Equal(t, http.StatusOK, updated.Code, updated.Body.String())
-			assert.Contains(t, updated.Body.String(), `"name":"Checklist"`)
-			assert.Contains(t, updated.Body.String(), "Check every endpoint for owner scoping.", "unsent content keeps its stored value")
+			// A name-only update creates no version.
+			renamed := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/snippets/"+id, map[string]any{"name": "Checklist"}, controller.UpdatePlaygroundSnippet)
+			require.Equal(t, http.StatusOK, renamed.Code, renamed.Body.String())
+			require.NoError(t, common.Unmarshal(renamed.Body.Bytes(), &envelope))
+			assert.Equal(t, "Checklist", envelope.Data.Name)
+			assert.Equal(t, "Check every endpoint for owner scoping.", envelope.Data.Content, "unsent content keeps its stored value")
+			assert.Equal(t, 1, envelope.Data.CurrentVersion)
+
+			// Changed text appends the next immutable version and publishes it.
+			second := "Check every endpoint for owner scoping. v2"
+			published := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/snippets/"+id, map[string]any{"content": second}, controller.UpdatePlaygroundSnippet)
+			require.Equal(t, http.StatusOK, published.Code, published.Body.String())
+			require.NoError(t, common.Unmarshal(published.Body.Bytes(), &envelope))
+			assert.Equal(t, 2, envelope.Data.CurrentVersion)
+			assert.Equal(t, 2, envelope.Data.ProductionVersion)
+			assert.Equal(t, second, envelope.Data.Content)
+			require.NoError(t, db.Where("user_id = ?", 7).First(&usage).Error)
+			assert.EqualValues(t, 2, usage.SnippetVersions)
+
+			// Saving the published text again is a no-op, not a new revision.
+			repeated := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/snippets/"+id, map[string]any{"content": second}, controller.UpdatePlaygroundSnippet)
+			require.Equal(t, http.StatusOK, repeated.Code, repeated.Body.String())
+			require.NoError(t, common.Unmarshal(repeated.Body.Bytes(), &envelope))
+			assert.Equal(t, 2, envelope.Data.CurrentVersion)
+			var versionRows int64
+			require.NoError(t, db.Model(&model.PlaygroundSnippetVersion{}).Where("snippet_id = ?", id).Count(&versionRows).Error)
+			assert.EqualValues(t, 2, versionRows)
+			require.NoError(t, db.Where("user_id = ?", 7).First(&usage).Error)
+			assert.EqualValues(t, 2, usage.SnippetVersions)
+
+			// Rollback moves the production pointer back; the history rows stay
+			// byte-identical and remain addressable.
+			rolled := playgroundRequest(t, 7, http.MethodPost, "/api/playground/snippets/"+id+"/rollback", map[string]any{"version": 1}, controller.RollbackPlaygroundSnippet)
+			require.Equal(t, http.StatusOK, rolled.Code, rolled.Body.String())
+			require.NoError(t, common.Unmarshal(rolled.Body.Bytes(), &envelope))
+			assert.Equal(t, 1, envelope.Data.ProductionVersion)
+			assert.Equal(t, 2, envelope.Data.CurrentVersion)
+			assert.Equal(t, "Check every endpoint for owner scoping.", envelope.Data.Content)
+			require.Len(t, envelope.Data.Versions, 2)
+			assert.Equal(t, second, envelope.Data.Versions[1].Content)
+			require.NoError(t, db.Where("snippet_id = ?", id).Order("version").Find(&versions).Error)
+			require.Len(t, versions, 2)
+			assert.Equal(t, second, string(versions[1].Content), "rollback never rewrites history")
+
+			// An unknown revision is a 404, not a 400 or a silent clamp.
+			unknownRollback := playgroundRequest(t, 7, http.MethodPost, "/api/playground/snippets/"+id+"/rollback", map[string]any{"version": 99}, controller.RollbackPlaygroundSnippet)
+			assert.Equal(t, http.StatusNotFound, unknownRollback.Code, unknownRollback.Body.String())
+			assert.Contains(t, unknownRollback.Body.String(), "Prompt snippet version not found.")
+
+			// Re-publishing text that matches an older revision moves the
+			// pointer to it instead of storing a duplicate.
+			republished := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/snippets/"+id, map[string]any{"content": second}, controller.UpdatePlaygroundSnippet)
+			require.Equal(t, http.StatusOK, republished.Code, republished.Body.String())
+			require.NoError(t, common.Unmarshal(republished.Body.Bytes(), &envelope))
+			assert.Equal(t, 2, envelope.Data.ProductionVersion)
+			assert.Equal(t, 2, envelope.Data.CurrentVersion)
+
+			// New text appends version 3.
+			third := "Check every endpoint for owner scoping. v3"
+			publishedThird := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/snippets/"+id, map[string]any{"content": third}, controller.UpdatePlaygroundSnippet)
+			require.Equal(t, http.StatusOK, publishedThird.Code, publishedThird.Body.String())
+			require.NoError(t, common.Unmarshal(publishedThird.Body.Bytes(), &envelope))
+			assert.Equal(t, 3, envelope.Data.CurrentVersion)
+			assert.Equal(t, 3, envelope.Data.ProductionVersion)
+
+			// Export renders the full history, and importing the document
+			// restores it for the same account as a new template.
+			exported := playgroundRequest(t, 7, http.MethodGet, "/api/playground/snippets/"+id+"/export", nil, controller.ExportPlaygroundSnippet)
+			require.Equal(t, http.StatusOK, exported.Code, exported.Body.String())
+			var exportEnvelope struct {
+				Success bool
+				Data    struct {
+					Format      string `json:"format"`
+					Filename    string `json:"filename"`
+					ContentType string `json:"content_type"`
+					Content     string `json:"content"`
+				}
+			}
+			require.NoError(t, common.Unmarshal(exported.Body.Bytes(), &exportEnvelope))
+			require.True(t, exportEnvelope.Success, exported.Body.String())
+			assert.Equal(t, "json", exportEnvelope.Data.Format)
+			assert.Equal(t, "Checklist.json", exportEnvelope.Data.Filename)
+			assert.Equal(t, "application/json; charset=utf-8", exportEnvelope.Data.ContentType)
+			var document struct {
+				Format        string `json:"format"`
+				SchemaVersion int    `json:"schema_version"`
+				ExportedAt    int64  `json:"exported_at"`
+				Template      struct {
+					Name              string                  `json:"name"`
+					ProductionVersion int                     `json:"production_version"`
+					Versions          []snippetVersionPayload `json:"versions"`
+				} `json:"template"`
+			}
+			require.NoError(t, common.UnmarshalJsonStr(exportEnvelope.Data.Content, &document))
+			assert.Equal(t, "new-api-playground-prompt-template", document.Format)
+			assert.Equal(t, 1, document.SchemaVersion)
+			assert.NotZero(t, document.ExportedAt)
+			assert.Equal(t, "Checklist", document.Template.Name)
+			assert.Equal(t, 3, document.Template.ProductionVersion)
+			require.Len(t, document.Template.Versions, 3)
+			assert.Equal(t, "Check every endpoint for owner scoping.", document.Template.Versions[0].Content)
+			assert.Equal(t, third, document.Template.Versions[2].Content)
+
+			imported := playgroundRequest(t, 7, http.MethodPost, "/api/playground/snippets/import", []byte(exportEnvelope.Data.Content), controller.ImportPlaygroundSnippet)
+			require.Equal(t, http.StatusOK, imported.Code, imported.Body.String())
+			var importedEnvelope struct {
+				Success bool
+				Data    snippetPayload
+			}
+			require.NoError(t, common.Unmarshal(imported.Body.Bytes(), &importedEnvelope))
+			require.True(t, importedEnvelope.Success, imported.Body.String())
+			assert.NotEqual(t, id, importedEnvelope.Data.ID)
+			assert.Equal(t, "Checklist", importedEnvelope.Data.Name)
+			assert.Equal(t, 3, importedEnvelope.Data.VersionCount)
+			assert.Equal(t, 3, importedEnvelope.Data.ProductionVersion)
+			assert.Equal(t, third, importedEnvelope.Data.Content)
+			require.Len(t, importedEnvelope.Data.Versions, 3)
+			require.NoError(t, db.Where("user_id = ?", 7).First(&usage).Error)
+			assert.EqualValues(t, 2, usage.Snippets)
+			assert.EqualValues(t, 6, usage.SnippetVersions)
+
+			// A foreign or malformed document is rejected before anything is
+			// stored.
+			for name, body := range map[string]string{
+				"unknown format":   strings.Replace(exportEnvelope.Data.Content, "new-api-playground-prompt-template", "something-else", 1),
+				"unknown schema":   strings.Replace(exportEnvelope.Data.Content, `"schema_version":1`, `"schema_version":2`, 1),
+				"missing template": `{"format":"new-api-playground-prompt-template","schema_version":1}`,
+			} {
+				rejected := playgroundRequest(t, 7, http.MethodPost, "/api/playground/snippets/import", []byte(body), controller.ImportPlaygroundSnippet)
+				assert.Equal(t, http.StatusBadRequest, rejected.Code, name+": "+rejected.Body.String())
+				assert.Contains(t, rejected.Body.String(), "Invalid prompt snippet file.", name)
+			}
+			gapped := strings.Replace(exportEnvelope.Data.Content, `"version":3`, `"version":4`, 1)
+			rejectedGap := playgroundRequest(t, 7, http.MethodPost, "/api/playground/snippets/import", []byte(gapped), controller.ImportPlaygroundSnippet)
+			assert.Equal(t, http.StatusBadRequest, rejectedGap.Code, rejectedGap.Body.String())
 
 			for name, body := range map[string]map[string]any{
 				"empty name":      {"name": "   ", "content": "x"},
@@ -4400,9 +4569,11 @@ func TestPlaygroundSnippetPersistenceAndOwnership(t *testing.T) {
 			emptyPatch := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/snippets/"+id, map[string]any{}, controller.UpdatePlaygroundSnippet)
 			assert.Equal(t, http.StatusBadRequest, emptyPatch.Code, emptyPatch.Body.String())
 			assert.Contains(t, emptyPatch.Body.String(), "Invalid prompt snippet.")
+			emptyRollback := playgroundRequest(t, 7, http.MethodPost, "/api/playground/snippets/"+id+"/rollback", map[string]any{}, controller.RollbackPlaygroundSnippet)
+			assert.Equal(t, http.StatusBadRequest, emptyRollback.Code, emptyRollback.Body.String())
 
-			// The resource policy bounds the text of one snippet and the
-			// account count with stable capacity errors.
+			// The resource policy bounds one snippet's text and the per-template
+			// version count with stable capacity errors.
 			usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
 				policy.SnippetContentMaxBytes = 16
 			})
@@ -4412,21 +4583,44 @@ func TestPlaygroundSnippetPersistenceAndOwnership(t *testing.T) {
 			assert.Equal(t, http.StatusUnprocessableEntity, tooLong.Code, tooLong.Body.String())
 			assert.Contains(t, tooLong.Body.String(), "PLAYGROUND_SNIPPET_CONTENT_LIMIT_EXCEEDED")
 			usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+				policy.SnippetContentMaxBytes = 8 << 10
+				policy.SnippetVersionMaxCount = 3
+			})
+			versionOverflow := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/snippets/"+id, map[string]any{"content": "v4"}, controller.UpdatePlaygroundSnippet)
+			assert.Equal(t, http.StatusUnprocessableEntity, versionOverflow.Code, versionOverflow.Body.String())
+			assert.Contains(t, versionOverflow.Body.String(), "PLAYGROUND_SNIPPET_VERSION_LIMIT_EXCEEDED")
+			// The account-level version budget is enforced independently, for a
+			// write and for an import.
+			usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+				policy.SnippetVersionMaxCount = 50
+				policy.SnippetVersionUserMaxCount = 3
+			})
+			accountOverflow := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/snippets/"+id, map[string]any{"content": "v5"}, controller.UpdatePlaygroundSnippet)
+			assert.Equal(t, http.StatusUnprocessableEntity, accountOverflow.Code, accountOverflow.Body.String())
+			assert.Contains(t, accountOverflow.Body.String(), "PLAYGROUND_SNIPPET_VERSION_LIMIT_EXCEEDED")
+			importOverflow := playgroundRequest(t, 7, http.MethodPost, "/api/playground/snippets/import", []byte(exportEnvelope.Data.Content), controller.ImportPlaygroundSnippet)
+			assert.Equal(t, http.StatusUnprocessableEntity, importOverflow.Code, importOverflow.Body.String())
+			assert.Contains(t, importOverflow.Body.String(), "PLAYGROUND_SNIPPET_VERSION_LIMIT_EXCEEDED")
+			usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
 				policy.SnippetUserMaxCount = 1
 			})
-			overflow := playgroundRequest(t, 7, http.MethodPost, "/api/playground/snippets", map[string]any{"name": "One too many", "content": "x"}, controller.CreatePlaygroundSnippet)
-			assert.Equal(t, http.StatusUnprocessableEntity, overflow.Code, overflow.Body.String())
-			assert.Contains(t, overflow.Body.String(), "PLAYGROUND_SNIPPET_LIMIT_EXCEEDED")
+			countOverflow := playgroundRequest(t, 7, http.MethodPost, "/api/playground/snippets", map[string]any{"name": "One too many", "content": "x"}, controller.CreatePlaygroundSnippet)
+			assert.Equal(t, http.StatusUnprocessableEntity, countOverflow.Code, countOverflow.Body.String())
+			assert.Contains(t, countOverflow.Body.String(), "PLAYGROUND_SNIPPET_LIMIT_EXCEEDED")
 
+			// Deleting the template releases its versions and both counters.
 			deleted := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/snippets/"+id, nil, controller.DeletePlaygroundSnippet)
 			require.Equal(t, http.StatusOK, deleted.Code, deleted.Body.String())
 			repeat := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/snippets/"+id, nil, controller.DeletePlaygroundSnippet)
 			assert.Equal(t, http.StatusNotFound, repeat.Code, repeat.Body.String())
 			var stored int64
 			require.NoError(t, db.Model(&model.PlaygroundSnippet{}).Where("user_id = ?", 7).Count(&stored).Error)
-			assert.Zero(t, stored)
+			assert.EqualValues(t, 1, stored)
+			require.NoError(t, db.Model(&model.PlaygroundSnippetVersion{}).Where("user_id = ?", 7).Count(&stored).Error)
+			assert.EqualValues(t, 3, stored, "only the imported template's versions are left")
 			require.NoError(t, db.Where("user_id = ?", 7).First(&usage).Error)
-			assert.Zero(t, usage.Snippets)
+			assert.EqualValues(t, 1, usage.Snippets)
+			assert.EqualValues(t, 3, usage.SnippetVersions)
 		})
 	}
 }
@@ -7232,9 +7426,11 @@ func TestPlaygroundLogCapture(t *testing.T) {
 			assert.Equal(t, "other answer", adminContentReplay.Data.Capture.Response["content"])
 			require.NoError(t, db.Table("audit_logs").Where("action = ?", "playground.log_replay_view").Count(&auditCount).Error)
 			assert.EqualValues(t, 1, auditCount)
-			// The owner still reads their own content without an audit row.
+			// The owner still reads their own content without adding an audit row.
 			ownerSelf := callLogRoute(8, common.RoleCommonUser, http.MethodGet, "pg-replay-other", "", controller.GetPlaygroundLogReplay)
 			require.Equal(t, http.StatusOK, ownerSelf.Code, ownerSelf.Body.String())
+			require.NoError(t, db.Table("audit_logs").Where("action = ?", "playground.log_replay_view").Count(&auditCount).Error)
+			assert.EqualValues(t, 1, auditCount)
 
 			// Expired rows stop serving content before cleanup removes them.
 			require.NoError(t, model.SavePlaygroundLogCapture(&model.PlaygroundLogCapture{

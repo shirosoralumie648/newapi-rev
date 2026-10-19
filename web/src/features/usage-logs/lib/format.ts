@@ -576,6 +576,8 @@ const AUDIT_TEMPLATES: Record<string, string> = {
   // Logs
   'log.clear': 'Cleared historical logs',
   'log.cleanup_start': 'Log cleanup task started.',
+  'playground.log_replay_view':
+    'Viewed retained Playground request content of user {{target_user_id}} (request {{request_id}})',
   // Generic middleware fallback
   generic: '{{method}} {{route}}',
 }

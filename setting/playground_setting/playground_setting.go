@@ -208,8 +208,12 @@ type PlaygroundQuotaPolicy struct {
 	// snippet library: how many snippets it may store and how many bytes one
 	// snippet's text may occupy. Snippets are reusable composer text, not
 	// stored attachments, so they have no account-level byte budget.
-	SnippetUserMaxCount    int   `json:"snippet_user_max_count"`
-	SnippetContentMaxBytes int64 `json:"snippet_content_max_bytes"`
+	// SnippetVersionMaxCount bounds the immutable revisions of one snippet and
+	// SnippetVersionUserMaxCount the account's total stored revisions.
+	SnippetUserMaxCount        int   `json:"snippet_user_max_count"`
+	SnippetContentMaxBytes     int64 `json:"snippet_content_max_bytes"`
+	SnippetVersionMaxCount     int   `json:"snippet_version_max_count"`
+	SnippetVersionUserMaxCount int   `json:"snippet_version_user_max_count"`
 	// MemoryUserMaxCount and MemoryContentMaxBytes bound the account's durable
 	// cross-session notes: how many memories it may store and how many bytes one
 	// memory's text may occupy. Memories are derived from the owner's own
@@ -470,11 +474,16 @@ func (setting *PlaygroundStorageBillingSetting) EgressDailyLimits(group string) 
 // the policy existed.
 func builtinPlaygroundQuotaPolicy() PlaygroundQuotaPolicy {
 	return PlaygroundQuotaPolicy{
-		SessionMaxCount:             100,
-		PresetUserMaxCount:          50,
-		SystemPromptMaxBytes:        16 << 10,
-		SnippetUserMaxCount:         100,
-		SnippetContentMaxBytes:      8 << 10,
+		SessionMaxCount:        100,
+		PresetUserMaxCount:     50,
+		SystemPromptMaxBytes:   16 << 10,
+		SnippetUserMaxCount:    100,
+		SnippetContentMaxBytes: 8 << 10,
+		// A template earns its keep by iterating: 50 immutable revisions per
+		// template and 1000 per account cover a busy editing history without
+		// letting version rows grow without bound.
+		SnippetVersionMaxCount:      50,
+		SnippetVersionUserMaxCount:  1000,
 		MemoryUserMaxCount:          100,
 		MemoryContentMaxBytes:       4 << 10,
 		MessageMaxCount:             100,
@@ -678,6 +687,12 @@ func applyPlaygroundQuotaOverrides(policy *PlaygroundQuotaPolicy, override *Play
 	}
 	if override.SnippetContentMaxBytes > 0 {
 		policy.SnippetContentMaxBytes = override.SnippetContentMaxBytes
+	}
+	if override.SnippetVersionMaxCount > 0 {
+		policy.SnippetVersionMaxCount = override.SnippetVersionMaxCount
+	}
+	if override.SnippetVersionUserMaxCount > 0 {
+		policy.SnippetVersionUserMaxCount = override.SnippetVersionUserMaxCount
 	}
 	if override.MemoryUserMaxCount > 0 {
 		policy.MemoryUserMaxCount = override.MemoryUserMaxCount

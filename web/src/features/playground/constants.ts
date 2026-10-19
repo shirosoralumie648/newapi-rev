@@ -20,6 +20,7 @@ import type {
   PlaygroundConfig,
   PlaygroundContextSettings,
   PlaygroundDeveloperOptions,
+  PlaygroundProtocol,
   ParameterEnabled,
 } from './types'
 
@@ -127,6 +128,8 @@ export const PLAYGROUND_MODERATION_MAX_INPUT_CHARS = 16_000
 // API endpoints
 export const API_ENDPOINTS = {
   CHAT_COMPLETIONS: '/pg/chat/completions',
+  RESPONSES: '/pg/responses',
+  MESSAGES: '/pg/messages',
   EMBEDDINGS: '/pg/embeddings',
   RERANK: '/pg/rerank',
   MODERATIONS: '/pg/moderations',
@@ -331,7 +334,45 @@ export const DEFAULT_CONFIG: PlaygroundConfig = {
   seed: null,
   reasoning_effort: '',
   stream: true,
+  protocol: 'chat',
 }
+
+// The protocols the workspace can send one prompt with. The labels are i18n
+// keys (English source text); the protocol value travels in the session config
+// and selects the relay route and the payload conversion.
+export const PLAYGROUND_PROTOCOL_OPTIONS: ReadonlyArray<{
+  value: PlaygroundProtocol
+  labelKey: string
+}> = [
+  { value: 'chat', labelKey: 'Chat Completions' },
+  { value: 'responses', labelKey: 'Responses' },
+  { value: 'messages', labelKey: 'Anthropic Messages' },
+]
+
+// Public API path each protocol exports and relays to. The Playground itself
+// posts to the /pg bridge; exported code and the direct API use these paths.
+export const PLAYGROUND_PROTOCOL_API_PATHS: Record<PlaygroundProtocol, string> =
+  {
+    chat: '/v1/chat/completions',
+    responses: '/v1/responses',
+    messages: '/v1/messages',
+  }
+
+// Anthropic requires the version header on every Messages request.
+export const PLAYGROUND_ANTHROPIC_VERSION = '2023-06-01'
+
+// The Messages endpoint requires max_tokens; a conversation that leaves the
+// parameter unset still sends this bounded default instead of an empty field.
+export const PLAYGROUND_MESSAGES_FALLBACK_MAX_TOKENS = 4096
+
+// The captured raw response is display-only and stays in memory; an unbounded
+// SSE transcript would pin the whole stream in a component state.
+export const PLAYGROUND_CAPTURED_RESPONSE_MAX_CHARS = 64_000
+
+// Shown beside a relay error that names an unsupported protocol shape, so the
+// caller knows the model or channel is the limiting factor, not the prompt.
+export const PLAYGROUND_PROTOCOL_UNSUPPORTED_HINT =
+  'This model or channel may not support the selected protocol. Switch back to Chat Completions or choose another model.'
 
 export const DEFAULT_PARAMETER_ENABLED: ParameterEnabled = {
   temperature: true,

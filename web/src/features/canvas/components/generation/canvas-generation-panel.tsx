@@ -26,9 +26,12 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
+import { CANVAS_WORKFLOW_CAPABILITY_MESSAGES } from '@/features/canvas/constants'
 import type { CanvasSendSeed } from '@/features/canvas/lib/canvas-send'
-import { canvasWorkflowGenerationSupport } from '@/features/canvas/lib/canvas-workflow'
-import type { CanvasWorkflowModelCapability } from '@/features/canvas/lib/canvas-workflow'
+import {
+  canvasWorkflowGenerationSupport,
+  type CanvasWorkflowModelCapability,
+} from '@/features/canvas/lib/canvas-workflow'
 import {
   PLAYGROUND_AUDIO_VOICES,
   PLAYGROUND_GENERATION_BATCH_CONCURRENCY,
@@ -96,6 +99,15 @@ const GENERATION_ERROR_KEYS: Record<PlaygroundGenerationKind, string> = {
   audio: PLAYGROUND_GENERATION_ERRORS.AUDIO_FAILED,
 }
 
+// Only image and video carry generation support in the model catalog; an audio
+// model has no capability metadata to judge, so it is never gated.
+const GENERATION_CAPABILITY_MESSAGES: Partial<
+  Record<PlaygroundGenerationKind, string>
+> = {
+  image: CANVAS_WORKFLOW_CAPABILITY_MESSAGES.IMAGE_UNSUPPORTED,
+  video: CANVAS_WORKFLOW_CAPABILITY_MESSAGES.VIDEO_UNSUPPORTED,
+}
+
 interface GenerationPlanNotice {
   messageKey: string
   values: Record<string, string>
@@ -133,9 +145,9 @@ interface CanvasGenerationPanelProps {
   active: boolean
   disabled?: boolean
   group: string
-  models: ModelOption[]
-  /** Sizes, qualities and durations the model catalog reports per model. */
+  /** Endpoint, task-usage, size, quality and duration metadata per model. */
   modelCapabilities?: Record<string, CanvasWorkflowModelCapability>
+  models: ModelOption[]
   /** Prompt a conversation message action handed to the canvas. */
   initialPrompt?: string
   initialKind?: PlaygroundGenerationKind
@@ -213,6 +225,22 @@ export function CanvasGenerationPanel(props: CanvasGenerationPanelProps) {
   }, [audioUrl])
 
   const controlsDisabled = props.disabled || isSubmitting || batch.running
+  // A catalog row that proves the selected model cannot serve the current kind
+  // disables the send; unknown metadata keeps the panel usable, matching the
+  // canvas node controls. In compare mode the batch plan validates every
+  // selected model instead of the hidden single-model select.
+  const generationSupport = canvasWorkflowGenerationSupport(
+    props.modelCapabilities?.[model.trim()]
+  )
+  const generationUnsupported =
+    mode !== 'compare' &&
+    kind !== 'audio' &&
+    generationSupport !== null &&
+    !generationSupport[kind]
+  const capabilityReason = generationUnsupported
+    ? (GENERATION_CAPABILITY_MESSAGES[kind] ?? null)
+    : null
+
   const trimmedPrompt = prompt.trim()
   const availableModelValues = props.models.map((option) => option.value)
   const selectedCompareModels = normalizeGenerationModels(compareModels).filter(
@@ -304,6 +332,7 @@ export function CanvasGenerationPanel(props: CanvasGenerationPanelProps) {
     mode === 'compare' ? compareSelection.length > 0 : model.trim() !== ''
   const canSubmit =
     !controlsDisabled &&
+    !generationUnsupported &&
     selectedModelReady &&
     trimmedPrompt !== '' &&
     !seedInvalid
@@ -545,6 +574,9 @@ export function CanvasGenerationPanel(props: CanvasGenerationPanelProps) {
                 </NativeSelectOption>
               ))}
             </NativeSelect>
+            {capabilityReason ? (
+              <p className='text-warning text-xs'>{t(capabilityReason)}</p>
+            ) : null}
           </div>
         )}
 

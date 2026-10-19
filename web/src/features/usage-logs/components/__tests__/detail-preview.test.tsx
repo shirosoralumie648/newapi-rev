@@ -132,6 +132,22 @@ function renderPreview(other: LogOtherData, isAdmin = true, type?: number) {
   return screen.getByRole('button', { name: /./ })
 }
 
+test('offers a Playground replay link for a chat request log', () => {
+  renderPreview({ request_path: '/v1/chat/completions' })
+
+  expect(
+    screen.getByRole('link', { name: 'Open in Playground' })
+  ).toHaveAttribute('href', '/playground?replay=req-1&replayUser=1')
+})
+
+test('omits the Playground replay link for a non-chat log', () => {
+  renderPreview({ request_path: '/v1/images/generations' })
+
+  expect(
+    screen.queryByRole('link', { name: 'Open in Playground' })
+  ).not.toBeInTheDocument()
+})
+
 test('keeps log details open when the parent refreshes with unchanged data', async () => {
   const other = { model_price: 0.25 }
   const wrapper = ({ children }: { children: React.ReactNode }) => (

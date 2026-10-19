@@ -143,9 +143,14 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.PUT("/knowledge-bases/:kbId/documents/:documentId/chunks", controller.ReplacePlaygroundKnowledgeDocumentChunks)
 			playgroundRoute.GET("/snippets", controller.ListPlaygroundSnippets)
 			playgroundRoute.POST("/snippets", controller.CreatePlaygroundSnippet)
+			// Import answers on the collection path; export and rollback are
+			// per-template actions.
+			playgroundRoute.POST("/snippets/import", controller.ImportPlaygroundSnippet)
 			playgroundRoute.GET("/snippets/:snippetId", controller.GetPlaygroundSnippet)
 			playgroundRoute.PATCH("/snippets/:snippetId", controller.UpdatePlaygroundSnippet)
 			playgroundRoute.DELETE("/snippets/:snippetId", controller.DeletePlaygroundSnippet)
+			playgroundRoute.GET("/snippets/:snippetId/export", controller.ExportPlaygroundSnippet)
+			playgroundRoute.POST("/snippets/:snippetId/rollback", controller.RollbackPlaygroundSnippet)
 			playgroundRoute.GET("/memories", controller.ListPlaygroundMemories)
 			playgroundRoute.POST("/memories", controller.CreatePlaygroundMemory)
 			playgroundRoute.GET("/memories/:memoryId", controller.GetPlaygroundMemory)
