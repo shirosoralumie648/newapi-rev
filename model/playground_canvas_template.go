@@ -392,7 +392,7 @@ func UpdatePlaygroundCanvasTemplate(userID int, id string, updates map[string]an
 	}
 	var template PlaygroundCanvasTemplate
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		owned := tx.Where("id = ? AND user_id = ? AND deleted_at = 0 AND (visibility IS NULL OR visibility <> ?)", id, userID, PlaygroundCanvasTemplateVisibilityGlobal)
+		owned := tx.Model(&PlaygroundCanvasTemplate{}).Where("id = ? AND user_id = ? AND deleted_at = 0 AND (visibility IS NULL OR visibility <> ?)", id, userID, PlaygroundCanvasTemplateVisibilityGlobal)
 		if err := lockForUpdate(tx).Where("id = ? AND user_id = ? AND deleted_at = 0 AND (visibility IS NULL OR visibility <> ?)", id, userID, PlaygroundCanvasTemplateVisibilityGlobal).First(&template).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrPlaygroundCanvasTemplateNotFound

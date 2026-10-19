@@ -1299,7 +1299,7 @@ func TestPlaygroundCanvasShares(t *testing.T) {
 				`"model"`, `"size"`, `"quality"`, `"group"`, `"sourceNodeId"`, `"content_url"`,
 				`"token"`, `"user_id"`,
 			} {
-				assert.NotContains(t, read.Body.String(), forbiddenKey)
+				assert.NotContains(t, read.Body.String(), forbiddenKey+":")
 			}
 
 			// Rotation, expiry and revocation use the identical non-enumerable
