@@ -5111,19 +5111,24 @@ func TestPlaygroundSessionDeveloperOptions(t *testing.T) {
 			for index := range 33 {
 				manyTools = append(manyTools, validTool(fmt.Sprintf("tool_%d", index)))
 			}
-			largeSchema := func() map[string]any {
+			// One JSON Schema of the requested description size. The server
+			// bounds a single schema at 64 KiB, so a larger fixture is what the
+			// per-schema case must send.
+			largeSchema := func(size int) map[string]any {
 				return map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"blob": map[string]any{"type": "string", "description": strings.Repeat("y", 40<<10)},
+						"blob": map[string]any{"type": "string", "description": strings.Repeat("y", size)},
 					},
 				}
 			}
+			// Every schema stays inside the per-schema budget while the whole
+			// list exceeds the total developer-options budget.
 			oversizedTools := make([]any, 0, 8)
 			for index := range 8 {
 				oversizedTools = append(oversizedTools, map[string]any{
 					"type":     "function",
-					"function": map[string]any{"name": fmt.Sprintf("big_%d", index), "parameters": largeSchema()},
+					"function": map[string]any{"name": fmt.Sprintf("big_%d", index), "parameters": largeSchema(40 << 10)},
 				})
 			}
 			rejected := []struct {
@@ -5146,7 +5151,7 @@ func TestPlaygroundSessionDeveloperOptions(t *testing.T) {
 				{"non-object response schema", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "response_format": map[string]any{"type": "json_schema", "json_schema": map[string]any{"name": "x", "schema": "text"}}}}, http.StatusBadRequest},
 				{"unknown response format key", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "response_format": map[string]any{"type": "json_object", "mode": "fast"}}}, http.StatusBadRequest},
 				{"too many tools", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "tools": manyTools}}, http.StatusUnprocessableEntity},
-				{"oversized schema", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "tools": []any{map[string]any{"type": "function", "function": map[string]any{"name": "big", "parameters": largeSchema()}}}}}, http.StatusUnprocessableEntity},
+				{"oversized schema", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "tools": []any{map[string]any{"type": "function", "function": map[string]any{"name": "big", "parameters": largeSchema(80 << 10)}}}}}, http.StatusUnprocessableEntity},
 				{"oversized total", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "tools": oversizedTools}}, http.StatusUnprocessableEntity},
 			}
 			for _, test := range rejected {
