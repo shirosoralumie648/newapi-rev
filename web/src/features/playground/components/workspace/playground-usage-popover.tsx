@@ -70,6 +70,13 @@ function PlaygroundUsageSummary(props: { userId: number | null }) {
       bytes: false,
     },
     {
+      key: 'memories',
+      label: t('Memories'),
+      metric: usage.memories,
+      counts: true,
+      bytes: false,
+    },
+    {
       key: 'attachments',
       label: t('Attachments'),
       metric: usage.attachments,

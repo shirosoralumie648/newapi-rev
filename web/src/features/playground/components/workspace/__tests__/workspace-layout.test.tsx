@@ -76,6 +76,8 @@ test('desktop hides the inspector and reports the requested view', async () => {
   expect(onToggleInspector).toHaveBeenCalledWith('artifacts')
   await user.click(canvases)
   expect(onToggleInspector).toHaveBeenCalledWith('canvas')
+  await user.click(screen.getByRole('button', { name: 'Memory' }))
+  expect(onToggleInspector).toHaveBeenCalledWith('memory')
 })
 
 test('desktop marks the active canvas inspector view', () => {

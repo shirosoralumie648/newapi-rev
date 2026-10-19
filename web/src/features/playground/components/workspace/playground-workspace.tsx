@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import {
+  Brain,
   FileText,
   FolderOpen,
   Frame,
@@ -50,6 +51,7 @@ export type PlaygroundInspectorView =
   | 'canvas'
   | 'generate'
   | 'library'
+  | 'memory'
   | 'presets'
   | 'trash'
 
@@ -111,6 +113,11 @@ export function PlaygroundWorkspace(props: PlaygroundWorkspaceProps) {
     inspectorTitle = t('Assistant presets')
     inspectorDescription = t(
       'Reusable assistants with their own model, parameters and system prompt.'
+    )
+  } else if (props.inspectorView === 'memory') {
+    inspectorTitle = t('Memory')
+    inspectorDescription = t(
+      'Durable notes the assistant can reuse across conversations.'
     )
   } else if (props.inspectorView === 'trash') {
     inspectorTitle = t('Trash')
@@ -214,6 +221,17 @@ export function PlaygroundWorkspace(props: PlaygroundWorkspaceProps) {
             >
               <FolderOpen aria-hidden='true' />
               {t('Library')}
+            </Button>
+            <Button
+              aria-pressed={props.inspectorView === 'memory'}
+              disabled={props.disabled}
+              onClick={() => props.onToggleInspector('memory')}
+              size='sm'
+              type='button'
+              variant={props.inspectorView === 'memory' ? 'secondary' : 'ghost'}
+            >
+              <Brain aria-hidden='true' />
+              {t('Memory')}
             </Button>
           </div>
         </div>

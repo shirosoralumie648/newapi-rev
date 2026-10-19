@@ -50,6 +50,7 @@ import type {
   PlaygroundContextSummary,
   PlaygroundExportFormat,
   PlaygroundMessageCost,
+  PlaygroundMemory,
   PlaygroundServerSession,
   PlaygroundSessionExport,
   PlaygroundTrashListing,
@@ -935,6 +936,7 @@ const playgroundMessageCostLookupSchema = z.object({
 const playgroundUsageSchema = z.object({
   group: z.string(),
   sessions: playgroundUsageMetricSchema,
+  memories: playgroundUsageMetricSchema,
   attachments: playgroundUsageMetricSchema,
   artifacts: playgroundUsageMetricSchema,
   canvas: playgroundUsageMetricSchema,
@@ -961,6 +963,7 @@ export interface PlaygroundUsageMetric {
 export interface PlaygroundResourceUsage {
   group: string
   sessions: PlaygroundUsageMetric
+  memories: PlaygroundUsageMetric
   attachments: PlaygroundUsageMetric
   artifacts: PlaygroundUsageMetric
   canvas: PlaygroundUsageMetric
@@ -1027,6 +1030,7 @@ export async function getPlaygroundUsage(
   return {
     group: metrics.group,
     sessions: toMetric(metrics.sessions),
+    memories: toMetric(metrics.memories),
     attachments: toMetric(metrics.attachments),
     artifacts: toMetric(metrics.artifacts),
     canvas: toMetric(metrics.canvas),
@@ -1344,6 +1348,101 @@ export async function deletePlaygroundSnippet(
 ): Promise<void> {
   const response = await api.delete(
     `${API_ENDPOINTS.PLAYGROUND_SNIPPETS}/${encodeURIComponent(snippetId)}`,
+    { signal }
+  )
+  requireServerSuccess(response.data)
+}
+
+const serverMemorySchema = z.object({
+  id: z.string().min(1),
+  content: z.string(),
+  category: z.string(),
+  source_session_id: z.string().nullable().optional(),
+  enabled: z.boolean(),
+  created_at: z.number().int().nonnegative(),
+  updated_at: z.number().int().nonnegative(),
+})
+
+export interface PlaygroundMemoryInput {
+  content: string
+  category?: string
+  /** Omitted leaves the source unchanged; null clears it. */
+  source_session_id?: string | null
+  enabled?: boolean
+}
+
+export type PlaygroundMemoryUpdateInput = Partial<PlaygroundMemoryInput>
+
+export interface PlaygroundMemoryListing {
+  items: PlaygroundMemory[]
+  total: number
+  /** Per-account memory budget the server enforces for the owner's group. */
+  limit: number
+}
+
+function mapServerMemory(value: unknown): PlaygroundMemory {
+  const memory = serverMemorySchema.parse(value)
+  return {
+    id: memory.id,
+    content: memory.content,
+    category: memory.category,
+    sourceSessionId: memory.source_session_id ?? null,
+    enabled: memory.enabled,
+    createdAt: memory.created_at * 1000,
+    updatedAt: memory.updated_at * 1000,
+  }
+}
+
+export async function getPlaygroundMemories(
+  signal?: AbortSignal
+): Promise<PlaygroundMemoryListing> {
+  const response = await api.get(API_ENDPOINTS.PLAYGROUND_MEMORIES, { signal })
+  requireServerSuccess(response.data)
+  const data = z
+    .object({
+      items: z.array(z.unknown()),
+      total: z.number().nonnegative(),
+      limit: z.number().int().nonnegative(),
+    })
+    .parse(response.data.data)
+  return {
+    items: data.items.map(mapServerMemory),
+    total: data.total,
+    limit: data.limit,
+  }
+}
+
+export async function createPlaygroundMemory(
+  input: PlaygroundMemoryInput,
+  signal?: AbortSignal
+): Promise<PlaygroundMemory> {
+  const response = await api.post(API_ENDPOINTS.PLAYGROUND_MEMORIES, input, {
+    signal,
+  })
+  requireServerSuccess(response.data)
+  return mapServerMemory(response.data.data)
+}
+
+export async function updatePlaygroundMemory(
+  memoryId: string,
+  input: PlaygroundMemoryUpdateInput,
+  signal?: AbortSignal
+): Promise<PlaygroundMemory> {
+  const response = await api.patch(
+    `${API_ENDPOINTS.PLAYGROUND_MEMORIES}/${encodeURIComponent(memoryId)}`,
+    input,
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  return mapServerMemory(response.data.data)
+}
+
+export async function deletePlaygroundMemory(
+  memoryId: string,
+  signal?: AbortSignal
+): Promise<void> {
+  const response = await api.delete(
+    `${API_ENDPOINTS.PLAYGROUND_MEMORIES}/${encodeURIComponent(memoryId)}`,
     { signal }
   )
   requireServerSuccess(response.data)

@@ -229,6 +229,32 @@ export interface PromptSnippet {
 }
 
 /**
+ * A durable cross-session note owned by the account. Memories are derived from
+ * the owner's own conversations (or written by hand), optionally point back at
+ * the source conversation, and are injected as one system message into the
+ * next request only while enabled.
+ */
+export interface PlaygroundMemory {
+  id: string
+  content: string
+  category: string
+  sourceSessionId: string | null
+  enabled: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+/**
+ * Browser-owned extraction preference of one account. It is off by default so
+ * no conversation is sent to the extraction model until the owner opts in;
+ * the model is empty while the setting follows the context summary model.
+ */
+export interface PlaygroundMemoryExtractionSettings {
+  enabled: boolean
+  model: string
+}
+
+/**
  * Deep-link target for the Playground route. `session` is the canonical server
  * session id a canvas node points back to; `artifact` selects a saved artifact
  * inside that session.

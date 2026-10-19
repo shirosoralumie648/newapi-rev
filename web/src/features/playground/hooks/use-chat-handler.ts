@@ -56,6 +56,8 @@ interface UseChatHandlerOptions {
   parameterEnabled: ParameterEnabled
   /** Conversation-level instruction injected as the first request message. */
   systemPrompt: string
+  /** Enabled cross-session memory block injected after the system prompt. */
+  memoryBlock?: string
   /** Context limits and summary model applied when the payload is built. */
   contextSettings: PlaygroundContextSettings
   /**
@@ -102,6 +104,7 @@ export function useChatHandler({
   config,
   parameterEnabled,
   systemPrompt,
+  memoryBlock,
   contextSettings,
   prepareContextSummary,
   onMessageUpdate,
@@ -354,7 +357,8 @@ export function useChatHandler({
         config,
         parameterEnabled,
         systemPrompt,
-        { settings: contextSettings, summary: contextSummary }
+        { settings: contextSettings, summary: contextSummary },
+        memoryBlock
       )
       void sendStreamRequest(payload, {
         onUpdate: (type, chunk) => handleStreamUpdate(generation, type, chunk),
@@ -371,6 +375,7 @@ export function useChatHandler({
       config,
       parameterEnabled,
       systemPrompt,
+      memoryBlock,
       contextSettings,
       sendStreamRequest,
       discardPendingStreamUpdates,
@@ -395,7 +400,8 @@ export function useChatHandler({
         config,
         parameterEnabled,
         systemPrompt,
-        { settings: contextSettings, summary: contextSummary }
+        { settings: contextSettings, summary: contextSummary },
+        memoryBlock
       )
       const generation = requestGenerationRef.current + 1
       const abortController = new AbortController()
@@ -469,6 +475,7 @@ export function useChatHandler({
       config,
       parameterEnabled,
       systemPrompt,
+      memoryBlock,
       contextSettings,
       stopStream,
       discardPendingStreamUpdates,
