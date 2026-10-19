@@ -131,7 +131,7 @@ const sourceSchema = z.object({
 // Web-search snapshot of one user turn. The bounds mirror the server-side
 // validation of a stored message: exceeding one rejects the whole store
 // instead of silently dropping the replay context.
-const messageSearchSchema = z.object({
+export const messageSearchSchema = z.object({
   query: z.string().min(1).max(512),
   provider: z.string().max(32).optional(),
   results: z

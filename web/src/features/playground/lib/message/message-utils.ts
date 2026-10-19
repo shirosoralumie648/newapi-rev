@@ -149,26 +149,45 @@ export function setActiveMessageVersion(
 }
 
 /**
- * Create a user message
+ * Create a user message. A turn that searched the web carries the normalized
+ * snapshot, so replay rebuilds the same context and its citations.
  */
 export function createUserMessage(
   content: string,
   createdAt: number = Date.now(),
-  attachments?: MessageAttachment[]
+  attachments?: MessageAttachment[],
+  search?: MessageSearchSnapshot
 ): Message {
   return {
     key: nanoid(),
     from: MESSAGE_ROLES.USER,
     versions: [createMessageVersion(content, attachments)],
     createdAt,
+    ...(search ? { search } : {}),
   }
+}
+
+/**
+ * Turn the stored search snapshot into the citation list rendered under the
+ * assistant reply. The reply copies the hits instead of reading the preceding
+ * user turn, so a version keeps its sources after regeneration and reload.
+ */
+export function getMessageSearchSources(
+  search?: MessageSearchSnapshot
+): NonNullable<Message['sources']> {
+  if (!search) return []
+  return search.results.map((result) => ({
+    href: result.url,
+    title: result.title.trim() || result.url,
+  }))
 }
 
 /**
  * Create a loading assistant message
  */
 export function createLoadingAssistantMessage(
-  startedAt: number = Date.now()
+  startedAt: number = Date.now(),
+  sources?: NonNullable<Message['sources']>
 ): Message {
   return {
     key: nanoid(),
@@ -176,6 +195,7 @@ export function createLoadingAssistantMessage(
     versions: [createMessageVersion('')],
     createdAt: startedAt,
     startedAt,
+    ...(sources && sources.length > 0 ? { sources } : {}),
     reasoning: undefined,
     isReasoningComplete: false,
     isContentComplete: false,

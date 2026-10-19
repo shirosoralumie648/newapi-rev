@@ -98,6 +98,9 @@ interface PlaygroundInputProps {
   onAutoReadChange: (value: boolean) => void
   onAutoReadUseDefault: () => void
   onAutoReadDefaultChange: (value: boolean) => void
+  webSearchAvailable?: boolean
+  webSearchEnabled?: boolean
+  onWebSearchChange?: (value: boolean) => void
 }
 
 export function PlaygroundInput({
@@ -136,6 +139,9 @@ export function PlaygroundInput({
   onAutoReadChange,
   onAutoReadUseDefault,
   onAutoReadDefaultChange,
+  webSearchAvailable = false,
+  webSearchEnabled = false,
+  onWebSearchChange,
 }: PlaygroundInputProps) {
   const { t } = useTranslation()
   const { text, updateText, appendText, handleKeyDown, rememberSubmittedText } =
@@ -230,8 +236,11 @@ export function PlaygroundInput({
                 onRemoveContextSummary={onRemoveContextSummary}
                 onSummarizeContext={onSummarizeContext}
                 onSystemPromptChange={onSystemPromptChange}
+                onWebSearchChange={onWebSearchChange}
                 parameterEnabled={parameterEnabled}
                 systemPrompt={systemPrompt}
+                webSearchAvailable={webSearchAvailable}
+                webSearchEnabled={webSearchEnabled}
               />
             }
           />

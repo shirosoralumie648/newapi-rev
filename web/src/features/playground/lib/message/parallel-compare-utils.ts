@@ -29,13 +29,18 @@ import type {
   ChatCompletionResponse,
   Message,
   MessageAttachment,
+  MessageSearchSnapshot,
   MessageStatus,
   MessageUsage,
   MessageVersion,
 } from '../../types'
 import { applyChatCompletionChoice } from './message-streaming-utils'
 import { completeAssistantTiming } from './message-timing-utils'
-import { createUserMessage, getActiveVersionIndex } from './message-utils'
+import {
+  createUserMessage,
+  getActiveVersionIndex,
+  getMessageSearchSources,
+} from './message-utils'
 
 type ChatCompletionChoice = ChatCompletionResponse['choices'][number]
 
@@ -86,7 +91,8 @@ export function createParallelMessageVersion(model: string): MessageVersion {
  */
 export function createParallelReplyMessage(
   models: string[],
-  startedAt: number = Date.now()
+  startedAt: number = Date.now(),
+  sources?: Message['sources']
 ): Message {
   return {
     key: nanoid(),
@@ -94,6 +100,7 @@ export function createParallelReplyMessage(
     parallel: true,
     createdAt: startedAt,
     startedAt,
+    ...(sources && sources.length > 0 ? { sources } : {}),
     isReasoningComplete: false,
     isContentComplete: false,
     isReasoningStreaming: false,
@@ -113,12 +120,17 @@ export function appendParallelMessagePair(
   content: string,
   attachments: MessageAttachment[] | undefined,
   models: string[],
-  submittedAt: number = Date.now()
+  submittedAt: number = Date.now(),
+  search?: MessageSearchSnapshot
 ): Message[] {
   return [
     ...messages,
-    createUserMessage(content, submittedAt, attachments),
-    createParallelReplyMessage(models, submittedAt),
+    createUserMessage(content, submittedAt, attachments, search),
+    createParallelReplyMessage(
+      models,
+      submittedAt,
+      getMessageSearchSources(search)
+    ),
   ]
 }
 

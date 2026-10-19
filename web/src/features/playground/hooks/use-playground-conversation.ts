@@ -30,7 +30,11 @@ import {
   setActiveMessageVersion,
   updateMessageToolCallStatus,
 } from '../lib'
-import type { Message, MessageAttachment } from '../types'
+import type {
+  Message,
+  MessageAttachment,
+  MessageSearchSnapshot,
+} from '../types'
 
 type UsePlaygroundConversationOptions = {
   messages: Message[]
@@ -64,11 +68,16 @@ export function usePlaygroundConversation({
   messagesRef.current = messages
 
   const handleSendMessage = useCallback(
-    (text: string, attachments?: MessageAttachment[]) => {
+    (
+      text: string,
+      attachments?: MessageAttachment[],
+      search?: MessageSearchSnapshot
+    ) => {
       const nextMessages = appendUserMessagePair(
         messagesRef.current,
         text,
-        attachments
+        attachments,
+        search
       )
       updateMessages(nextMessages)
       sendChat(nextMessages)
