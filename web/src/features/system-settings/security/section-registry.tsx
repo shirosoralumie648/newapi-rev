@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { PlaygroundQuotaSection } from '../playground/playground-quota-section'
 import { PlaygroundStorageBillingSection } from '../playground/playground-storage-billing-section'
+import { PlaygroundWebSearchSection } from '../playground/playground-web-search-section'
 import { RateLimitSection } from '../request-limits/rate-limit-section'
 import { SSRFSection } from '../request-limits/ssrf-section'
 import { TokenLimitSection } from '../request-limits/token-limit-section'
@@ -98,6 +99,15 @@ const SECURITY_SECTIONS = [
     build: (settings: SecuritySettings) => (
       <PlaygroundStorageBillingSection
         storageBillingJson={settings['playground_setting.storage_billing']}
+      />
+    ),
+  },
+  {
+    id: 'playground-web-search',
+    titleKey: 'Playground Web Search',
+    build: (settings: SecuritySettings) => (
+      <PlaygroundWebSearchSection
+        webSearchJson={settings['playground_setting.web_search']}
       />
     ),
   },

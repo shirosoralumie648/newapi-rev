@@ -483,6 +483,8 @@ func migrateDB() error {
 		&PlaygroundCanvasProject{},
 		&PlaygroundCanvasSnapshot{},
 		&PlaygroundCanvasAsset{},
+		&PlaygroundCanvasTemplate{},
+		&PlaygroundCanvasTemplateAsset{},
 		&PlaygroundKnowledgeBase{},
 		&PlaygroundKnowledgeDocument{},
 		&PlaygroundKnowledgeChunk{},
@@ -515,6 +517,9 @@ func migrateDB() error {
 	// rows that predate the columns hold their bytes in data.
 	if err := ensurePlaygroundAttachmentStorageBackend(DB); err != nil {
 		return err
+	}
+	if err := SeedPlaygroundCanvasTemplates(DB); err != nil {
+		return fmt.Errorf("seed Playground canvas templates: %w", err)
 	}
 	if _, err := EnsureWalletLedgerOpeningBalances(); err != nil {
 		return fmt.Errorf("seed wallet ledger opening balances: %w", err)

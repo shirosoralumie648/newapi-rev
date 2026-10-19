@@ -22,6 +22,7 @@ import type {
   ConfirmPaymentComplianceResponse,
   FetchUpstreamRatiosRequest,
   LogCleanupTask,
+  PlaygroundWebSearchSettingsRequest,
   SystemOptionsResponse,
   SystemTaskListResponse,
   SystemTaskFilters,
@@ -41,6 +42,16 @@ export async function getSystemOptions() {
 
 export async function updateSystemOption(request: UpdateOptionRequest) {
   const res = await api.put<UpdateOptionResponse>('/api/option/', request)
+  return res.data
+}
+
+export async function updatePlaygroundWebSearch(
+  request: PlaygroundWebSearchSettingsRequest
+) {
+  const res = await api.put<UpdateOptionResponse>(
+    '/api/option/playground/web_search',
+    request
+  )
   return res.data
 }
 

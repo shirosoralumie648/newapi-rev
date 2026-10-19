@@ -259,6 +259,15 @@ type PlaygroundQuotaPolicy struct {
 	CanvasMaxEdges            int   `json:"canvas_max_edges"`
 	CanvasNodeDataMaxBytes    int64 `json:"canvas_node_data_max_bytes"`
 	CanvasUserMaxBytes        int64 `json:"canvas_user_max_bytes"`
+	// Canvas template budgets (CV-11). A template is a structure-level canvas
+	// snapshot with optional inline assets: CanvasTemplateUserMaxCount bounds
+	// the account's private library, CanvasTemplateMaxBytes bounds one template
+	// (document plus raw asset bytes), and CanvasTemplateUserMaxBytes bounds
+	// the whole private library. Official/global templates are platform
+	// content and are not charged to any account.
+	CanvasTemplateUserMaxCount int   `json:"canvas_template_user_max_count"`
+	CanvasTemplateMaxBytes     int64 `json:"canvas_template_max_bytes"`
+	CanvasTemplateUserMaxBytes int64 `json:"canvas_template_user_max_bytes"`
 	// Canvas snapshot history is written while the board is saved: a snapshot
 	// is captured after every CanvasSnapshotEverySaves document saves, after
 	// CanvasSnapshotIntervalMinutes since the previous one, and once for the
@@ -486,6 +495,13 @@ func builtinPlaygroundQuotaPolicy() PlaygroundQuotaPolicy {
 		CanvasMaxEdges:         400,
 		CanvasNodeDataMaxBytes: 64 << 10,
 		CanvasUserMaxBytes:     16 << 20,
+		// A private template library starts at 50 templates / 32 MiB in total,
+		// with one template (document plus inline assets) capped at 8 MiB. That
+		// fits a board with several images while keeping the bookkeeping small
+		// enough to list without transferring every document.
+		CanvasTemplateUserMaxCount: 50,
+		CanvasTemplateMaxBytes:     8 << 20,
+		CanvasTemplateUserMaxBytes: 32 << 20,
 		// History starts on the first document save and then keeps one snapshot
 		// per ten saves or per half hour, retaining ten per board. The account
 		// ceilings bound the whole workspace at 200 snapshots / 64 MiB, and the
@@ -542,7 +558,18 @@ func GetPlaygroundWebSearchSetting() *PlaygroundWebSearchSetting {
 // IsWebSearchEnabled reports whether the search-with-this-turn control should
 // be offered to users. An unanswered or incomplete configuration stays off.
 func IsWebSearchEnabled() bool {
-	return GetPlaygroundWebSearchSetting().IsEnabled()
+	setting := GetPlaygroundWebSearchSetting()
+	if !setting.IsEnabled() {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(setting.Provider)) {
+	case PlaygroundWebSearchProviderTavily, PlaygroundWebSearchProviderBrave:
+		return GetPlaygroundWebSearchAPIKey() != ""
+	case PlaygroundWebSearchProviderSearXNG:
+		return strings.TrimSpace(setting.BaseURL) != ""
+	default:
+		return false
+	}
 }
 
 // GetPlaygroundWebSearchAPIKey returns the server-side provider credential.
@@ -707,6 +734,15 @@ func applyPlaygroundQuotaOverrides(policy *PlaygroundQuotaPolicy, override *Play
 	}
 	if override.CanvasUserMaxBytes > 0 {
 		policy.CanvasUserMaxBytes = override.CanvasUserMaxBytes
+	}
+	if override.CanvasTemplateUserMaxCount > 0 {
+		policy.CanvasTemplateUserMaxCount = override.CanvasTemplateUserMaxCount
+	}
+	if override.CanvasTemplateMaxBytes > 0 {
+		policy.CanvasTemplateMaxBytes = override.CanvasTemplateMaxBytes
+	}
+	if override.CanvasTemplateUserMaxBytes > 0 {
+		policy.CanvasTemplateUserMaxBytes = override.CanvasTemplateUserMaxBytes
 	}
 	if override.CanvasSnapshotEverySaves > 0 {
 		policy.CanvasSnapshotEverySaves = override.CanvasSnapshotEverySaves
