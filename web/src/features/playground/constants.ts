@@ -694,7 +694,6 @@ export const PLAYGROUND_GENERATION_BATCH_MESSAGES = {
   IMAGE_UNSUPPORTED: 'This model cannot generate images.',
   VIDEO_UNSUPPORTED: 'This model cannot generate videos.',
   COMPARE_SELECTION: 'Select 2 to 4 models to compare.',
-  COMPARE_REQUIRED: 'Select at least two models to compare.',
   MODEL_REQUIRED: 'Choose a model to generate media.',
   PROMPT_REQUIRED: 'Describe what you want to generate',
   SEED_INVALID: 'The seed must be an integer between 1 and 2147483647.',

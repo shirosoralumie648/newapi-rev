@@ -19,8 +19,10 @@ For commercial licensing, please contact support@quantumnous.com
 import { describe, expect, test } from 'vitest'
 
 import {
+  PLAYGROUND_GENERATION_ADJUSTMENTS,
   PLAYGROUND_GENERATION_BATCH_MESSAGES,
   PLAYGROUND_GENERATION_SEED_MAX,
+  PLAYGROUND_GENERATION_SEED_MIN,
 } from '@/features/playground/constants'
 
 import {
@@ -90,6 +92,36 @@ describe('generation seed grid', () => {
     expect(clampGenerationVariationCount(128)).toBe(8)
     expect(clampGenerationVariationCount(Number.NaN)).toBe(1)
   })
+
+  test('fills every variation count from one to eight in both seed modes', () => {
+    for (let count = 1; count <= 8; count++) {
+      const incremented = generationSeedGrid({
+        count,
+        mode: 'increment',
+        baseSeed: 5,
+      })
+      expect(incremented).toHaveLength(count)
+      expect(incremented).toEqual(
+        Array.from({ length: count }, (_, index) => 5 + index)
+      )
+
+      const random = generationSeedGrid({
+        count,
+        mode: 'random',
+        baseSeed: 5,
+        randomSeed: () => 5,
+      })
+      expect(random).toHaveLength(count)
+      expect(new Set(random).size).toBe(count)
+      expect(
+        random.every(
+          (seed) =>
+            seed >= PLAYGROUND_GENERATION_SEED_MIN &&
+            seed <= PLAYGROUND_GENERATION_SEED_MAX
+        )
+      ).toBe(true)
+    }
+  })
 })
 
 describe('generation batch plan', () => {
@@ -115,6 +147,30 @@ describe('generation batch plan', () => {
       from: '1792x1024',
       to: '1024x1024',
     })
+  })
+
+  test('quality is omitted and reported when a model does not offer it', () => {
+    const plan = buildGenerationBatchPlan({
+      mode: 'variations',
+      kind: 'image',
+      prompt: 'a red fox',
+      group: 'default',
+      models: ['img-a'],
+      variationCount: 1,
+      baseSeed: 1,
+      quality: 'hd',
+      limits: { 'img-a': { sizes: ['1024x1024'], qualities: ['high'] } },
+    })
+
+    expect(plan.requests[0]?.quality).toBeUndefined()
+    expect(plan.requests[0]?.adjustments).toEqual([
+      {
+        field: 'quality',
+        from: 'hd',
+        to: '',
+        messageKey: PLAYGROUND_GENERATION_ADJUSTMENTS.QUALITY,
+      },
+    ])
   })
 
   test('comparison shares one seed across two models and maps each model separately', () => {
