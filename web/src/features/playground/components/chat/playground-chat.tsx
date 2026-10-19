@@ -173,13 +173,16 @@ export function PlaygroundChat({
       : defaultMessageOffset
   const visibleMessages = messages.slice(visibleMessageOffset)
 
-  // Scroll the highlighted message into view once it is rendered. jsdom and
-  // other environments without layout keep the highlight without a scroll.
+  // Scroll the highlighted message into view once it is rendered. The key is
+  // matched through the data attribute instead of a selector so an imported or
+  // deep-linked key with quotes or backslashes cannot break the lookup. jsdom
+  // and other environments without layout keep the highlight without a scroll.
   useEffect(() => {
     if (!highlightedMessageKey) return
-    const element = contentRef.current?.querySelector(
-      `[data-message-key="${highlightedMessageKey}"]`
-    )
+    const element = Array.from(
+      contentRef.current?.querySelectorAll<HTMLElement>('[data-message-key]') ??
+        []
+    ).find((node) => node.dataset.messageKey === highlightedMessageKey)
     element?.scrollIntoView?.({ block: 'center' })
   }, [highlightedMessageKey])
 

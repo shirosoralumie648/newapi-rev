@@ -793,6 +793,8 @@ export async function forkPlaygroundSession(options: {
       config: options.sourceSession.config,
       parameter_enabled: options.sourceSession.parameterEnabled,
       system_prompt: options.sourceSession.systemPrompt,
+      opening_message: options.sourceSession.openingMessage,
+      suggested_questions: options.sourceSession.suggestedQuestions,
       context: options.sourceSession.context,
       context_summary: null,
     },
