@@ -424,6 +424,11 @@ func writePlaygroundError(c *gin.Context, err error) {
 		code = "PLAYGROUND_NOT_FOUND"
 		err = common.NewMessage(err.Error())
 	}
+	if errors.Is(err, model.ErrPlaygroundSnippetVersionNotFound) {
+		status = http.StatusNotFound
+		code = "PLAYGROUND_NOT_FOUND"
+		err = common.NewMessage(err.Error())
+	}
 	if errors.Is(err, model.ErrPlaygroundMemoryNotFound) {
 		status = http.StatusNotFound
 		code = "PLAYGROUND_NOT_FOUND"
@@ -536,6 +541,11 @@ func writePlaygroundError(c *gin.Context, err error) {
 	if errors.Is(err, model.ErrPlaygroundSnippetContentLimit) {
 		status = http.StatusUnprocessableEntity
 		code = "PLAYGROUND_SNIPPET_CONTENT_LIMIT_EXCEEDED"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundSnippetVersionLimit) {
+		status = http.StatusUnprocessableEntity
+		code = "PLAYGROUND_SNIPPET_VERSION_LIMIT_EXCEEDED"
 		err = common.NewMessage(err.Error())
 	}
 	if errors.Is(err, model.ErrPlaygroundMemoryLimit) {

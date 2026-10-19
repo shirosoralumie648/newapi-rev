@@ -408,6 +408,11 @@ func migrateDB() error {
 	if err := migratePlaygroundUserUsageCounters(DB); err != nil {
 		return err
 	}
+	// The prompt snippet version pointers are the same kind of later NOT NULL
+	// column on a table that already holds rows; add them with a default first.
+	if err := migratePlaygroundSnippetVersionColumns(DB); err != nil {
+		return err
+	}
 	// The extension columns (RF-04, RF-05) are appended to a commission table
 	// that already holds recorded events on upgraded installations; add them
 	// before AutoMigrate compares the model.
@@ -474,6 +479,7 @@ func migrateDB() error {
 		&PlaygroundMessage{},
 		&PlaygroundPreset{},
 		&PlaygroundSnippet{},
+		&PlaygroundSnippetVersion{},
 		&PlaygroundMemory{},
 		&PlaygroundArtifact{},
 		&PlaygroundArtifactVersion{},
@@ -519,6 +525,11 @@ func migrateDB() error {
 	// AutoMigrate just added storage_backend/object_key to upgraded databases;
 	// rows that predate the columns hold their bytes in data.
 	if err := ensurePlaygroundAttachmentStorageBackend(DB); err != nil {
+		return err
+	}
+	// AutoMigrate just created the snippet version table; backfill the first
+	// immutable version of every template written before versions existed.
+	if err := migratePlaygroundSnippetVersions(DB); err != nil {
 		return err
 	}
 	if err := SeedPlaygroundCanvasTemplates(DB); err != nil {
