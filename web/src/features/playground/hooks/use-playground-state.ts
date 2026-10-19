@@ -29,6 +29,11 @@ import {
   applyMessageStateUpdate,
   type MessageStateUpdater,
 } from '../lib/state/playground-state-utils'
+import {
+  loadNewSessionDefaults,
+  saveNewSessionDefaults,
+  type PlaygroundNewSessionDefaults,
+} from '../lib/storage/playground-preferences'
 import { loadLegacyPlaygroundState } from '../lib/storage/storage'
 import {
   createEmptySession,
@@ -46,6 +51,9 @@ import type {
 } from '../types'
 
 const SESSION_SAVE_DEBOUNCE_MS = 500
+// The account-level new-conversation defaults are written after the active
+// conversation settles, so dragging a slider does not write on every frame.
+const NEW_SESSION_DEFAULTS_DEBOUNCE_MS = 400
 
 type SessionUpdate = (session: PlaygroundSession) => PlaygroundSession
 
@@ -70,10 +78,17 @@ export function usePlaygroundState() {
   const [models, setModels] = useState<ModelOption[]>([])
   const [groups, setGroups] = useState<GroupOption[]>([])
   const saveTimerRef = useRef<number | null>(null)
+  const newSessionDefaultsTimerRef = useRef<number | null>(null)
   const latestSessionsRef = useRef<PlaygroundSession[]>([])
   const latestActiveSessionIdRef = useRef<string | null>(null)
   const latestUserIdRef = useRef<number | null>(userId)
   const hasLoadedSessionsRef = useRef(false)
+  // The account's remembered new-conversation starting point. Persisted per
+  // account in the browser; the server sessions stay the source of truth for
+  // the conversations themselves.
+  const newSessionDefaultsRef = useRef<PlaygroundNewSessionDefaults | null>(
+    null
+  )
 
   const isHydrated = hydratedUserId === userId
   const visibleSessions = isHydrated ? sessions : []
@@ -144,10 +159,16 @@ export function usePlaygroundState() {
       window.clearTimeout(saveTimerRef.current)
       saveTimerRef.current = null
     }
+    if (newSessionDefaultsTimerRef.current !== null) {
+      window.clearTimeout(newSessionDefaultsTimerRef.current)
+      newSessionDefaultsTimerRef.current = null
+    }
 
     latestUserIdRef.current = userId
     hasLoadedSessionsRef.current = false
     const legacy = loadLegacyPlaygroundState(userId)
+    const defaults = loadNewSessionDefaults(userId)
+    newSessionDefaultsRef.current = defaults
     const loaded = loadSessionsState(
       {
         config: { ...DEFAULT_CONFIG, ...legacy.config },
@@ -157,7 +178,8 @@ export function usePlaygroundState() {
         },
         messages: legacy.messages ?? [],
       },
-      userId
+      userId,
+      defaults
     )
 
     latestSessionsRef.current = loaded.sessions
@@ -178,6 +200,10 @@ export function usePlaygroundState() {
         window.clearTimeout(saveTimerRef.current)
         saveTimerRef.current = null
       }
+      if (newSessionDefaultsTimerRef.current !== null) {
+        window.clearTimeout(newSessionDefaultsTimerRef.current)
+        newSessionDefaultsTimerRef.current = null
+      }
 
       if (latestActiveSessionIdRef.current !== null) {
         saveSessionsState(
@@ -191,6 +217,53 @@ export function usePlaygroundState() {
     },
     []
   )
+
+  // Remember the account's latest model, parameters and system prompt as the
+  // starting point of the next new conversation. Switching conversations also
+  // refreshes the defaults, so "recently used" is exactly what the account
+  // last worked with.
+  const activeConfig = isHydrated ? activeSession?.config : undefined
+  const activeParameterEnabled = isHydrated
+    ? activeSession?.parameterEnabled
+    : undefined
+  const activeSystemPrompt = activeSession?.systemPrompt
+  useEffect(() => {
+    if (!isHydrated || !activeConfig || !activeParameterEnabled) return
+    const nextDefaults: PlaygroundNewSessionDefaults = {
+      config: activeConfig,
+      parameterEnabled: activeParameterEnabled,
+      systemPrompt: activeSystemPrompt ?? '',
+    }
+    const current = newSessionDefaultsRef.current
+    if (
+      current &&
+      JSON.stringify(current.config) === JSON.stringify(nextDefaults.config) &&
+      JSON.stringify(current.parameterEnabled) ===
+        JSON.stringify(nextDefaults.parameterEnabled) &&
+      current.systemPrompt === nextDefaults.systemPrompt
+    ) {
+      return
+    }
+
+    // The in-memory defaults update immediately so creating a conversation
+    // right after a change uses it; only the browser write is debounced.
+    newSessionDefaultsRef.current = nextDefaults
+    if (newSessionDefaultsTimerRef.current !== null) {
+      window.clearTimeout(newSessionDefaultsTimerRef.current)
+    }
+    const ownerId = userId
+    newSessionDefaultsTimerRef.current = window.setTimeout(() => {
+      newSessionDefaultsTimerRef.current = null
+      if (latestUserIdRef.current !== ownerId) return
+      saveNewSessionDefaults(ownerId, nextDefaults)
+    }, NEW_SESSION_DEFAULTS_DEBOUNCE_MS)
+  }, [
+    activeConfig,
+    activeParameterEnabled,
+    activeSystemPrompt,
+    isHydrated,
+    userId,
+  ])
 
   const hydrateSessions = useCallback(
     (nextSessions: PlaygroundSession[]) => {
@@ -344,7 +417,9 @@ export function usePlaygroundState() {
 
   /**
    * Creates a conversation. A caller may pass the settings a preset supplies;
-   * otherwise the new conversation inherits the active one's configuration.
+   * otherwise the new conversation starts from the account's remembered
+   * defaults (latest model, parameters and system prompt), falling back to the
+   * active one's configuration and finally to the factory defaults.
    */
   const createSession = useCallback(
     (overrides?: {
@@ -355,18 +430,43 @@ export function usePlaygroundState() {
       const currentSession = latestSessionsRef.current.find(
         (session) => session.id === latestActiveSessionIdRef.current
       )
+      const defaults = newSessionDefaultsRef.current
       const nextSession = createEmptySession(
-        overrides?.config ?? currentSession?.config ?? DEFAULT_CONFIG,
+        overrides?.config ??
+          defaults?.config ??
+          currentSession?.config ??
+          DEFAULT_CONFIG,
         overrides?.parameterEnabled ??
+          defaults?.parameterEnabled ??
           currentSession?.parameterEnabled ??
           DEFAULT_PARAMETER_ENABLED,
-        overrides?.systemPrompt ?? ''
+        overrides?.systemPrompt ?? defaults?.systemPrompt ?? ''
       )
       const nextSessions = [
         { ...nextSession, syncPending: true },
         ...latestSessionsRef.current,
       ]
       applySessionState(nextSessions, nextSession.id)
+    },
+    [applySessionState]
+  )
+
+  /**
+   * Adds a conversation that already exists on the server (a completed import).
+   * Its messages are acknowledged by the caller, so it is not marked pending.
+   */
+  const addSession = useCallback(
+    (session: PlaygroundSession) => {
+      const serverId = session.server?.id
+      const nextSessions = [
+        session,
+        ...latestSessionsRef.current.filter(
+          (item) =>
+            item.id !== session.id &&
+            (!serverId || item.server?.id !== serverId)
+        ),
+      ]
+      applySessionState(nextSessions, session.id)
     },
     [applySessionState]
   )
@@ -469,6 +569,7 @@ export function usePlaygroundState() {
     reconcileSession,
     findSession,
     createSession,
+    addSession,
     renameSession,
     deleteSession,
     switchSession,

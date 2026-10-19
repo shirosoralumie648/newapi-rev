@@ -42,6 +42,7 @@ import {
   getMessageAlignment,
   getPreviousUserMessage,
   isErrorMessage,
+  isMessageTruncated,
   isParallelMessage,
 } from '../../lib'
 import type {
@@ -67,6 +68,8 @@ interface PlaygroundChatProps {
   onCopyMessage?: (message: MessageType) => void
   onReadAloud?: (message: MessageType) => void
   onRegenerateMessage?: (message: MessageType) => void
+  /** Continue the last reply when it was cut short by the token cap or a stop. */
+  onContinueMessage?: (message: MessageType) => void
   onEditMessage?: (message: MessageType) => void
   onDeleteMessage?: (message: MessageType) => void
   onSelectVersion?: (message: MessageType, versionIndex: number) => void
@@ -101,6 +104,7 @@ export function PlaygroundChat({
   onCopyMessage,
   onReadAloud,
   onRegenerateMessage,
+  onContinueMessage,
   onEditMessage,
   onDeleteMessage,
   onSelectVersion,
@@ -173,9 +177,11 @@ export function PlaygroundChat({
     const isLastMessage = messageIndex === messages.length - 1
     const messageActions = (
       <MessageActions
+        canContinue={isLastMessage && isMessageTruncated(message)}
         message={message}
         onCopy={onCopyMessage}
         onReadAloud={onReadAloud}
+        onContinue={onContinueMessage}
         onRegenerate={onRegenerateMessage}
         onToggleSource={handleToggleMessageSource}
         onEdit={onEditMessage}

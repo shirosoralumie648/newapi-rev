@@ -24,6 +24,7 @@ import {
   FileText,
   Frame,
   MoreHorizontal,
+  Play,
   RefreshCw,
   Trash2,
   Volume2,
@@ -57,6 +58,9 @@ interface MessageActionsProps {
   onCopy?: (message: Message) => void
   onReadAloud?: (message: Message) => void
   onRegenerate?: (message: Message) => void
+  /** Offered when the active version was cut short and can be continued. */
+  onContinue?: (message: Message) => void
+  canContinue?: boolean
   onToggleSource?: (message: Message) => void
   onEdit?: (message: Message) => void
   onDelete?: (message: Message) => void
@@ -82,6 +86,8 @@ export function MessageActions({
   onCopy,
   onReadAloud,
   onRegenerate,
+  onContinue,
+  canContinue = false,
   onToggleSource,
   onEdit,
   onDelete,
@@ -182,6 +188,22 @@ export function MessageActions({
       icon: RefreshCw,
       label: MESSAGE_ACTION_LABELS.REGENERATE,
       onClick: handleRegenerate,
+    })
+  }
+
+  if (
+    canContinue &&
+    isAssistant &&
+    hasContent &&
+    !isLoading &&
+    message.status !== 'error' &&
+    onContinue
+  ) {
+    actions.push({
+      disabled: isGenerating,
+      icon: Play,
+      label: 'Continue generation',
+      onClick: guardAction(() => onContinue(message)),
     })
   }
 

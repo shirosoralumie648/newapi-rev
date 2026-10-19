@@ -61,6 +61,8 @@ interface PlaygroundWorkspaceProps {
   onSwitch: (sessionId: string) => void
   onRename: (sessionId: string, title: string) => void
   onDelete: (sessionId: string) => void
+  /** Rebuild one conversation from an exported JSON file. */
+  onImportFile?: (file: File) => Promise<void> | void
   children: React.ReactNode
   usagePanel?: React.ReactNode
   inspectorView: PlaygroundInspectorView | null
@@ -84,6 +86,7 @@ export function PlaygroundWorkspace(props: PlaygroundWorkspaceProps) {
       onAction={() => setIsSessionListOpen(false)}
       onCreate={props.onCreate}
       onDelete={props.onDelete}
+      onImportFile={props.onImportFile}
       onOpenPresets={props.onOpenPresets}
       onOpenTrash={props.onOpenTrash}
       onRename={props.onRename}

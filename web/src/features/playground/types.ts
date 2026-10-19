@@ -86,6 +86,13 @@ export interface MessageVersion {
   requestId?: string
   /** Token usage the relay reported when this version finished generating. */
   usage?: MessageUsage
+  /**
+   * Why the generation of this version ended, as the provider reported it
+   * (`length` when the output hit the token cap, `interrupted` when the user
+   * stopped it). The value only labels the stored version so a truncated reply
+   * can offer "continue generation"; it never feeds billing.
+   */
+  finishReason?: string
 }
 
 /**

@@ -90,6 +90,15 @@ interface PlaygroundInputProps {
   onContextSettingsChange: (settings: PlaygroundContextSettings) => void
   onRemoveContextSummary: () => void
   onSummarizeContext: () => void
+  /** Effective auto read-aloud state of the active conversation. */
+  autoReadEnabled: boolean
+  /** Account default applied to conversations without an override. */
+  autoReadDefaultEnabled: boolean
+  /** Whether the active conversation carries an explicit choice. */
+  autoReadHasOverride: boolean
+  onAutoReadChange: (value: boolean) => void
+  onAutoReadUseDefault: () => void
+  onAutoReadDefaultChange: (value: boolean) => void
   /**
    * Files the workspace wants added to the composer (for example "send to
    * chat" from the asset library). Each array is consumed once and validated
@@ -132,6 +141,12 @@ export function PlaygroundInput({
   onContextSettingsChange,
   onRemoveContextSummary,
   onSummarizeContext,
+  autoReadEnabled,
+  autoReadDefaultEnabled,
+  autoReadHasOverride,
+  onAutoReadChange,
+  onAutoReadUseDefault,
+  onAutoReadDefaultChange,
   pendingFiles,
   onPendingFilesConsumed,
   pendingText,
@@ -217,6 +232,9 @@ export function PlaygroundInput({
             text={text}
             tools={
               <PlaygroundInputTools
+                autoReadDefaultEnabled={autoReadDefaultEnabled}
+                autoReadEnabled={autoReadEnabled}
+                autoReadHasOverride={autoReadHasOverride}
                 config={config}
                 contextPlan={contextPlan}
                 contextSettings={contextSettings}
@@ -225,6 +243,9 @@ export function PlaygroundInput({
                 hasMessages={hasMessages}
                 isSummarizing={isSummarizing}
                 models={models}
+                onAutoReadChange={onAutoReadChange}
+                onAutoReadDefaultChange={onAutoReadDefaultChange}
+                onAutoReadUseDefault={onAutoReadUseDefault}
                 compareModels={compareModels}
                 onCompareModelsChange={onCompareModelsChange}
                 onClearMessages={onClearMessages}

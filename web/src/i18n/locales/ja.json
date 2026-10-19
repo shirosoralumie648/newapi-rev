@@ -8305,6 +8305,17 @@
     "Grace": "猶予中",
     "Playground storage billing for {{date}}: {{quota}} quota charged, {{bytes}} bytes billed": "{{date}} の Playground ストレージ課金：{{quota}} クォータを請求、{{bytes}} バイトを課金",
     "You have reached the daily Playground storage download limit. It resets with the next storage day.": "Playground ストレージの 1 日のダウンロード上限に達しました。次のストレージ日にリセットされます。",
-    "Playground storage settlement left {{count}} accounts read-only with {{quota}} quota uncovered; see the playground_storage_settle system task result": "Playground ストレージの精算により、{{count}} 個のアカウントが {{quota}} クォータ未払いのまま読み取り専用になりました。詳細は playground_storage_settle システムタスクの結果を参照してください。"
+    "Playground storage settlement left {{count}} accounts read-only with {{quota}} quota uncovered; see the playground_storage_settle system task result": "Playground ストレージの精算により、{{count}} 個のアカウントが {{quota}} クォータ未払いのまま読み取り専用になりました。詳細は playground_storage_settle システムタスクの結果を参照してください。",
+    "Read replies aloud": "返信を読み上げる",
+    "Read each completed reply aloud automatically.": "完了した返信を自動で読み上げます。",
+    "Use account default": "アカウントの既定値を使用",
+    "New conversations read replies aloud": "新しい会話で返信を読み上げる",
+    "This default also applies to conversations without a choice.": "この既定値は個別設定のない会話にも適用されます。",
+    "Import conversation": "会話をインポート",
+    "Conversation imported": "会話をインポートしました",
+    "Invalid conversation export.": "会話のエクスポートファイルが無効です。",
+    "The conversation export is too large.": "会話のエクスポートファイルが大きすぎます。",
+    "Unable to import the conversation.": "会話をインポートできませんでした。",
+    "{{count}} attachments could not be restored and were kept as placeholders.": "{{count}} 件の添付ファイルを復元できなかったため、プレースホルダーとして残しました。"
   }
 }

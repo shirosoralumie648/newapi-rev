@@ -23,6 +23,7 @@ import {
   appendUserMessagePair,
   applyMessageEdit,
   canContinueToolCalls,
+  createContinuationMessages,
   createRegeneratedMessages,
   createToolContinuationMessages,
   removeMessageByKey,
@@ -37,12 +38,21 @@ type UsePlaygroundConversationOptions = {
     updater: Message[] | ((prev: Message[]) => Message[])
   ) => void
   sendChat: (messages: Message[]) => void
+  /**
+   * Continue the last truncated assistant reply: the prefill form is tried
+   * first, the fallback form appends one user instruction.
+   */
+  continueChat: (
+    prefillMessages: Message[],
+    fallbackMessages: Message[]
+  ) => void
 }
 
 export function usePlaygroundConversation({
   messages,
   updateMessages,
   sendChat,
+  continueChat,
 }: UsePlaygroundConversationOptions) {
   const [editingMessageKey, setEditingMessageKey] = useState<string | null>(
     null
@@ -161,6 +171,19 @@ export function usePlaygroundConversation({
     [updateMessages]
   )
 
+  // Continue a truncated reply: the produced text stays stored as a branch and
+  // the continuation lands as a new version of the same assistant message.
+  const handleContinueMessage = useCallback(
+    (message: Message) => {
+      const plan = createContinuationMessages(messagesRef.current, message.key)
+      if (!plan) return
+
+      updateMessages(plan.stateMessages)
+      continueChat(plan.prefillMessages, plan.fallbackMessages)
+    },
+    [continueChat, updateMessages]
+  )
+
   // Once every call is answered, the model can continue in a fresh reply.
   const handleContinueToolCalls = useCallback(() => {
     const lastMessage = messagesRef.current.at(-1)
@@ -183,5 +206,6 @@ export function usePlaygroundConversation({
     handleProvideToolResult,
     handleDenyToolCall,
     handleContinueToolCalls,
+    handleContinueMessage,
   }
 }
