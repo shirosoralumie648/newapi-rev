@@ -16,19 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import {
-  Ban,
-  Crop,
-  Eraser,
-  Expand,
-  FileText,
-  Info,
-  Maximize2,
-  MessageSquare,
-  Paintbrush,
-  Palette,
-  Trash2,
-} from 'lucide-react'
+import { Ban, FileText, Info, MessageSquare, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -79,17 +67,7 @@ import {
 import type { CanvasFlowNode, CanvasNodeColor } from '../types'
 import { CanvasNodeResultFields } from './canvas-node-result-fields'
 import { CanvasNodeWorkflowFields } from './canvas-node-workflow-fields'
-
-// One icon per image tool; the buttons map over the title record so a new tool
-// needs its entry here and in the titles.
-const CANVAS_IMAGE_TOOL_ICONS: Record<CanvasImageToolKind, typeof Crop> = {
-  crop: Crop,
-  redraw: Paintbrush,
-  upscale: Maximize2,
-  outpaint: Expand,
-  backgroundRemoval: Eraser,
-  styleReference: Palette,
-}
+import { CANVAS_IMAGE_TOOL_ICONS } from './image/canvas-image-tool-icons'
 
 interface CanvasNodeInspectorProps {
   node: CanvasFlowNode | null

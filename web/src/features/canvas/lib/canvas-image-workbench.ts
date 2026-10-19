@@ -75,7 +75,10 @@ export function canvasImageWorkbenchStep(
   nodes: CanvasFlowNode[]
 ): CanvasFlowNode | null {
   const steps = nodes
-    .filter((node) => node.data.kind === 'task')
+    .filter(
+      (node) =>
+        node.data.kind === 'task' && node.data.workflow?.generation !== 'video'
+    )
     .sort(
       (left, right) =>
         left.position.y - right.position.y || left.position.x - right.position.x

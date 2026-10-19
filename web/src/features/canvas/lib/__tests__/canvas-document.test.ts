@@ -153,6 +153,7 @@ function canvasProject(
     createdAt: 0,
     updatedAt: 0,
     ...project,
+    mode: project.mode ?? 'infinite',
   }
 }
 

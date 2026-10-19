@@ -22,17 +22,23 @@ import { useTranslation } from 'react-i18next'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 
-import type { CanvasProjectSummary } from '../types'
+import type { CanvasProjectMode, CanvasProjectSummary } from '../types'
 import { CanvasProjectItem } from './canvas-project-item'
 
 interface CanvasProjectListProps {
   disabled?: boolean
   projects: CanvasProjectSummary[]
   activeProjectId: string | null
-  onCreate: () => void
+  onCreate: (mode?: CanvasProjectMode) => void
   onSelect: (projectId: string) => void
   onRename: (projectId: string, title: string) => void
   onDelete: (projectId: string) => void
@@ -79,18 +85,38 @@ export function CanvasProjectList(props: CanvasProjectListProps) {
             value={query}
           />
         </div>
-        <Button
-          aria-label={t('New canvas')}
-          disabled={props.disabled}
-          onClick={() => {
-            props.onCreate()
-            props.onAction?.()
-          }}
-          size='icon'
-          type='button'
-        >
-          <Plus aria-hidden='true' />
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                aria-label={t('New canvas')}
+                disabled={props.disabled}
+                size='icon'
+                type='button'
+              />
+            }
+          >
+            <Plus aria-hidden='true' />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align='end'>
+            <DropdownMenuItem
+              onClick={() => {
+                props.onCreate('infinite')
+                props.onAction?.()
+              }}
+            >
+              {t('Infinite canvas')}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                props.onCreate('image')
+                props.onAction?.()
+              }}
+            >
+              {t('Image workbench')}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       <ScrollArea className='min-h-0 flex-1'>
