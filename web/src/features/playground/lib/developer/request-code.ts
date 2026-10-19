@@ -16,18 +16,24 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import {
+  PLAYGROUND_ANTHROPIC_VERSION,
+  PLAYGROUND_PROTOCOL_API_PATHS,
+} from '../../constants'
 import type {
   ChatCompletionMessage,
   ChatCompletionRequest,
   ContentPart,
+  PlaygroundProtocol,
 } from '../../types'
+import { buildPlaygroundProtocolRequest } from '../protocol/protocol-payload'
 
 /**
- * The OpenAI-compatible endpoint every export targets. The Playground itself
+ * The OpenAI-compatible endpoint a chat export targets. The Playground itself
  * posts to the `/pg` bridge; the exported code always uses the public API path
  * so it can run outside the browser with a real token.
  */
-export const PLAYGROUND_REQUEST_API_PATH = '/v1/chat/completions'
+export const PLAYGROUND_REQUEST_API_PATH = PLAYGROUND_PROTOCOL_API_PATHS.chat
 
 /**
  * Placeholder key written into every export. Exports never read, render or
@@ -47,6 +53,16 @@ export const PLAYGROUND_REQUEST_CODE_TABS: readonly PlaygroundRequestCodeTab[] =
 export interface PlaygroundCapturedRequest {
   payload: ChatCompletionRequest
   capturedAt: number
+  /**
+   * Wire protocol of this send. Absent means chat, which keeps captures made
+   * before the protocol selector usable.
+   */
+  protocol?: PlaygroundProtocol
+  /**
+   * Raw reply body (non-streaming) or SSE transcript (streaming), bounded and
+   * display-only. Absent until the transport has received it.
+   */
+  rawResponse?: string
 }
 
 /** One attachment whose bytes were replaced by a file placeholder. */
@@ -164,8 +180,11 @@ export function normalizePlaygroundRequestBaseUrl(baseUrl: string): string {
   return trimmed || FALLBACK_BASE_URL
 }
 
-export function playgroundRequestEndpoint(baseUrl: string): string {
-  return `${normalizePlaygroundRequestBaseUrl(baseUrl)}${PLAYGROUND_REQUEST_API_PATH}`
+export function playgroundRequestEndpoint(
+  baseUrl: string,
+  protocol: PlaygroundProtocol = 'chat'
+): string {
+  return `${normalizePlaygroundRequestBaseUrl(baseUrl)}${PLAYGROUND_PROTOCOL_API_PATHS[protocol]}`
 }
 
 /** Site origin of the running console; empty outside the browser. */
@@ -174,11 +193,30 @@ export function resolvePlaygroundRequestBaseUrl(): string {
   return window.location.origin
 }
 
-/** Messages JSON tab: the exact payload with attachments redacted. */
+/**
+ * Redacts attachments and converts the chat payload into the exported
+ * protocol's wire body. Chat keeps the payload unchanged.
+ */
+function protocolRequestBody(
+  payload: ChatCompletionRequest,
+  protocol: PlaygroundProtocol
+): {
+  body: Record<string, unknown>
+  attachments: PlaygroundRequestAttachment[]
+} {
+  const { payload: redacted, attachments } = redactPlaygroundRequest(payload)
+  return {
+    body: buildPlaygroundProtocolRequest(redacted, protocol).body,
+    attachments,
+  }
+}
+
+/** Messages JSON tab: the exact wire payload with attachments redacted. */
 export function buildPlaygroundMessagesJson(
-  payload: ChatCompletionRequest
+  payload: ChatCompletionRequest,
+  protocol: PlaygroundProtocol = 'chat'
 ): string {
-  return JSON.stringify(redactPlaygroundRequest(payload).payload, null, 2)
+  return JSON.stringify(protocolRequestBody(payload, protocol).body, null, 2)
 }
 
 function shellSingleQuote(value: string): string {
@@ -187,27 +225,39 @@ function shellSingleQuote(value: string): string {
 
 function groupFieldNotes(
   payload: ChatCompletionRequest,
-  comment: string
+  comment: string,
+  protocol: PlaygroundProtocol = 'chat'
 ): string[] {
   if (payload.group === undefined) return []
   return [
     `${comment} "group" is a Playground-only routing field.`,
-    `${comment} /v1/chat/completions selects the group from the API token instead,`,
+    `${comment} ${PLAYGROUND_PROTOCOL_API_PATHS[protocol]} selects the group from the API token instead,`,
     `${comment} so remove "group" if the endpoint rejects it.`,
   ]
+}
+
+function protocolAuthHeaderLines(protocol: PlaygroundProtocol): string[] {
+  if (protocol === 'messages') {
+    return [
+      `  -H "x-api-key: ${PLAYGROUND_REQUEST_API_KEY}" \\`,
+      `  -H "anthropic-version: ${PLAYGROUND_ANTHROPIC_VERSION}" \\`,
+    ]
+  }
+  return [`  -H "Authorization: Bearer ${PLAYGROUND_REQUEST_API_KEY}" \\`]
 }
 
 /** cURL tab: a runnable command with a placeholder key and redacted body. */
 export function buildPlaygroundCurlCode(
   payload: ChatCompletionRequest,
-  baseUrl: string
+  baseUrl: string,
+  protocol: PlaygroundProtocol = 'chat'
 ): string {
-  const { payload: redacted, attachments } = redactPlaygroundRequest(payload)
+  const { body, attachments } = protocolRequestBody(payload, protocol)
   const lines = [
     '# New API Playground request.',
-    '# It targets the OpenAI-compatible API with the placeholder key',
+    '# It targets the selected API protocol with the placeholder key',
     `# ${PLAYGROUND_REQUEST_API_KEY}; replace it with a token of your own.`,
-    ...groupFieldNotes(redacted, '#'),
+    ...groupFieldNotes(payload, '#', protocol),
   ]
   if (attachments.length > 0) {
     lines.push(
@@ -216,10 +266,10 @@ export function buildPlaygroundCurlCode(
     )
   }
   lines.push(
-    `curl ${shellSingleQuote(playgroundRequestEndpoint(baseUrl))} \\`,
-    `  -H "Authorization: Bearer ${PLAYGROUND_REQUEST_API_KEY}" \\`,
+    `curl ${shellSingleQuote(playgroundRequestEndpoint(baseUrl, protocol))} \\`,
+    ...protocolAuthHeaderLines(protocol),
     '  -H "Content-Type: application/json" \\',
-    `  -d ${shellSingleQuote(JSON.stringify(redacted, null, 2))}`
+    `  -d ${shellSingleQuote(JSON.stringify(body, null, 2))}`
   )
   return lines.join('\n')
 }
@@ -541,14 +591,141 @@ export function buildPlaygroundNodeCode(
   return lines.join('\n')
 }
 
+function protocolDisplayName(protocol: PlaygroundProtocol): string {
+  if (protocol === 'responses') return 'OpenAI Responses API'
+  if (protocol === 'messages') return 'Anthropic Messages API'
+  return 'OpenAI-compatible API'
+}
+
+function protocolHeaders(protocol: PlaygroundProtocol): Record<string, string> {
+  if (protocol === 'messages') {
+    return {
+      'x-api-key': PLAYGROUND_REQUEST_API_KEY,
+      'anthropic-version': PLAYGROUND_ANTHROPIC_VERSION,
+      'content-type': 'application/json',
+    }
+  }
+  return {
+    Authorization: `Bearer ${PLAYGROUND_REQUEST_API_KEY}`,
+    'content-type': 'application/json',
+  }
+}
+
+/**
+ * Python tab of a non-chat protocol. The OpenAI SDKs only speak their own
+ * protocol, so Responses and Messages exports use a plain HTTP request that
+ * matches the API exactly.
+ */
+export function buildPlaygroundProtocolPythonCode(
+  payload: ChatCompletionRequest,
+  baseUrl: string,
+  protocol: PlaygroundProtocol
+): string {
+  const { body, attachments } = protocolRequestBody(payload, protocol)
+  const options: LiteralOptions = {
+    attachments: attachmentPlaceholderMap(attachments),
+    attachmentExpression: pythonAttachmentExpression,
+    indentUnit: '    ',
+    language: 'python',
+  }
+  const lines = [
+    `# New API Playground request for the ${protocolDisplayName(protocol)}.`,
+    '# pip install requests',
+    ...groupFieldNotes(payload, '#', protocol),
+  ]
+  if (attachments.length > 0) {
+    lines.push(
+      '# Attachment bytes are read from local files at runtime;',
+      '# no base64 is embedded in this snippet.',
+      'import base64'
+    )
+  }
+  lines.push('import requests', '')
+  if (attachments.length > 0) {
+    lines.push(
+      'def _attachment_data_url(path: str, media_type: str) -> str:',
+      '    with open(path, "rb") as file:',
+      '        encoded = base64.b64encode(file.read()).decode("ascii")',
+      '    return f"data:{media_type};base64,{encoded}"',
+      ''
+    )
+  }
+  lines.push(
+    `body = ${renderLiteral(body, 0, options)}`,
+    '',
+    'response = requests.post(',
+    `    ${JSON.stringify(playgroundRequestEndpoint(baseUrl, protocol))},`,
+    `    headers=${renderLiteral(protocolHeaders(protocol), 0, options)},`,
+    '    json=body,',
+    ')',
+    'print(response.text)'
+  )
+  return lines.join('\n')
+}
+
+/** Node tab of a non-chat protocol: a plain fetch request. */
+export function buildPlaygroundProtocolNodeCode(
+  payload: ChatCompletionRequest,
+  baseUrl: string,
+  protocol: PlaygroundProtocol
+): string {
+  const { body, attachments } = protocolRequestBody(payload, protocol)
+  const options: LiteralOptions = {
+    attachments: attachmentPlaceholderMap(attachments),
+    attachmentExpression: nodeAttachmentExpression,
+    indentUnit: '  ',
+    language: 'javascript',
+  }
+  const lines = [
+    `// New API Playground request for the ${protocolDisplayName(protocol)}.`,
+    ...groupFieldNotes(payload, '//', protocol),
+  ]
+  if (attachments.length > 0) {
+    lines.push(
+      '// Attachment bytes are read from local files at runtime;',
+      '// no base64 is embedded in this snippet.',
+      'import fs from "node:fs";'
+    )
+  }
+  if (attachments.length > 0) {
+    lines.push(
+      'function attachmentDataUrl(path, mediaType) {',
+      '  return `data:${mediaType};base64,${fs.readFileSync(path).toString("base64")}`;',
+      '}',
+      ''
+    )
+  }
+  lines.push(
+    `const body = ${renderLiteral(body, 0, options)};`,
+    '',
+    `const response = await fetch(${JSON.stringify(playgroundRequestEndpoint(baseUrl, protocol))}, {`,
+    `  method: "POST",`,
+    `  headers: ${renderLiteral(protocolHeaders(protocol), 0, options)},`,
+    '  body: JSON.stringify(body),',
+    '});',
+    '',
+    'console.log(await response.text());'
+  )
+  return lines.join('\n')
+}
+
 /** Builds the clipboard text of one viewer tab. */
 export function buildPlaygroundRequestCode(
   tab: PlaygroundRequestCodeTab,
   payload: ChatCompletionRequest,
-  baseUrl: string
+  baseUrl: string,
+  protocol: PlaygroundProtocol = 'chat'
 ): string {
-  if (tab === 'curl') return buildPlaygroundCurlCode(payload, baseUrl)
-  if (tab === 'python') return buildPlaygroundPythonCode(payload, baseUrl)
-  if (tab === 'node') return buildPlaygroundNodeCode(payload, baseUrl)
-  return buildPlaygroundMessagesJson(payload)
+  if (tab === 'curl') return buildPlaygroundCurlCode(payload, baseUrl, protocol)
+  if (tab === 'python') {
+    return protocol === 'chat'
+      ? buildPlaygroundPythonCode(payload, baseUrl)
+      : buildPlaygroundProtocolPythonCode(payload, baseUrl, protocol)
+  }
+  if (tab === 'node') {
+    return protocol === 'chat'
+      ? buildPlaygroundNodeCode(payload, baseUrl)
+      : buildPlaygroundProtocolNodeCode(payload, baseUrl, protocol)
+  }
+  return buildPlaygroundMessagesJson(payload, protocol)
 }

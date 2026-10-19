@@ -1,11 +1,14 @@
 package controller
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -71,6 +74,33 @@ func TestTaskLogDTOSeparatesUserAdminAndRootDetails(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, string(rootJSON), "channel-secret-canary")
 	assert.Contains(t, string(rootJSON), "upstream-private")
+}
+
+// The gallery filters are optional query parameters; a malformed number must
+// not hide the list, while every parsed filter must reach the model query.
+func TestTaskGenerationFiltersParseMetadataQueries(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	contextFor := func(rawQuery string) *gin.Context {
+		recorder := httptest.NewRecorder()
+		context, _ := gin.CreateTestContext(recorder)
+		context.Request = httptest.NewRequest(http.MethodGet, "/api/task/self?"+rawQuery, nil)
+		return context
+	}
+
+	filters := taskGenerationFilters(contextFor("generation_prompt=%20lighthouse%20&generation_model=gpt-image-1&generation_size=1024x1024&generation_quality=high&generation_seed=42&generation_count=2"))
+	assert.Equal(t, "lighthouse", filters.Prompt)
+	assert.Equal(t, "gpt-image-1", filters.Model)
+	assert.Equal(t, "1024x1024", filters.Size)
+	assert.Equal(t, "high", filters.Quality)
+	require.NotNil(t, filters.Seed)
+	assert.Equal(t, int64(42), *filters.Seed)
+	require.NotNil(t, filters.Count)
+	assert.Equal(t, 2, *filters.Count)
+
+	ignored := taskGenerationFilters(contextFor("generation_seed=abc&generation_count=one"))
+	assert.Nil(t, ignored.Seed)
+	assert.Nil(t, ignored.Count)
 }
 
 func TestTaskLogDTOProjectsGenerationMetadataWithoutPrivateFields(t *testing.T) {

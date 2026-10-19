@@ -88,6 +88,14 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.POST("/workflows/estimate", controller.PlaygroundWorkflowEstimate)
 			playgroundRoute.POST("/workflows/runs", controller.PlaygroundWorkflowRunCreate)
 			playgroundRoute.POST("/workflows/runs/:runId/settle", controller.PlaygroundWorkflowRunSettle)
+			// Run history persists what each workflow run produced; the node
+			// cache lookup is a read-only projection of finished runs.
+			playgroundRoute.POST("/workflows/history", controller.CreatePlaygroundWorkflowRunHistory)
+			playgroundRoute.GET("/workflows/history", controller.ListPlaygroundWorkflowRunHistory)
+			playgroundRoute.GET("/workflows/history/:runId", controller.GetPlaygroundWorkflowRunHistory)
+			playgroundRoute.PATCH("/workflows/history/:runId", controller.UpdatePlaygroundWorkflowRunHistory)
+			playgroundRoute.DELETE("/workflows/history/:runId", controller.DeletePlaygroundWorkflowRunHistory)
+			playgroundRoute.POST("/workflows/node-cache", controller.LookupPlaygroundWorkflowNodeCache)
 			playgroundRoute.GET("/comparisons", controller.ListPlaygroundComparisonRuns)
 			playgroundRoute.POST("/comparisons", controller.CreatePlaygroundComparisonRun)
 			playgroundRoute.GET("/comparisons/:runId", controller.GetPlaygroundComparisonRun)
@@ -135,9 +143,14 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.PUT("/knowledge-bases/:kbId/documents/:documentId/chunks", controller.ReplacePlaygroundKnowledgeDocumentChunks)
 			playgroundRoute.GET("/snippets", controller.ListPlaygroundSnippets)
 			playgroundRoute.POST("/snippets", controller.CreatePlaygroundSnippet)
+			// Import answers on the collection path; export and rollback are
+			// per-template actions.
+			playgroundRoute.POST("/snippets/import", controller.ImportPlaygroundSnippet)
 			playgroundRoute.GET("/snippets/:snippetId", controller.GetPlaygroundSnippet)
 			playgroundRoute.PATCH("/snippets/:snippetId", controller.UpdatePlaygroundSnippet)
 			playgroundRoute.DELETE("/snippets/:snippetId", controller.DeletePlaygroundSnippet)
+			playgroundRoute.GET("/snippets/:snippetId/export", controller.ExportPlaygroundSnippet)
+			playgroundRoute.POST("/snippets/:snippetId/rollback", controller.RollbackPlaygroundSnippet)
 			playgroundRoute.GET("/memories", controller.ListPlaygroundMemories)
 			playgroundRoute.POST("/memories", controller.CreatePlaygroundMemory)
 			playgroundRoute.GET("/memories/:memoryId", controller.GetPlaygroundMemory)

@@ -119,6 +119,12 @@ const (
 // request can send.
 var playgroundReasoningEffortValues = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
 
+// playgroundProtocolValues lists the wire protocols a conversation may store.
+// Each value selects a Playground relay route whose payload shape matches the
+// canonical /v1 endpoint the bridge rewrites to, so a stored protocol is always
+// one the workspace can send (PG2-09).
+var playgroundProtocolValues = []string{"chat", "responses", "messages"}
+
 // playgroundDeveloperToolChoiceValues and playgroundDeveloperResponseFormatTypes
 // list the accepted developer-settings enums. They mirror the OpenAI wire shape
 // the client injects unchanged into a relay request.
@@ -424,6 +430,11 @@ func writePlaygroundError(c *gin.Context, err error) {
 		code = "PLAYGROUND_NOT_FOUND"
 		err = common.NewMessage(err.Error())
 	}
+	if errors.Is(err, model.ErrPlaygroundSnippetVersionNotFound) {
+		status = http.StatusNotFound
+		code = "PLAYGROUND_NOT_FOUND"
+		err = common.NewMessage(err.Error())
+	}
 	if errors.Is(err, model.ErrPlaygroundMemoryNotFound) {
 		status = http.StatusNotFound
 		code = "PLAYGROUND_NOT_FOUND"
@@ -469,6 +480,38 @@ func writePlaygroundError(c *gin.Context, err error) {
 		code = "PLAYGROUND_COMPARISON_UNAVAILABLE"
 		err = common.NewMessage(err.Error())
 	}
+	// Workflow history has its own stable codes so the canvas can tell a full
+	// history from a malformed snapshot or a stale revision.
+	if errors.Is(err, model.ErrPlaygroundWorkflowRunNotFound) {
+		status = http.StatusNotFound
+		code = "PLAYGROUND_WORKFLOW_RUN_NOT_FOUND"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundWorkflowRunConflict) {
+		status = http.StatusConflict
+		code = "PLAYGROUND_CONFLICT"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundWorkflowRunInvalid) {
+		status = http.StatusBadRequest
+		code = "PLAYGROUND_WORKFLOW_RUN_INVALID"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundWorkflowRunLimit) {
+		status = http.StatusUnprocessableEntity
+		code = "PLAYGROUND_WORKFLOW_RUN_LIMIT_EXCEEDED"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundWorkflowRunStorageLimit) {
+		status = http.StatusUnprocessableEntity
+		code = "PLAYGROUND_WORKFLOW_RUN_STORAGE_LIMIT_EXCEEDED"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundWorkflowRunUnavailable) {
+		status = http.StatusInternalServerError
+		code = "PLAYGROUND_WORKFLOW_RUN_UNAVAILABLE"
+		err = common.NewMessage(err.Error())
+	}
 	// The resource quota policy returns stable capacity errors so the client can
 	// tell a full workspace from a malformed request.
 	if errors.Is(err, model.ErrPlaygroundSessionLimit) {
@@ -504,6 +547,11 @@ func writePlaygroundError(c *gin.Context, err error) {
 	if errors.Is(err, model.ErrPlaygroundSnippetContentLimit) {
 		status = http.StatusUnprocessableEntity
 		code = "PLAYGROUND_SNIPPET_CONTENT_LIMIT_EXCEEDED"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundSnippetVersionLimit) {
+		status = http.StatusUnprocessableEntity
+		code = "PLAYGROUND_SNIPPET_VERSION_LIMIT_EXCEEDED"
 		err = common.NewMessage(err.Error())
 	}
 	if errors.Is(err, model.ErrPlaygroundMemoryLimit) {
@@ -1093,6 +1141,9 @@ func encodePlaygroundSettings(request playgroundSessionRequest, systemPromptMaxB
 			case "reasoning_effort":
 				text, ok := value.(string)
 				valid = ok && (text == "" || slices.Contains(playgroundReasoningEffortValues, text))
+			case "protocol":
+				text, ok := value.(string)
+				valid = ok && slices.Contains(playgroundProtocolValues, text)
 			}
 			if !valid {
 				return nil, common.NewMessage("Invalid Playground configuration.")

@@ -25,6 +25,7 @@ import {
   API_ENDPOINTS,
   DEFAULT_CONFIG,
   DEFAULT_PARAMETER_ENABLED,
+  PLAYGROUND_ANTHROPIC_VERSION,
   PLAYGROUND_REQUEST_ID_HEADER,
   PLAYGROUND_SEARCH_MAX_RESULTS,
   PLAYGROUND_TOOL_CALL_RESULT_DEFAULT_MAX_BYTES,
@@ -35,6 +36,8 @@ import {
   normalizeContextSummary,
 } from './lib/context/playground-context'
 import { normalizeDeveloperOptions } from './lib/developer/developer-options'
+import type { PlaygroundProtocolRequest } from './lib/protocol/protocol-payload'
+import { parsePlaygroundProtocolCompletion } from './lib/protocol/protocol-response'
 import type { PlaygroundLogReplay } from './lib/replay/playground-replay'
 import { normalizeSessionTags } from './lib/session-organization'
 import {
@@ -71,7 +74,7 @@ export interface ChatCompletionResult {
 
 // Axios lower-cases response header names; the relay writes the request id it
 // logged into this header.
-function readRequestIdHeader(headers: unknown): string | undefined {
+export function readRequestIdHeader(headers: unknown): string | undefined {
   if (!headers || typeof headers !== 'object') return undefined
   const value = (headers as Record<string, unknown>)[
     PLAYGROUND_REQUEST_ID_HEADER.toLowerCase()
@@ -102,6 +105,43 @@ export async function sendChatCompletion(
   return {
     response: res.data as ChatCompletionResponse,
     requestId: readRequestIdHeader(res.headers),
+  }
+}
+
+/** One non-streaming protocol reply plus the raw body the viewer shows. */
+export interface PlaygroundProtocolCompletionResult {
+  response: ChatCompletionResponse
+  requestId?: string
+  rawResponse: string
+}
+
+/**
+ * Sends the converted Responses or Messages payload through its Playground
+ * bridge. The reply is normalized into the internal chat completion shape, so
+ * the message lifecycle is shared with the chat protocol; the untouched body is
+ * returned for the request viewer.
+ */
+export async function sendPlaygroundProtocolCompletion(
+  request: PlaygroundProtocolRequest,
+  signal?: AbortSignal,
+  workflowRunId?: string
+): Promise<PlaygroundProtocolCompletionResult> {
+  const headers: Record<string, string> = {}
+  if (request.protocol === 'messages') {
+    headers['anthropic-version'] = PLAYGROUND_ANTHROPIC_VERSION
+  }
+  if (workflowRunId) {
+    headers[PLAYGROUND_WORKFLOW_RUN_HEADER] = workflowRunId
+  }
+  const res = await api.post(request.endpoint, request.body, {
+    signal,
+    skipErrorHandler: true,
+    ...(Object.keys(headers).length > 0 ? { headers } : {}),
+  } as Record<string, unknown>)
+  return {
+    response: parsePlaygroundProtocolCompletion(request.protocol, res.data),
+    requestId: readRequestIdHeader(res.headers),
+    rawResponse: JSON.stringify(res.data),
   }
 }
 

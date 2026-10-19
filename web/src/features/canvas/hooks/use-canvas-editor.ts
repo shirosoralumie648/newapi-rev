@@ -567,11 +567,12 @@ export function useCanvasEditor(
       ) {
         return
       }
-      // The replaced edge must not introduce a cycle through its new target.
-      const others = edgesRef.current.filter((edge) => edge.id !== oldEdge.id)
+      // A reconnected edge keeps its identity, but its new endpoints must fit
+      // the graph it is committed into: a connection that closes a cycle is
+      // rejected exactly like a fresh one.
       if (
         wouldCreateCanvasWorkflowCycle(
-          others,
+          edgesRef.current,
           connection.source,
           connection.target
         )

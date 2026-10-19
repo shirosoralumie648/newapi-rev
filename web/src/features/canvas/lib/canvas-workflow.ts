@@ -103,6 +103,12 @@ export type CanvasWorkflowModelCapability = {
   endpointTypes?: string[]
   usageFields?: string[]
   /**
+   * The task usage schema enums of the model, merged over its plugin variants.
+   * The generation panel reads size/quality/duration enums from it so a batch
+   * can map a requested value onto what the model actually accepts.
+   */
+  usageSchema?: Record<string, { enum?: readonly string[] } | undefined>
+  /**
    * Image-edit operations the enabled channels of the model expose. Undefined
    * means the catalog did not report any, so the canvas treats the capability
    * as unknown and keeps the tool available.

@@ -1224,6 +1224,11 @@ export const STATIC_I18N_KEYS = [
   'High',
   'Extra high',
   'Maximum',
+  // Protocol labels render through t(labelKey) from
+  // PLAYGROUND_PROTOCOL_OPTIONS; the value also selects the relay route.
+  'Chat Completions',
+  'Responses',
+  'Anthropic Messages',
   // Prompt snippet failure messages render from PLAYGROUND_SNIPPET_ERRORS and
   // the server returns the rest through message_key, so the literal scan
   // cannot see them.
@@ -1437,4 +1442,19 @@ export const STATIC_I18N_KEYS = [
   'Value matches none of the allowed shapes',
   'Value does not match every required shape',
   'Playground developer options limit exceeded.',
+  'cURL',
+  'Python',
+  'Node.js',
+  'JSON',
+  'Copy cURL',
+  'Copy Python',
+  'Copy Node.js',
+  'Copy JSON',
+  '{{count}} inputs',
+  '{{count}} dimensions',
+  '{{count}} results',
+  'Input {{index}}',
+  'Embedding requests accept up to 64 inputs of 16,000 characters each.',
+  'Rerank requests accept a query of up to 16,000 characters and up to 32 candidates of 16,000 characters each.',
+  'Moderation requests accept up to 64 inputs of 16,000 characters each.',
 ] as const
