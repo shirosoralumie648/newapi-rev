@@ -32,6 +32,12 @@ import type {
   CanvasTemplateAsset,
   CanvasTemplateDetail,
   CanvasTemplateSummary,
+  CanvasWorkflowCacheEntry,
+  CanvasWorkflowRun,
+  CanvasWorkflowRunCreateInput,
+  CanvasWorkflowRunNodeRecord,
+  CanvasWorkflowRunSummary,
+  CanvasWorkflowRunUpdateInput,
 } from './types'
 
 const CANVAS_ENDPOINT = '/api/playground/canvases'
@@ -494,6 +500,275 @@ export async function settleCanvasWorkflowRunBudget(
   )
   requireServerSuccess(response.data)
   return mapWorkflowRun(workflowRunSchema.parse(response.data.data))
+}
+
+const workflowRunNodeSchema = z.object({
+  node_id: z.string().min(1),
+  kind: z.enum(['model', 'task']),
+  model: z.string(),
+  group: z.string(),
+  status: z.enum(['succeeded', 'failed', 'canceled', 'skipped']),
+  fingerprint: z.string(),
+  cache_hit: z.boolean(),
+  output: z.string(),
+  task_id: z.string(),
+  artifact_keys: z.array(z.string()),
+  result_count: z.number().int().nonnegative(),
+  prompt_tokens: z.number().int().nonnegative(),
+  completion_tokens: z.number().int().nonnegative(),
+  total_tokens: z.number().int().nonnegative(),
+  quota: z.number().int().nonnegative(),
+  duration_ms: z.number().int().nonnegative(),
+  error: z.string(),
+  started_at: z.number().int().nonnegative(),
+  finished_at: z.number().int().nonnegative(),
+})
+
+const workflowRunSummarySchema = z.object({
+  id: z.string().min(1),
+  canvas_id: z.string().min(1),
+  session_id: z.string(),
+  workflow_revision: z.number().int().nonnegative(),
+  status: z.enum(['running', 'completed', 'failed', 'canceled']),
+  node_count: z.number().int().nonnegative(),
+  cache_hits: z.number().int().nonnegative(),
+  total_quota: z.number().int().nonnegative(),
+  prompt_tokens: z.number().int().nonnegative(),
+  completion_tokens: z.number().int().nonnegative(),
+  total_tokens: z.number().int().nonnegative(),
+  duration_ms: z.number().int().nonnegative(),
+  estimate_quota: z.number().int().nonnegative(),
+  budget_cap: z.number().int().nonnegative(),
+  byte_size: z.number().int().nonnegative(),
+  revision: z.number().int().nonnegative(),
+  created_at: z.number().int().nonnegative(),
+  updated_at: z.number().int().nonnegative(),
+})
+
+const workflowRunSchemaWithNodes = workflowRunSummarySchema.extend({
+  nodes: z.array(workflowRunNodeSchema),
+})
+
+const workflowCacheEntrySchema = z.object({
+  fingerprint: z.string().min(1),
+  node_id: z.string(),
+  kind: z.enum(['model', 'task']),
+  model: z.string(),
+  output: z.string(),
+  task_id: z.string(),
+  artifact_keys: z.array(z.string()),
+  result_count: z.number().int().nonnegative(),
+  quota: z.number().int().nonnegative(),
+  run_id: z.string().min(1),
+  updated_at: z.number().int().nonnegative(),
+})
+
+function mapWorkflowRunNode(
+  value: z.output<typeof workflowRunNodeSchema>
+): CanvasWorkflowRunNodeRecord {
+  return {
+    nodeId: value.node_id,
+    kind: value.kind,
+    model: value.model,
+    group: value.group,
+    status: value.status,
+    fingerprint: value.fingerprint,
+    cacheHit: value.cache_hit,
+    output: value.output,
+    taskId: value.task_id,
+    artifactKeys: value.artifact_keys,
+    resultCount: value.result_count,
+    promptTokens: value.prompt_tokens,
+    completionTokens: value.completion_tokens,
+    totalTokens: value.total_tokens,
+    quota: value.quota,
+    durationMs: value.duration_ms,
+    error: value.error,
+    startedAt: value.started_at,
+    finishedAt: value.finished_at,
+  }
+}
+
+function mapWorkflowRunSummary(
+  value: z.output<typeof workflowRunSummarySchema>
+): CanvasWorkflowRunSummary {
+  return {
+    id: value.id,
+    canvasId: value.canvas_id,
+    sessionId: value.session_id,
+    workflowRevision: value.workflow_revision,
+    status: value.status,
+    nodeCount: value.node_count,
+    cacheHits: value.cache_hits,
+    totalQuota: value.total_quota,
+    promptTokens: value.prompt_tokens,
+    completionTokens: value.completion_tokens,
+    totalTokens: value.total_tokens,
+    durationMs: value.duration_ms,
+    estimateQuota: value.estimate_quota,
+    budgetCap: value.budget_cap,
+    byteSize: value.byte_size,
+    revision: value.revision,
+    createdAt: value.created_at * 1000,
+    updatedAt: value.updated_at * 1000,
+  }
+}
+
+function mapWorkflowRunHistory(
+  value: z.output<typeof workflowRunSchemaWithNodes>
+): CanvasWorkflowRun {
+  return {
+    ...mapWorkflowRunSummary(value),
+    nodes: value.nodes.map(mapWorkflowRunNode),
+  }
+}
+
+function workflowRunNodeWire(node: CanvasWorkflowRunNodeRecord) {
+  return {
+    node_id: node.nodeId,
+    kind: node.kind,
+    model: node.model,
+    group: node.group,
+    status: node.status,
+    fingerprint: node.fingerprint,
+    cache_hit: node.cacheHit,
+    output: node.output,
+    task_id: node.taskId,
+    artifact_keys: node.artifactKeys,
+    result_count: node.resultCount,
+    prompt_tokens: node.promptTokens,
+    completion_tokens: node.completionTokens,
+    total_tokens: node.totalTokens,
+    quota: node.quota,
+    duration_ms: node.durationMs,
+    error: node.error,
+    started_at: node.startedAt,
+    finished_at: node.finishedAt,
+  }
+}
+
+/**
+ * Starts one persisted run-history row before the first step. This is not the
+ * BL-03 budget row: it charges nothing, and every step still bills through its
+ * own relay request.
+ */
+export async function createCanvasWorkflowRunHistory(
+  input: CanvasWorkflowRunCreateInput,
+  signal?: AbortSignal
+): Promise<CanvasWorkflowRun> {
+  const response = await api.post(
+    `${WORKFLOW_ENDPOINT}/history`,
+    {
+      canvas_id: input.canvasId,
+      ...(input.sessionId ? { session_id: input.sessionId } : {}),
+      workflow_revision: input.workflowRevision,
+      estimate_quota: input.estimateQuota,
+      budget_cap: input.budgetCap,
+    },
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  return mapWorkflowRunHistory(
+    workflowRunSchemaWithNodes.parse(response.data.data)
+  )
+}
+
+/** Lists the newest run summaries of one canvas (or the whole account). */
+export async function listCanvasWorkflowRuns(
+  canvasId: string,
+  signal?: AbortSignal
+): Promise<CanvasWorkflowRunSummary[]> {
+  const response = await api.get(`${WORKFLOW_ENDPOINT}/history`, {
+    params: { canvas_id: canvasId },
+    signal,
+  })
+  requireServerSuccess(response.data)
+  const data = z
+    .object({ items: z.array(workflowRunSummarySchema) })
+    .parse(response.data.data)
+  return data.items.map(mapWorkflowRunSummary)
+}
+
+/** Reads one run with its node waterfall. */
+export async function getCanvasWorkflowRun(
+  runId: string,
+  signal?: AbortSignal
+): Promise<CanvasWorkflowRun> {
+  const response = await api.get(
+    `${WORKFLOW_ENDPOINT}/history/${encodeURIComponent(runId)}`,
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  return mapWorkflowRunHistory(
+    workflowRunSchemaWithNodes.parse(response.data.data)
+  )
+}
+
+/** Replaces one run snapshot under its revision compare-and-swap. */
+export async function updateCanvasWorkflowRunHistory(
+  runId: string,
+  input: CanvasWorkflowRunUpdateInput,
+  signal?: AbortSignal
+): Promise<CanvasWorkflowRun> {
+  const response = await api.patch(
+    `${WORKFLOW_ENDPOINT}/history/${encodeURIComponent(runId)}`,
+    {
+      revision: input.revision,
+      status: input.status,
+      nodes: input.nodes.map(workflowRunNodeWire),
+    },
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  return mapWorkflowRunHistory(
+    workflowRunSchemaWithNodes.parse(response.data.data)
+  )
+}
+
+/** Deletes one run and releases its snapshot bytes. */
+export async function deleteCanvasWorkflowRun(
+  runId: string,
+  signal?: AbortSignal
+): Promise<void> {
+  const response = await api.delete(
+    `${WORKFLOW_ENDPOINT}/history/${encodeURIComponent(runId)}`,
+    { signal }
+  )
+  requireServerSuccess(response.data)
+}
+
+/**
+ * Resolves cached outputs for a batch of client-computed fingerprints. The
+ * server only answers for the caller's owned canvas and only with finished
+ * runs, so a cache lookup can never read another account's output.
+ */
+export async function lookupCanvasWorkflowNodeCache(
+  canvasId: string,
+  fingerprints: string[],
+  signal?: AbortSignal
+): Promise<CanvasWorkflowCacheEntry[]> {
+  const response = await api.post(
+    `${WORKFLOW_ENDPOINT}/node-cache`,
+    { canvas_id: canvasId, fingerprints },
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  const data = z
+    .object({ items: z.array(workflowCacheEntrySchema) })
+    .parse(response.data.data)
+  return data.items.map((entry) => ({
+    fingerprint: entry.fingerprint,
+    nodeId: entry.node_id,
+    kind: entry.kind,
+    model: entry.model,
+    output: entry.output,
+    taskId: entry.task_id,
+    artifactKeys: entry.artifact_keys,
+    resultCount: entry.result_count,
+    quota: entry.quota,
+    runId: entry.run_id,
+    updatedAt: entry.updated_at * 1000,
+  }))
 }
 
 const CANVAS_TEMPLATE_ENDPOINT = '/api/playground/canvas-templates'

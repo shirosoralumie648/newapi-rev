@@ -196,6 +196,13 @@ func playgroundRequest(t *testing.T, user int, method, path string, body any, ha
 		if parts[3] == "comparisons" {
 			c.Params = append(c.Params, gin.Param{Key: "runId", Value: parts[4]})
 		}
+		if parts[3] == "workflows" {
+			if parts[4] == "history" && len(parts) > 5 {
+				c.Params = append(c.Params, gin.Param{Key: "runId", Value: parts[5]})
+			} else if parts[4] != "history" {
+				c.Params = append(c.Params, gin.Param{Key: "runId", Value: parts[4]})
+			}
+		}
 		if parts[3] == "uploads" {
 			c.Params = append(c.Params, gin.Param{Key: "uploadId", Value: parts[4]})
 		}

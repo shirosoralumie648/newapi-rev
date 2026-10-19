@@ -167,7 +167,8 @@ function useRunnerHarness(
   initialNodes: CanvasFlowNode[],
   initialEdges: CanvasFlowEdge[],
   group = 'default',
-  nodeLimit = Number.POSITIVE_INFINITY
+  nodeLimit = Number.POSITIVE_INFINITY,
+  canvasId?: string
 ) {
   const [nodes, setNodes] = useState(initialNodes)
   const [edges, setEdges] = useState(initialEdges)
@@ -221,6 +222,7 @@ function useRunnerHarness(
     group,
     updateNodeData,
     addLinkedNode,
+    ...(canvasId ? { canvasId, workflowRevision: 3 } : {}),
   })
   return { nodes, edges, runner }
 }
@@ -1383,4 +1385,135 @@ test('refuses a selection without any workflow step with its own message', () =>
   act(() => hook.result.current.runner.runSelection())
   expect(hook.result.current.runner.phase).toBe('idle')
   expect(post).not.toHaveBeenCalled()
+})
+
+test('an unchanged step adopts the stored cache entry and skips the relay', async () => {
+  const nowSeconds = Math.floor(Date.now() / 1000)
+  let createdCount = 0
+  let currentRunId = ''
+  let revision = 1
+  let latestNodes: Array<Record<string, unknown>> = []
+  let chatCalls = 0
+  const runPayload = (nodes: Array<Record<string, unknown>>) => ({
+    id: currentRunId,
+    canvas_id: 'pgc_1',
+    session_id: '',
+    workflow_revision: 3,
+    status: 'running',
+    node_count: nodes.length,
+    cache_hits: nodes.filter((node) => node.cache_hit === true).length,
+    total_quota: 0,
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    total_tokens: 0,
+    duration_ms: 0,
+    estimate_quota: 0,
+    budget_cap: 0,
+    byte_size: 64,
+    revision,
+    created_at: nowSeconds,
+    updated_at: nowSeconds,
+    nodes,
+  })
+
+  const post = vi.spyOn(api, 'post').mockImplementation(async (url, body) => {
+    if (url === '/pg/chat/completions') {
+      chatCalls += 1
+      return {
+        data: {
+          choices: [{ message: { role: 'assistant', content: 'cached fox' } }],
+          usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+        },
+      }
+    }
+    if (url === '/api/playground/workflows/history') {
+      createdCount += 1
+      currentRunId = `pgwr_${createdCount}`
+      revision = 1
+      return { data: { success: true, data: runPayload([]) } }
+    }
+    if (url === '/api/playground/workflows/node-cache') {
+      const fingerprints = (body as { fingerprints: string[] }).fingerprints
+      const node = latestNodes.find((item) =>
+        fingerprints.includes(String(item.fingerprint))
+      )
+      return {
+        data: {
+          success: true,
+          data: {
+            items: node
+              ? [
+                  {
+                    fingerprint: node.fingerprint,
+                    node_id: node.node_id,
+                    kind: node.kind,
+                    model: node.model,
+                    output: node.output,
+                    task_id: '',
+                    artifact_keys: [],
+                    result_count: 0,
+                    quota: 0,
+                    run_id: 'pgwr_1',
+                    updated_at: nowSeconds,
+                  },
+                ]
+              : [],
+          },
+        },
+      }
+    }
+    throw new Error(`Unexpected POST ${url}`)
+  })
+  vi.spyOn(api, 'patch').mockImplementation(async (_url, body) => {
+    latestNodes = (body as { nodes: Array<Record<string, unknown>> }).nodes
+    revision += 1
+    return {
+      data: {
+        success: true,
+        data: {
+          ...runPayload(latestNodes),
+          status: (body as { status: string }).status,
+        },
+      },
+    }
+  })
+
+  const nodes = [
+    graphNode('p1', 'prompt', { text: 'a red fox' }),
+    graphNode('m1', 'model', {
+      workflow: { model: 'gpt-4o' },
+    }),
+  ]
+  const edges: CanvasFlowEdge[] = [{ id: 'e1', source: 'p1', target: 'm1' }]
+  const hook = renderHook(() =>
+    useRunnerHarness(nodes, edges, 'default', Number.POSITIVE_INFINITY, 'pgc_1')
+  )
+
+  act(() => hook.result.current.runner.run())
+  await waitFor(() => expect(hook.result.current.runner.phase).toBe('idle'))
+  expect(chatCalls).toBe(1)
+  expect(latestNodes[0]).toMatchObject({
+    node_id: 'm1',
+    output: 'cached fox',
+    cache_hit: false,
+  })
+
+  act(() => hook.result.current.runner.run())
+  await waitFor(() => expect(hook.result.current.runner.phase).toBe('idle'))
+
+  expect(chatCalls).toBe(1)
+  expect(latestNodes[0]).toMatchObject({
+    node_id: 'm1',
+    output: 'cached fox',
+    cache_hit: true,
+    quota: 0,
+  })
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 'm1')?.data.workflow
+  ).toMatchObject({ status: 'succeeded', cacheHit: true, output: 'cached fox' })
+  expect(post).toHaveBeenCalledWith(
+    '/api/playground/workflows/node-cache',
+    expect.objectContaining({ canvas_id: 'pgc_1' }),
+    expect.anything()
+  )
 })

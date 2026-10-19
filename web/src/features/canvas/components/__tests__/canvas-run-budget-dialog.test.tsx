@@ -86,7 +86,12 @@ test('shows the priced steps and total, then runs without a cap', async () => {
 
   await user.click(screen.getByRole('button', { name: 'Run workflow' }))
 
-  await waitFor(() => expect(onRun).toHaveBeenCalledWith(undefined))
+  await waitFor(() =>
+    expect(onRun).toHaveBeenCalledWith(undefined, {
+      estimateQuota: 2625,
+      budgetCap: 0,
+    })
+  )
   expect(onOpenChange).toHaveBeenCalledWith(false)
   expect(createCanvasWorkflowRunBudget).not.toHaveBeenCalled()
 })
@@ -112,9 +117,10 @@ test('opens a budget cap and starts the run inside it', async () => {
   expect(input).toHaveAttribute('aria-invalid', 'false')
   await user.click(screen.getByRole('button', { name: 'Run workflow' }))
 
-  await waitFor(() => expect(onRun).toHaveBeenCalledWith({ runId: 'pgw_1' }))
-  const [cap] = vi.mocked(createCanvasWorkflowRunBudget).mock.calls[0]
-  expect(cap).toBeGreaterThan(0)
+  await waitFor(() => expect(onRun).toHaveBeenCalled())
+  const [budget, start] = vi.mocked(onRun).mock.calls[0]
+  expect(budget).toEqual({ runId: 'pgw_1' })
+  expect(start).toEqual({ estimateQuota: 125, budgetCap: 2500000 })
   expect(onOpenChange).toHaveBeenCalledWith(false)
 })
 
@@ -183,7 +189,12 @@ test('runs unpriced steps anyway and says so', async () => {
   expect(screen.getByText('Not priced')).toBeInTheDocument()
 
   await user.click(screen.getByRole('button', { name: 'Run workflow' }))
-  await waitFor(() => expect(onRun).toHaveBeenCalledWith(undefined))
+  await waitFor(() =>
+    expect(onRun).toHaveBeenCalledWith(undefined, {
+      estimateQuota: 0,
+      budgetCap: 0,
+    })
+  )
 })
 
 test('shows the server reason when the estimate fails and retries', async () => {

@@ -23,6 +23,7 @@ import {
   Download,
   FileText,
   FolderOpen,
+  History,
   LayoutTemplate,
   ListChecks,
   Pencil,
@@ -59,6 +60,7 @@ export type CanvasToolbarInspectorView =
   | 'generate'
   | 'library'
   | 'artifacts'
+  | 'history'
 
 interface CanvasToolbarProps {
   disabled?: boolean
@@ -119,6 +121,7 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
     { view: 'generate', label: t('Generate'), icon: Sparkles },
     { view: 'library', label: t('Library'), icon: FolderOpen },
     { view: 'artifacts', label: t('Artifacts'), icon: FileText },
+    { view: 'history', label: t('Run history'), icon: History },
     { view: 'assistant', label: t('Assistant'), icon: Bot },
   ]
 
