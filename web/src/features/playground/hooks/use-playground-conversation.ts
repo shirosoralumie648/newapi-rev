@@ -44,7 +44,8 @@ type UsePlaygroundConversationOptions = {
    */
   continueChat: (
     prefillMessages: Message[],
-    fallbackMessages: Message[]
+    fallbackMessages: Message[],
+    prefix: string
   ) => void
 }
 
@@ -179,7 +180,7 @@ export function usePlaygroundConversation({
       if (!plan) return
 
       updateMessages(plan.stateMessages)
-      continueChat(plan.prefillMessages, plan.fallbackMessages)
+      continueChat(plan.prefillMessages, plan.fallbackMessages, plan.prefix)
     },
     [continueChat, updateMessages]
   )

@@ -104,8 +104,11 @@ test('continuing keeps the truncated version and appends a fresh empty branch', 
     finishReason: 'length',
   })
   expect(continued?.activeVersionIndex).toBe(1)
-  expect(continued?.versions[1].content).toBe('')
+  // The new branch starts with the truncated text so it reads as the complete
+  // answer once the continuation is appended.
+  expect(continued?.versions[1].content).toBe('The first half of the answer')
   expect(continued?.status).toBe('loading')
+  expect(plan.prefix).toBe('The first half of the answer')
 
   // The request still carries the truncated answer as the final assistant turn
   // (assistant prefill), and the fallback adds one user instruction instead.

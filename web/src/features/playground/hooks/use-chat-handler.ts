@@ -148,12 +148,17 @@ export function useChatHandler({
   const continuationRef = useRef<{
     fallbackMessages: Message[]
     contextSummary: PlaygroundContextSummary | null
+    prefix: string
   } | null>(null)
   // Deliver a prepared payload through the configured transport. It is a ref
   // so the stream error handler can start the continuation fallback without a
   // circular hook dependency.
   const deliverPayloadRef = useRef<
-    (messages: Message[], summary: PlaygroundContextSummary | null) => void
+    (
+      messages: Message[],
+      summary: PlaygroundContextSummary | null,
+      prefix?: string
+    ) => void
   >(() => undefined)
 
   const discardPendingStreamUpdates = useCallback((generation: number) => {
@@ -398,7 +403,7 @@ export function useChatHandler({
         onMessageUpdate(
           (prev) =>
             updateLastAssistantMessage(prev, (message) => ({
-              ...updateCurrentVersionContent(message, ''),
+              ...updateCurrentVersionContent(message, continuation.prefix),
               startedAt: Date.now(),
               completedAt: undefined,
               durationMs: undefined,
@@ -413,7 +418,8 @@ export function useChatHandler({
         )
         deliverPayloadRef.current(
           continuation.fallbackMessages,
-          continuation.contextSummary
+          continuation.contextSummary,
+          continuation.prefix
         )
         return
       }
@@ -504,7 +510,13 @@ export function useChatHandler({
   const sendNonStreamingChat = useCallback(
     async (
       messages: Message[],
-      contextSummary: PlaygroundContextSummary | null
+      contextSummary: PlaygroundContextSummary | null,
+      /**
+       * Text the continuation branch starts from. A complete answer replaces
+       * the branch content, so a response that only carries the continuation
+       * is prefixed with it.
+       */
+      prefix?: string
     ) => {
       const payload = buildChatCompletionPayload(
         messages,
@@ -567,7 +579,20 @@ export function useChatHandler({
 
             if (!updatedMessage) return message
 
-            const completed = attachMessageVersionUsage(updatedMessage, {
+            // A non-streaming continuation may return only the new text; keep
+            // the truncated prefix so the branch holds the complete answer.
+            let completedMessage = updatedMessage
+            if (prefix) {
+              const version = getCurrentVersion(updatedMessage)
+              if (!version.content.startsWith(prefix)) {
+                completedMessage = updateCurrentVersionContent(
+                  updatedMessage,
+                  prefix + version.content
+                )
+              }
+            }
+
+            const completed = attachMessageVersionUsage(completedMessage, {
               requestId,
               usage,
             })
@@ -657,10 +682,15 @@ export function useChatHandler({
    * selectable branch.
    */
   const continueChat = useCallback(
-    (prefillMessages: Message[], fallbackMessages: Message[]) => {
+    (
+      prefillMessages: Message[],
+      fallbackMessages: Message[],
+      prefix: string
+    ) => {
       continuationRef.current = {
         fallbackMessages,
         contextSummary: null,
+        prefix,
       }
       void Promise.all([
         ensurePlaygroundMessageAttachments(prefillMessages),
@@ -679,7 +709,7 @@ export function useChatHandler({
         if (config.stream) {
           sendStreamingChat(prefillMessages, contextSummary)
         } else {
-          void sendNonStreamingChat(prefillMessages, contextSummary)
+          void sendNonStreamingChat(prefillMessages, contextSummary, prefix)
         }
       })
     },
@@ -736,12 +766,12 @@ export function useChatHandler({
 
   // The error handler reaches the transport through this ref so a failed
   // prefill can start the user-instruction retry without a dependency cycle.
-  deliverPayloadRef.current = (messages, contextSummary) => {
+  deliverPayloadRef.current = (messages, contextSummary, prefix) => {
     if (config.stream) {
       sendStreamingChat(messages, contextSummary)
       return
     }
-    void sendNonStreamingChat(messages, contextSummary)
+    void sendNonStreamingChat(messages, contextSummary, prefix)
   }
 
   return {

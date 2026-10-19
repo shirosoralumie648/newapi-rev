@@ -46,19 +46,6 @@ const truncated: Message = {
   versions: [{ id: 'a1', content: 'Once upon a time', finishReason: 'length' }],
 }
 
-function mountHandler() {
-  return renderHook(() =>
-    useChatHandler({
-      config: { ...DEFAULT_CONFIG, stream: false },
-      parameterEnabled: { ...DEFAULT_PARAMETER_ENABLED },
-      systemPrompt: '',
-      contextSettings: { ...DEFAULT_CONTEXT_SETTINGS },
-      onMessageUpdate: vi.fn(),
-      sessionId: 'session-1',
-    })
-  )
-}
-
 test('a rejected assistant prefill retries once with a user continue instruction', async () => {
   vi.mocked(sendChatCompletion)
     .mockRejectedValueOnce(new Error('Assistant prefill is not supported'))
@@ -78,7 +65,31 @@ test('a rejected assistant prefill retries once with a user continue instruction
       },
       requestId: 'req-2',
     })
-  const hook = mountHandler()
+  // The caller already appended the continuation branch, which starts from the
+  // truncated text. It stays the last message while the request runs.
+  let current: Message[] = [
+    userMessage,
+    {
+      key: 'assistant-1',
+      from: 'assistant',
+      status: 'loading',
+      versions: [{ id: 'a2', content: 'Once upon a time' }],
+    },
+  ]
+  const onResponseComplete = vi.fn()
+  const hook = renderHook(() =>
+    useChatHandler({
+      config: { ...DEFAULT_CONFIG, stream: false },
+      parameterEnabled: { ...DEFAULT_PARAMETER_ENABLED },
+      systemPrompt: '',
+      contextSettings: { ...DEFAULT_CONTEXT_SETTINGS },
+      onMessageUpdate: (updater) => {
+        current = typeof updater === 'function' ? updater(current) : updater
+      },
+      onResponseComplete,
+      sessionId: 'session-1',
+    })
+  )
   const fallback = [
     userMessage,
     truncated,
@@ -92,7 +103,11 @@ test('a rejected assistant prefill retries once with a user continue instruction
   ]
 
   act(() => {
-    hook.result.current.continueChat([userMessage, truncated], fallback)
+    hook.result.current.continueChat(
+      [userMessage, truncated],
+      fallback,
+      'Once upon a time'
+    )
   })
 
   await waitFor(() => expect(sendChatCompletion).toHaveBeenCalledTimes(2))
@@ -106,6 +121,18 @@ test('a rejected assistant prefill retries once with a user continue instruction
     role: 'user',
     content: CONTINUE_GENERATION_INSTRUCTION,
   })
+  // The new branch holds the complete answer, not only the continuation.
+  await waitFor(() =>
+    expect(current.at(-1)?.versions.at(-1)?.content).toBe(
+      'Once upon a time and they lived.'
+    )
+  )
+  expect(onResponseComplete).toHaveBeenCalledWith(
+    expect.objectContaining({
+      content: 'Once upon a time and they lived.',
+      finishReason: 'stop',
+    })
+  )
 })
 
 test('a stopped reply keeps its text and is labelled interrupted', () => {

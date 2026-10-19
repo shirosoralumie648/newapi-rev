@@ -11,6 +11,7 @@ import {
   createUserMessage,
   getMessageContent,
   hasMessageContent,
+  updateCurrentVersionContent,
 } from './message-utils'
 import { isParallelMessage } from './parallel-compare-utils'
 
@@ -112,6 +113,8 @@ export interface PlaygroundContinuationPlan {
   stateMessages: Message[]
   prefillMessages: Message[]
   fallbackMessages: Message[]
+  /** The truncated text the continuation branch starts from. */
+  prefix: string
 }
 
 /**
@@ -137,13 +140,21 @@ export function createContinuationMessages(
     return null
   }
 
+  // The new branch starts with the truncated text and the stream appends the
+  // continuation to it, so switching branches shows the complete answer while
+  // the truncated version stays available untouched.
+  const prefix = getMessageContent(last)
   return {
-    stateMessages: [...messages.slice(0, -1), startAssistantReply(last)],
+    stateMessages: [
+      ...messages.slice(0, -1),
+      updateCurrentVersionContent(startAssistantReply(last), prefix),
+    ],
     prefillMessages: messages,
     fallbackMessages: [
       ...messages,
       createUserMessage(CONTINUE_GENERATION_INSTRUCTION),
     ],
+    prefix,
   }
 }
 
