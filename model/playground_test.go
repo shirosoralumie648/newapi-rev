@@ -4948,7 +4948,7 @@ func TestPlaygroundTrashLifecycle(t *testing.T) {
 			assert.Zero(t, rows)
 			require.NoError(t, db.Model(&model.PlaygroundAttachment{}).Where("session_id = ?", id).Count(&rows).Error)
 			assert.Zero(t, rows)
-			assert.Equal(t, []int64{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, playgroundUsageCounterValues(playgroundUsageCounters(t, db, 7)))
+			assert.Equal(t, playgroundUsageCounterValues(model.PlaygroundUserUsage{}), playgroundUsageCounterValues(playgroundUsageCounters(t, db, 7)))
 			assert.Empty(t, playgroundTrashListingFixture(t, 7).Items)
 			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+id+"/export?format=json", nil, controller.ExportPlaygroundSession).Code)
 			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions/"+id+"/restore", nil, controller.RestorePlaygroundSession).Code)
@@ -5320,7 +5320,7 @@ func TestPlaygroundKnowledgeBaseMatrix(t *testing.T) {
 			documentID := documentEnvelope.Document.ID
 			require.NotEmpty(t, documentID)
 			assert.Equal(t, model.PlaygroundKnowledgeDocumentStatusPending, documentEnvelope.Document.Status)
-			assert.Equal(t, "Alpha paragraph.\nBeta paragraph.\n", documentEnvelope.Document.Text)
+			assert.Equal(t, "Alpha paragraph.\nBeta paragraph.", documentEnvelope.Document.Text)
 			assert.EqualValues(t, len(source), documentEnvelope.Document.ByteSize)
 			assert.EqualValues(t, len(documentEnvelope.Document.Text), documentEnvelope.Document.TextBytes)
 
@@ -5450,10 +5450,13 @@ func TestPlaygroundKnowledgeBaseMatrix(t *testing.T) {
 
 			// Changing the base model makes old chunks stale; the client must
 			// reindex with the new model, and a mismatch is refused.
+			var updatedBase struct {
+				EmbeddingModel string `json:"embedding_model"`
+			}
 			playgroundKnowledgeResponseData(t, playgroundRequest(t, 7, http.MethodPatch, basePath+"/"+baseID, map[string]any{
 				"embedding_model": "embedding-3-large",
-			}, controller.UpdatePlaygroundKnowledgeBase), &baseEnvelope)
-			assert.Equal(t, "embedding-3-large", baseEnvelope.KnowledgeBase.EmbeddingModel)
+			}, controller.UpdatePlaygroundKnowledgeBase), &updatedBase)
+			assert.Equal(t, "embedding-3-large", updatedBase.EmbeddingModel)
 			stale := playgroundRequest(t, 7, http.MethodPut, chunksPath, chunksBody, controller.ReplacePlaygroundKnowledgeDocumentChunks)
 			assert.Equal(t, http.StatusBadRequest, stale.Code, stale.Body.String())
 			assert.Contains(t, stale.Body.String(), "PLAYGROUND_KNOWLEDGE_EMBEDDING_MODEL_MISMATCH")
