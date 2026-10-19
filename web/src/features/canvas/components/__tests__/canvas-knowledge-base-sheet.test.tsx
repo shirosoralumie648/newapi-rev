@@ -184,7 +184,7 @@ describe('CanvasKnowledgeBaseSheet', () => {
     renderSheet()
 
     expect(
-      await screen.findByText('3 documents · 6 chunks · 2 KiB')
+      await screen.findByText(/3 documents · 6 chunks · 2 KiB/)
     ).toBeVisible()
     const file = new File(['alpha text'], 'handbook.txt', {
       type: 'text/plain',
@@ -216,6 +216,34 @@ describe('CanvasKnowledgeBaseSheet', () => {
     )
   })
 
+  test('uploading a markdown document normalizes an empty browser media type', async () => {
+    bases = [base]
+    renderSheet()
+
+    expect(
+      await screen.findByText('3 documents · 6 chunks · 2 KiB')
+    ).toBeVisible()
+    const file = new File(['# alpha text'], 'handbook.md', { type: '' })
+    fireEvent.change(screen.getByLabelText('Upload knowledge base document'), {
+      target: { files: [file] },
+    })
+
+    await waitFor(() =>
+      expect(knowledgeApi.createKnowledgeDocument).toHaveBeenCalledWith(
+        'kb-1',
+        expect.objectContaining({
+          filename: 'handbook.md',
+          mediaType: 'text/markdown',
+        })
+      )
+    )
+    await waitFor(() =>
+      expect(knowledgeApi.indexKnowledgeDocument).toHaveBeenCalledWith(
+        expect.objectContaining({ documentId: 'doc-1' })
+      )
+    )
+  })
+
   test('rebuilding an index clears the old chunks before embedding again', async () => {
     bases = [base]
     documents = [document]
@@ -224,7 +252,11 @@ describe('CanvasKnowledgeBaseSheet', () => {
 
     expect(await screen.findByText('handbook.txt')).toBeVisible()
     expect(screen.getByText('provider unavailable')).toBeVisible()
-    await user.click(screen.getByRole('button', { name: 'Rebuild index' }))
+    await user.click(
+      screen.getByRole('button', {
+        name: 'Rebuild the index of handbook.txt',
+      })
+    )
 
     await waitFor(() =>
       expect(knowledgeApi.reindexKnowledgeDocument).toHaveBeenCalledWith(

@@ -26,8 +26,10 @@ import {
 } from '../../../constants'
 import {
   loadAutoReadPreferences,
+  loadAutoTitlePreferences,
   loadNewSessionDefaults,
   saveAutoReadPreferences,
+  saveAutoTitlePreferences,
   saveNewSessionDefaults,
 } from '../playground-preferences'
 
@@ -99,5 +101,43 @@ test('malformed read-aloud overrides are dropped instead of breaking the store',
   expect(loadAutoReadPreferences(7)).toEqual({
     defaultEnabled: true,
     overrides: { keep: false },
+  })
+})
+
+test('automatic naming is on by default and keeps per-conversation overrides', () => {
+  expect(loadAutoTitlePreferences(7)).toEqual({
+    defaultEnabled: true,
+    overrides: {},
+  })
+
+  saveAutoTitlePreferences(7, {
+    defaultEnabled: false,
+    overrides: { 'local-1': true },
+  })
+  expect(loadAutoTitlePreferences(7)).toEqual({
+    defaultEnabled: false,
+    overrides: { 'local-1': true },
+  })
+  expect(loadAutoTitlePreferences(8)).toEqual({
+    defaultEnabled: true,
+    overrides: {},
+  })
+})
+
+test('malformed naming overrides are dropped instead of breaking the store', () => {
+  localStorage.setItem(
+    `${STORAGE_KEYS.AUTO_TITLE}:7`,
+    JSON.stringify({
+      version: 1,
+      data: {
+        defaultEnabled: false,
+        overrides: { keep: true, drop: 'yes', '': false },
+      },
+    })
+  )
+
+  expect(loadAutoTitlePreferences(7)).toEqual({
+    defaultEnabled: false,
+    overrides: { keep: true },
   })
 })

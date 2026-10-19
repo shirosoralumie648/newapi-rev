@@ -20,80 +20,136 @@ import { useCallback, useEffect, useState } from 'react'
 
 import {
   loadAutoReadPreferences,
+  loadAutoTitlePreferences,
   saveAutoReadPreferences,
+  saveAutoTitlePreferences,
   type PlaygroundAutoReadPreferences,
+  type PlaygroundAutoTitlePreferences,
 } from '../lib/storage/playground-preferences'
 
 /**
  * Account-level Playground preferences that stay in the browser: the auto
- * read-aloud default plus one explicit override per conversation. The account
- * default applies to every conversation without an override and to every new
- * conversation.
+ * read-aloud and automatic conversation naming defaults plus one explicit
+ * override per conversation. An account default applies to every conversation
+ * without an override and to every new conversation.
  */
 export function usePlaygroundPreferences(userId: number | null) {
-  const [preferences, setPreferences] = useState<PlaygroundAutoReadPreferences>(
-    {
-      defaultEnabled: false,
-      overrides: {},
-    }
-  )
+  const [autoRead, setAutoRead] = useState<PlaygroundAutoReadPreferences>({
+    defaultEnabled: false,
+    overrides: {},
+  })
+  const [autoTitle, setAutoTitle] = useState<PlaygroundAutoTitlePreferences>({
+    defaultEnabled: true,
+    overrides: {},
+  })
 
   // Auth changes intentionally rehydrate browser-owned preferences after
   // hiding the previous account's state.
   useEffect(() => {
     // eslint-disable-next-line react/set-state-in-effect
-    setPreferences(loadAutoReadPreferences(userId))
+    setAutoRead(loadAutoReadPreferences(userId))
+    // eslint-disable-next-line react/set-state-in-effect
+    setAutoTitle(loadAutoTitlePreferences(userId))
   }, [userId])
 
-  const persist = useCallback(
+  const persistAutoRead = useCallback(
     (next: PlaygroundAutoReadPreferences) => {
-      setPreferences(next)
+      setAutoRead(next)
       saveAutoReadPreferences(userId, next)
+    },
+    [userId]
+  )
+
+  const persistAutoTitle = useCallback(
+    (next: PlaygroundAutoTitlePreferences) => {
+      setAutoTitle(next)
+      saveAutoTitlePreferences(userId, next)
     },
     [userId]
   )
 
   const setAutoReadDefault = useCallback(
     (value: boolean) => {
-      persist({ ...preferences, defaultEnabled: value })
+      persistAutoRead({ ...autoRead, defaultEnabled: value })
     },
-    [persist, preferences]
+    [persistAutoRead, autoRead]
   )
 
   /** Set one conversation's override; null removes it and follows the default. */
   const setSessionAutoRead = useCallback(
     (sessionId: string | null, value: boolean | null) => {
       if (!sessionId) return
-      const overrides = { ...preferences.overrides }
+      const overrides = { ...autoRead.overrides }
       if (value === null) {
         delete overrides[sessionId]
       } else {
         overrides[sessionId] = value
       }
-      persist({ ...preferences, overrides })
+      persistAutoRead({ ...autoRead, overrides })
     },
-    [persist, preferences]
+    [persistAutoRead, autoRead]
   )
 
   const isAutoReadEnabled = useCallback(
     (sessionId: string | null) => {
-      if (!sessionId) return preferences.defaultEnabled
-      return preferences.overrides[sessionId] ?? preferences.defaultEnabled
+      if (!sessionId) return autoRead.defaultEnabled
+      return autoRead.overrides[sessionId] ?? autoRead.defaultEnabled
     },
-    [preferences]
+    [autoRead]
   )
 
   const hasSessionAutoReadOverride = useCallback(
     (sessionId: string | null) =>
-      Boolean(sessionId && sessionId in preferences.overrides),
-    [preferences]
+      Boolean(sessionId && sessionId in autoRead.overrides),
+    [autoRead]
+  )
+
+  const setAutoTitleDefault = useCallback(
+    (value: boolean) => {
+      persistAutoTitle({ ...autoTitle, defaultEnabled: value })
+    },
+    [persistAutoTitle, autoTitle]
+  )
+
+  /** Set one conversation's override; null removes it and follows the default. */
+  const setSessionAutoTitle = useCallback(
+    (sessionId: string | null, value: boolean | null) => {
+      if (!sessionId) return
+      const overrides = { ...autoTitle.overrides }
+      if (value === null) {
+        delete overrides[sessionId]
+      } else {
+        overrides[sessionId] = value
+      }
+      persistAutoTitle({ ...autoTitle, overrides })
+    },
+    [persistAutoTitle, autoTitle]
+  )
+
+  const isAutoTitleEnabled = useCallback(
+    (sessionId: string | null) => {
+      if (!sessionId) return autoTitle.defaultEnabled
+      return autoTitle.overrides[sessionId] ?? autoTitle.defaultEnabled
+    },
+    [autoTitle]
+  )
+
+  const hasSessionAutoTitleOverride = useCallback(
+    (sessionId: string | null) =>
+      Boolean(sessionId && sessionId in autoTitle.overrides),
+    [autoTitle]
   )
 
   return {
-    autoReadDefault: preferences.defaultEnabled,
+    autoReadDefault: autoRead.defaultEnabled,
     hasSessionAutoReadOverride,
     isAutoReadEnabled,
     setAutoReadDefault,
     setSessionAutoRead,
+    autoTitleDefault: autoTitle.defaultEnabled,
+    hasSessionAutoTitleOverride,
+    isAutoTitleEnabled,
+    setAutoTitleDefault,
+    setSessionAutoTitle,
   }
 }
