@@ -295,6 +295,15 @@ func TestGetUserModelsExpandsAutoGroupsInConfiguredOrder(t *testing.T) {
 
 func TestGetUserModelsDetailsIncludeReadonlyMetadata(t *testing.T) {
 	db := setupModelListControllerTestDB(t)
+	// vip is one of the default usable groups, so a request for it is served
+	// until an administrator removes it from the usable set. Pin the set to the
+	// account's own group so the empty answer below proves a group outside that
+	// set is never queried.
+	originalUsableGroups := setting.UserUsableGroups2JSONString()
+	require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"default":"Default group"}`))
+	t.Cleanup(func() {
+		require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(originalUsableGroups))
+	})
 	require.NoError(t, db.Create(&model.User{
 		Id:       1005,
 		Username: "playground-detail-model-user",
