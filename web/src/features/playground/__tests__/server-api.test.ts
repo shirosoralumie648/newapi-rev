@@ -33,8 +33,11 @@ import {
   updatePlaygroundSession,
 } from '../api'
 import {
+  createPlaygroundCanvasShare,
   createPlaygroundSessionShare,
   getSharedPlaygroundConversation,
+  getSharedPlaygroundTarget,
+  revokePlaygroundCanvasShare,
   revokePlaygroundSessionShare,
 } from '../share-api'
 import type { Message } from '../types'
@@ -567,6 +570,84 @@ test('revoking a share link deletes every active link of the conversation', asyn
 
   expect(remove).toHaveBeenCalledTimes(1)
   expect(remove.mock.calls[0][0]).toBe('/api/playground/sessions/pgs_one/share')
+})
+
+test('creating and revoking a canvas link use the canvas share route', async () => {
+  const post = vi.spyOn(api, 'post').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        token: 'canvas-token',
+        url_path: '/share/canvas-token',
+        expires_at: 300,
+        created_at: 100,
+      },
+    },
+  })
+  const remove = vi.spyOn(api, 'delete').mockResolvedValue({
+    data: { success: true, data: { revoked: true } },
+  })
+
+  const share = await createPlaygroundCanvasShare('pgc_one', 7)
+  await revokePlaygroundCanvasShare('pgc_one')
+
+  expect(post.mock.calls[0][0]).toBe('/api/playground/canvases/pgc_one/share')
+  expect(post.mock.calls[0][1]).toEqual({ expires_in_days: 7 })
+  expect(share).toEqual({
+    token: 'canvas-token',
+    urlPath: '/share/canvas-token',
+    expiresAt: 300000,
+    createdAt: 100000,
+  })
+  expect(remove.mock.calls[0][0]).toBe('/api/playground/canvases/pgc_one/share')
+})
+
+test('the public target read distinguishes a canvas snapshot from a conversation', async () => {
+  const get = vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        kind: 'canvas',
+        title: 'Public board',
+        updated_at: 100,
+        document: {
+          viewport: { x: 0, y: 0, zoom: 1 },
+          nodes: [
+            {
+              id: 'n1',
+              type: 'text',
+              position: { x: 0, y: 0 },
+              data: { kind: 'text', text: 'Visible preview' },
+            },
+          ],
+          edges: [],
+        },
+      },
+    },
+  })
+
+  const target = await getSharedPlaygroundTarget('share-token')
+
+  expect(get.mock.calls[0][0]).toBe('/api/playground/shared/share-token')
+  expect(target).toEqual({
+    kind: 'canvas',
+    canvas: {
+      title: 'Public board',
+      updatedAt: 100000,
+      document: {
+        viewport: { x: 0, y: 0, zoom: 1 },
+        nodes: [
+          {
+            id: 'n1',
+            type: 'text',
+            position: { x: 0, y: 0 },
+            data: { kind: 'text', text: 'Visible preview' },
+          },
+        ],
+        edges: [],
+      },
+    },
+  })
 })
 
 test('the public share read maps only the sanitized snapshot', async () => {
