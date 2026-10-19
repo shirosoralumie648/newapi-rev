@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { GlobeIcon, PaperclipIcon, Trash2Icon } from 'lucide-react'
+import { GlobeIcon, Trash2Icon } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -24,7 +24,6 @@ import { toast } from 'sonner'
 import {
   PromptInputButton,
   PromptInputTools,
-  usePromptInputAttachments,
 } from '@/components/ai-elements/prompt-input'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import {
@@ -42,6 +41,7 @@ import type {
   PlaygroundContextSettings,
   PlaygroundContextSummary,
 } from '../../types'
+import { PlaygroundAssetPicker } from './playground-asset-picker'
 import { PlaygroundAutoReadControl } from './playground-auto-read-control'
 import { PlaygroundComparePanel } from './playground-compare-panel'
 import { PlaygroundContextPanel } from './playground-context-panel'
@@ -122,7 +122,6 @@ export function PlaygroundInputTools({
   onAutoReadDefaultChange,
 }: PlaygroundInputToolsProps) {
   const { t } = useTranslation()
-  const attachments = usePromptInputAttachments()
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
 
   const handleSearchAction = () => {
@@ -139,24 +138,10 @@ export function PlaygroundInputTools({
   return (
     <>
       <PromptInputTools className='bg-background/70 border-border/60 rounded-lg border p-1 shadow-xs'>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <PromptInputButton
-                aria-label={t('Attach')}
-                className='text-muted-foreground hover:text-foreground hover:bg-muted/70 font-medium'
-                disabled={disabled}
-                onClick={() => attachments.openFileDialog()}
-                variant='ghost'
-              >
-                <PaperclipIcon size={16} />
-              </PromptInputButton>
-            }
-          />
-          <TooltipContent>
-            <p>{t('Attach')}</p>
-          </TooltipContent>
-        </Tooltip>
+        <PlaygroundAssetPicker
+          disabled={disabled}
+          onInsertText={onInsertText}
+        />
 
         <Tooltip>
           <TooltipTrigger

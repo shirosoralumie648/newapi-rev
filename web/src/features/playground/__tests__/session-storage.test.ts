@@ -38,6 +38,8 @@ const session = (id: string, title = id): PlaygroundSession => ({
   config: { ...DEFAULT_CONFIG },
   parameterEnabled: { ...DEFAULT_PARAMETER_ENABLED },
   systemPrompt: '',
+  openingMessage: '',
+  suggestedQuestions: [],
   context: { ...DEFAULT_CONTEXT_SETTINGS },
   contextSummary: null,
   messages: [],

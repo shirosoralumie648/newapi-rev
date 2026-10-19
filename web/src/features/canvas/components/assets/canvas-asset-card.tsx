@@ -37,14 +37,14 @@ import { Badge } from '@/components/ui/badge'
 import { toIntlLocale } from '@/i18n/languages'
 import { formatBytes, formatTimestampRelative } from '@/lib/format'
 
-import type { PlaygroundAssetItem } from '../../asset-api'
-import { playgroundAttachmentKind } from '../../constants'
-import { useAttachmentPreviewUrl } from '../../hooks'
+import type { PlaygroundAssetItem } from '@/features/playground/asset-api'
+import { playgroundAttachmentKind } from '@/features/playground/constants'
+import { useAttachmentPreviewUrl } from '@/features/playground/hooks'
 
-interface PlaygroundAssetCardProps {
+interface CanvasAssetCardProps {
   asset: PlaygroundAssetItem
   onPreview: (asset: PlaygroundAssetItem) => void
-  onSendToChat: (asset: PlaygroundAssetItem) => void
+  onSendToChat?: (asset: PlaygroundAssetItem) => void
   onSendToCanvas: (asset: PlaygroundAssetItem) => void
   onOpenConversation: (asset: PlaygroundAssetItem) => void
   onDelete: (asset: PlaygroundAssetItem) => void
@@ -55,7 +55,7 @@ interface PlaygroundAssetCardProps {
  * attachment loads through the owner-scoped content endpoint; every action
  * re-verifies ownership on the server, so the card only carries ids.
  */
-export function PlaygroundAssetCard(props: PlaygroundAssetCardProps) {
+export function CanvasAssetCard(props: CanvasAssetCardProps) {
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const asset = props.asset
@@ -122,12 +122,14 @@ export function PlaygroundAssetCard(props: PlaygroundAssetCardProps) {
           onClick={() => props.onPreview(asset)}
           tooltip={t('Preview')}
         />
-        <ArtifactAction
-          icon={MessageSquare}
-          label={t('Send to chat')}
-          onClick={() => props.onSendToChat(asset)}
-          tooltip={t('Send to chat')}
-        />
+        {props.onSendToChat ? (
+          <ArtifactAction
+            icon={MessageSquare}
+            label={t('Send to chat')}
+            onClick={() => props.onSendToChat?.(asset)}
+            tooltip={t('Send to chat')}
+          />
+        ) : null}
         <ArtifactAction
           icon={Frame}
           label={t('Send to canvas')}

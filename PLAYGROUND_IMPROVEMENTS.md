@@ -115,7 +115,7 @@ Playground
 - [x] 键盘访问、active session 语义和无障碍名称；
 - [x] 新增文案接入七种前端语言；
 - [x] 保留现有流式消息、reasoning、编辑、删除和重新生成能力；
-- [x] 明确右侧 Inspector/Artifact 面板与全局导航侧栏的边界（Artifact 面板属于 Playground 工作区内部，由聊天头部按钮切换，不占用全局导航侧栏；移动端为右侧 Sheet；UX-02 起 Playground 与画布编辑器共用右侧 Inspector 外壳，制品与画布预览在同一面板的两个视图间切换）；
+- [x] 明确右侧 Inspector/Artifact 面板与全局导航侧栏的边界（Artifact 面板属于 Playground 工作区内部，由工作区头部按钮切换（LB-14 起生成媒体、制品浏览器与素材库三个创作域入口撤出对话、改由画布编辑器 Inspector 承载，对话只保留预设/回收站等会话域视图），不占用全局导航侧栏；移动端为右侧 Sheet；UX-02 起 Playground 与画布编辑器共用右侧 Inspector 外壳，制品与画布预览在同一面板的两个视图间切换）；
 - [x] 完善桌面、移动、窄屏、暗色模式和嵌套滚动的真实浏览器验收（Playwright E2E：桌面与移动视口、暗色模式跨刷新持久化、会话列表嵌套滚动不带动页面）。
 
 ### Phase 2：服务端会话和消息同步 — 已完成
@@ -165,7 +165,7 @@ Playground
 - [x] 建立画布项目和用户的归属关系（`playground_canvas` 表按 `user_id` 唯一与查询，列表/读取/更新/删除均带 `user_id = ?` 过滤，`model/playground_canvas_test.go` 覆盖跨用户 404）；
 - [x] 限制项目数量、节点数量和持久化大小（每账号 20 个项目 / 16 MiB、单文档 1 MiB、200 节点、400 边、单节点数据 64 KiB；服务端事务内校验并返回稳定错误码，前端 `validateCanvasDocument` 先做本地反馈）；
 - [x] 明确画布数据与 session/消息/附件/Artifact 的引用关系与生命周期，避免删除消息或会话导致画布资源意外丢失（服务端新增 `PlaygroundCanvasAsset` 画布-附件 pin 表：创建/更新画布时在同一事务内重建被引用附件的 pin，删除画布或保存不再引用该附件的文档时释放；`DeleteOrphanedPlaygroundAttachments` 跳过被 pin 的附件，被 pin 的附件禁止手动删除，删除会话级联时一并清理其附件 pin；`ValidatePlaygroundCanvasReferences` 改为「跨账号引用仍返回 400 `PLAYGROUND_CANVAS_REFERENCE_INVALID`，已删除资源容忍并保持画布可编辑」，读取画布时由 `PlaygroundCanvasReferenceAvailability` 计算 `unavailable_node_ids`；前端 `applyCanvasReferenceStatus` 将缺失来源的节点标记 `sourceDeleted`，`canvas-node.tsx` 显示「来源已删除」徽标与快照提示、`canvas-node-inspector.tsx` 同提示，节点保留 `text`/`snapshot`/`label` 内容快照；`model/playground_canvas_test.go` 的 `TestPlaygroundCanvasAttachmentPins`、`TestPlaygroundCanvasAttachmentDereference`、`TestPlaygroundCanvasSessionCascade`、`TestPlaygroundCanvasReferenceSourceDeleted` 与扩展的 `TestPlaygroundCanvasReferenceOwnership` 覆盖引用/解除引用、跨用户引用 400、会话级联与孤儿清理交互、来源删除标记；`canvas-node.test.tsx`、`canvas-document.test.ts` 覆盖渲染与状态应用；补 2 个新键的七语言翻译（`i18n:sync` missingCount=0、extrasCount=0）；无新依赖；本地未运行测试（CI-only））。
-- [x] 统一桌面/移动端右侧 Inspector 并打通聊天与画布的双向跳转（新增共享 `components/workspace-inspector.tsx`：桌面 `ResizablePanelGroup` 并排、移动端右侧 Sheet，复用 Base UI 焦点陷阱与既有未保存草稿保护；Playground 头部「Artifacts」/「Canvases」切换同一 Inspector 的制品列表与只读画布预览（`playground-canvas-panel.tsx` 经 `listCanvasProjects`/`getCanvasProject` + `fromServerDocument` 预览节点并可「打开画布」跳转全量编辑器），画布编辑器节点详情复用同一外壳；路由新增 `validateSearch` 深链：`/playground?session&message&artifact` 切换到对应会话并打开制品、`/playground/canvas?project` 打开指定画布；画布节点详情新增「来源」区，经 `lib/canvas-navigation.ts` 生成跳转参数回到源会话/制品（`CanvasNodeInspector` 仅暴露 `onOpenSource` 回调，由 `CanvasWorkspace` 用 `useNavigate` 接线，保持组件不依赖路由、可测试）；扩展 `workspace-layout.test.tsx`（桌面并排/隐藏与视图切换、移动 Sheet 关闭、会话列表入口），新增 `playground-canvas-panel.test.tsx`、`canvas-navigation.test.ts`、`canvas-node-inspector.test.tsx`，并扩展 `canvas-send-dialog.test.tsx` 断言 `onSent(project)`；`i18n:sync` missingCount=0、extrasCount=0（补 5 个新键的七语言翻译）；无新依赖；本地未运行测试/typecheck/lint/build（CI-only））。
+- [x] 统一桌面/移动端右侧 Inspector 并打通聊天与画布的双向跳转（新增共享 `components/workspace-inspector.tsx`：桌面 `ResizablePanelGroup` 并排、移动端右侧 Sheet，复用 Base UI 焦点陷阱与既有未保存草稿保护；Playground 头部「Artifacts」/「Canvases」切换同一 Inspector 的制品列表与只读画布预览（`playground-canvas-panel.tsx` 经 `listCanvasProjects`/`getCanvasProject` + `fromServerDocument` 预览节点并可「打开画布」跳转全量编辑器），画布编辑器节点详情复用同一外壳；路由新增 `validateSearch` 深链：`/playground?session&message&artifact` 切换到对应会话并打开制品、`/playground/canvas?project` 打开指定画布；画布节点详情新增「来源」区，经 `lib/canvas-navigation.ts` 生成跳转参数回到源会话/制品（`CanvasNodeInspector` 仅暴露 `onOpenSource` 回调，由 `CanvasWorkspace` 用 `useNavigate` 接线，保持组件不依赖路由、可测试）；扩展 `workspace-layout.test.tsx`（桌面并排/隐藏与视图切换、移动 Sheet 关闭、会话列表入口），新增 `playground-canvas-panel.test.tsx`、`canvas-navigation.test.ts`、`canvas-node-inspector.test.tsx`，并扩展 `canvas-send-dialog.test.tsx` 断言 `onSent(project)`；`i18n:sync` missingCount=0、extrasCount=0（补 5 个新键的七语言翻译）；无新依赖；LB-14 起 Playground 头部的「Artifacts」/「Canvases」入口已撤出对话侧，同一画布编辑器承载生成/制品/素材库面板；本地未运行测试/typecheck/lint/build（CI-only））。
 
 ### Phase 6：多媒体、Agent 和工作流 — 进行中
 
@@ -832,6 +832,16 @@ Step 进度：
 
 - **LB-13 新用户引导（P1 收尾，LB-01..LB-12 全部落地后）**——①**欢迎卡**：首次进入 Playground 显示可关闭的概览卡（桌面 Dialog / 移动 Sheet），按账号记 localStorage「已读」标记，右上角 Help 按钮提供「重看引导」重放入口；②**空态功能入口增强**：现有 starter prompts 空态旁增加功能入口卡（参数面板/预设/生成任务等当时已存在的能力），仅新手阶段（未完成引导）显示；③**无可用模型提示**：检测本分组无可用模型时在欢迎卡与空态展示指引（复用现有模型列表查询，不新增后端）；④**高亮步进 tour**：引入 `driver.js`（`bun add`，轻量无 UI 框架耦合），步进点锚定到稳定 `data-tour-*` 选择器（面板增删时同步维护），覆盖会话列表、模型选择、参数面板、联网搜索与 composer、记忆与预设入口（对话侧），以及画布编辑器内的生成面板、制品浏览器、素材库与画布工具（创作侧，LB-14 分层后的最终布局）；步进内容全部 i18n 七语言，Esc 可随时退出、关闭后不再自动弹出；移动端提供精简步序或仅欢迎卡。测试：首次/已读/重放三类显示逻辑、移动端 Sheet、焦点管理与 Esc 关闭 a11y、tour 选择器在关键面板存在性的静态测试。
 - **LB-14 对话/创作分层（2026-10-19 用户确认：创作域全部归画布，聊天不承载创作工具）**——①**Playground 对话顶栏撤出全部四个常驻入口按钮**（`Generate`/`Canvases`/`Artifacts`/`Library`，含 inspectorView 机关与 `artifactsDisabled` 分支），顶栏只保留账号用量入口、移动端会话抽屉与同步状态徽标；②**生成媒体完全迁入画布编辑器**：提交表单 + 任务列表成为 `CanvasWorkspace` 内置面板（generation/task API 复用不动，任务仍用户级归属）；对话内发起生成的唯一路径是消息动作「用这段生成图片/视频」→ 跳 `/playground/canvas` 并预填提示词/参考图（新 task 节点或表单预填），运行与钱包结算都在画布侧完成；③**制品浏览器迁入画布**：版本管理/Sandbox 预览/导出 UI 移到画布编辑器侧（画布已有 artifact 节点与来源深链），对话内消息流保留内联内容渲染与轻量预览卡（操作 = 打开画布查看），消息动作「发送到画布」是双向桥接；④**素材库迁入画布**（素材/存储管理视图），对话 composer 附件弹层增加「我的素材」页签保留素材进对话的轻路径；⑤**全局导航**给画布一个独立入口（全局侧栏不属于对话界面），playground→canvas 既有路由 `/playground/canvas` 与深链不变。测试：workspace 布局与 inspector 相关组件测试改写、消息动作跳转测试、composer 素材页签测试、E2E 适配新入口；i18n 七语言。LB-14 落地后 LB-13 引导的 tour 步序按最终布局编写。
+
+**LB-14 对话/创作分层验收（2026-10-19，CI-only，本地未运行测试）**：
+
+- [x] ①Playground 顶栏撤出 Generate/Canvases/Artifacts/Library 四个常驻入口（删除 inspectorView 机关与 `artifactsDisabled` 分支），只保留账号用量入口、移动端会话抽屉与同步状态徽标；会话域预设/回收站 Inspector 保留（`workspace-layout.test.tsx` 重写：四个入口缺失、用量面板与状态徽标可见、移动端会话抽屉与 Inspector Sheet）；
+- [x] ②生成媒体迁入画布编辑器：`CanvasGenerationPanel` + `CanvasTaskList` 成为画布 Inspector 的 `generate` 视图（generation/task API 原样复用、任务仍用户级归属）；对话内唯一生成路径为消息动作 `Generate image`/`Generate video` → `/playground/canvas?prompt&generate&session&message&attachment`，画布将其落成 task 节点（提示词 + 参考图 attachment 节点连边）并选中，运行与钱包结算沿用画布工作流链路（`message-actions.test.tsx` 跳转用例、`canvas-navigation.test.ts` 的 prefill/graph 用例、`use-canvas-editor.test.ts` 的 `addGraph`/`selectNode` 用例）；
+- [x] ③制品浏览器迁入画布：版本管理/Sandbox 预览/下载导出的 `CanvasArtifactPanel` 由 `CanvasArtifactBrowser` 按会话打开（`/playground?artifact=` 旧深链重定向到画布）；对话消息流保留内联渲染、`PlaygroundArtifactLinks` 轻量预览卡（点击在画布打开）与消息动作桥接，Create artifact 保存后直接打开画布制品浏览器，Send to canvas 仍是双向桥接，画布节点「Open artifact」在画布内打开（`canvas-artifact-panel.test.tsx` 迁移、`canvas-node-inspector.test.tsx` 用例）；
+- [x] ④素材库迁入画布：`CanvasAssetLibrary`（附件/Artifact/生成结果浏览、预览、删除、加入画布、打开会话）成为画布 Inspector 的 `library` 视图；对话 composer 附件层新增「My assets」页签与上传页签（`PlaygroundAssetPicker`）保留素材进对话的轻路径（`canvas-asset-library.test.tsx` 迁移、`playground-asset-picker.test.tsx`）；
+- [x] ⑤全局侧栏保留独立 Canvas 入口（`/playground/canvas`，全局导航不属于对话界面），playground→canvas 路由与深链（`?project`、`?session&message&artifact`）保持不变（E2E `playground-workspace.spec.ts` 顶栏入口缺失 + Canvas 导航用例、`playground-mobile.spec.ts` 附件层页签用例）；
+- [x] 文案接入七语言（新增 9 键；`node scripts/sync-i18n.mjs` missingCount=0、extrasCount=0，untranslated 基线保持 zh 3/ja 4/ru 5）；
+- [x] 无新依赖、无 Go/schema 改动（纯前端重构，无需三数据库矩阵；本地未运行测试/typecheck/lint/build，CI-only）。
 - **LB-11 预设市场**——`playground_presets` 新增 `visibility`（private/global）与开场白、建议问题字段；管理端维护全局预设（复用用户端编辑面板），`GET /api/playground/presets/market` 列出全局预设，「复制为我的预设」入库；JSON 导入/导出沿用 preset 既有校验；以预设新建会话时支持注入开场白与建议问题。
 
 ### 14.4 决策（2026-10-19 用户确认）
@@ -978,6 +988,40 @@ Step 进度：
 
 所有参考项目只借鉴公开的产品设计与交互，不移植、不改写其源代码；涉及第三方库时按现有依赖策略评估许可证。
 
+## 17. 上游 issue 精选吸收包与模型知识库（2026-10-19 调研）
+
+> 来源：对 QuantumNous/new-api 2026-05→10 月 open issue 的**按创建日期从近到远**扫描（约 1200 条标题层 + 高赞正文深读）。结论：高赞存量需求 fork 已覆盖或由上游关闭解决（详见 17.4）；以下为按时间扫描出的真 gap。所有 #N 均为上游 issue 号，实施前需复核其当前状态。
+
+### 17.1 吸收 Step（GI-* 与 MS-01）
+
+| ID | 标题 | 覆盖上游 issue | 量级 |
+| --- | --- | --- | --- |
+| GI-01 | 限流/额度维度矩阵：TPM 补「用户分组/模型/全局」维度；按用户/分组的自然日请求上限（RPD）与每日 token 上限；用户级并发控制；multi-key 渠道的 key 级并发；渠道单日 token 预算（保护上游免费额度） | #7408 #6458 #5252 #6196 #6679 #2489 | 中 |
+| GI-02 | 重试与渠道自愈：relay 重试加退避/jitter 并尊重上游 Retry-After；上游 429 携带重置时间时临时封禁渠道并到期自动解封；自动禁用渠道的冷却自动恢复（半开试探）；渠道亲和失败后的重试选路优化（跨请求重置优先级、排除失败渠道） | #5049 #7660 #5420 #6021 #7784 | 中 |
+| GI-03 | 安全策略包：root 强制全体用户 2FA 开关；API key 最长有效期强制；反复无效 key 自动封禁来源 IP（与 CriticalRateLimit 协同）；OIDC RP-Initiated Logout 支持；上游「余额不足」类错误对终端用户脱敏；日志可选记录来源 IP/UA/底层客户端标识（默认关，含 AI 客户端指纹识别） | #7263 #7262 #7890 #5156 #6306 #7620 #5277 | 小~中 |
+| GI-04 | 响应携带实耗成本：usage 返回本次请求实际消耗额度（x_quota 或扩展字段）；playground/控制台按消息展示实际成本 | #6397 #7054 | 小 |
+| GI-05 | 订阅增强：到期自动用钱包余额续费（可关）；日/周/月多周期限制并存；套餐按分组可见/可订阅；订阅可用余额支付可配置 | #7850 #4978 #5706 #3388 #5249 | 中 |
+| GI-06 | 看板缓存与聚合增强：缓存 token（cache read/creation）进用量看板与模型调用分析；按 API key 聚合统计；时间范围预设扩展 | #5069 #7759 #4963 #4971 #7484 #6880 | 小~中 |
+| MS-01 | 模型知识库：独立策展数据仓库（别名映射/质量与速度档位/擅长标签/一句话点评/数据日期）+ 网关每日拉取（URL 可配置、可关停、可单模型覆盖，覆盖项存现有 option 配置不建新表）+ 模型广场徽标与详情展示（**六维能力雷达图**：财务会计/战略运营/法律/医疗健康/工程/经济）、编码指数与 Agent 指数徽标、首字延迟 TTFT、标签筛选排序 | 新提案（用户 2026-10-19） | 中 |
+
+- MS-01 数据仓库独立成仓（已建：https://github.com/shirosoralumie648/newapi-model-kb ，首版 2026-10-19 已收录 52 个模型、19 个开源权重，数据以 AA Intelligence Index v4.3.2 快照为锚）；质量/速度/价格为**档位**而非精确分数（降低错报风险），擅长标签用语言中立枚举键由前端 i18n 翻译，点评存 zh/en 双语其余语言回退 en；分发自 GitHub raw / jsDelivr，站点侧**无需注册外部 API key**；数据许可 CC BY 4.0（LICENSE，含 AA attribution 要求）；schema v2 新增六维能力指数（雷达图，AA 免费档字段，缺测维度为 null 不画）、编码/Agent 指数、首字延迟 TTFT、缓存与每百万 token 参考价——数据待 AA 免费 key 首拉填充。
+- 合规边界：AA 等外部数据仅作**参考展示**，不参与计费、不影响路由；具体价格一律以站点自身 pricing 为准，外部数据只给档位与出处（含 attribution 与「数据截至」日期）；若上游数据方条款收紧，降级为链接引用 + 自整理档位。
+- 与 PG2-02（模型元数据/发送前估算，playground 侧）互补不冲突：MS-01 管 console 模型广场展示侧。
+- 执行顺序建议：GI-03、GI-04（小步先收）→ GI-01 → GI-02 → GI-05 → GI-06；MS-01 的数据仓库可与 GI 并行推进（仓库侧无网关依赖）。
+
+### 17.2 P2 大特性 backlog（本包不做，另行设计）
+
+- #6572 New-API 作为 OAuth2/OIDC IdP（供第三方平台登录）；#7312 组织/团队（共享额度/成员角色/资源隔离）；#6508 主库日志表自动分区/清理（可借 DB-04 分区设计）；#6535 OpenAI/Gemini Batch API 支持；#2299 `/v1/files` + `/v1/vector_stores`（与 LB-04 向量基建协同，待 LB-04 落地后评估）；#7667 智能模型路由决策层；#7308 桌面端一次性授权码登录接力（fork 有 Electron 壳，优先级可提前）；#4982 自定义主题系统。
+
+### 17.3 fork 排查项（上游报告的性能问题，fork 同款代码待核实）
+
+- #7394 tiered_expr 预消费将整个请求体读入内存；#5480 流式中继为统计 token 而将完整响应文本缓冲进内存。均属 relay 热路径内存占用，核实属实则记入优化 Step。
+
+### 17.4 结论修正与已覆盖确认
+
+- **撤回**此前（按 👍 排序轮次）对 #5209（Responses→ChatCompletions 降级）的吸收建议：上游 2026-05~07 已 closed 一批协议转换 issue（#4754 Responses→OpenAI 兼容、#6162 Responses→Anthropic、#5514 OpenAI→Claude 兼容、#5392 多协议渠道 👍8），fork 随上游合并即得。
+- 确认已覆盖、无需采纳：#1730（channel_admission 并发/RPM/TPM/排队预留）、#2845（订阅兑换码 `SubscriptionSourceRedemption`）、#4896（affinity KeySource `request_header`）、#4882（token `PeriodQuota`）、#6722（`status_code_ranges.go` 可配置重试区间）、#7799（PG2「渠道可见粒度」决策 + RF-08 分组定价）、#5599（请求体留存 = PG2-08 已规划）。
+
 ## 8. 变更记录
 
 | 日期 | 变更 |
@@ -1072,5 +1116,9 @@ Step 进度：
 | 2026-10-18 | RF-08：按用户组比例与推荐官档位（可选）（借鉴 QuantumNous/new-api#5856、#6539 的思路自行实现，未移植其代码；仅单层、无多级/团队计酬；CI-only，本地未运行测试）——比例解析链为「单人覆盖 → 推荐官档位 → 用户组覆盖 → 全局默认」（`ResolveCommissionRatePercent`），`referral_commissions` 新增 `rate_source` 记录每笔佣金来源；新增 `referral_agents` 表与可选 `agent_tiers` 档位目录（≤50 档、比例 0–100、id 唯一，`ValidateReferralOption` 校验，未知/删除档位自动回退）；管理员接口 `GET /api/user/referral/agents`、`PUT/DELETE /api/user/:id/referral-agent`（`AdminAuth` + `CriticalRateLimit` + 访问令牌规则，审计 `user.referral_agent`/`user.referral_agent_clear`）与只读 `GET /api/user/self/referral-agent`（自述资料把风控三态清零并重算可支付总额，不泄漏决策）；专属页 `/referral` 展示自身档位/比例来源/邀请明细，管理员可编辑档位与标记，钱包页新增入口；测试 `TestReferralCommissionAgentTiers`（SQLite/MySQL/PostgreSQL 真库矩阵）、`TestReferralCommissionOptionValidation` 扩展、`TestReferralAgentAdminEndpoints`（CI 在 MySQL/PostgreSQL 运行）与前端 `referral-agent.test.ts`/`referral-agent-tiers-card.test.tsx`/`referral-agents-card.test.tsx`/`referral-program.test.tsx`；补 42 个新键的七语言翻译（`i18n:sync` missingCount=0、extrasCount=0，untranslatedCount 保持 zh 3/ja 4/ru 5）并登记 4 个动态键；无新依赖。 |
 | 2026-10-19 | 计划：新增第 14 节「Lobe 对齐能力包」——游乐场全量盘点（main @ `f1dff7b96`）对照 lobehub/lobehub 官方 README 的差距分析；用户确认补齐方向（体验补齐包/记忆/RAG/工具执行+MCP/预设市场）并确认**后端计算边界约束**（LLM/embedding 一律经 Relay 计费、分块在前端、向量检索只做余弦点积、外部工具为 API 适配器且 tool loop 由前端驱动、不做代码运行沙箱与内嵌进程）；新增 LB-01..LB-11 十一个 Step（联网搜索、置顶/归档/标签、自动命名、消息级操作、只读分享、记忆、知识库×2、工具执行端、MCP 代理、预设市场），细化 14.3 各 Step 范围与完成标准（自动命名/消息级操作/工具循环为纯前端零后端新增）与建议实施顺序；14.4 五项决策当日确认：LB-02 纳入标签、LB-01 搜索按次计费（固定单价经钱包 hold/settle，上游自带搜索随上游 usage 计费）、LB-05 分享附件只显示占位、LB-06 记忆抽取默认关、LB-10 MCP 管理员全局清单；同日追加 **LB-12** 对话体验小项包（继续生成/回复自动朗读/新会话默认配置/会话导入，纯前端，放 P0 批次），并确认不做话题二级结构与消息点赞/点踩；同日追加 **LB-13** 新用户引导 Step（欢迎卡+空态入口+无模型提示+driver.js 步进 tour，优先级 P1 收尾，2026-10-19 用户确认）与 **LB-14** 对话/创作分层 Step（创作域四入口全部撤出对话归画布：生成媒体迁画布编辑器、制品浏览器迁画布、素材库迁画布、顶栏清空只留用量入口，纯前端，2026-10-19 用户确认，LB-13 依赖其定盘布局）；Phase 7 分享项标注 LB-05 轻量落地；本日仅规划未实施。 |
 | 2026-10-19 | 新增第 16 节「Playground 第二轮」（编排器侧计划，原文编号第 14 节，合并时顺延）：PG2-01…PG2-18 共 18 步纳入计划，并固化日志请求体留存、批量/对比成本、渠道可见粒度、费用口径 4 项决策。 |
+| 2026-10-19 | 计划：新增第 17 节——上游 issue 按日期从近到远扫描（2026-05→10 月约 1200 条标题层 + 高赞深读）精选 GI-01..GI-06 六个吸收包与 MS-01 模型知识库（独立策展数据仓库 + 网关每日拉取 + 模型广场徽标展示，外部数据仅参考不碰计费/路由）；列 P2 backlog（IdP/团队/日志分区/Batch API/files+vector stores/智能路由/桌面授权码/主题）与 fork 排查项（tiered_expr 全量读 body、流式全缓冲）；修正撤回 #5209 吸收建议（上游已做协议转换矩阵）。 |
+| 2026-10-19 | 落地：MS-01 数据仓库建成并推送 https://github.com/shirosoralumie648/newapi-model-kb ——models.json（52 模型/19 开源权重，AA Intelligence Index v4.3.2 2026-10 快照锚定）、schema.json、README（档位划线与维护流程）、LICENSE（CC BY 4.0 + AA attribution）、scripts/fetch-aa-draft.py（AA 免费档半自动草稿）；第 17 节同步回填仓库地址。 |
+| 2026-10-19 | 计划：MS-01 schema 升级 v2——新增六维能力指数（财务会计/战略运营/法律/医疗健康/工程/经济，模型详情页雷达图，缺测维度 null 不画，与智力指数分开版本化）+ 编码/Agent 指数 + 首字延迟 TTFT + 缓存命中/写入与每百万 token 参考价；以上均为 AA 免费档字段（OpenAPI 核实），数据待 AA 免费 key 首次拉取填充。 |
 | 2026-10-19 | 计划：新增第 15 节「画布创作域补齐」——对 `web/src/features/canvas/` 源码核实（13 种节点、连线/工具/工作流既有，内容级撤销/对齐吸附/导出 PNG/seed/batch/渠道能力揭示/模板/组织查找全部缺失）并对照 ComfyUI/Krea/Miro 同级差距；新增 CV-06..CV-13 八个 Step（编辑器手感、生成参数与变体、渠道条件工具、**图片工作台（P0，项目模式 mode 列复用单文档，zero 新表）**、视频工作台（P1，前端抽帧进 i2v）、画布模板、画布只读分享、组织与查找）；用户确认画布需要单独的图片/视频工作台且功能严重不足需补齐；批次一 P0 = CV-06→07→08→09，批次二 P1 = 10/11/12/13 并行；LB-13 画布部分步序待 CV-09/10 后编写；本日仅规划未实施。 |
 | 2026-10-19 | LB-12：对话体验小项包（继续生成/回复自动朗读/新会话默认配置/会话导入；CI-only，本地未运行测试）——流式解析与用户停止记录版本级 `finishReason`（`length`/`interrupted`，消息 JSON 字段，服务端校验 ≤64 字节，无表结构变更），截断回复的操作区新增「Continue generation」：优先 assistant prefill，渠道拒绝时自动追加一条 user 继续指令重试，新版本从截断文本起点补全为完整回答并保留截断分支；账号默认 + 会话覆盖的自动朗读偏好，回复完成后经既有 `/pg/audio/speech` 朗读，AbortController/序号/会话守卫屏蔽迟到响应且不阻塞输入；按账号记住最近模型/参数/系统提示词作为新会话起点；解析既有 JSON export 反向重建会话，同账号附件经受控内容接口取回并经普通上传链路重建，跨账号附件以占位标注，数量/字节/附件配额沿用服务端原链路，失败删除半成品会话；11 个新键七语言（`i18n:sync` missingCount=0、extrasCount=0，untranslated 基线 zh 3/ja 4/ru 5）；新增/扩展 `message-continuation.test.ts`、`use-chat-handler.test.tsx`、`use-auto-read-aloud.test.ts`、`playground-auto-read-control.test.tsx`、`playground-preferences.test.ts`、`import.test.ts`、`use-playground-state.test.tsx`、`playground-session-list.test.tsx`、`message-actions.test.tsx`、`use-stream-request.test.ts` 与后端 `TestPlaygroundMessageVersionBranches`/`TestPlaygroundRejectsInvalidSnapshotsWithoutReplacingHistory`；无新依赖、无数据库 schema/路由变更；本地未运行测试/typecheck/lint/build（CI-only）。 |
+| 2026-10-19 | LB-14：对话/创作分层（CI-only，本地未运行测试）——Playground 顶栏撤出 Generate/Canvases/Artifacts/Library 四个常驻入口与 inspectorView/artifactsDisabled 机关，仅保留账号用量入口、移动端会话抽屉与同步状态徽标（`playground-workspace.tsx` 收窄为预设/回收站两个会话域视图，`workspace-layout.test.tsx` 重写）；生成媒体整体迁入画布：`playground-generation-panel`/`playground-task-list` 迁为 `canvas-generation-panel`/`canvas-task-list` 并成为画布 Inspector `generate` 视图，消息动作「Generate image/Generate video」经 `CanvasGenerationSearch` 深链（prompt/session/message/attachment）在画布落成 task 节点 + 参考图 attachment 连边图（`canvasGenerationPrefillGraph` + `useCanvasEditor.addGraph`/`selectNode`，画布无项目时自动建项目，prefill 消费后 replace 清参）；制品浏览器迁入画布：`playground-artifact-panel`/`sandboxed-artifact-preview` 迁为 `canvas-artifact-panel`/`sandboxed-artifact-preview`，新增 `canvas-artifact-browser`（按会话选择 + `usePlaygroundArtifacts` 版本管理/沙箱预览/下载导出），聊天 Create artifact 后直接打开该画布浏览器，消息流顶部以 `PlaygroundArtifactLinks` 轻量卡保留「打开画布」入口（`playground-artifact-links.test.tsx`）；素材库迁入画布：asset 组件迁为 `canvas-asset-library`/`canvas-asset-card`/`canvas-asset-preview-dialog` 并成为画布 Inspector `library` 视图（生成结果/任务列表复用），卡片「Send to chat」在画布隐藏，对话 composer 附件层新增「Upload files」/「My assets」双页签 `PlaygroundAssetPicker` 保留素材进对话轻路径；画布 Inspector 视图扩为 details/assistant/generate/library/artifacts（`CanvasInspectorViewToggle` 与工具栏 4 个开关），画布节点「Open artifact」改为画布内打开；旧 `/playground?artifact=` 深链重定向到画布，`/playground/canvas` 路由与 `?project` 深链不变（全局侧栏 Canvas 入口沿用）；删除对话侧 `playground-canvas-panel`；新增/迁移测试 `canvas-inspector-view-toggle.test.tsx`（5 视图）、`canvas-navigation.test.ts`（prefill/graph）、`use-canvas-editor.test.ts`（addGraph/selectNode）、`message-actions.test.tsx`（生成跳转）、`playground-asset-picker.test.tsx`、`canvas-toolbar.test.tsx`/`canvas-node-inspector.test.tsx` 适配，E2E 三处适配新入口；7 语言新增 9 键（`i18n:sync` missingCount=0、extrasCount=0，untranslated 基线 zh 3/ja 4/ru 5）；无新依赖、无后端/schema 改动。 |

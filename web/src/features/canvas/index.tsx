@@ -17,8 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useNavigate } from '@tanstack/react-router'
-import { History, Menu, PanelLeft } from 'lucide-react'
-import { useCallback, useState, type ReactNode } from 'react'
+import { BookOpen, History, Menu, PanelLeft } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -38,6 +38,7 @@ import { getServerMessage } from '@/lib/server-error-message'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { CanvasEditor } from './components/canvas-editor'
+import { CanvasKnowledgeBaseSheet } from './components/canvas-knowledge-base-sheet'
 import { CanvasProjectList } from './components/canvas-project-list'
 import { CanvasSnapshotHistory } from './components/canvas-snapshot-history'
 import { CANVAS_DEFAULT_TITLE } from './constants'
@@ -45,13 +46,23 @@ import {
   useCanvasProject,
   type CanvasSaveStatus,
 } from './hooks/use-canvas-project'
-import { canvasSourceSearch } from './lib/canvas-navigation'
+import {
+  canvasSourceSearch,
+  type CanvasArtifactTarget,
+  type CanvasGenerationPrefill,
+} from './lib/canvas-navigation'
 import type { CanvasSourceTarget } from './lib/canvas-navigation'
 import type { CanvasServerDocument } from './types'
 
 interface CanvasWorkspaceProps {
   /** Project to open on first load; overrides the last-used selection. */
   initialProjectId?: string
+  /** Task node a conversation message action asked to prefill. */
+  generationPrefill?: CanvasGenerationPrefill | null
+  /** Saved artifact a conversation creation or canvas link opens. */
+  artifactTarget?: CanvasArtifactTarget | null
+  /** Clears the one-shot generation deep link after the editor applied it. */
+  onGenerationPrefillApplied?: () => void
 }
 
 export function CanvasWorkspace(props: CanvasWorkspaceProps) {
@@ -60,6 +71,9 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps) {
     <CanvasWorkspaceContent
       key={userId ?? 'signed-out'}
       initialProjectId={props.initialProjectId}
+      generationPrefill={props.generationPrefill}
+      artifactTarget={props.artifactTarget}
+      onGenerationPrefillApplied={props.onGenerationPrefillApplied}
     />
   )
 }
@@ -81,7 +95,10 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
   const controller = useCanvasProject(userId, props.initialProjectId)
   const [listOpen, setListOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [knowledgeOpen, setKnowledgeOpen] = useState(false)
   const [epoch, setEpoch] = useState(0)
+  const createdForPrefill = useRef(false)
+  const { project, status, error, dirty, conflict } = controller
 
   const reportError = useCallback(
     (error: unknown) => {
@@ -199,7 +216,29 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
     [navigate]
   )
 
-  const { project, status, error, dirty, conflict } = controller
+  const handleOpenConversation = useCallback(
+    (sessionId: string) => {
+      void navigate({ to: '/playground', search: { session: sessionId } })
+    },
+    [navigate]
+  )
+
+  // A generation prefill needs a board to land on. When the account has no
+  // canvas yet, create one before the editor mounts so the task node is kept.
+  const prefill = props.generationPrefill
+  useEffect(() => {
+    if (
+      !prefill ||
+      project ||
+      status !== 'ready' ||
+      createdForPrefill.current
+    ) {
+      return
+    }
+    createdForPrefill.current = true
+    void handleCreate()
+  }, [handleCreate, prefill, project, status])
+
   const projectList = (
     <CanvasProjectList
       activeProjectId={project?.id ?? null}
@@ -231,12 +270,17 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
     body = (
       <CanvasEditor
         key={`${project.id}:${epoch}`}
+        artifactTarget={props.artifactTarget}
         disabled={status === 'loading'}
+        generationPrefill={props.generationPrefill}
         onBeforeExportArchive={controller.flushNow}
         onChange={handleDocumentChange}
+        onGenerationPrefillApplied={props.onGenerationPrefillApplied}
         onImportArchive={handleImportArchive}
+        onOpenConversation={handleOpenConversation}
         onOpenSource={handleOpenSource}
         project={project}
+        userId={userId}
       />
     )
   } else {
@@ -294,6 +338,15 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
             <span className='truncate text-sm font-medium'>{displayTitle}</span>
           </div>
           <div className='flex shrink-0 items-center gap-1'>
+            <Button
+              aria-label={t('Knowledge bases')}
+              onClick={() => setKnowledgeOpen(true)}
+              size='icon-sm'
+              type='button'
+              variant='ghost'
+            >
+              <BookOpen aria-hidden='true' />
+            </Button>
             {project && (
               <Button
                 aria-label={t('Canvas history')}
@@ -346,6 +399,11 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
           projectId={project.id}
         />
       )}
+      <CanvasKnowledgeBaseSheet
+        onOpenChange={setKnowledgeOpen}
+        open={knowledgeOpen}
+        userId={userId}
+      />
     </div>
   )
 }

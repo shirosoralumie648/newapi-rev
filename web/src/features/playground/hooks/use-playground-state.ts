@@ -403,6 +403,8 @@ export function usePlaygroundState() {
       config: PlaygroundConfig
       parameterEnabled: ParameterEnabled
       systemPrompt: string
+      openingMessage: string
+      suggestedQuestions: string[]
     }) => {
       const currentActiveSessionId = latestActiveSessionIdRef.current
       if (!currentActiveSessionId) return
@@ -426,6 +428,8 @@ export function usePlaygroundState() {
       config?: PlaygroundConfig
       parameterEnabled?: ParameterEnabled
       systemPrompt?: string
+      openingMessage?: string
+      suggestedQuestions?: string[]
     }) => {
       const currentSession = latestSessionsRef.current.find(
         (session) => session.id === latestActiveSessionIdRef.current
@@ -440,7 +444,11 @@ export function usePlaygroundState() {
           defaults?.parameterEnabled ??
           currentSession?.parameterEnabled ??
           DEFAULT_PARAMETER_ENABLED,
-        overrides?.systemPrompt ?? defaults?.systemPrompt ?? ''
+        overrides?.systemPrompt ?? defaults?.systemPrompt ?? '',
+        DEFAULT_CONTEXT_SETTINGS,
+        null,
+        overrides?.openingMessage ?? '',
+        overrides?.suggestedQuestions ?? []
       )
       const nextSessions = [
         { ...nextSession, syncPending: true },
@@ -545,6 +553,8 @@ export function usePlaygroundState() {
     parameterEnabled:
       activeSession?.parameterEnabled ?? DEFAULT_PARAMETER_ENABLED,
     systemPrompt: activeSession?.systemPrompt ?? '',
+    openingMessage: activeSession?.openingMessage ?? '',
+    suggestedQuestions: activeSession?.suggestedQuestions ?? [],
     context: activeSession?.context ?? DEFAULT_CONTEXT_SETTINGS,
     contextSummary: activeSession?.contextSummary ?? null,
     messages: activeSession?.messages ?? [],

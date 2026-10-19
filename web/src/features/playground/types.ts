@@ -196,6 +196,13 @@ export interface PlaygroundSession {
   parameterEnabled: ParameterEnabled
   /** Conversation-level instruction injected as the first `system` message. */
   systemPrompt: string
+  /**
+   * Display-only greeting from the preset that started this conversation. It is
+   * shown on the empty state and never sent to the model.
+   */
+  openingMessage: string
+  /** Starter questions shown on the empty state; never sent to the model. */
+  suggestedQuestions: string[]
   /** Context limits, auto-summary flag and summary model of the conversation. */
   context: PlaygroundContextSettings
   /** Persisted compression node, or null when the full history is sent. */
@@ -204,6 +211,8 @@ export interface PlaygroundSession {
   server?: { id: string; revision: number; messageRevision: number }
   syncPending?: boolean
 }
+
+export type PlaygroundPresetVisibility = 'private' | 'global'
 
 /**
  * A reusable assistant definition owned by the account: a name and avatar, the
@@ -218,6 +227,12 @@ export interface AssistantPreset {
   config: PlaygroundConfig
   parameterEnabled: ParameterEnabled
   systemPrompt: string
+  /** Private presets belong to one account; global presets come from the market. */
+  visibility: PlaygroundPresetVisibility
+  /** Display-only greeting copied into a new conversation. */
+  openingMessage: string
+  /** Starter questions copied into a new conversation and shown before its first message. */
+  suggestedQuestions: string[]
   createdAt: number
   updatedAt: number
 }
@@ -266,6 +281,14 @@ export type PlaygroundExportFormat = 'markdown' | 'json'
 /** One conversation export file: body, media type and suggested filename. */
 export interface PlaygroundSessionExport {
   format: PlaygroundExportFormat
+  filename: string
+  contentType: string
+  content: string
+}
+
+/** One preset export file: the JSON import document and its download metadata. */
+export interface PlaygroundPresetExport {
+  format: 'json'
   filename: string
   contentType: string
   content: string

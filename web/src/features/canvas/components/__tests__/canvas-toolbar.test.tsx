@@ -25,7 +25,7 @@ import { CanvasToolbar } from '../canvas-toolbar'
 
 function toolbarProps(runPhase: CanvasWorkflowRunPhase = 'idle') {
   return {
-    assistantOpen: false,
+    inspectorView: 'details' as const,
     canCopy: false,
     canExportSelection: false,
     canGroup: false,
@@ -54,7 +54,7 @@ function toolbarProps(runPhase: CanvasWorkflowRunPhase = 'idle') {
     onRedo: vi.fn(),
     onRunWorkflow: vi.fn(),
     onSelectAll: vi.fn(),
-    onToggleAssistant: vi.fn(),
+    onToggleInspectorView: vi.fn(),
     onUndo: vi.fn(),
     onUngroupSelection: vi.fn(),
     runPhase,
@@ -149,9 +149,9 @@ test('toggles the assistant view and reports its pressed state', async () => {
   expect(toggle).toHaveAttribute('aria-pressed', 'false')
 
   await user.click(toggle)
-  expect(props.onToggleAssistant).toHaveBeenCalledTimes(1)
+  expect(props.onToggleInspectorView).toHaveBeenCalledWith('assistant')
 
-  rerender(<CanvasToolbar {...props} assistantOpen />)
+  rerender(<CanvasToolbar {...props} inspectorView='assistant' />)
   expect(screen.getByRole('button', { name: 'Assistant' })).toHaveAttribute(
     'aria-pressed',
     'true'

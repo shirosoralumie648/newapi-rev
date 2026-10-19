@@ -85,25 +85,31 @@ const (
 var playgroundReasoningEffortValues = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
 
 type playgroundSessionRequest struct {
-	Title            *string                  `json:"title"`
-	ClientID         string                   `json:"client_id"`
-	Config           map[string]any           `json:"config"`
-	ParameterEnabled map[string]bool          `json:"parameter_enabled"`
-	SystemPrompt     *string                  `json:"system_prompt"`
-	Context          json.RawMessage          `json:"context"`
-	ContextSummary   json.RawMessage          `json:"context_summary"`
-	Revision         *int64                   `json:"revision"`
-	Messages         []playgroundMessageInput `json:"messages"`
+	Title            *string         `json:"title"`
+	ClientID         string          `json:"client_id"`
+	Config           map[string]any  `json:"config"`
+	ParameterEnabled map[string]bool `json:"parameter_enabled"`
+	SystemPrompt     *string         `json:"system_prompt"`
+	OpeningMessage   *string         `json:"opening_message"`
+	// SuggestedQuestions is a pointer so an update can distinguish "keep the
+	// stored questions" from an explicit empty list that clears them.
+	SuggestedQuestions *[]string                `json:"suggested_questions"`
+	Context            json.RawMessage          `json:"context"`
+	ContextSummary     json.RawMessage          `json:"context_summary"`
+	Revision           *int64                   `json:"revision"`
+	Messages           []playgroundMessageInput `json:"messages"`
 }
 
 type playgroundSessionResponse struct {
-	Created          bool            `json:"created,omitempty"`
-	ID               string          `json:"id"`
-	ClientID         *string         `json:"client_id,omitempty"`
-	Title            string          `json:"title"`
-	Config           map[string]any  `json:"config"`
-	ParameterEnabled map[string]bool `json:"parameter_enabled"`
-	SystemPrompt     string          `json:"system_prompt"`
+	Created            bool            `json:"created,omitempty"`
+	ID                 string          `json:"id"`
+	ClientID           *string         `json:"client_id,omitempty"`
+	Title              string          `json:"title"`
+	Config             map[string]any  `json:"config"`
+	ParameterEnabled   map[string]bool `json:"parameter_enabled"`
+	SystemPrompt       string          `json:"system_prompt"`
+	OpeningMessage     string          `json:"opening_message"`
+	SuggestedQuestions []string        `json:"suggested_questions"`
 	// Context is the conversation's context management settings; an absent or
 	// legacy NULL column reads back as an empty object and the client picks
 	// its defaults. ContextSummary is the persisted compression node or null.
@@ -385,13 +391,22 @@ func decodePlaygroundRequest(c *gin.Context, target any, maxBytes int64) bool {
 
 func playgroundDecodeSession(session *model.PlaygroundSession) (playgroundSessionResponse, error) {
 	response := playgroundSessionResponse{ID: session.ID, ClientID: session.ClientID, Created: session.CreatedNow, Title: session.Title, Revision: session.Revision, MessageRevision: session.MessageRevision,
-		SystemPrompt: session.SystemPrompt, Context: map[string]any{}, ContextSummary: json.RawMessage("null"),
+		SystemPrompt: session.SystemPrompt, OpeningMessage: string(session.OpeningMessage), SuggestedQuestions: []string{},
+		Context: map[string]any{}, ContextSummary: json.RawMessage("null"),
 		CreatedAt: session.CreatedAt, UpdatedAt: session.UpdatedAt, Config: map[string]any{}, ParameterEnabled: map[string]bool{}}
 	if err := common.Unmarshal([]byte(session.Config), &response.Config); err != nil {
 		return response, err
 	}
 	if err := common.Unmarshal([]byte(session.ParameterEnabled), &response.ParameterEnabled); err != nil {
 		return response, err
+	}
+	if stored := strings.TrimSpace(session.SuggestedQuestions); stored != "" && stored != "null" {
+		if err := common.UnmarshalJsonStr(stored, &response.SuggestedQuestions); err != nil {
+			return response, err
+		}
+		if response.SuggestedQuestions == nil {
+			response.SuggestedQuestions = []string{}
+		}
 	}
 	if stored := strings.TrimSpace(session.ContextConfig); stored != "" && stored != "null" {
 		if err := common.UnmarshalJsonStr(stored, &response.Context); err != nil {
@@ -523,6 +538,23 @@ func encodePlaygroundSettings(request playgroundSessionRequest, systemPromptMaxB
 			return nil, common.NewMessage("Invalid Playground configuration.")
 		}
 		updates["system_prompt"] = prompt
+	}
+	if request.OpeningMessage != nil {
+		message := *request.OpeningMessage
+		if len(message) > playgroundPresetOpeningMessageMaxBytes {
+			return nil, common.NewMessage("The opening message is too long.")
+		}
+		if strings.ContainsRune(message, 0) {
+			return nil, common.NewMessage("Invalid Playground configuration.")
+		}
+		updates["opening_message"] = message
+	}
+	if request.SuggestedQuestions != nil {
+		encoded, err := encodePlaygroundSuggestedQuestions(*request.SuggestedQuestions)
+		if err != nil {
+			return nil, err
+		}
+		updates["suggested_questions"] = encoded
 	}
 	if request.Context != nil {
 		encoded, err := encodePlaygroundContextSettings(request.Context)
@@ -892,6 +924,12 @@ func CreatePlaygroundSession(c *gin.Context) {
 	}
 	if contextSummary, ok := updates["context_summary"]; ok {
 		session.ContextSummary = contextSummary.(string)
+	}
+	if openingMessage, ok := updates["opening_message"]; ok {
+		session.OpeningMessage = model.LongText(openingMessage.(string))
+	}
+	if suggestedQuestions, ok := updates["suggested_questions"]; ok {
+		session.SuggestedQuestions = suggestedQuestions.(string)
 	}
 	if request.ClientID != "" {
 		session.ClientID = &request.ClientID

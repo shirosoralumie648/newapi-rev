@@ -45,12 +45,14 @@ import {
   isMessageTruncated,
   isParallelMessage,
 } from '../../lib'
+import type { PlaygroundArtifactSummary } from '../../artifact-api'
 import type {
   Message as MessageType,
   PlaygroundContextSummary,
   PlaygroundMessageCost,
   PlaygroundMessageLayoutMode,
 } from '../../types'
+import { PlaygroundArtifactLinks } from './playground-artifact-links'
 import { MessageActions } from '../message/message-actions'
 import { MessageErrorActions } from '../message/message-error-actions'
 import { PlaygroundMessageContent } from '../message/playground-message-content'
@@ -75,6 +77,7 @@ interface PlaygroundChatProps {
   onSelectVersion?: (message: MessageType, versionIndex: number) => void
   onCreateArtifact?: (message: MessageType) => void
   onSendToCanvas?: (message: MessageType) => void
+  onGenerateMedia?: (message: MessageType, kind: 'image' | 'video') => void
   onSelectPrompt?: (prompt: string) => void
   onProvideToolResult?: (
     message: MessageType,
@@ -94,8 +97,15 @@ interface PlaygroundChatProps {
   messageLayoutMode?: PlaygroundMessageLayoutMode
   /** Compression node that replaces older messages in the next request. */
   contextSummary?: PlaygroundContextSummary | null
+  /** Display-only greeting of a preset-started conversation. */
+  openingMessage?: string
+  /** Starter questions of a preset-started conversation. */
+  suggestedQuestions?: string[]
   /** Undo the compression: the stored messages stay, the node is removed. */
   onRemoveContextSummary?: () => void
+  /** Saved artifacts of the conversation, shown as lightweight canvas links. */
+  artifacts?: PlaygroundArtifactSummary[]
+  onOpenArtifact?: (artifact: PlaygroundArtifactSummary) => void
 }
 
 export function PlaygroundChat({
@@ -110,6 +120,7 @@ export function PlaygroundChat({
   onSelectVersion,
   onCreateArtifact,
   onSendToCanvas,
+  onGenerateMedia,
   onSelectPrompt,
   onProvideToolResult,
   onDenyToolCall,
@@ -123,7 +134,11 @@ export function PlaygroundChat({
   onSaveEditAndSubmit,
   messageLayoutMode = 'alternating',
   contextSummary,
+  openingMessage,
+  suggestedQuestions,
   onRemoveContextSummary,
+  artifacts,
+  onOpenArtifact,
 }: PlaygroundChatProps) {
   const { t } = useTranslation()
   const [editText, setEditText] = useState('')
@@ -188,6 +203,7 @@ export function PlaygroundChat({
         onDelete={onDeleteMessage}
         onCreateArtifact={onCreateArtifact}
         onSendToCanvas={onSendToCanvas}
+        onGenerateMedia={onGenerateMedia}
         isSourceVisible={isSourceVisible}
         isGenerating={isGenerating}
         alwaysVisible={alwaysShowActions}
@@ -287,7 +303,12 @@ export function PlaygroundChat({
 
   if (visibleMessages.length === 0 && onSelectPrompt) {
     chatContent = [
-      <PlaygroundEmptyState key='empty' onSelectPrompt={onSelectPrompt} />,
+      <PlaygroundEmptyState
+        key='empty'
+        onSelectPrompt={onSelectPrompt}
+        openingMessage={openingMessage}
+        suggestedQuestions={suggestedQuestions}
+      />,
     ]
   }
 
@@ -328,7 +349,15 @@ export function PlaygroundChat({
     <Conversation>
       {/* Remove outer padding; apply padding to inner centered container to align with input */}
       <ConversationContent className='p-0'>
-        <div className='mx-auto w-full max-w-4xl px-4 py-4'>{chatContent}</div>
+        <div className='mx-auto w-full max-w-4xl px-4 py-4'>
+          {artifacts && onOpenArtifact ? (
+            <PlaygroundArtifactLinks
+              artifacts={artifacts}
+              onOpenArtifact={onOpenArtifact}
+            />
+          ) : null}
+          {chatContent}
+        </div>
       </ConversationContent>
       <ConversationScrollButton />
     </Conversation>

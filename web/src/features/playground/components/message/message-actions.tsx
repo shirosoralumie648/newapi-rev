@@ -23,10 +23,12 @@ import {
   FileCode2,
   FileText,
   Frame,
+  Image as ImageIcon,
   MoreHorizontal,
   Play,
   RefreshCw,
   Trash2,
+  Video,
   Volume2,
   type LucideIcon,
 } from 'lucide-react'
@@ -66,6 +68,8 @@ interface MessageActionsProps {
   onDelete?: (message: Message) => void
   onCreateArtifact?: (message: Message) => void
   onSendToCanvas?: (message: Message) => void
+  /** Hands the message prompt and reference images to the canvas generation. */
+  onGenerateMedia?: (message: Message, kind: 'image' | 'video') => void
   isSourceVisible?: boolean
   isGenerating?: boolean
   alwaysVisible?: boolean
@@ -93,6 +97,7 @@ export function MessageActions({
   onDelete,
   onCreateArtifact,
   onSendToCanvas,
+  onGenerateMedia,
   isSourceVisible = false,
   isGenerating = false,
   alwaysVisible = false,
@@ -169,6 +174,26 @@ export function MessageActions({
       icon: Frame,
       label: MESSAGE_ACTION_LABELS.SEND_TO_CANVAS,
       onClick: () => onSendToCanvas(message),
+    })
+  }
+
+  if (
+    hasContent &&
+    !isLoading &&
+    message.status !== 'error' &&
+    onGenerateMedia
+  ) {
+    actions.push({
+      disabled: isGenerating,
+      icon: ImageIcon,
+      label: MESSAGE_ACTION_LABELS.GENERATE_IMAGE,
+      onClick: guardAction(() => onGenerateMedia(message, 'image')),
+    })
+    actions.push({
+      disabled: isGenerating,
+      icon: Video,
+      label: MESSAGE_ACTION_LABELS.GENERATE_VIDEO,
+      onClick: guardAction(() => onGenerateMedia(message, 'video')),
     })
   }
 
