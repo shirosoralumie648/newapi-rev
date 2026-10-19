@@ -141,6 +141,8 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/playground/canvases/:canvasId":                                     accessTokenSessionRule,
 	"PATCH /api/playground/canvases/:canvasId":                                   accessTokenSessionRule,
 	"DELETE /api/playground/canvases/:canvasId":                                  accessTokenSessionRule,
+	"POST /api/playground/canvases/:canvasId/share":                              accessTokenSessionRule,
+	"DELETE /api/playground/canvases/:canvasId/share":                            accessTokenSessionRule,
 	"POST /api/playground/canvases/:canvasId/restore":                            accessTokenSessionRule,
 	"GET /api/playground/canvases/:canvasId/snapshots":                           accessTokenSessionRule,
 	"POST /api/playground/canvases/:canvasId/snapshots/:snapshotId/restore":      accessTokenSessionRule,

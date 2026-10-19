@@ -32,15 +32,18 @@ import (
 
 var ErrPlaygroundShareNotFound = errors.New("Shared conversation not found.")
 
-// PlaygroundSessionShare is one revocable public link to a conversation. The
-// plaintext token is returned to its owner exactly once; only its SHA-256 hash
-// is stored, so a database read cannot reconstruct a working link. A row is
-// looked up by hash equality, which keeps a random 128-bit token
-// non-enumerable while avoiding a timing comparison against stored secrets.
+// PlaygroundSessionShare is one revocable public link to a conversation or a
+// canvas document. The plaintext token is returned to its owner exactly once;
+// only its SHA-256 hash is stored, so a database read cannot reconstruct a
+// working link. A row is looked up by hash equality, which keeps a random
+// 128-bit token non-enumerable while avoiding a timing comparison against
+// stored secrets. Conversation links set SessionID; canvas links leave it
+// empty and set CanvasID, so a link can never resolve as the other kind.
 type PlaygroundSessionShare struct {
 	ID        int64  `json:"-" gorm:"primaryKey"`
 	SessionID string `json:"-" gorm:"size:128;not null;index:idx_playground_session_share_owner,priority:1"`
-	UserID    int    `json:"-" gorm:"not null;index:idx_playground_session_share_owner,priority:2"`
+	CanvasID  string `json:"-" gorm:"size:32;not null;default:'';index:idx_playground_canvas_share_owner,priority:1"`
+	UserID    int    `json:"-" gorm:"not null;index:idx_playground_session_share_owner,priority:2;index:idx_playground_canvas_share_owner,priority:2"`
 	TokenHash string `json:"-" gorm:"size:64;not null;uniqueIndex"`
 	// ExpiresAt is the Unix second the link stops resolving; zero means no
 	// expiry. RevokedAt is set when the owner revokes the link or the
@@ -68,6 +71,27 @@ func playgroundShareTokenHash(token string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// newPlaygroundShareRecord mints the secret and the row shared by both link
+// kinds. The plaintext token is returned to the caller and never stored.
+func newPlaygroundShareRecord(userID int, sessionID, canvasID string, expiresInDays int) (*PlaygroundSessionShare, string, error) {
+	token, err := generatePlaygroundShareToken()
+	if err != nil {
+		return nil, "", err
+	}
+	now := common.GetTimestamp()
+	share := PlaygroundSessionShare{
+		SessionID: sessionID,
+		CanvasID:  canvasID,
+		UserID:    userID,
+		TokenHash: playgroundShareTokenHash(token),
+		CreatedAt: now,
+	}
+	if expiresInDays > 0 {
+		share.ExpiresAt = now + int64(expiresInDays)*24*60*60
+	}
+	return &share, token, nil
+}
+
 // CreatePlaygroundSessionShare creates a new link to one active conversation
 // of the account. Creating a link revokes every older active link of the same
 // conversation in the same transaction: the plaintext of an old link is not
@@ -77,20 +101,11 @@ func CreatePlaygroundSessionShare(userID int, sessionID string, expiresInDays in
 	if userID <= 0 || expiresInDays < 0 {
 		return nil, "", ErrPlaygroundSessionNotFound
 	}
-	token, err := generatePlaygroundShareToken()
+	share, token, err := newPlaygroundShareRecord(userID, sessionID, "", expiresInDays)
 	if err != nil {
 		return nil, "", err
 	}
-	now := common.GetTimestamp()
-	share := PlaygroundSessionShare{
-		SessionID: sessionID,
-		UserID:    userID,
-		TokenHash: playgroundShareTokenHash(token),
-		CreatedAt: now,
-	}
-	if expiresInDays > 0 {
-		share.ExpiresAt = now + int64(expiresInDays)*24*60*60
-	}
+	now := share.CreatedAt
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		// Locking the conversation serializes create against revoke and the
 		// trash transition, and the owner filter rejects a foreign id before a
@@ -106,12 +121,45 @@ func CreatePlaygroundSessionShare(userID int, sessionID string, expiresInDays in
 			Update("revoked_at", now).Error; err != nil {
 			return err
 		}
-		return tx.Create(&share).Error
+		return tx.Create(share).Error
 	})
 	if err != nil {
 		return nil, "", err
 	}
-	return &share, token, nil
+	return share, token, nil
+}
+
+// CreatePlaygroundCanvasShare creates a new link to one active canvas of the
+// account, revoking every older active link of the same canvas in the same
+// transaction. Like a conversation link, the plaintext token is displayed once
+// and cannot be recovered later.
+func CreatePlaygroundCanvasShare(userID int, canvasID string, expiresInDays int) (*PlaygroundSessionShare, string, error) {
+	if userID <= 0 || expiresInDays < 0 {
+		return nil, "", ErrPlaygroundCanvasNotFound
+	}
+	share, token, err := newPlaygroundShareRecord(userID, "", canvasID, expiresInDays)
+	if err != nil {
+		return nil, "", err
+	}
+	now := share.CreatedAt
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		// Locking the canvas serializes create against revoke and the trash
+		// transition, and the owner filter rejects a foreign id before a token
+		// is written.
+		if err := lockPlaygroundCanvasProject(tx, userID, canvasID); err != nil {
+			return err
+		}
+		if err := tx.Model(&PlaygroundSessionShare{}).
+			Where("user_id = ? AND canvas_id = ? AND revoked_at = 0", userID, canvasID).
+			Update("revoked_at", now).Error; err != nil {
+			return err
+		}
+		return tx.Create(share).Error
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	return share, token, nil
 }
 
 // RevokePlaygroundSessionShare revokes every active link of one conversation.
@@ -137,11 +185,46 @@ func RevokePlaygroundSessionShare(userID int, sessionID string) error {
 	})
 }
 
-// LoadPlaygroundSharedSession resolves a plaintext token to the stored
-// conversation snapshot. A missing, revoked, expired, trashed or otherwise
-// unpublished link all produce ErrPlaygroundShareNotFound, so an anonymous
-// caller cannot distinguish a revoked link from one that never existed.
-func LoadPlaygroundSharedSession(token string) (*PlaygroundSessionExport, error) {
+// RevokePlaygroundCanvasShare revokes every active link of one canvas.
+// Revocation is idempotent and also succeeds for a trashed canvas, so the
+// owner can finish cleaning up after deleting it.
+func RevokePlaygroundCanvasShare(userID int, canvasID string) error {
+	if userID <= 0 {
+		return ErrPlaygroundCanvasNotFound
+	}
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var project PlaygroundCanvasProject
+		if err := lockForUpdate(tx).Where("id = ? AND user_id = ?", canvasID, userID).First(&project).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrPlaygroundCanvasNotFound
+			}
+			return err
+		}
+		return tx.Model(&PlaygroundSessionShare{}).
+			Where("user_id = ? AND canvas_id = ? AND revoked_at = 0", userID, canvasID).
+			Update("revoked_at", common.GetTimestamp()).Error
+	})
+}
+
+// PlaygroundSharedTarget is the sanitized-resource selector of one public
+// token. Exactly one payload is set according to Kind.
+type PlaygroundSharedTarget struct {
+	Kind    string
+	Session *PlaygroundSessionExport
+	Canvas  *PlaygroundCanvasProject
+}
+
+const (
+	PlaygroundShareKindConversation = "conversation"
+	PlaygroundShareKindCanvas       = "canvas"
+)
+
+// ResolvePlaygroundSharedToken resolves a plaintext token to the stored
+// conversation or canvas snapshot. A missing, revoked, expired, trashed or
+// otherwise unpublished link all produce ErrPlaygroundShareNotFound, so an
+// anonymous caller cannot distinguish a revoked link from one that never
+// existed. A canvas link can only resolve as a canvas, and vice versa.
+func ResolvePlaygroundSharedToken(token string) (*PlaygroundSharedTarget, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {
 		return nil, ErrPlaygroundShareNotFound
@@ -158,6 +241,20 @@ func LoadPlaygroundSharedSession(token string) (*PlaygroundSessionExport, error)
 	if err != nil {
 		return nil, err
 	}
+	if share.CanvasID != "" {
+		var project PlaygroundCanvasProject
+		err = DB.Where("id = ? AND user_id = ? AND deleted_at = 0", share.CanvasID, share.UserID).First(&project).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrPlaygroundShareNotFound
+		}
+		if err != nil {
+			return nil, err
+		}
+		if err := hydratePlaygroundCanvasProject(&project); err != nil {
+			return nil, err
+		}
+		return &PlaygroundSharedTarget{Kind: PlaygroundShareKindCanvas, Canvas: &project}, nil
+	}
 	var session PlaygroundSession
 	err = DB.Where("id = ? AND user_id = ? AND deleted_at = 0", share.SessionID, share.UserID).First(&session).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -173,5 +270,21 @@ func LoadPlaygroundSharedSession(token string) (*PlaygroundSessionExport, error)
 		Find(&messages).Error; err != nil {
 		return nil, err
 	}
-	return &PlaygroundSessionExport{Session: session, Messages: messages}, nil
+	return &PlaygroundSharedTarget{
+		Kind:    PlaygroundShareKindConversation,
+		Session: &PlaygroundSessionExport{Session: session, Messages: messages},
+	}, nil
+}
+
+// LoadPlaygroundSharedSession resolves a plaintext token to the stored
+// conversation snapshot. It rejects a token that belongs to a canvas link.
+func LoadPlaygroundSharedSession(token string) (*PlaygroundSessionExport, error) {
+	target, err := ResolvePlaygroundSharedToken(token)
+	if err != nil {
+		return nil, err
+	}
+	if target.Kind != PlaygroundShareKindConversation || target.Session == nil {
+		return nil, ErrPlaygroundShareNotFound
+	}
+	return target.Session, nil
 }

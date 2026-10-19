@@ -2443,6 +2443,7 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	anonymousRead := playgroundAuthenticatedRequest(t, engine, "", http.MethodGet, "/api/playground/shared/"+shareEnvelope.Data.Token, nil)
 	require.Equal(t, 200, anonymousRead.Code, anonymousRead.Body.String())
 	assert.Contains(t, anonymousRead.Header().Get("Cache-Control"), "no-store")
+	assert.Contains(t, anonymousRead.Body.String(), `"kind":"conversation"`)
 	assert.Equal(t, "noindex, nofollow, noarchive", anonymousRead.Header().Get("X-Robots-Tag"))
 	anonymousMissing := playgroundAuthenticatedRequest(t, engine, "", http.MethodGet, "/api/playground/shared/unknown-token", nil)
 	assert.Equal(t, 404, anonymousMissing.Code)
@@ -2535,6 +2536,7 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodGet, canvasBase}, {http.MethodPost, canvasBase},
 		{http.MethodGet, canvasBase + "/missing"}, {http.MethodPatch, canvasBase + "/missing"},
 		{http.MethodDelete, canvasBase + "/missing"},
+		{http.MethodPost, canvasBase + "/missing/share"}, {http.MethodDelete, canvasBase + "/missing/share"},
 		{http.MethodPost, canvasBase + "/missing/restore"},
 		{http.MethodPost, canvasBase + "/missing/attachments"},
 		{http.MethodGet, canvasBase + "/missing/snapshots"},
@@ -2562,6 +2564,20 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	require.NotEmpty(t, canvasEnvelope.Data.ID)
 	canvasDetail := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, canvasBase+"/"+canvasEnvelope.Data.ID, nil)
 	require.Equal(t, 200, canvasDetail.Code, canvasDetail.Body.String())
+	canvasShare := playgroundAuthenticatedRequest(t, engine, token, http.MethodPost, canvasBase+"/"+canvasEnvelope.Data.ID+"/share", map[string]any{})
+	require.Equal(t, 200, canvasShare.Code, canvasShare.Body.String())
+	var canvasShareEnvelope struct {
+		Data struct{ Token string }
+	}
+	require.NoError(t, common.Unmarshal(canvasShare.Body.Bytes(), &canvasShareEnvelope))
+	require.NotEmpty(t, canvasShareEnvelope.Data.Token)
+	anonymousCanvas := playgroundAuthenticatedRequest(t, engine, "", http.MethodGet, "/api/playground/shared/"+canvasShareEnvelope.Data.Token, nil)
+	require.Equal(t, 200, anonymousCanvas.Code, anonymousCanvas.Body.String())
+	assert.Contains(t, anonymousCanvas.Body.String(), `"kind":"canvas"`)
+	assert.Contains(t, anonymousCanvas.Body.String(), `"document"`)
+	assert.NotContains(t, anonymousCanvas.Body.String(), `"ref"`)
+	require.Equal(t, 200, playgroundAuthenticatedRequest(t, engine, token, http.MethodDelete, canvasBase+"/"+canvasEnvelope.Data.ID+"/share", nil).Code)
+	assert.Equal(t, 404, playgroundAuthenticatedRequest(t, engine, "", http.MethodGet, "/api/playground/shared/"+canvasShareEnvelope.Data.Token, nil).Code)
 	require.Equal(t, 200, playgroundAuthenticatedRequest(t, engine, token, http.MethodDelete, canvasBase+"/"+canvasEnvelope.Data.ID, nil).Code)
 
 	// Assistant presets share the same session-only contract and stay

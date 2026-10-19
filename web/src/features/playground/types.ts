@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { CanvasServerDocument } from '@/features/canvas/types'
 import type { RequestTimingBreakdown } from '@/features/usage-logs/types'
 
 // Message types
@@ -384,12 +385,29 @@ export interface PlaygroundSharedMessage {
   attachments: PlaygroundSharedAttachment[]
 }
 
-/** The anonymous read contract of `/api/playground/shared/:token`. */
+/** The anonymous conversation contract of `/api/playground/shared/:token`. */
 export interface PlaygroundSharedConversation {
   title: string
   openingMessage: string
   messages: PlaygroundSharedMessage[]
 }
+
+/**
+ * The anonymous canvas contract. The document keeps layout and the previews a
+ * node shows; no reference id, provider URL, stored input/error or fetchable
+ * media URL is part of it.
+ */
+export interface PlaygroundSharedCanvas {
+  title: string
+  /** Zero when the server did not report an update time. */
+  updatedAt: number
+  document: CanvasServerDocument
+}
+
+/** One public link resolves to exactly one sanitized payload. */
+export type PlaygroundSharedTarget =
+  | { kind: 'conversation'; conversation: PlaygroundSharedConversation }
+  | { kind: 'canvas'; canvas: PlaygroundSharedCanvas }
 
 /** One conversation export file: body, media type and suggested filename. */
 export interface PlaygroundSessionExport {
