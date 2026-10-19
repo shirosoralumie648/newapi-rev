@@ -78,7 +78,23 @@ describe('media batch runner', () => {
 
   test('stops after a fatal error and skips the queued cells', async () => {
     const updates = new Map<string, string | undefined>()
+    let releaseFirst = () => {}
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    let markSkipped = () => {}
+    const skipped = new Promise<void>((resolve) => {
+      markSkipped = resolve
+    })
     const submit: CanvasGenerationSubmit = async (request) => {
+      if (request.id === 'variations-0') {
+        // Hold the first cell so the fatal error is observed while the third
+        // cell is still unclaimed; only then does the runner release it.
+        await firstGate
+        return {
+          images: [{ url: `https://cdn.example.com/${request.id}.png` }],
+        }
+      }
       if (request.id === 'variations-1') {
         throw {
           response: {
@@ -89,14 +105,21 @@ describe('media batch runner', () => {
       return { images: [{ url: `https://cdn.example.com/${request.id}.png` }] }
     }
 
-    await runGenerationBatch({
+    const run = runGenerationBatch({
       plan: planWithRequests(3),
       concurrency: 2,
       submit,
       signal: new AbortController().signal,
-      onCell: (requestId, update) =>
-        updates.set(requestId, update.status ?? updates.get(requestId)),
+      onCell: (requestId, update) => {
+        updates.set(requestId, update.status ?? updates.get(requestId))
+        if (requestId === 'variations-2' && update.status === 'skipped') {
+          markSkipped()
+        }
+      },
     })
+    await skipped
+    releaseFirst()
+    await run
 
     expect(updates.get('variations-0')).toBe('succeeded')
     expect(updates.get('variations-1')).toBe('failed')

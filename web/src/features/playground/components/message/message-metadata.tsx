@@ -50,6 +50,8 @@ type MessageMetadataProps = {
   version: MessageVersion
   /** Settled consume row of this version's request, when it is loaded. */
   cost?: PlaygroundMessageCost
+  /** Anonymous arena groups must not expose the serving channel. */
+  hideChannel?: boolean
 }
 
 function formatMessageTime(timestamp?: number): string | undefined {
@@ -123,7 +125,10 @@ export function MessageMetadata(props: MessageMetadataProps) {
     Number.isFinite(groupRatio) &&
     groupRatio !== 1
   const hasDiagnostics = Boolean(
-    props.cost?.timing || props.cost?.channelKey || cache || hasGroupRatio
+    props.cost?.timing ||
+    (!props.hideChannel && props.cost?.channelKey) ||
+    cache ||
+    hasGroupRatio
   )
   const details: Array<{ key: string; node: ReactNode }> = []
 
@@ -155,6 +160,7 @@ export function MessageMetadata(props: MessageMetadataProps) {
         <RequestDiagnosticsPopover
           alignment={props.alignment}
           cost={props.cost}
+          hideChannel={props.hideChannel}
           locale={locale}
         />
       ),

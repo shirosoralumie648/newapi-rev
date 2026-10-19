@@ -184,6 +184,8 @@ const messageSchema = z.object({
   versions: z.array(messageVersionSchema).min(1),
   /** Assistant message group of one parallel comparison. */
   parallel: z.boolean().optional(),
+  /** Anonymous A/B arena group of exactly two compared replies. */
+  anonymous: z.boolean().optional(),
   activeVersionIndex: z.number().int().nonnegative().optional(),
   createdAt: z.number().finite().optional(),
   startedAt: z.number().finite().optional(),

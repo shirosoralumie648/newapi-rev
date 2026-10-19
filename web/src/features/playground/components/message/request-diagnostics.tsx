@@ -44,6 +44,8 @@ type DiagnosticRow = { key: string; label: string; value: string }
 export function RequestDiagnosticsPopover(props: {
   alignment: MessageAlignment
   cost: PlaygroundMessageCost
+  /** Anonymous arena groups omit the serving channel entirely. */
+  hideChannel?: boolean
   locale: Intl.LocalesArgument
 }) {
   const { t } = useTranslation()
@@ -59,7 +61,7 @@ export function RequestDiagnosticsPopover(props: {
   const channelValue = [channelName, props.cost.channelKey]
     .filter(Boolean)
     .join(' · ')
-  if (channelValue) {
+  if (channelValue && !props.hideChannel) {
     rows.push({ key: 'channel', label: t('Channel'), value: channelValue })
   }
   const groupRatio = props.cost.groupRatio

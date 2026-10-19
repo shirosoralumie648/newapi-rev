@@ -87,10 +87,21 @@ test('shows the priced steps and total, then runs without a cap', async () => {
   await user.click(screen.getByRole('button', { name: 'Run workflow' }))
 
   await waitFor(() =>
-    expect(onRun).toHaveBeenCalledWith(undefined, {
-      estimateQuota: 2625,
-      budgetCap: 0,
-    })
+    expect(onRun).toHaveBeenCalledWith(
+      undefined,
+      {
+        estimateQuota: 2625,
+        budgetCap: 0,
+      },
+      {
+        steps: [
+          { nodeId: 'm1', quota: 125, available: true, approximate: false },
+          { nodeId: 't1', quota: 2500, available: true, approximate: true },
+        ],
+        totalQuota: 2625,
+        available: true,
+      }
+    )
   )
   expect(onOpenChange).toHaveBeenCalledWith(false)
   expect(createCanvasWorkflowRunBudget).not.toHaveBeenCalled()
@@ -190,10 +201,20 @@ test('runs unpriced steps anyway and says so', async () => {
 
   await user.click(screen.getByRole('button', { name: 'Run workflow' }))
   await waitFor(() =>
-    expect(onRun).toHaveBeenCalledWith(undefined, {
-      estimateQuota: 0,
-      budgetCap: 0,
-    })
+    expect(onRun).toHaveBeenCalledWith(
+      undefined,
+      {
+        estimateQuota: 0,
+        budgetCap: 0,
+      },
+      {
+        steps: [
+          { nodeId: 'm1', quota: 0, available: false, approximate: false },
+        ],
+        totalQuota: 0,
+        available: false,
+      }
+    )
   )
 })
 

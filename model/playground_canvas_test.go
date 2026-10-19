@@ -2098,6 +2098,7 @@ func TestPlaygroundWorkflowRunHistoryMatrix(t *testing.T) {
 
 			type runView struct {
 				ID          string `json:"id"`
+				SessionID   string `json:"session_id"`
 				Status      string `json:"status"`
 				NodeCount   int    `json:"node_count"`
 				CacheHits   int    `json:"cache_hits"`

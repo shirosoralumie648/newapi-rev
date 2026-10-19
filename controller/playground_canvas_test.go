@@ -110,27 +110,31 @@ func TestPlaygroundCanvasDocumentRejectsUnknownNodeKinds(t *testing.T) {
 	assert.ErrorIs(t, err, model.ErrPlaygroundCanvasInvalid)
 }
 
-// Workflow node data only carries display configuration and ID references, and
-// it stays inside the same per-node byte budget as every other node kind.
-func TestPlaygroundCanvasWorkflowNodeDataStaysBounded(t *testing.T) {
+// Node data only carries display configuration and ID references, and it stays
+// inside the same per-node byte budget for workflow steps and annotations.
+func TestPlaygroundCanvasNodeDataStaysBounded(t *testing.T) {
 	policy := playground_setting.GetPlaygroundQuotaPolicy("")
 	oversized := strings.Repeat("a", int(policy.CanvasNodeDataMaxBytes)+1)
-	var request playgroundCanvasRequest
-	require.NoError(t, common.UnmarshalJsonStr(`{
-		"document": {
-			"nodes": [{
-				"id": "n1",
-				"type": "model",
-				"position": {"x": 0, "y": 0},
-				"data": {"kind": "model", "text": "`+oversized+`"}
-			}],
-			"edges": []
-		}
-	}`, &request))
-	require.NotNil(t, request.Document)
+	for _, kind := range []string{"model", "frame", "sticky"} {
+		t.Run(kind, func(t *testing.T) {
+			var request playgroundCanvasRequest
+			require.NoError(t, common.UnmarshalJsonStr(`{
+				"document": {
+					"nodes": [{
+						"id": "n1",
+						"type": "`+kind+`",
+						"position": {"x": 0, "y": 0},
+						"data": {"kind": "`+kind+`", "text": "`+oversized+`"}
+					}],
+					"edges": []
+				}
+			}`, &request))
+			require.NotNil(t, request.Document)
 
-	_, _, _, err := normalizePlaygroundCanvasDocument(request.Document, policy)
-	assert.ErrorIs(t, err, model.ErrPlaygroundCanvasLimit)
+			_, _, _, err := normalizePlaygroundCanvasDocument(request.Document, policy)
+			assert.ErrorIs(t, err, model.ErrPlaygroundCanvasLimit)
+		})
+	}
 }
 
 // The workspace workflow budget endpoints are the contract between the canvas

@@ -173,7 +173,9 @@ function generationSeedSpan(): number {
 function normalizeWholeSeed(seed: number): number {
   const span = generationSeedSpan()
   const whole = Number.isFinite(seed) ? Math.trunc(seed) : 0
-  return (((whole % span) + span) % span) + PLAYGROUND_GENERATION_SEED_MIN
+  const offset =
+    (((whole - PLAYGROUND_GENERATION_SEED_MIN) % span) + span) % span
+  return PLAYGROUND_GENERATION_SEED_MIN + offset
 }
 
 /** A fresh explicit seed; a blank seed never reaches the provider as zero. */

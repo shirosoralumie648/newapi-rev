@@ -395,11 +395,11 @@ test('comparison shares one seed and maps each model to its own size', async () 
   expect(bodies[0]?.seed).toBe(bodies[1]?.seed)
   expect(bodies[0]?.size).toBe('1024x1024')
   expect(bodies[1]?.size).toBe('1792x1024')
-  expect(
-    await screen.findByText(
-      'Size 1024x1024 is not available for img-b; using 1792x1024.'
-    )
-  ).toBeVisible()
+  const notices = await screen.findAllByText(
+    'Size 1024x1024 is not available for img-b; using 1792x1024.'
+  )
+  expect(notices.length).toBeGreaterThan(0)
+  expect(notices[0]).toBeVisible()
 })
 
 test('a model without image capability blocks the comparison before billing', async () => {

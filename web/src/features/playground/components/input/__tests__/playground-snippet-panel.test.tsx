@@ -328,7 +328,7 @@ test('the history dialog loads revisions and rolls the production pointer back',
   await user.click(screen.getByRole('button', { name: 'Version history' }))
   expect(await screen.findByText('v2')).toBeVisible()
   await user.click(
-    screen.getAllByRole('button', { name: 'Roll back to this version' })[1]
+    screen.getByRole('button', { name: 'Roll back to this version' })
   )
   await user.click(screen.getByRole('button', { name: 'Roll back' }))
 
@@ -350,6 +350,15 @@ test('importing an exported template posts the document and lists the copy', asy
     ...snippetWire,
     id: 'pgs_imported',
     name: 'Imported checklist',
+    content: 'Imported body.',
+    versions: [
+      {
+        version: 1,
+        content: 'Imported body.',
+        byte_size: 14,
+        created_at: 10,
+      },
+    ],
   }
   const post = vi.spyOn(api, 'post').mockResolvedValue({
     data: { success: true, data: imported },

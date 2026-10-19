@@ -31,6 +31,10 @@ export const playgroundQueryKeys = {
     ['playground', userId, 'mcp-servers'] as const,
   messageCosts: (userId: number | null, requestIds: string) =>
     ['playground', userId, 'message-costs', requestIds] as const,
+  arenaVotes: (userId: number | null, sessionId: string | null) =>
+    ['playground', userId, 'arena', 'votes', sessionId] as const,
+  arenaSummary: (userId: number | null, scope: 'personal' | 'instance') =>
+    ['playground', userId, 'arena', 'summary', scope] as const,
   tasksAll: () => ['playground', 'tasks'] as const,
   tasks: (filtersKey = 'list') => ['playground', 'tasks', filtersKey] as const,
   knowledgeBases: (userId: number | null) =>

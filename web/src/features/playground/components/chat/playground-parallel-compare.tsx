@@ -28,8 +28,12 @@ import { cn } from '@/lib/utils'
 
 import { MESSAGE_STATUS } from '../../constants'
 import {
+  anonymizeParallelMessage,
+  anonymousParallelModelLabel,
   getActiveVersionIndex,
   getMessageContentState,
+  hasPendingParallelVersions,
+  isAnonymousParallelMessage,
   isPendingParallelVersion,
   linkKnowledgeCitations,
 } from '../../lib'
@@ -37,14 +41,29 @@ import type {
   Message,
   MessageKnowledgeSnapshot,
   MessageVersion,
+  PlaygroundArenaVote,
+  PlaygroundArenaVoteSummary,
   PlaygroundMessageCost,
 } from '../../types'
 import { MessageError } from '../message/message-error'
 import { MessageKnowledgeSources } from '../message/message-knowledge-sources'
 import { MessageMetadata } from '../message/message-metadata'
 import { MessageToolCalls } from '../message/message-tool-calls'
+import { PlaygroundArenaVoteBar } from './playground-arena-vote'
 
 interface PlaygroundParallelCompareProps {
+  /** The caller's stored raw preference for this anonymous group. */
+  arenaVote?: PlaygroundArenaVote
+  /** Read-only personal totals shown by the vote bar summary. */
+  arenaPersonalSummary?: PlaygroundArenaVoteSummary
+  /** Administrator-only instance totals shown by the summary. */
+  arenaInstanceSummary?: PlaygroundArenaVoteSummary
+  /** Save or change the raw preference of this anonymous group. */
+  onArenaVote?: (
+    messageKey: string,
+    choice: PlaygroundArenaVote['choice'],
+    note: string
+  ) => Promise<void> | void
   /** Settled cost rows of the compared requests, by request id. */
   costs?: ReadonlyMap<string, PlaygroundMessageCost>
   /** Calls being answered by the automatic tool loop right now. */
@@ -70,6 +89,8 @@ interface PlaygroundParallelCompareProps {
 }
 
 interface ParallelVersionCardProps {
+  /** Anonymous groups replace model names and redact reply text. */
+  anonymous: boolean
   cost?: PlaygroundMessageCost
   /** Calls being answered by the automatic tool loop right now. */
   executingToolCallKeys?: ReadonlySet<string>
@@ -104,10 +125,18 @@ function ParallelVersionCard(props: ParallelVersionCardProps) {
   const { t } = useTranslation()
   const isPending = isPendingParallelVersion(props.version)
   const isFailed = props.version.status === MESSAGE_STATUS.ERROR
+  const displayMessage = props.anonymous
+    ? anonymizeParallelMessage(props.message)
+    : props.message
+  const displayVersion =
+    displayMessage.versions[props.versionIndex] ?? props.version
+  const modelLabel = props.anonymous
+    ? anonymousParallelModelLabel(props.versionIndex)
+    : (props.version.model ?? '')
   const displayContent = getMessageContentState(
-    props.message,
-    props.version.content,
-    props.version
+    displayMessage,
+    displayVersion.content,
+    displayVersion
   ).displayContent
   const knowledgeAnchorId = `${props.message.key}-${props.versionIndex}`
   const knowledgeResultCount = props.knowledge?.results.length ?? 0
@@ -152,9 +181,9 @@ function ParallelVersionCard(props: ParallelVersionCardProps) {
           ) : undefined
         }
         message={{
-          ...props.message,
+          ...displayMessage,
           status: MESSAGE_STATUS.ERROR,
-          errorCode: props.version.errorCode ?? null,
+          errorCode: displayVersion.errorCode ?? null,
           activeVersionIndex: props.versionIndex,
         }}
       />
@@ -166,7 +195,7 @@ function ParallelVersionCard(props: ParallelVersionCardProps) {
   return (
     <section
       aria-label={t('Reply from {{model}}', {
-        model: props.version.model ?? '',
+        model: modelLabel,
       })}
       className={cn(
         'border-border/60 bg-muted/20 flex min-w-0 flex-col rounded-lg border',
@@ -174,9 +203,7 @@ function ParallelVersionCard(props: ParallelVersionCardProps) {
       )}
     >
       <header className='border-border/60 flex items-center justify-between gap-2 border-b px-3 py-2'>
-        <span className='truncate text-sm font-medium'>
-          {props.version.model}
-        </span>
+        <span className='truncate text-sm font-medium'>{modelLabel}</span>
         {props.isActive && !isPending && !isFailed ? (
           <span className='text-primary flex shrink-0 items-center gap-1 text-xs font-medium'>
             <CheckIcon aria-hidden='true' className='size-3.5' />
@@ -215,8 +242,9 @@ function ParallelVersionCard(props: ParallelVersionCardProps) {
         <MessageMetadata
           alignment='left'
           cost={props.cost}
-          message={props.message}
-          version={props.version}
+          hideChannel={props.anonymous}
+          message={displayMessage}
+          version={displayVersion}
         />
         {canSelect ? (
           <Button
@@ -246,24 +274,24 @@ export function PlaygroundParallelCompare(
 ) {
   const { t } = useTranslation()
   const activeIndex = getActiveVersionIndex(props.message)
+  const anonymous = isAnonymousParallelMessage(props.message)
   const hasSelectableReply = props.message.versions.some(
     (version) => version.status === MESSAGE_STATUS.COMPLETE
   )
+  const comparisonLabel = anonymous
+    ? t('Anonymous comparison')
+    : t('Comparing {{count}} models', {
+        count: props.message.versions.length,
+      })
 
   return (
     <div
-      aria-label={t('Comparing {{count}} models', {
-        count: props.message.versions.length,
-      })}
+      aria-label={comparisonLabel}
       className='flex w-full min-w-0 flex-col gap-2'
       role='group'
     >
       <div className='text-muted-foreground flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 px-0.5 text-xs'>
-        <span className='font-medium'>
-          {t('Comparing {{count}} models', {
-            count: props.message.versions.length,
-          })}
-        </span>
+        <span className='font-medium'>{comparisonLabel}</span>
         {hasSelectableReply ? (
           <span>{t('Select one reply to continue the conversation')}</span>
         ) : null}
@@ -272,6 +300,7 @@ export function PlaygroundParallelCompare(
       <div className='grid min-w-0 gap-2 md:grid-cols-2'>
         {props.message.versions.map((version, versionIndex) => (
           <ParallelVersionCard
+            anonymous={anonymous}
             autoFilledToolCallKeys={props.autoFilledToolCallKeys}
             cost={
               version.requestId
@@ -295,6 +324,20 @@ export function PlaygroundParallelCompare(
           />
         ))}
       </div>
+
+      {anonymous && props.onArenaVote ? (
+        <PlaygroundArenaVoteBar
+          disabled={
+            props.isGenerating || hasPendingParallelVersions(props.message)
+          }
+          instanceSummary={props.arenaInstanceSummary}
+          onVote={(choice, note) =>
+            props.onArenaVote?.(props.message.key, choice, note)
+          }
+          personalSummary={props.arenaPersonalSummary}
+          vote={props.arenaVote}
+        />
+      ) : null}
     </div>
   )
 }
