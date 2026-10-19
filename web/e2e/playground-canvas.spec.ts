@@ -181,4 +181,5 @@ test('an unchanged second run reuses the cached step without calling the relay',
   await runOnce()
   expect(relayCalls).toBe(1)
   await expect(page.getByText('cached fox').first()).toBeVisible()
+  await expect(node.getByText('Cached', { exact: true })).toBeVisible()
 })

@@ -2586,6 +2586,12 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodPut, "/api/playground/uploads/missing/content"},
 		{http.MethodPost, "/api/playground/uploads/missing/complete"},
 		{http.MethodDelete, "/api/playground/uploads/missing"},
+		{http.MethodPost, "/api/playground/workflows/history"},
+		{http.MethodGet, "/api/playground/workflows/history"},
+		{http.MethodGet, "/api/playground/workflows/history/missing"},
+		{http.MethodPatch, "/api/playground/workflows/history/missing"},
+		{http.MethodDelete, "/api/playground/workflows/history/missing"},
+		{http.MethodPost, "/api/playground/workflows/node-cache"},
 	} {
 		response := playgroundAuthenticatedRequest(t, engine, "", route.method, route.path, input)
 		assert.Equal(t, 401, response.Code, response.Body.String())

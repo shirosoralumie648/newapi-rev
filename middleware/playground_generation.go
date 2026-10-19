@@ -240,25 +240,23 @@ const PlaygroundWorkflowRunHeader = "X-Playground-Workflow-Run"
 // receives from POST /api/playground/workflows/runs.
 const playgroundWorkflowRunPrefix = "pgw_"
 
-// playgroundWorkflowRunMaxLength bounds the accepted run id, matching the
-// wallet hold request id column.
-const playgroundWorkflowRunMaxLength = 64
+// playgroundWorkflowRunRandomLength is the exact random suffix length of the
+// ids POST /api/playground/workflows/runs hands out.
+const playgroundWorkflowRunRandomLength = 32
 
 // validPlaygroundWorkflowRunId accepts only the ids this server generates, so a
-// forged header can never name a hold that belongs to something else.
+// forged header can never name a hold that belongs to something else. The exact
+// suffix length also keeps run-history ids (pgwr_...) out of the budget header.
 func validPlaygroundWorkflowRunId(runId string) bool {
-	if len(runId) <= len(playgroundWorkflowRunPrefix) || len(runId) > playgroundWorkflowRunMaxLength {
+	suffix, ok := strings.CutPrefix(runId, playgroundWorkflowRunPrefix)
+	if !ok || len(suffix) != playgroundWorkflowRunRandomLength {
 		return false
 	}
-	if !strings.HasPrefix(runId, playgroundWorkflowRunPrefix) {
-		return false
-	}
-	for _, character := range runId[len(playgroundWorkflowRunPrefix):] {
+	for _, character := range suffix {
 		switch {
 		case character >= 'a' && character <= 'z':
 		case character >= 'A' && character <= 'Z':
 		case character >= '0' && character <= '9':
-		case character == '_' || character == '-':
 		default:
 			return false
 		}
