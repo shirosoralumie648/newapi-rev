@@ -7217,9 +7217,11 @@ func TestPlaygroundLogCapture(t *testing.T) {
 			assert.Equal(t, "other answer", adminContentReplay.Data.Capture.Response["content"])
 			require.NoError(t, db.Table("audit_logs").Where("action = ?", "playground.log_replay_view").Count(&auditCount).Error)
 			assert.EqualValues(t, 1, auditCount)
-			// The owner still reads their own content without an audit row.
+			// The owner still reads their own content without adding an audit row.
 			ownerSelf := callLogRoute(8, common.RoleCommonUser, http.MethodGet, "pg-replay-other", "", controller.GetPlaygroundLogReplay)
 			require.Equal(t, http.StatusOK, ownerSelf.Code, ownerSelf.Body.String())
+			require.NoError(t, db.Table("audit_logs").Where("action = ?", "playground.log_replay_view").Count(&auditCount).Error)
+			assert.EqualValues(t, 1, auditCount)
 
 			// Expired rows stop serving content before cleanup removes them.
 			require.NoError(t, model.SavePlaygroundLogCapture(&model.PlaygroundLogCapture{
