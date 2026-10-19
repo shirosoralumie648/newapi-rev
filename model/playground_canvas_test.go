@@ -189,6 +189,90 @@ func TestPlaygroundCanvasPersistenceMatrix(t *testing.T) {
 	}
 }
 
+// The project mode selects the workspace layout: an absent mode creates the
+// classic infinite canvas, image and video projects store their mode, a later
+// save cannot rewrite it, an unknown mode is rejected instead of being built,
+// and a row that lost (or never had) its mode reads back as the infinite
+// canvas through the ordinary owner-scoped read path.
+func TestPlaygroundCanvasWorkbenchModes(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			playgroundTestDB(t, dialect)
+
+			created := createCanvasProject(t, 7, "mode-default")
+			assert.Equal(t, model.PlaygroundCanvasModeInfinite, created["mode"])
+
+			createWithMode := func(clientID, mode string, status int) map[string]any {
+				t.Helper()
+				response := playgroundRequest(t, 7, http.MethodPost, "/api/playground/canvases", map[string]any{
+					"client_id": clientID,
+					"title":     "Workspace",
+					"mode":      mode,
+					"document":  canvasDocument([]any{canvasNode("n1", "task", 0, 0)}, nil),
+				}, controller.CreatePlaygroundCanvasProject)
+				require.Equal(t, status, response.Code, response.Body.String())
+				if status != http.StatusOK {
+					return nil
+				}
+				return canvasEnvelope(t, response.Body.Bytes())
+			}
+
+			imageData := createWithMode("mode-image", "image", http.StatusOK)
+			require.NotNil(t, imageData)
+			assert.Equal(t, "image", imageData["mode"])
+			imageID, _ := imageData["id"].(string)
+			require.NotEmpty(t, imageID)
+			videoData := createWithMode("mode-video", "video", http.StatusOK)
+			require.NotNil(t, videoData)
+			assert.Equal(t, "video", videoData["mode"])
+
+			// The detail endpoint and the list carry the mode, and a save that
+			// sends another mode keeps the stored one: the mode is chosen once
+			// at creation, so no update can strand a document in a layout it
+			// was not authored in.
+			detail := playgroundRequest(t, 7, http.MethodGet, "/api/playground/canvases/"+imageID, nil, controller.GetPlaygroundCanvasProject)
+			require.Equal(t, http.StatusOK, detail.Code, detail.Body.String())
+			assert.Equal(t, "image", canvasEnvelope(t, detail.Body.Bytes())["mode"])
+			updated := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/canvases/"+imageID, map[string]any{
+				"revision": 0, "title": "Renamed", "mode": "video",
+			}, controller.UpdatePlaygroundCanvasProject)
+			require.Equal(t, http.StatusOK, updated.Code, updated.Body.String())
+			assert.Equal(t, "image", canvasEnvelope(t, updated.Body.Bytes())["mode"])
+
+			listed := playgroundRequest(t, 7, http.MethodGet, "/api/playground/canvases?page_size=50", nil, controller.ListPlaygroundCanvasProjects)
+			var listing struct {
+				Data struct {
+					Items []map[string]any
+				}
+			}
+			require.NoError(t, common.Unmarshal(listed.Body.Bytes(), &listing))
+			modes := make(map[string]string, len(listing.Data.Items))
+			for _, item := range listing.Data.Items {
+				id, _ := item["id"].(string)
+				mode, _ := item["mode"].(string)
+				modes[id] = mode
+			}
+			assert.Equal(t, "infinite", modes[created["id"].(string)])
+			assert.Equal(t, "image", modes[imageID])
+
+			// A row written before the mode column (an empty value) reads back
+			// as the infinite canvas instead of an unknown layout.
+			require.NoError(t, model.DB.Model(&model.PlaygroundCanvasProject{}).
+				Where("id = ?", imageID).Update("mode", "").Error)
+			legacy, err := model.GetPlaygroundCanvasProject(7, imageID)
+			require.NoError(t, err)
+			assert.Equal(t, model.PlaygroundCanvasModeInfinite, legacy.Mode)
+
+			// An unknown mode is refused at creation.
+			createWithMode("mode-invalid", "gallery", http.StatusBadRequest)
+			assert.Equal(t, http.StatusBadRequest, playgroundRequest(t, 7, http.MethodPost, "/api/playground/canvases", map[string]any{
+				"client_id": "mode-invalid-2", "mode": 17,
+				"document": canvasDocument(nil, nil),
+			}, controller.CreatePlaygroundCanvasProject).Code)
+		})
+	}
+}
+
 func TestPlaygroundCanvasDocumentValidation(t *testing.T) {
 	playgroundTestDB(t, "sqlite")
 	path := "/api/playground/canvases"

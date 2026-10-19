@@ -71,7 +71,7 @@ func playgroundMigrationDB(t *testing.T, dialect string) *gorm.DB {
 		sqlDB.SetMaxOpenConns(1)
 	}
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&PlaygroundMessage{}, &PlaygroundAttachment{}, &PlaygroundUserUsage{}, &PlaygroundPreset{}, &PlaygroundSession{}, &PlaygroundSessionShare{}))
+		require.NoError(t, db.Migrator().DropTable(&PlaygroundMessage{}, &PlaygroundAttachment{}, &PlaygroundUserUsage{}, &PlaygroundPreset{}, &PlaygroundSession{}, &PlaygroundSessionShare{}, &PlaygroundCanvasProject{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
@@ -462,6 +462,59 @@ func TestStableGroupReferenceMigration(t *testing.T) {
 			assert.Equal(t, "vip", subscription.UpgradeGroup)
 			assert.Equal(t, "vip", subscription.DowngradeGroup)
 			assert.Equal(t, "vip", subscription.PrevUserGroup)
+		})
+	}
+}
+
+// A canvas table written before the workbench modes existed has no mode column.
+// AutoMigrate must add it without touching the stored document, a legacy row
+// must read back as the infinite canvas default (the app-level normalization,
+// independent of any dialect column default), a workbench mode must be
+// storable after the upgrade, and repeating the migration changes nothing.
+func TestPlaygroundCanvasModeColumnMigration(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundMigrationDB(t, dialect)
+			quote := "`"
+			if dialect == "postgres" {
+				quote = `"`
+			}
+			q := func(name string) string { return quote + name + quote }
+
+			table := db.NamingStrategy.TableName("PlaygroundCanvasProject")
+			legacyColumns := []string{"id", "user_id", "client_id", "title", "document", "document_bytes", "node_count", "edge_count", "revision", "storage_backend", "object_key", "content_encoding", "deleted_at", "created_at", "updated_at"}
+			legacyTypes := []string{"varchar(32) PRIMARY KEY", "bigint NOT NULL", "varchar(128) NULL", "varchar(200) NOT NULL", "text NOT NULL", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL", "varchar(32) NOT NULL", "varchar(512) NOT NULL", "varchar(16) NOT NULL", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL"}
+			definitions := make([]string, len(legacyColumns))
+			quoted := make([]string, len(legacyColumns))
+			for index, name := range legacyColumns {
+				definitions[index] = q(name) + " " + legacyTypes[index]
+				quoted[index] = q(name)
+			}
+			require.NoError(t, db.Exec("CREATE TABLE "+q(table)+" ("+strings.Join(definitions, ", ")+")").Error)
+			require.NoError(t, db.Exec("INSERT INTO "+q(table)+" ("+strings.Join(quoted, ", ")+") VALUES ("+strings.Repeat("?,", len(legacyColumns)-1)+"?)",
+				"pgc_legacy", 7, nil, "Legacy board", `{"viewport":{"x":0,"y":0,"zoom":1},"nodes":[],"edges":[]}`, 51, 0, 0, 3, "", "", "", 0, 111, 111).Error)
+
+			for range 2 {
+				require.NoError(t, db.AutoMigrate(&PlaygroundCanvasProject{}))
+			}
+			assert.True(t, db.Migrator().HasColumn(&PlaygroundCanvasProject{}, "mode"))
+
+			var legacy PlaygroundCanvasProject
+			require.NoError(t, db.Where("id = ?", "pgc_legacy").First(&legacy).Error)
+			assert.Equal(t, "Legacy board", legacy.Title)
+			assert.EqualValues(t, 3, legacy.Revision)
+			require.NoError(t, hydratePlaygroundCanvasProject(&legacy))
+			assert.Equal(t, PlaygroundCanvasModeInfinite, legacy.Mode)
+			assert.Equal(t, PlaygroundCanvasModeInfinite, NormalizePlaygroundCanvasMode("unknown"))
+
+			require.NoError(t, db.Create(&PlaygroundCanvasProject{
+				ID: "pgc_image", UserID: 7, Title: "Image workspace",
+				Mode: PlaygroundCanvasModeImage, Document: `{"nodes":[],"edges":[]}`,
+				DocumentBytes: 23, CreatedAt: 222, UpdatedAt: 222,
+			}).Error)
+			var stored PlaygroundCanvasProject
+			require.NoError(t, db.Where("id = ?", "pgc_image").First(&stored).Error)
+			assert.Equal(t, PlaygroundCanvasModeImage, NormalizePlaygroundCanvasMode(stored.Mode))
 		})
 	}
 }

@@ -112,8 +112,12 @@ type playgroundCanvasDocument struct {
 }
 
 type playgroundCanvasRequest struct {
-	ClientID string                    `json:"client_id"`
-	Title    *string                   `json:"title"`
+	ClientID string  `json:"client_id"`
+	Title    *string `json:"title"`
+	// Mode selects the workspace layout at creation. It is optional; an
+	// absent value creates the classic infinite canvas, and an unknown value
+	// is rejected instead of being silently normalized.
+	Mode     *string                   `json:"mode"`
 	Revision *int64                    `json:"revision"`
 	Document *playgroundCanvasDocument `json:"document"`
 }
@@ -123,6 +127,7 @@ type playgroundCanvasResponse struct {
 	ID            string          `json:"id"`
 	ClientID      *string         `json:"client_id,omitempty"`
 	Title         string          `json:"title"`
+	Mode          string          `json:"mode"`
 	NodeCount     int             `json:"node_count"`
 	EdgeCount     int             `json:"edge_count"`
 	DocumentBytes int64           `json:"document_bytes"`
@@ -134,6 +139,21 @@ type playgroundCanvasResponse struct {
 	// the client can render the "source deleted" state without rewriting the
 	// stored document.
 	UnavailableNodeIDs []string `json:"unavailable_node_ids,omitempty"`
+}
+
+// playgroundCanvasRequestMode resolves the creation mode of one request: an
+// absent mode is the infinite canvas, and any other value must be one the
+// workspace knows. The stored mode of a project is never rewritten here.
+func playgroundCanvasRequestMode(request *playgroundCanvasRequest) (string, bool) {
+	if request.Mode == nil {
+		return model.PlaygroundCanvasModeInfinite, true
+	}
+	switch *request.Mode {
+	case model.PlaygroundCanvasModeInfinite, model.PlaygroundCanvasModeImage, model.PlaygroundCanvasModeVideo:
+		return *request.Mode, true
+	default:
+		return "", false
+	}
 }
 
 func writePlaygroundCanvasError(c *gin.Context, err error) {
@@ -358,6 +378,7 @@ func playgroundCanvasUnavailableNodeIDs(userID int, document string) []string {
 func playgroundDecodeCanvasProject(project *model.PlaygroundCanvasProject, created bool) playgroundCanvasResponse {
 	response := playgroundCanvasResponse{
 		Created: created, ID: project.ID, ClientID: project.ClientID, Title: project.Title,
+		Mode:      model.NormalizePlaygroundCanvasMode(project.Mode),
 		NodeCount: project.NodeCount, EdgeCount: project.EdgeCount,
 		DocumentBytes: project.DocumentBytes, Revision: project.Revision,
 		CreatedAt: project.CreatedAt, UpdatedAt: project.UpdatedAt,
@@ -391,6 +412,7 @@ func ListPlaygroundCanvasProjects(c *gin.Context) {
 	for index := range projects {
 		items = append(items, model.PlaygroundCanvasSummary{
 			ID: projects[index].ID, ClientID: projects[index].ClientID, Title: projects[index].Title,
+			Mode:      model.NormalizePlaygroundCanvasMode(projects[index].Mode),
 			NodeCount: projects[index].NodeCount, EdgeCount: projects[index].EdgeCount,
 			DocumentBytes: projects[index].DocumentBytes, Revision: projects[index].Revision,
 			CreatedAt: projects[index].CreatedAt, UpdatedAt: projects[index].UpdatedAt,
@@ -419,6 +441,11 @@ func CreatePlaygroundCanvasProject(c *gin.Context) {
 		writePlaygroundCanvasError(c, err)
 		return
 	}
+	mode, ok := playgroundCanvasRequestMode(&request)
+	if !ok {
+		writePlaygroundCanvasError(c, model.ErrPlaygroundCanvasInvalid)
+		return
+	}
 	document, nodeCount, edgeCount, err := normalizePlaygroundCanvasDocument(request.Document, policy)
 	if err != nil {
 		writePlaygroundCanvasError(c, err)
@@ -430,7 +457,7 @@ func CreatePlaygroundCanvasProject(c *gin.Context) {
 		return
 	}
 	project := &model.PlaygroundCanvasProject{
-		Title: title, Document: model.LongText(document),
+		Title: title, Mode: mode, Document: model.LongText(document),
 		DocumentBytes: int64(len(document)), NodeCount: nodeCount, EdgeCount: edgeCount,
 	}
 	if request.ClientID != "" {
