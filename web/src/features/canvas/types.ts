@@ -173,6 +173,10 @@ export type CanvasNodeData = {
   // Declared media type of an `attachment` node. Older boards were image-only
   // and carry no value, which keeps rendering as an image.
   mediaType?: string
+  // Set by the image workbench's "pin to canvas" action: the node belongs to a
+  // bloodline the user affixed to the board, so the canvas marks it as pinned
+  // and the workbench keeps its layout. Absent on ordinary nodes.
+  affixed?: boolean
   // Workflow configuration and last-run state of a `model`/`task` step and the
   // filled-in state of a `task-result` node.
   workflow?: CanvasNodeWorkflowState
@@ -220,10 +224,20 @@ export type CanvasServerDocument = {
   edges: CanvasServerEdge[]
 }
 
+/**
+ * Which workspace layout a project opens in. Every mode shares the same
+ * document column and node/edge contract; the mode only selects the layout:
+ * `infinite` is the node board, `image` opens the single-image workbench
+ * (CV-09) and `video` is reserved for the video workbench (CV-10). A project
+ * that predates the column reads back as `infinite`.
+ */
+export type CanvasProjectMode = 'infinite' | 'image' | 'video'
+
 export type CanvasProjectSummary = {
   id: string
   clientId?: string
   title: string
+  mode: CanvasProjectMode
   nodeCount: number
   edgeCount: number
   documentBytes: number

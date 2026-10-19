@@ -5207,17 +5207,28 @@ func TestPlaygroundMessageCostLookup(t *testing.T) {
 			db := playgroundTestDB(t, dialect)
 			previousLog := model.LOG_DB
 			model.LOG_DB = db
-			require.NoError(t, db.AutoMigrate(&model.Log{}))
+			// Resolve the admin channel name from the fixture database instead
+			// of a process-wide channel cache.
+			previousMemoryCache := common.MemoryCacheEnabled
+			common.MemoryCacheEnabled = false
+			require.NoError(t, db.AutoMigrate(&model.Log{}, &model.Channel{}))
 			t.Cleanup(func() {
+				common.MemoryCacheEnabled = previousMemoryCache
 				model.LOG_DB = previousLog
-				require.NoError(t, db.Migrator().DropTable(&model.Log{}))
+				require.NoError(t, db.Migrator().DropTable(&model.Log{}, &model.Channel{}))
 			})
+			// Administrators see the resolved name of the channel that settled
+			// the request; the fixture keeps the lookup on the main database.
+			require.NoError(t, db.Create(&[]model.Channel{
+				{Id: 3, Name: "First relay", Key: "test-key"},
+				{Id: 5, Name: "Primary relay", Key: "test-key"},
+			}).Error)
 			require.NoError(t, db.Create(&[]model.Log{
-				{UserId: 7, Type: model.LogTypeConsume, RequestId: "pg-cost-owner", Quota: 1234, PromptTokens: 10, CompletionTokens: 20, ModelName: "cost-model", CreatedAt: 100,
-					Other: `{"request_timing":{"total_ms":1320,"auth_ms":24,"channel_select_ms":8,"upstream_ms":411,"first_token_ms":445,"retries":1},"admin_info":{"use_channel":[3]}}`},
-				{UserId: 7, Type: model.LogTypeConsume, RequestId: "pg-cost-no-timing", Quota: 50, PromptTokens: 2, CompletionTokens: 3, ModelName: "cost-model", CreatedAt: 100,
-					Other: `{"request_path":"/v1/chat/completions"}`},
-				{UserId: 8, Type: model.LogTypeConsume, RequestId: "pg-cost-other", Quota: 9999, PromptTokens: 1, CompletionTokens: 1, ModelName: "other-model", CreatedAt: 100},
+				{UserId: 7, Type: model.LogTypeConsume, RequestId: "pg-cost-owner", Quota: 1234, PromptTokens: 10, CompletionTokens: 20, ModelName: "cost-model", CreatedAt: 100, ChannelId: 5,
+					Other: `{"request_timing":{"total_ms":1320,"auth_ms":24,"channel_select_ms":8,"upstream_ms":411,"first_token_ms":445,"retries":1},"cache_tokens":320,"cache_ratio":0.1,"model_ratio":1.5,"group_ratio":2,"admin_info":{"use_channel":[3,"5"]}}`},
+				{UserId: 7, Type: model.LogTypeConsume, RequestId: "pg-cost-no-timing", Quota: 50, PromptTokens: 2, CompletionTokens: 3, ModelName: "cost-model", CreatedAt: 100, ChannelId: 3,
+					Other: `{"request_path":"/v1/chat/completions","cache_tokens":100,"admin_info":{"use_channel":[3]}}`},
+				{UserId: 8, Type: model.LogTypeConsume, RequestId: "pg-cost-other", Quota: 9999, PromptTokens: 1, CompletionTokens: 1, ModelName: "other-model", CreatedAt: 100, ChannelId: 5},
 				{UserId: 7, Type: model.LogTypeError, RequestId: "pg-cost-error", Quota: 0, CreatedAt: 100},
 			}).Error)
 
@@ -5239,29 +5250,39 @@ func TestPlaygroundMessageCostLookup(t *testing.T) {
 			// The client relies on this flag to stop waiting for a row that a
 			// deployment with consume logs switched off would never write.
 			expectedEnabled := common.LogConsumeEnabled
-			var envelope struct {
+			type costTiming struct {
+				TotalMs         *int64 `json:"total_ms"`
+				AuthMs          *int64 `json:"auth_ms"`
+				ChannelSelectMs *int64 `json:"channel_select_ms"`
+				UpstreamMs      *int64 `json:"upstream_ms"`
+				FirstTokenMs    *int64 `json:"first_token_ms"`
+				Retries         *int   `json:"retries"`
+			}
+			type costItem struct {
+				RequestID        string      `json:"request_id"`
+				Quota            int         `json:"quota"`
+				PromptTokens     int         `json:"prompt_tokens"`
+				CompletionTokens int         `json:"completion_tokens"`
+				TotalTokens      int         `json:"total_tokens"`
+				ModelName        string      `json:"model_name"`
+				CreatedAt        int64       `json:"created_at"`
+				Timing           *costTiming `json:"timing"`
+				CacheTokens      *int        `json:"cache_tokens"`
+				CacheRatio       *float64    `json:"cache_ratio"`
+				ModelRatio       *float64    `json:"model_ratio"`
+				GroupRatio       *float64    `json:"group_ratio"`
+				ChannelKey       string      `json:"channel_key"`
+				ChannelID        *int        `json:"channel_id"`
+				ChannelName      string      `json:"channel_name"`
+			}
+			type costEnvelope struct {
 				Success bool `json:"success"`
 				Data    struct {
-					Enabled bool `json:"enabled"`
-					Items   []struct {
-						RequestID        string `json:"request_id"`
-						Quota            int    `json:"quota"`
-						PromptTokens     int    `json:"prompt_tokens"`
-						CompletionTokens int    `json:"completion_tokens"`
-						TotalTokens      int    `json:"total_tokens"`
-						ModelName        string `json:"model_name"`
-						CreatedAt        int64  `json:"created_at"`
-						Timing           *struct {
-							TotalMs         *int64 `json:"total_ms"`
-							AuthMs          *int64 `json:"auth_ms"`
-							ChannelSelectMs *int64 `json:"channel_select_ms"`
-							UpstreamMs      *int64 `json:"upstream_ms"`
-							FirstTokenMs    *int64 `json:"first_token_ms"`
-							Retries         *int   `json:"retries"`
-						} `json:"timing"`
-					} `json:"items"`
+					Enabled bool       `json:"enabled"`
+					Items   []costItem `json:"items"`
 				} `json:"data"`
 			}
+			var envelope costEnvelope
 			require.NoError(t, common.Unmarshal(response.Body.Bytes(), &envelope))
 			require.True(t, envelope.Success, response.Body.String())
 			assert.Equal(t, expectedEnabled, envelope.Data.Enabled)
@@ -5283,26 +5304,91 @@ func TestPlaygroundMessageCostLookup(t *testing.T) {
 			assert.EqualValues(t, 411, *item.Timing.UpstreamMs)
 			require.NotNil(t, item.Timing.Retries)
 			assert.Equal(t, 1, *item.Timing.Retries)
+			// The settled cache tokens and the price ratios the owner needs to
+			// estimate the cache saving are projected from the same row.
+			require.NotNil(t, item.CacheTokens)
+			assert.Equal(t, 320, *item.CacheTokens)
+			require.NotNil(t, item.CacheRatio)
+			assert.InDelta(t, 0.1, *item.CacheRatio, 0.000001)
+			require.NotNil(t, item.ModelRatio)
+			assert.InDelta(t, 1.5, *item.ModelRatio, 0.000001)
+			require.NotNil(t, item.GroupRatio)
+			assert.InDelta(t, 2, *item.GroupRatio, 0.000001)
+			// A regular viewer only receives a masked channel label: the label
+			// is stable per account and channel, never the id, and neither the
+			// channel id nor its name leaves the server.
+			assert.Regexp(t, `^#\d+$`, item.ChannelKey)
+			assert.NotEqual(t, "#5", item.ChannelKey)
+			assert.Nil(t, item.ChannelID)
+			assert.Empty(t, item.ChannelName)
+			assert.NotContains(t, response.Body.String(), "channel_id")
+			assert.NotContains(t, response.Body.String(), "channel_name")
 			assert.NotContains(t, response.Body.String(), "use_channel")
 
+			// Administrators see the complete identity: the attempted chain
+			// from admin_info.use_channel, the answering channel id and name.
+			adminResponse := func() *httptest.ResponseRecorder {
+				recorder := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(recorder)
+				c.Set("id", 7)
+				c.Set("role", common.RoleAdminUser)
+				c.Request = httptest.NewRequest(http.MethodGet, "/api/playground/message-costs?request_ids=pg-cost-owner,pg-cost-no-timing", nil)
+				controller.GetPlaygroundMessageCosts(c)
+				return recorder
+			}()
+			require.Equal(t, http.StatusOK, adminResponse.Code, adminResponse.Body.String())
+			var adminEnvelope costEnvelope
+			require.NoError(t, common.Unmarshal(adminResponse.Body.Bytes(), &adminEnvelope))
+			require.True(t, adminEnvelope.Success, adminResponse.Body.String())
+			require.Len(t, adminEnvelope.Data.Items, 2)
+			byRequestID := make(map[string]costItem, len(adminEnvelope.Data.Items))
+			for _, adminItem := range adminEnvelope.Data.Items {
+				byRequestID[adminItem.RequestID] = adminItem
+			}
+			retried := byRequestID["pg-cost-owner"]
+			assert.Equal(t, "#3 → #5", retried.ChannelKey)
+			require.NotNil(t, retried.ChannelID)
+			assert.Equal(t, 5, *retried.ChannelID)
+			assert.Equal(t, "Primary relay", retried.ChannelName)
+			direct := byRequestID["pg-cost-no-timing"]
+			assert.Equal(t, "#3", direct.ChannelKey)
+			require.NotNil(t, direct.ChannelID)
+			assert.Equal(t, 3, *direct.ChannelID)
+			assert.Equal(t, "First relay", direct.ChannelName)
+			assert.NotContains(t, adminResponse.Body.String(), "use_channel")
+
 			// A settle row stored before the timing field existed answers with
-			// the cost figures and no timing object.
+			// the cost figures and no timing object. Its cached tokens are still
+			// projected, while the ratios stay absent so the client shows the
+			// token count without inventing a saving amount.
 			legacyResponse := playgroundRequest(t, 7, http.MethodGet, "/api/playground/message-costs?request_ids=pg-cost-no-timing", nil, controller.GetPlaygroundMessageCosts)
 			require.Equal(t, http.StatusOK, legacyResponse.Code, legacyResponse.Body.String())
-			var legacyEnvelope struct {
-				Data struct {
-					Items []struct {
-						RequestID string `json:"request_id"`
-						Timing    *struct {
-							TotalMs *int64 `json:"total_ms"`
-						} `json:"timing"`
-					} `json:"items"`
-				} `json:"data"`
-			}
+			var legacyEnvelope costEnvelope
 			require.NoError(t, common.Unmarshal(legacyResponse.Body.Bytes(), &legacyEnvelope))
 			require.Len(t, legacyEnvelope.Data.Items, 1)
-			assert.Equal(t, "pg-cost-no-timing", legacyEnvelope.Data.Items[0].RequestID)
-			assert.Nil(t, legacyEnvelope.Data.Items[0].Timing)
+			legacy := legacyEnvelope.Data.Items[0]
+			assert.Equal(t, "pg-cost-no-timing", legacy.RequestID)
+			assert.Nil(t, legacy.Timing)
+			require.NotNil(t, legacy.CacheTokens)
+			assert.Equal(t, 100, *legacy.CacheTokens)
+			assert.Nil(t, legacy.CacheRatio)
+			assert.Nil(t, legacy.ModelRatio)
+			assert.Regexp(t, `^#\d+$`, legacy.ChannelKey)
+			assert.NotEqual(t, "#3", legacy.ChannelKey)
+
+			// With consume logs switched off the lookup still returns stored
+			// rows but tells the client to stop waiting for a new one.
+			previousConsumeEnabled := common.LogConsumeEnabled
+			common.LogConsumeEnabled = false
+			t.Cleanup(func() {
+				common.LogConsumeEnabled = previousConsumeEnabled
+			})
+			disabledResponse := playgroundRequest(t, 7, http.MethodGet, "/api/playground/message-costs?request_ids=pg-cost-owner", nil, controller.GetPlaygroundMessageCosts)
+			require.Equal(t, http.StatusOK, disabledResponse.Code, disabledResponse.Body.String())
+			var disabledEnvelope costEnvelope
+			require.NoError(t, common.Unmarshal(disabledResponse.Body.Bytes(), &disabledEnvelope))
+			assert.False(t, disabledEnvelope.Data.Enabled)
+			require.Len(t, disabledEnvelope.Data.Items, 1)
 
 			invalidQueries := []string{
 				"",

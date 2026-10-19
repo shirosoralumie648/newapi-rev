@@ -37,8 +37,8 @@ export const MESSAGE_STATUS = {
   ERROR: 'error',
 } as const
 
-// Tool call states. A call stays pending until the user provides a result (or
-// denies it); Playground never executes a tool on its own.
+// Tool call states. A call stays pending until the Playground auto-executes a
+// supported tool or the user provides a result (or denies it).
 export const TOOL_CALL_STATUS = {
   PENDING: 'pending',
   COMPLETED: 'completed',
@@ -50,6 +50,31 @@ export const TOOL_CALL_STATUS = {
 // Playground. These sentences are model input, not user interface text.
 export const TOOL_CALL_DENIED_CONTENT = 'The user denied this tool call.'
 export const TOOL_CALL_FAILED_CONTENT = 'The tool call failed.'
+
+// Automatic execution only covers these declared functions. Any other tool
+// call keeps the manual result/deny flow. The failure sentences are i18n keys
+// and are also the stored execution error.
+export const PLAYGROUND_TOOL_EXECUTION_ERRORS = {
+  INVALID_ARGUMENTS: 'The tool call arguments are not a JSON object.',
+  INVALID_TIME_ZONE: 'The requested time zone is not valid.',
+  WEB_SEARCH_QUERY_REQUIRED: 'Web search needs a non-empty query.',
+  KB_SEARCH_QUERY_REQUIRED: 'Knowledge base search needs a non-empty query.',
+  KB_NOT_BOUND: 'No knowledge base is bound to this conversation.',
+  KB_NOT_SELECTED:
+    'The requested knowledge base is not bound to this conversation.',
+  FAILED: 'The tool call could not be executed.',
+} as const
+
+// Local default when the server has not reported its authoritative result byte
+// budget yet. The policy returned by /api/playground/settings always wins.
+export const PLAYGROUND_TOOL_CALL_RESULT_DEFAULT_MAX_BYTES = 256 << 10
+
+// Client preference for the tool loop. Execution is opt-in because every
+// automatic continuation is another billed request.
+export const PLAYGROUND_TOOL_EXECUTION_DEFAULT_ENABLED = false
+export const PLAYGROUND_TOOL_EXECUTION_DEFAULT_MAX_ROUNDS = 5
+export const PLAYGROUND_TOOL_EXECUTION_MIN_ROUNDS = 1
+export const PLAYGROUND_TOOL_EXECUTION_MAX_ROUNDS = 10
 
 // Fallback continue instruction. Channels that do not accept an assistant
 // prefill get one extra user turn with this sentence; it is model input, not
@@ -313,6 +338,7 @@ export const STORAGE_KEYS = {
   NEW_SESSION_DEFAULTS: 'playground_new_session_defaults',
   AUTO_READ_ALOUD: 'playground_auto_read_aloud',
   AUTO_TITLE: 'playground_auto_title',
+  TOOL_EXECUTION: 'playground_tool_execution',
 } as const
 
 // The new-conversation defaults are a client-side preference, not a store: the

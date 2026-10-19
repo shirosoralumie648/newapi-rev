@@ -189,6 +189,90 @@ func TestPlaygroundCanvasPersistenceMatrix(t *testing.T) {
 	}
 }
 
+// The project mode selects the workspace layout: an absent mode creates the
+// classic infinite canvas, image and video projects store their mode, a later
+// save cannot rewrite it, an unknown mode is rejected instead of being built,
+// and a row that lost (or never had) its mode reads back as the infinite
+// canvas through the ordinary owner-scoped read path.
+func TestPlaygroundCanvasWorkbenchModes(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			playgroundTestDB(t, dialect)
+
+			created := createCanvasProject(t, 7, "mode-default")
+			assert.Equal(t, model.PlaygroundCanvasModeInfinite, created["mode"])
+
+			createWithMode := func(clientID, mode string, status int) map[string]any {
+				t.Helper()
+				response := playgroundRequest(t, 7, http.MethodPost, "/api/playground/canvases", map[string]any{
+					"client_id": clientID,
+					"title":     "Workspace",
+					"mode":      mode,
+					"document":  canvasDocument([]any{canvasNode("n1", "task", 0, 0)}, nil),
+				}, controller.CreatePlaygroundCanvasProject)
+				require.Equal(t, status, response.Code, response.Body.String())
+				if status != http.StatusOK {
+					return nil
+				}
+				return canvasEnvelope(t, response.Body.Bytes())
+			}
+
+			imageData := createWithMode("mode-image", "image", http.StatusOK)
+			require.NotNil(t, imageData)
+			assert.Equal(t, "image", imageData["mode"])
+			imageID, _ := imageData["id"].(string)
+			require.NotEmpty(t, imageID)
+			videoData := createWithMode("mode-video", "video", http.StatusOK)
+			require.NotNil(t, videoData)
+			assert.Equal(t, "video", videoData["mode"])
+
+			// The detail endpoint and the list carry the mode, and a save that
+			// sends another mode keeps the stored one: the mode is chosen once
+			// at creation, so no update can strand a document in a layout it
+			// was not authored in.
+			detail := playgroundRequest(t, 7, http.MethodGet, "/api/playground/canvases/"+imageID, nil, controller.GetPlaygroundCanvasProject)
+			require.Equal(t, http.StatusOK, detail.Code, detail.Body.String())
+			assert.Equal(t, "image", canvasEnvelope(t, detail.Body.Bytes())["mode"])
+			updated := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/canvases/"+imageID, map[string]any{
+				"revision": 0, "title": "Renamed", "mode": "video",
+			}, controller.UpdatePlaygroundCanvasProject)
+			require.Equal(t, http.StatusOK, updated.Code, updated.Body.String())
+			assert.Equal(t, "image", canvasEnvelope(t, updated.Body.Bytes())["mode"])
+
+			listed := playgroundRequest(t, 7, http.MethodGet, "/api/playground/canvases?page_size=50", nil, controller.ListPlaygroundCanvasProjects)
+			var listing struct {
+				Data struct {
+					Items []map[string]any
+				}
+			}
+			require.NoError(t, common.Unmarshal(listed.Body.Bytes(), &listing))
+			modes := make(map[string]string, len(listing.Data.Items))
+			for _, item := range listing.Data.Items {
+				id, _ := item["id"].(string)
+				mode, _ := item["mode"].(string)
+				modes[id] = mode
+			}
+			assert.Equal(t, "infinite", modes[created["id"].(string)])
+			assert.Equal(t, "image", modes[imageID])
+
+			// A row written before the mode column (an empty value) reads back
+			// as the infinite canvas instead of an unknown layout.
+			require.NoError(t, model.DB.Model(&model.PlaygroundCanvasProject{}).
+				Where("id = ?", imageID).Update("mode", "").Error)
+			legacy, err := model.GetPlaygroundCanvasProject(7, imageID)
+			require.NoError(t, err)
+			assert.Equal(t, model.PlaygroundCanvasModeInfinite, legacy.Mode)
+
+			// An unknown mode is refused at creation.
+			createWithMode("mode-invalid", "gallery", http.StatusBadRequest)
+			assert.Equal(t, http.StatusBadRequest, playgroundRequest(t, 7, http.MethodPost, "/api/playground/canvases", map[string]any{
+				"client_id": "mode-invalid-2", "mode": 17,
+				"document": canvasDocument(nil, nil),
+			}, controller.CreatePlaygroundCanvasProject).Code)
+		})
+	}
+}
+
 func TestPlaygroundCanvasDocumentValidation(t *testing.T) {
 	playgroundTestDB(t, "sqlite")
 	path := "/api/playground/canvases"
@@ -1690,22 +1774,23 @@ func TestPlaygroundCanvasTemplateLibrary(t *testing.T) {
 			canvasID := createCanvasProject(t, 7, "canvas-template")["id"].(string)
 			png := playgroundPNGFixture(80)
 			attachmentID := playgroundUploadCanvasAttachment(t, 7, canvasID, "template-1", "image/png", png)["id"].(string)
+			modelNode := map[string]any{
+				"id": "m1", "type": "model", "position": map[string]any{"x": 360, "y": 0},
+				"data": map[string]any{
+					"kind": "model", "label": "Generate", "preferred": true,
+					"snapshot": map[string]any{"sessionId": "leaked-session", "text": "leaked preview"},
+					"workflow": map[string]any{
+						"model": "test-model", "size": "1024x1024", "imageCount": float64(1),
+						"status": "succeeded", "output": "leaked output", "inputText": "leaked input",
+						"resultImageCount": float64(1), "error": "leaked error", "attempts": float64(2),
+						"lastSeed": float64(1234), "preferredResultNodeId": "m1-result-1",
+					},
+				},
+			}
 			document := canvasDocument([]any{
 				canvasNode("p1", "prompt", 0, 0),
 				canvasRefNode("a1", "attachment", map[string]any{"sessionId": canvasID, "attachmentId": attachmentID}),
-				map[string]any{
-					"id": "m1", "type": "model", "position": map[string]any{"x": 360, "y": 0},
-					"data": map[string]any{
-						"kind": "model", "label": "Generate", "preferred": true,
-						"snapshot": map[string]any{"sessionId": "leaked-session", "text": "leaked preview"},
-						"workflow": map[string]any{
-							"model": "test-model", "size": "1024x1024", "imageCount": float64(1),
-							"status": "succeeded", "output": "leaked output", "inputText": "leaked input",
-							"resultImageCount": float64(1), "error": "leaked error", "attempts": float64(2),
-							"lastSeed": float64(1234), "preferredResultNodeId": "m1-result-1",
-						},
-					},
-				},
+				modelNode,
 			}, []any{
 				map[string]any{"id": "e1", "source": "p1", "target": "m1"},
 			})
@@ -1801,10 +1886,18 @@ func TestPlaygroundCanvasTemplateLibrary(t *testing.T) {
 
 			// An administrator can save their own canvas directly as a global
 			// market template. The row is ownerless, keeps no system key and
-			// consumes no account quota; a foreign canvas stays unreadable.
+			// consumes no account quota; a foreign canvas stays unreadable. The
+			// admin board carries the same last run but must not claim the other
+			// account's attachment.
 			adminCanvasID := createCanvasProject(t, 9, "admin-global-template")["id"].(string)
+			adminDocument := canvasDocument([]any{
+				canvasNode("p1", "prompt", 0, 0),
+				modelNode,
+			}, []any{
+				map[string]any{"id": "e1", "source": "p1", "target": "m1"},
+			})
 			require.Equal(t, http.StatusOK, playgroundRequest(t, 9, http.MethodPatch, "/api/playground/canvases/"+adminCanvasID, map[string]any{
-				"revision": 0, "document": document,
+				"revision": 0, "document": adminDocument,
 			}, controller.UpdatePlaygroundCanvasProject).Code)
 			globalResponse := playgroundRequest(t, 9, http.MethodPost, "/api/playground/canvas-templates/global", map[string]any{
 				"canvas_id": adminCanvasID, "name": "Admin chain", "category": "translation", "inline_assets": false,

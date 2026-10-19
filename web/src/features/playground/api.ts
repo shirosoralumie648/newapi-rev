@@ -27,6 +27,7 @@ import {
   DEFAULT_PARAMETER_ENABLED,
   PLAYGROUND_REQUEST_ID_HEADER,
   PLAYGROUND_SEARCH_MAX_RESULTS,
+  PLAYGROUND_TOOL_CALL_RESULT_DEFAULT_MAX_BYTES,
   PLAYGROUND_WORKFLOW_RUN_HEADER,
 } from './constants'
 import {
@@ -1008,6 +1009,13 @@ const playgroundMessageCostSchema = z.object({
   model_name: z.string().optional(),
   created_at: z.number().int().nonnegative(),
   timing: playgroundRequestTimingSchema.optional(),
+  cache_tokens: z.number().int().nonnegative().optional(),
+  cache_ratio: z.number().nonnegative().optional(),
+  model_ratio: z.number().nonnegative().optional(),
+  group_ratio: z.number().nonnegative().optional(),
+  channel_key: z.string().optional(),
+  channel_id: z.number().int().positive().optional(),
+  channel_name: z.string().optional(),
 })
 
 const playgroundMessageCostLookupSchema = z.object({
@@ -1035,6 +1043,7 @@ const playgroundUsageSchema = z.object({
 const playgroundSettingsSchema = z.object({
   sandbox_preview_enabled: z.boolean(),
   web_search_enabled: z.boolean().optional(),
+  tool_call_result_max_bytes: z.number().int().positive().optional(),
 })
 
 export interface PlaygroundUsageMetric {
@@ -1101,6 +1110,13 @@ export async function getPlaygroundMessageCosts(
       modelName: item.model_name ?? '',
       createdAt: item.created_at * 1000,
       timing: item.timing,
+      cacheTokens: item.cache_tokens,
+      cacheRatio: item.cache_ratio,
+      modelRatio: item.model_ratio,
+      groupRatio: item.group_ratio,
+      channelKey: item.channel_key,
+      channelId: item.channel_id,
+      channelName: item.channel_name,
     })
   }
   return { enabled: data.enabled, costs }
@@ -1254,6 +1270,11 @@ export async function getPlaygroundStorageBilling(
 export interface PlaygroundServerSettings {
   sandboxPreviewEnabled: boolean
   webSearchEnabled: boolean
+  /**
+   * Authoritative byte budget the server validates one tool result against.
+   * Older servers omit it; the local default applies until they report it.
+   */
+  toolCallResultMaxBytes: number
 }
 
 export async function getPlaygroundSettings(
@@ -1265,6 +1286,9 @@ export async function getPlaygroundSettings(
   return {
     sandboxPreviewEnabled: settings.sandbox_preview_enabled,
     webSearchEnabled: settings.web_search_enabled === true,
+    toolCallResultMaxBytes:
+      settings.tool_call_result_max_bytes ??
+      PLAYGROUND_TOOL_CALL_RESULT_DEFAULT_MAX_BYTES,
   }
 }
 

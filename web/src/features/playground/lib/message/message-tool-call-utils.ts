@@ -34,9 +34,9 @@ import type {
 import { getActiveVersionIndex } from './message-utils'
 
 /**
- * Tool call state helpers. Playground stores both the requested call and the
- * result the user provided manually inside the message snapshot; nothing here
- * (or on the server) executes a tool.
+ * Tool call state helpers. Playground stores both the call the model requested
+ * and the result that answered it — either produced by the automatic executor
+ * or provided manually by the user; the server never executes a tool.
  */
 export function getVersionToolCalls(
   version: MessageVersion | undefined
@@ -168,7 +168,8 @@ export function setToolCallStatus(
   message: Message,
   toolCallId: string,
   status: MessageToolCallStatus,
-  result?: string
+  result?: string,
+  errorMessage?: string
 ): Message {
   const activeIndex = getActiveVersionIndex(message)
   const completedAt = Date.now()
@@ -184,6 +185,8 @@ export function setToolCallStatus(
                 ...call,
                 status,
                 result,
+                errorMessage:
+                  status === TOOL_CALL_STATUS.ERROR ? errorMessage : undefined,
                 completedAt,
               }
             : call
@@ -201,11 +204,12 @@ export function updateMessageToolCallStatus(
   messageKey: string,
   toolCallId: string,
   status: MessageToolCallStatus,
-  result?: string
+  result?: string,
+  errorMessage?: string
 ): Message[] {
   return messages.map((message) =>
     message.key === messageKey
-      ? setToolCallStatus(message, toolCallId, status, result)
+      ? setToolCallStatus(message, toolCallId, status, result, errorMessage)
       : message
   )
 }

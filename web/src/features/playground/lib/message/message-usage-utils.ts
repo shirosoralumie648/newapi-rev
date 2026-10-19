@@ -161,6 +161,55 @@ export function getVersionUsage(
   }
 }
 
+/** USD per one million input tokens represented by one model ratio unit. */
+const MODEL_RATIO_USD_PER_MILLION_TOKENS = 2
+
+/** Cached prompt tokens of a settled request and the amount they saved. */
+export interface MessageCacheUsage {
+  tokens: number
+  /**
+   * Estimated saving in USD over uncached input. Absent when the row does not
+   * carry both applied prices, so the display never fabricates an amount.
+   */
+  savingsUSD?: number
+}
+
+/**
+ * Cached prompt tokens of the settled request and, when the row carries both
+ * the applied input price (model ratio) and the cache price (cache ratio), the
+ * amount those tokens saved compared with uncached input. A request billed
+ * without token ratios, or a row stored before they were recorded, yields the
+ * token count only.
+ */
+export function getMessageCacheUsage(
+  cost?: PlaygroundMessageCost
+): MessageCacheUsage | undefined {
+  const tokens = normalizeTokenCount(cost?.cacheTokens)
+  if (tokens === undefined || tokens <= 0) return undefined
+
+  const usage: MessageCacheUsage = { tokens }
+  const modelRatio = cost?.modelRatio
+  const cacheRatio = cost?.cacheRatio
+  if (
+    typeof modelRatio !== 'number' ||
+    !Number.isFinite(modelRatio) ||
+    modelRatio <= 0 ||
+    typeof cacheRatio !== 'number' ||
+    !Number.isFinite(cacheRatio) ||
+    cacheRatio < 0
+  ) {
+    return usage
+  }
+
+  const inputPriceUSD = modelRatio * MODEL_RATIO_USD_PER_MILLION_TOKENS
+  const cachePriceUSD = inputPriceUSD * cacheRatio
+  const savingsUSD = (tokens / 1_000_000) * (inputPriceUSD - cachePriceUSD)
+  if (savingsUSD > 0) {
+    usage.savingsUSD = savingsUSD
+  }
+  return usage
+}
+
 /** Conversation totals over the version each message currently displays. */
 export interface ConversationUsageSummary {
   usage: MessageUsage

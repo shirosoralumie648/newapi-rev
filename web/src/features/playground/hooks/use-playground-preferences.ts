@@ -19,12 +19,21 @@ For commercial licensing, please contact support@quantumnous.com
 import { useCallback, useEffect, useState } from 'react'
 
 import {
+  PLAYGROUND_TOOL_EXECUTION_DEFAULT_ENABLED,
+  PLAYGROUND_TOOL_EXECUTION_DEFAULT_MAX_ROUNDS,
+  PLAYGROUND_TOOL_EXECUTION_MAX_ROUNDS,
+  PLAYGROUND_TOOL_EXECUTION_MIN_ROUNDS,
+} from '../constants'
+import {
   loadAutoReadPreferences,
   loadAutoTitlePreferences,
+  loadToolExecutionPreferences,
   saveAutoReadPreferences,
   saveAutoTitlePreferences,
+  saveToolExecutionPreferences,
   type PlaygroundAutoReadPreferences,
   type PlaygroundAutoTitlePreferences,
+  type PlaygroundToolExecutionPreferences,
 } from '../lib/storage/playground-preferences'
 
 /**
@@ -42,6 +51,11 @@ export function usePlaygroundPreferences(userId: number | null) {
     defaultEnabled: true,
     overrides: {},
   })
+  const [toolExecution, setToolExecution] =
+    useState<PlaygroundToolExecutionPreferences>({
+      enabled: PLAYGROUND_TOOL_EXECUTION_DEFAULT_ENABLED,
+      maxRounds: PLAYGROUND_TOOL_EXECUTION_DEFAULT_MAX_ROUNDS,
+    })
 
   // Auth changes intentionally rehydrate browser-owned preferences after
   // hiding the previous account's state.
@@ -50,6 +64,8 @@ export function usePlaygroundPreferences(userId: number | null) {
     setAutoRead(loadAutoReadPreferences(userId))
     // eslint-disable-next-line react/set-state-in-effect
     setAutoTitle(loadAutoTitlePreferences(userId))
+    // eslint-disable-next-line react/set-state-in-effect
+    setToolExecution(loadToolExecutionPreferences(userId))
   }, [userId])
 
   const persistAutoRead = useCallback(
@@ -140,6 +156,36 @@ export function usePlaygroundPreferences(userId: number | null) {
     [autoTitle]
   )
 
+  const persistToolExecution = useCallback(
+    (next: PlaygroundToolExecutionPreferences) => {
+      const normalized = {
+        enabled: next.enabled,
+        maxRounds: Math.min(
+          PLAYGROUND_TOOL_EXECUTION_MAX_ROUNDS,
+          Math.max(PLAYGROUND_TOOL_EXECUTION_MIN_ROUNDS, next.maxRounds)
+        ),
+      }
+      setToolExecution(normalized)
+      saveToolExecutionPreferences(userId, normalized)
+    },
+    [userId]
+  )
+
+  const setToolExecutionEnabled = useCallback(
+    (value: boolean) => {
+      persistToolExecution({ ...toolExecution, enabled: value })
+    },
+    [persistToolExecution, toolExecution]
+  )
+
+  const setToolExecutionMaxRounds = useCallback(
+    (value: number) => {
+      if (!Number.isFinite(value)) return
+      persistToolExecution({ ...toolExecution, maxRounds: Math.floor(value) })
+    },
+    [persistToolExecution, toolExecution]
+  )
+
   return {
     autoReadDefault: autoRead.defaultEnabled,
     hasSessionAutoReadOverride,
@@ -151,5 +197,9 @@ export function usePlaygroundPreferences(userId: number | null) {
     isAutoTitleEnabled,
     setAutoTitleDefault,
     setSessionAutoTitle,
+    toolExecutionEnabled: toolExecution.enabled,
+    toolExecutionMaxRounds: toolExecution.maxRounds,
+    setToolExecutionEnabled,
+    setToolExecutionMaxRounds,
   }
 }

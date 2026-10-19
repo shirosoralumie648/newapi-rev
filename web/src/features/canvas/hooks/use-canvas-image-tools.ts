@@ -207,6 +207,22 @@ async function fetchImageBytes(
   return new Uint8Array(await response.arrayBuffer())
 }
 
+/**
+ * Decodes the selected node's data URL into the bytes the multipart edit body
+ * carries. The dialog keeps the source as a data URL for preview, while
+ * `submitImageEdit` appends Blobs to its FormData.
+ */
+function sourceImageBlob(source: string): Blob {
+  const separator = source.startsWith('data:') ? source.indexOf(',') : -1
+  if (separator < 0) {
+    throw new CanvasImageToolError(CANVAS_IMAGE_TOOL_MESSAGES.SOURCE_UNREADABLE)
+  }
+  const mediaType = source.slice(5, separator).split(';')[0]?.trim()
+  return new Blob([decodeBase64ImageBytes(source)], {
+    type: mediaType || 'image/png',
+  })
+}
+
 /** Decodes one returned image into the bytes a canvas attachment stores. */
 async function imageResultToBlob(image: PlaygroundImageResult): Promise<Blob> {
   try {
@@ -694,7 +710,7 @@ export function useCanvasImageTools(
         const outcome = await submitImageEdit({
           model,
           prompt,
-          image,
+          image: sourceImageBlob(image),
           imageFilename: canvasImageToolFilename(
             node.data.label,
             'background-source'
@@ -743,7 +759,7 @@ export function useCanvasImageTools(
         const outcome = await submitImageEdit({
           model,
           prompt,
-          image,
+          image: sourceImageBlob(image),
           imageFilename: canvasImageToolFilename(
             node.data.label,
             'style-source'
