@@ -44,13 +44,14 @@ import {
   isAssistantMessageFinal,
   isAssistantMessagePending,
 } from '../lib'
-import type { ToolCallDelta } from '../lib'
+import type { PlaygroundCapturedRequest, ToolCallDelta } from '../lib'
 import type {
   Message,
   MessageUsage,
   PlaygroundConfig,
   PlaygroundContextSettings,
   PlaygroundContextSummary,
+  PlaygroundDeveloperOptions,
   PlaygroundPendingQuote,
   ParameterEnabled,
 } from '../types'
@@ -65,6 +66,11 @@ interface UseChatHandlerOptions {
   memoryBlock?: string
   /** Context limits and summary model applied when the payload is built. */
   contextSettings: PlaygroundContextSettings
+  /**
+   * Request-side developer settings (function tools and response format)
+   * injected into every send while enabled. Absent keeps the request unchanged.
+   */
+  developerOptions?: PlaygroundDeveloperOptions | null
   /**
    * Resolves the compression node the send should carry, summarizing the
    * messages a limit leaves out first when automatic summary is enabled. The
@@ -128,6 +134,7 @@ export function useChatHandler({
   systemPrompt,
   memoryBlock,
   contextSettings,
+  developerOptions,
   prepareContextSummary,
   prepareKnowledge,
   onMessageUpdate,
@@ -137,6 +144,10 @@ export function useChatHandler({
   const { t } = useTranslation()
   const { sendStreamRequest, stopStream, isStreaming } = useStreamRequest()
   const [isRequesting, setIsRequesting] = useState(false)
+  // Final payload of the most recent send, kept in memory only for the request
+  // viewer. Nothing is persisted and a reload clears it.
+  const [capturedRequest, setCapturedRequest] =
+    useState<PlaygroundCapturedRequest | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   const requestGenerationRef = useRef(0)
   const pendingStreamChunksRef = useRef<PendingStreamChunks>({
@@ -490,8 +501,10 @@ export function useChatHandler({
         systemPrompt,
         { settings: contextSettings, summary: contextSummary },
         memoryBlock,
-        quote
+        quote,
+        developerOptions
       )
+      setCapturedRequest({ payload, capturedAt: Date.now() })
       void sendStreamRequest(payload, {
         onUpdate: (type, chunk) => handleStreamUpdate(generation, type, chunk),
         onToolCalls: (deltas) => handleToolCallDeltas(generation, deltas),
@@ -511,6 +524,7 @@ export function useChatHandler({
       systemPrompt,
       memoryBlock,
       contextSettings,
+      developerOptions,
       sendStreamRequest,
       discardPendingStreamUpdates,
       handleStreamUpdate,
@@ -545,8 +559,10 @@ export function useChatHandler({
         systemPrompt,
         { settings: contextSettings, summary: contextSummary },
         memoryBlock,
-        quote
+        quote,
+        developerOptions
       )
+      setCapturedRequest({ payload, capturedAt: Date.now() })
       const generation = requestGenerationRef.current + 1
       const abortController = new AbortController()
 
@@ -653,6 +669,7 @@ export function useChatHandler({
       systemPrompt,
       memoryBlock,
       contextSettings,
+      developerOptions,
       stopStream,
       discardPendingStreamUpdates,
       onMessageUpdate,
@@ -812,9 +829,11 @@ export function useChatHandler({
   }
 
   return {
+    capturedRequest,
     sendChat,
     continueChat,
     stopGeneration,
+    capturedRequest,
     isGenerating: isStreaming || isRequesting,
   }
 }

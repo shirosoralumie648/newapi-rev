@@ -98,7 +98,7 @@ type playgroundSharedCanvasNodeData struct {
 	Text      string                        `json:"text,omitempty"`
 	Snapshot  *playgroundSharedNodeSnapshot `json:"snapshot,omitempty"`
 	Label     string                        `json:"label,omitempty"`
-	MediaType string                        `json:"media_type,omitempty"`
+	MediaType string                        `json:"mediaType,omitempty"`
 	Workflow  *playgroundSharedWorkflow     `json:"workflow,omitempty"`
 	ParentID  string                        `json:"parentId,omitempty"`
 }
@@ -251,7 +251,7 @@ func GetSharedPlaygroundSession(c *gin.Context) {
 		return
 	}
 	if target.Kind == model.PlaygroundShareKindCanvas {
-		document, err := playgroundSharedCanvasDocument(target.Canvas.Document)
+		document, err := playgroundSharedCanvasDocument(string(target.Canvas.Document))
 		if err != nil {
 			writePlaygroundError(c, err)
 			return

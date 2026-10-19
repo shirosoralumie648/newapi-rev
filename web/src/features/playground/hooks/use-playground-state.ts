@@ -23,6 +23,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import {
   DEFAULT_CONFIG,
   DEFAULT_CONTEXT_SETTINGS,
+  DEFAULT_DEVELOPER_OPTIONS,
   DEFAULT_PARAMETER_ENABLED,
 } from '../constants'
 import { normalizeSessionTags } from '../lib/session-organization'
@@ -48,6 +49,7 @@ import type {
   PlaygroundConfig,
   PlaygroundContextSettings,
   PlaygroundContextSummary,
+  PlaygroundDeveloperOptions,
   PlaygroundSession,
   PlaygroundSessionOrganization,
 } from '../types'
@@ -394,6 +396,28 @@ export function usePlaygroundState() {
     [updateSession]
   )
 
+  // The stored developer settings replace the previous object as a whole, so
+  // the value is copied one level deeper than the others: the tools list and
+  // every function object stay independent of the caller's object.
+  const updateDeveloperOptions = useCallback(
+    (options: PlaygroundDeveloperOptions) => {
+      const currentActiveSessionId = latestActiveSessionIdRef.current
+      if (!currentActiveSessionId) return
+
+      updateSession(currentActiveSessionId, (session) => ({
+        ...session,
+        developerOptions: {
+          ...options,
+          tools: options.tools.map((tool) => ({
+            ...tool,
+            function: { ...tool.function },
+          })),
+        },
+      }))
+    },
+    [updateSession]
+  )
+
   const updateMessages = useCallback<MessageUpdate>(
     (updater, sessionId = latestActiveSessionIdRef.current) => {
       if (!sessionId) return
@@ -600,6 +624,8 @@ export function usePlaygroundState() {
     suggestedQuestions: activeSession?.suggestedQuestions ?? [],
     context: activeSession?.context ?? DEFAULT_CONTEXT_SETTINGS,
     contextSummary: activeSession?.contextSummary ?? null,
+    developerOptions:
+      activeSession?.developerOptions ?? DEFAULT_DEVELOPER_OPTIONS,
     messages: activeSession?.messages ?? [],
     isLoadingMessages: !isHydrated,
     models,
@@ -615,6 +641,7 @@ export function usePlaygroundState() {
     updateContextSettings,
     updateContextSummary,
     updateKnowledgeBaseIds,
+    updateDeveloperOptions,
     applySessionSettings,
     updateMessages,
     clearMessages,

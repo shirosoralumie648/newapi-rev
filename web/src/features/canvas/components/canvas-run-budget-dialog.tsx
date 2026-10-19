@@ -115,8 +115,11 @@ export function CanvasRunBudgetDialog(props: CanvasRunBudgetDialogProps) {
       }
       setStarting(false)
     }
-    props.onOpenChange(false)
+    // Start while the parent can still read the plan the dialog was opened
+    // for, then close; the scope of a selection run must not depend on state
+    // teardown order.
     props.onRun(budget)
+    props.onOpenChange(false)
   }
 
   return (

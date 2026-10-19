@@ -118,14 +118,14 @@ func playgroundTestDB(t *testing.T, dialect string) *gorm.DB {
 	common.SetDatabaseTypes(common.DatabaseType(dialect), previousLog)
 	model.DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundKnowledgeChunk{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundUserUsage{}, &model.PlaygroundUpload{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundMessage{}, &model.PlaygroundSessionShare{}, &model.PlaygroundSession{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundKnowledgeChunk{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasTemplateAsset{}, &model.PlaygroundCanvasTemplate{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundUserUsage{}, &model.PlaygroundUpload{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundMessage{}, &model.PlaygroundSessionShare{}, &model.PlaygroundSession{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
 		model.DB = previous
 		common.SetDatabaseTypes(previousMain, previousLog)
 	})
-	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundSessionShare{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUpload{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeChunk{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundSessionShare{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUpload{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasTemplate{}, &model.PlaygroundCanvasTemplateAsset{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeChunk{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -164,6 +164,16 @@ func playgroundRequest(t *testing.T, user int, method, path string, body any, ha
 		}
 		if parts[3] == "canvases" {
 			c.Params = append(c.Params, gin.Param{Key: "canvasId", Value: parts[4]})
+		}
+		if parts[3] == "canvas-templates" {
+			templateID := parts[4]
+			if (templateID == "global" || templateID == "market") && len(parts) > 5 {
+				templateID = parts[5]
+			}
+			c.Params = append(c.Params, gin.Param{Key: "templateId", Value: templateID})
+			if len(parts) > 6 && parts[5] == "assets" {
+				c.Params = append(c.Params, gin.Param{Key: "assetId", Value: parts[6]})
+			}
 		}
 		if parts[3] == "presets" {
 			presetID := parts[4]
@@ -2501,6 +2511,8 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodGet, "/api/playground/sessions/" + sessionID + "/export"},
 		{http.MethodPost, "/api/playground/sessions/" + sessionID + "/share"},
 		{http.MethodDelete, "/api/playground/sessions/" + sessionID + "/share"},
+		{http.MethodPost, "/api/playground/canvases/missing/share"},
+		{http.MethodDelete, "/api/playground/canvases/missing/share"},
 		{http.MethodPost, "/api/playground/sessions/" + sessionID + "/restore"},
 		{http.MethodPost, "/api/playground/tasks/missing/cancel"},
 		{http.MethodPost, "/pg/embeddings"},
@@ -2576,6 +2588,50 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	assert.Equal(t, 404, anonymousMissing.Code)
 	assert.Contains(t, anonymousMissing.Body.String(), "PLAYGROUND_SHARE_NOT_FOUND")
 
+	// A canvas link uses the same public route and headers as a conversation
+	// link. Creating and revoking it through the real router also proves the
+	// canvas share routes are wired behind the session guard.
+	canvasCreated := playgroundAuthenticatedRequest(t, engine, token, http.MethodPost, "/api/playground/canvases", map[string]any{
+		"title":    "Route canvas",
+		"document": map[string]any{"nodes": []any{}, "edges": []any{}},
+	})
+	require.Equal(t, 200, canvasCreated.Code, canvasCreated.Body.String())
+	var canvasEnvelope struct {
+		Success bool
+		Data    struct {
+			ID string `json:"id"`
+		}
+	}
+	require.NoError(t, common.Unmarshal(canvasCreated.Body.Bytes(), &canvasEnvelope))
+	require.True(t, canvasEnvelope.Success, canvasCreated.Body.String())
+	require.NotEmpty(t, canvasEnvelope.Data.ID)
+	canvasSharePath := "/api/playground/canvases/" + canvasEnvelope.Data.ID + "/share"
+	canvasShare := playgroundAuthenticatedRequest(t, engine, token, http.MethodPost, canvasSharePath, map[string]any{})
+	require.Equal(t, 200, canvasShare.Code, canvasShare.Body.String())
+	var canvasShareEnvelope struct {
+		Success bool
+		Data    struct {
+			Token   string `json:"token"`
+			URLPath string `json:"url_path"`
+		}
+	}
+	require.NoError(t, common.Unmarshal(canvasShare.Body.Bytes(), &canvasShareEnvelope))
+	require.True(t, canvasShareEnvelope.Success, canvasShare.Body.String())
+	require.NotEmpty(t, canvasShareEnvelope.Data.Token)
+	assert.Equal(t, "/share/"+canvasShareEnvelope.Data.Token, canvasShareEnvelope.Data.URLPath)
+	anonymousCanvas := playgroundAuthenticatedRequest(t, engine, "", http.MethodGet, "/api/playground/shared/"+canvasShareEnvelope.Data.Token, nil)
+	require.Equal(t, 200, anonymousCanvas.Code, anonymousCanvas.Body.String())
+	assert.Contains(t, anonymousCanvas.Header().Get("Cache-Control"), "no-store")
+	assert.Contains(t, anonymousCanvas.Body.String(), `"kind":"canvas"`)
+	assert.Contains(t, anonymousCanvas.Body.String(), "Route canvas")
+	assert.Equal(t, "noindex, nofollow, noarchive", anonymousCanvas.Header().Get("X-Robots-Tag"))
+	assert.Equal(t, "no-referrer", anonymousCanvas.Header().Get("Referrer-Policy"))
+	canvasRevoked := playgroundAuthenticatedRequest(t, engine, token, http.MethodDelete, canvasSharePath, nil)
+	require.Equal(t, 200, canvasRevoked.Code, canvasRevoked.Body.String())
+	revokedCanvas := playgroundAuthenticatedRequest(t, engine, "", http.MethodGet, "/api/playground/shared/"+canvasShareEnvelope.Data.Token, nil)
+	assert.Equal(t, 404, revokedCanvas.Code)
+	assert.Equal(t, anonymousMissing.Body.String(), revokedCanvas.Body.String())
+
 	// Global preset maintenance is administrator-only. A personal access
 	// token is admitted by the dashboard authentication layer only with the
 	// option scope, and a common-user session is still rejected by AdminAuth.
@@ -2587,6 +2643,12 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodPatch, "/api/playground/presets/global/missing"},
 		{http.MethodDelete, "/api/playground/presets/global/missing"},
 		{http.MethodGet, "/api/playground/presets/global/missing/export"},
+		{http.MethodGet, "/api/playground/canvas-templates/global"},
+		{http.MethodPost, "/api/playground/canvas-templates/global/import"},
+		{http.MethodGet, "/api/playground/canvas-templates/global/missing"},
+		{http.MethodPatch, "/api/playground/canvas-templates/global/missing"},
+		{http.MethodDelete, "/api/playground/canvas-templates/global/missing"},
+		{http.MethodGet, "/api/playground/canvas-templates/global/missing/export"},
 	} {
 		response := playgroundAuthenticatedRequest(t, engine, "", route.method, route.path, input)
 		assert.Equal(t, 401, response.Code, route.method+" "+route.path+": "+response.Body.String())
@@ -2691,6 +2753,51 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	require.NotEmpty(t, canvasEnvelope.Data.ID)
 	canvasDetail := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, canvasBase+"/"+canvasEnvelope.Data.ID, nil)
 	require.Equal(t, 200, canvasDetail.Code, canvasDetail.Body.String())
+
+	// Canvas templates share the same session-only contract. The static
+	// market/global routes and the parameterized template routes all reject an
+	// anonymous request and a personal access token before a handler runs.
+	templateBase := "/api/playground/canvas-templates"
+	for _, route := range []struct{ method, path string }{
+		{http.MethodGet, templateBase}, {http.MethodPost, templateBase},
+		{http.MethodGet, templateBase + "/market"},
+		{http.MethodPost, templateBase + "/market/missing/copy"},
+		{http.MethodPost, templateBase + "/import"},
+		{http.MethodGet, templateBase + "/missing"},
+		{http.MethodPatch, templateBase + "/missing"},
+		{http.MethodDelete, templateBase + "/missing"},
+		{http.MethodGet, templateBase + "/missing/export"},
+		{http.MethodGet, templateBase + "/missing/assets/missing/content"},
+	} {
+		response := playgroundAuthenticatedRequest(t, engine, "", route.method, route.path, upload)
+		assert.Equal(t, 401, response.Code, route.method+" "+route.path+": "+response.Body.String())
+		assert.Contains(t, response.Header().Get("Cache-Control"), "no-store")
+		response = playgroundAuthenticatedRequest(t, engine, patRaw, route.method, route.path, upload)
+		assert.Equal(t, 403, response.Code, route.method+" "+route.path+": "+response.Body.String())
+		assert.Contains(t, response.Body.String(), "AUTH_SESSION_REQUIRED")
+	}
+	templateCreated := playgroundAuthenticatedRequest(t, engine, token, http.MethodPost, templateBase, map[string]any{
+		"canvas_id": canvasEnvelope.Data.ID, "name": "Router template", "inline_assets": false,
+	})
+	require.Equal(t, 200, templateCreated.Code, templateCreated.Body.String())
+	var templateEnvelope struct {
+		Data struct {
+			Template struct{ ID string } `json:"template"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(templateCreated.Body.Bytes(), &templateEnvelope))
+	require.NotEmpty(t, templateEnvelope.Data.Template.ID)
+	templateList := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, templateBase, nil)
+	require.Equal(t, 200, templateList.Code, templateList.Body.String())
+	assert.Contains(t, templateList.Body.String(), `"total":1`)
+	templateRead := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, templateBase+"/"+templateEnvelope.Data.Template.ID, nil)
+	require.Equal(t, 200, templateRead.Code, templateRead.Body.String())
+	assert.Contains(t, templateRead.Body.String(), `"name":"Router template"`)
+	templateExport := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, templateBase+"/"+templateEnvelope.Data.Template.ID+"/export", nil)
+	require.Equal(t, 200, templateExport.Code, templateExport.Body.String())
+	assert.Equal(t, "application/zip", templateExport.Header().Get("Content-Type"))
+	require.Equal(t, 200, playgroundAuthenticatedRequest(t, engine, token, http.MethodDelete, templateBase+"/"+templateEnvelope.Data.Template.ID, nil).Code)
+
 	canvasShare := playgroundAuthenticatedRequest(t, engine, token, http.MethodPost, canvasBase+"/"+canvasEnvelope.Data.ID+"/share", map[string]any{})
 	require.Equal(t, 200, canvasShare.Code, canvasShare.Body.String())
 	var canvasShareEnvelope struct {
@@ -4897,6 +5004,185 @@ func TestPlaygroundSessionContextManagement(t *testing.T) {
 			legacyView := readSession(t)
 			assert.Empty(t, legacyView.Context)
 			assert.Nil(t, legacyView.ContextSummary)
+		})
+	}
+}
+
+// Developer options are the request-side structured-output settings of one
+// conversation: the enabled switch, the function tool definitions and the
+// response format. The gateway validates and stores them but never executes a
+// tool, so the stored contract accepts only `type: "function"` tools and
+// rejects unknown keys, hosted tool types and oversized schemas.
+func TestPlaygroundSessionDeveloperOptions(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			created := playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions", map[string]any{
+				"title": "Developer", "client_id": "developer-session",
+				"config": map[string]any{"model": "test-model"}, "parameter_enabled": map[string]bool{},
+			}, controller.CreatePlaygroundSession)
+			require.Equal(t, http.StatusOK, created.Code, created.Body.String())
+
+			type sessionView struct {
+				ID               string         `json:"id"`
+				DeveloperOptions map[string]any `json:"developer_options"`
+			}
+			decode := func(t *testing.T, body []byte) sessionView {
+				t.Helper()
+				var envelope struct {
+					Success bool        `json:"success"`
+					Data    sessionView `json:"data"`
+				}
+				require.NoError(t, common.Unmarshal(body, &envelope))
+				require.True(t, envelope.Success, string(body))
+				return envelope.Data
+			}
+			session := decode(t, created.Body.Bytes())
+			createdID := session.ID
+			assert.Empty(t, session.DeveloperOptions)
+			readSession := func(t *testing.T) sessionView {
+				t.Helper()
+				response := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+createdID, nil, controller.GetPlaygroundSession)
+				require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+				return decode(t, response.Body.Bytes())
+			}
+
+			// A complete settings object is stored in the OpenAI wire shape and
+			// round-trips: the tool schema and the named JSON Schema survive.
+			stored := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+createdID, map[string]any{
+				"revision": 0,
+				"developer_options": map[string]any{
+					"enabled": true,
+					"tools": []any{map[string]any{
+						"type": "function",
+						"function": map[string]any{
+							"name":        "get_weather",
+							"description": "Look up the weather",
+							"parameters": map[string]any{
+								"type":       "object",
+								"properties": map[string]any{"city": map[string]any{"type": "string"}},
+								"required":   []string{"city"},
+							},
+							"strict": true,
+						},
+					}},
+					"tool_choice": "auto",
+					"response_format": map[string]any{
+						"type": "json_schema",
+						"json_schema": map[string]any{
+							"name": "weather_report",
+							"schema": map[string]any{
+								"type":       "object",
+								"properties": map[string]any{"summary": map[string]any{"type": "string"}},
+							},
+							"strict": true,
+						},
+					},
+				},
+			}, controller.UpdatePlaygroundSession)
+			require.Equal(t, http.StatusOK, stored.Code, stored.Body.String())
+			options := decode(t, stored.Body.Bytes()).DeveloperOptions
+			assert.Equal(t, true, options["enabled"])
+			assert.Equal(t, "auto", options["tool_choice"])
+			tools, ok := options["tools"].([]any)
+			require.True(t, ok, "%#v", options["tools"])
+			require.Len(t, tools, 1)
+			function := tools[0].(map[string]any)["function"].(map[string]any)
+			assert.Equal(t, "get_weather", function["name"])
+			assert.Equal(t, true, function["strict"])
+			parameters := function["parameters"].(map[string]any)
+			assert.Equal(t, "object", parameters["type"])
+			assert.Equal(t, []any{"city"}, parameters["required"])
+			format := options["response_format"].(map[string]any)
+			assert.Equal(t, "json_schema", format["type"])
+			assert.Equal(t, "weather_report", format["json_schema"].(map[string]any)["name"])
+
+			// A request that does not carry the object keeps the stored value.
+			renamed := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+createdID, map[string]any{"revision": 1, "title": "Renamed"}, controller.UpdatePlaygroundSession)
+			require.Equal(t, http.StatusOK, renamed.Code, renamed.Body.String())
+			assert.Equal(t, true, decode(t, renamed.Body.Bytes()).DeveloperOptions["enabled"])
+
+			// Invalid writes leave the stored snapshot untouched.
+			validTool := func(name string) map[string]any {
+				return map[string]any{"type": "function", "function": map[string]any{"name": name}}
+			}
+			manyTools := make([]any, 0, 40)
+			for index := range 33 {
+				manyTools = append(manyTools, validTool(fmt.Sprintf("tool_%d", index)))
+			}
+			largeSchema := func() map[string]any {
+				return map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"blob": map[string]any{"type": "string", "description": strings.Repeat("y", 40<<10)},
+					},
+				}
+			}
+			oversizedTools := make([]any, 0, 8)
+			for index := range 8 {
+				oversizedTools = append(oversizedTools, map[string]any{
+					"type":     "function",
+					"function": map[string]any{"name": fmt.Sprintf("big_%d", index), "parameters": largeSchema()},
+				})
+			}
+			rejected := []struct {
+				name   string
+				body   map[string]any
+				status int
+			}{
+				{"unknown top-level key", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "temperature": 1}}, http.StatusBadRequest},
+				{"non-boolean enabled", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": "yes"}}, http.StatusBadRequest},
+				{"hosted tool type", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "tools": []any{map[string]any{"type": "web_search"}}}}, http.StatusBadRequest},
+				{"unknown tool key", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "tools": []any{map[string]any{"type": "function", "function": map[string]any{"name": "t", "executor": "node"}}}}}, http.StatusBadRequest},
+				{"missing function object", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "tools": []any{map[string]any{"type": "function"}}}}, http.StatusBadRequest},
+				{"missing tool name", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "tools": []any{map[string]any{"type": "function", "function": map[string]any{"description": "nameless"}}}}}, http.StatusBadRequest},
+				{"duplicate tool names", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "tools": []any{validTool("same"), validTool("same")}}}, http.StatusBadRequest},
+				{"nul tool name", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "tools": []any{validTool("bad\x00name")}}}, http.StatusBadRequest},
+				{"unknown tool choice", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "tools": []any{validTool("t")}, "tool_choice": "sometimes"}}, http.StatusBadRequest},
+				{"tool choice without tools", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "tool_choice": "required"}}, http.StatusBadRequest},
+				{"schema on text format", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "response_format": map[string]any{"type": "text", "json_schema": map[string]any{"name": "x"}}}}, http.StatusBadRequest},
+				{"unnamed response schema", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "response_format": map[string]any{"type": "json_schema", "json_schema": map[string]any{"schema": map[string]any{"type": "object"}}}}}, http.StatusBadRequest},
+				{"non-object response schema", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "response_format": map[string]any{"type": "json_schema", "json_schema": map[string]any{"name": "x", "schema": "text"}}}}, http.StatusBadRequest},
+				{"unknown response format key", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "response_format": map[string]any{"type": "json_object", "mode": "fast"}}}, http.StatusBadRequest},
+				{"too many tools", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "tools": manyTools}}, http.StatusUnprocessableEntity},
+				{"oversized schema", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "tools": []any{map[string]any{"type": "function", "function": map[string]any{"name": "big", "parameters": largeSchema()}}}}}, http.StatusUnprocessableEntity},
+				{"oversized total", map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": true, "tools": oversizedTools}}, http.StatusUnprocessableEntity},
+			}
+			for _, test := range rejected {
+				response := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+createdID, test.body, controller.UpdatePlaygroundSession)
+				assert.Equal(t, test.status, response.Code, test.name+": "+response.Body.String())
+				if test.status == http.StatusUnprocessableEntity {
+					assert.Contains(t, response.Body.String(), "PLAYGROUND_DEVELOPER_OPTIONS_LIMIT_EXCEEDED", test.name)
+				}
+			}
+			still := readSession(t)
+			assert.Equal(t, "auto", still.DeveloperOptions["tool_choice"])
+			stillTools := still.DeveloperOptions["tools"].([]any)
+			assert.Equal(t, "get_weather", stillTools[0].(map[string]any)["function"].(map[string]any)["name"])
+
+			// The stored object is the complete replacement: disabling keeps
+			// only the switch, and an explicit null removes it altogether.
+			disabled := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+createdID, map[string]any{"revision": 2, "developer_options": map[string]any{"enabled": false}}, controller.UpdatePlaygroundSession)
+			require.Equal(t, http.StatusOK, disabled.Code, disabled.Body.String())
+			disabledState := decode(t, disabled.Body.Bytes()).DeveloperOptions
+			assert.Equal(t, false, disabledState["enabled"])
+			assert.NotContains(t, disabledState, "tools")
+			cleared := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/sessions/"+createdID, map[string]any{"revision": 3, "developer_options": nil}, controller.UpdatePlaygroundSession)
+			require.Equal(t, http.StatusOK, cleared.Code, cleared.Body.String())
+			assert.Empty(t, decode(t, cleared.Body.Bytes()).DeveloperOptions)
+			assert.Empty(t, readSession(t).DeveloperOptions)
+
+			// Another account cannot write to the conversation at all.
+			foreign := playgroundRequest(t, 8, http.MethodPatch, "/api/playground/sessions/"+createdID, map[string]any{"revision": 4, "developer_options": map[string]any{"enabled": true}}, controller.UpdatePlaygroundSession)
+			assert.Equal(t, http.StatusNotFound, foreign.Code, foreign.Body.String())
+
+			// A legacy row without the column reads back as empty defaults.
+			require.NoError(t, db.Model(&model.PlaygroundSession{}).Where("id = ? AND user_id = ?", createdID, 7).
+				Updates(map[string]any{"developer_options": gorm.Expr("NULL")}).Error)
+			legacy, err := model.GetPlaygroundSession(7, createdID)
+			require.NoError(t, err)
+			assert.Empty(t, legacy.DeveloperOptions)
+			assert.Empty(t, readSession(t).DeveloperOptions)
 		})
 	}
 }

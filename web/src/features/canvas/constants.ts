@@ -25,6 +25,7 @@ import {
 
 import type {
   CanvasAssistantMode,
+  CanvasNodeColor,
   CanvasNodeKind,
   CanvasWorkflowGenerationKind,
 } from './types'
@@ -90,6 +91,64 @@ export const CANVAS_NODE_KINDS = [
   'audio',
   'group',
 ] as const
+
+// Stable organization palette. A node stores only the color key; these class
+// maps keep the rendered swatch theme-aware and are shared by the node header,
+// the group outline and the inspector swatches.
+export const CANVAS_NODE_COLORS = [
+  'red',
+  'orange',
+  'amber',
+  'green',
+  'teal',
+  'blue',
+  'violet',
+  'pink',
+] as const
+
+export const CANVAS_NODE_COLOR_LABELS: Record<CanvasNodeColor, string> = {
+  red: 'Red',
+  orange: 'Orange',
+  amber: 'Amber',
+  green: 'Green',
+  teal: 'Teal',
+  blue: 'Blue',
+  violet: 'Violet',
+  pink: 'Pink',
+}
+
+export const CANVAS_NODE_COLOR_DOT_CLASSES: Record<CanvasNodeColor, string> = {
+  red: 'bg-red-500',
+  orange: 'bg-orange-500',
+  amber: 'bg-amber-500',
+  green: 'bg-green-500',
+  teal: 'bg-teal-500',
+  blue: 'bg-blue-500',
+  violet: 'bg-violet-500',
+  pink: 'bg-pink-500',
+}
+
+export const CANVAS_NODE_COLOR_BORDER_CLASSES: Record<CanvasNodeColor, string> =
+  {
+    red: 'border-red-500/70',
+    orange: 'border-orange-500/70',
+    amber: 'border-amber-500/70',
+    green: 'border-green-500/70',
+    teal: 'border-teal-500/70',
+    blue: 'border-blue-500/70',
+    violet: 'border-violet-500/70',
+    pink: 'border-pink-500/70',
+  }
+
+// Node tags use the same bounds as conversation tags: a short, deduplicated
+// list is a navigation aid, not a second content field. The import path drops
+// anything outside these bounds instead of failing the whole board.
+export const CANVAS_NODE_TAG_MAX_COUNT = 10
+export const CANVAS_NODE_TAG_MAX_LENGTH = 24
+
+// The in-canvas search panel lists at most this many matches; the query and
+// kind filter run in the client over the current board only.
+export const CANVAS_NODE_SEARCH_MAX_RESULTS = 50
 
 // Translation keys for the node kinds. The values double as English source
 // text and as i18n keys, so the node header always follows the interface
@@ -282,6 +341,8 @@ export const CANVAS_WORKFLOW_MESSAGES = {
   IMAGE_UNAVAILABLE: 'A connected reference image could not be read.',
   IMAGE_TOO_LARGE:
     'A connected reference image is larger than the 8 MiB limit.',
+  SELECTION_EMPTY: 'Select at least one node to run.',
+  SELECTION_NO_STEPS: 'The selection contains no workflow step to run.',
   IMAGE_INPUT_LIMIT: 'Too many reference images are connected to this step.',
   SIZE_INVALID:
     'The size must use WIDTHxHEIGHT with each side between 64 and 8192 pixels.',

@@ -1314,4 +1314,18 @@ export const STATIC_I18N_KEYS = [
   'Select at least one node to export.',
   'The PNG image could not be created.',
   'The PNG image could not be saved to the asset library.',
+  // Canvas node organization and selection runs (CV-13): the palette labels
+  // render through t(key) from CANVAS_NODE_COLOR_LABELS and the two selection
+  // messages come from CANVAS_WORKFLOW_MESSAGES, so the literal scan cannot
+  // see them.
+  'Red',
+  'Orange',
+  'Amber',
+  'Green',
+  'Teal',
+  'Blue',
+  'Violet',
+  'Pink',
+  'Select at least one node to run.',
+  'The selection contains no workflow step to run.',
 ] as const

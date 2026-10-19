@@ -288,6 +288,7 @@ function forkSourceSession(): PlaygroundSession {
     systemPrompt: 'Be precise.',
     openingMessage: 'Welcome aboard.',
     suggestedQuestions: ['Explain this'],
+    knowledgeBaseIds: [],
     context: { ...DEFAULT_CONTEXT_SETTINGS, historyLimit: 12 },
     contextSummary: {
       id: 'summary-1',

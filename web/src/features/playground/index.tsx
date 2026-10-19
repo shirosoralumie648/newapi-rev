@@ -37,6 +37,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import { searchPlaygroundWeb } from './api'
 import { PlaygroundArtifactSourceSheet } from './components/artifact/playground-artifact-source-sheet'
 import { PlaygroundChat } from './components/chat/playground-chat'
+import { PlaygroundRequestViewer } from './components/developer/playground-request-viewer'
 import { PlaygroundContextStatus } from './components/input/playground-context-status'
 import { PlaygroundInput } from './components/input/playground-input'
 import { PlaygroundQuoteBar } from './components/input/playground-quote-bar'
@@ -150,6 +151,9 @@ function PlaygroundContent(props: {
   const [presetsOpen, setPresetsOpen] = useState(false)
   const [trashOpen, setTrashOpen] = useState(false)
   const [memoryOpen, setMemoryOpen] = useState(false)
+  // Inspector sheet of the last captured request payload. Opening it never
+  // builds a request; it only shows what the last send already built.
+  const [requestViewerOpen, setRequestViewerOpen] = useState(false)
   // Composer-level quote of an earlier message; it is consumed by the next
   // send and never stored with the conversation.
   const [pendingQuote, setPendingQuote] =
@@ -267,19 +271,24 @@ function PlaygroundContent(props: {
     group: config.group,
   })
 
-  const { sendChat, continueChat, stopGeneration, isGenerating } =
-    useChatHandler({
-      config,
-      parameterEnabled,
-      systemPrompt,
-      memoryBlock,
-      contextSettings: context,
-      prepareContextSummary: contextController.prepareForSend,
-      prepareKnowledge,
-      onMessageUpdate: updateMessages,
-      onResponseComplete: (result) => autoRead.read(result.content),
-      sessionId: activeSessionId,
-    })
+  const {
+    capturedRequest,
+    sendChat,
+    continueChat,
+    stopGeneration,
+    isGenerating,
+  } = useChatHandler({
+    config,
+    parameterEnabled,
+    systemPrompt,
+    memoryBlock,
+    contextSettings: context,
+    prepareContextSummary: contextController.prepareForSend,
+    prepareKnowledge,
+    onMessageUpdate: updateMessages,
+    onResponseComplete: (result) => autoRead.read(result.content),
+    sessionId: activeSessionId,
+  })
 
   const {
     sendParallelChat,
@@ -1345,6 +1354,8 @@ function PlaygroundContent(props: {
               webSearchAvailable={webSearchAvailable}
               webSearchEnabled={webSearchEnabled}
               hasMessages={messages.length > 0}
+              hasCapturedRequest={capturedRequest !== null}
+              onOpenRequestViewer={() => setRequestViewerOpen(true)}
             />
           </div>
         </div>
@@ -1357,6 +1368,11 @@ function PlaygroundContent(props: {
         onRetry={artifactController.retryCreate}
         onOpenChange={closeArtifactSource}
         onCreate={handleCreateArtifact}
+      />
+      <PlaygroundRequestViewer
+        open={requestViewerOpen}
+        onOpenChange={setRequestViewerOpen}
+        request={capturedRequest}
       />
       <PlaygroundSpeechDialog
         group={config.group}

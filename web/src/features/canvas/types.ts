@@ -18,6 +18,21 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type { Edge, Node } from '@xyflow/react'
 
+/**
+ * A stable color marker of one canvas node. The stored value is only this key;
+ * the palette and its classes are presentation details of the client, so an
+ * older board never persists a theme-dependent class name.
+ */
+export type CanvasNodeColor =
+  | 'red'
+  | 'orange'
+  | 'amber'
+  | 'green'
+  | 'teal'
+  | 'blue'
+  | 'violet'
+  | 'pink'
+
 export type CanvasNodeKind =
   | 'text'
   | 'note'
@@ -150,6 +165,11 @@ export type CanvasNodeData = {
   snapshot?: CanvasMessageSnapshot
   ref?: CanvasNodeRef
   label?: string
+  // Optional organization aids. Both live in the opaque node `data` the server
+  // stores, so they round-trip through save, export and import without a schema
+  // change; the editor normalizes them on read and on every edit.
+  color?: CanvasNodeColor
+  tags?: string[]
   // Declared media type of an `attachment` node. Older boards were image-only
   // and carry no value, which keeps rendering as an image.
   mediaType?: string
@@ -231,4 +251,40 @@ export type CanvasSnapshotSummary = {
   edgeCount: number
   byteSize: number
   createdAt: number
+}
+
+/** One attachment byte snapshot stored inside an inline canvas template. */
+export type CanvasTemplateAsset = {
+  id: string
+  /** The attachment id the template document still references. */
+  sourceAttachmentId: string
+  filename: string
+  mediaType: string
+  byteSize: number
+  contentHash: string
+}
+
+export type CanvasTemplateVisibility = 'private' | 'global'
+
+/** The list metadata of one personal, official or administrator template. */
+export type CanvasTemplateSummary = {
+  id: string
+  name: string
+  description: string
+  category: string
+  visibility: CanvasTemplateVisibility
+  inlineAssets: boolean
+  nodeCount: number
+  edgeCount: number
+  documentBytes: number
+  assetCount: number
+  assetBytes: number
+  createdAt: number
+  updatedAt: number
+}
+
+/** One template with its stored document and asset metadata (not the bytes). */
+export type CanvasTemplateDetail = CanvasTemplateSummary & {
+  document: CanvasServerDocument
+  assets: CanvasTemplateAsset[]
 }

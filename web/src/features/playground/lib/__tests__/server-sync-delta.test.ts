@@ -102,6 +102,7 @@ describe('playground session snapshots', () => {
       systemPrompt,
       openingMessage: '',
       suggestedQuestions: [],
+      knowledgeBaseIds: [],
       context: { ...DEFAULT_CONTEXT_SETTINGS },
       contextSummary: null,
       pinned: false,

@@ -47,6 +47,10 @@ function renderTools(
     available: boolean
     enabled: boolean
     onChange: (value: boolean) => void
+  },
+  requestViewer?: {
+    hasCapturedRequest: boolean
+    onOpen: () => void
   }
 ) {
   // The dictation panel mounts a transcription mutation, which needs the query
@@ -71,11 +75,13 @@ function renderTools(
           })}
           contextSettings={DEFAULT_CONTEXT_SETTINGS}
           contextSummary={null}
+          hasCapturedRequest={requestViewer?.hasCapturedRequest ?? false}
           hasMessages
           models={[{ label: 'gpt-4o', value: 'gpt-4o' }]}
           compareModels={[]}
           onCompareModelsChange={() => undefined}
           onClearMessages={onClearMessages}
+          onOpenRequestViewer={requestViewer?.onOpen}
           onAutoReadChange={() => undefined}
           onAutoReadDefaultChange={() => undefined}
           onAutoReadUseDefault={() => undefined}
@@ -120,6 +126,8 @@ beforeAll(() => {
     'System prompt saved': 'System prompt saved',
     'The system prompt is sent to the model at the start of every request in this conversation.':
       'The system prompt is sent to the model at the start of every request in this conversation.',
+    'View the request payload of the last send':
+      'View the request payload of the last send',
     'e.g. You are a concise assistant.': 'e.g. You are a concise assistant.',
   })
 })
