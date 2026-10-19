@@ -269,14 +269,23 @@ export function planPlaygroundContext(options: {
   settings: PlaygroundContextSettings
   summary?: PlaygroundContextSummary | null
   systemPrompt?: string
+  /** Enabled cross-session memories, injected as an extra system message. */
+  memoryBlock?: string
   /** Target model; omitted means unknown, which keeps structured images. */
   model?: string
 }): PlaygroundContextPlan {
   const settings = normalizeContextSettings(options.settings)
   const validMessages = options.messages.filter(isValidMessage)
-  const systemTokens = options.systemPrompt
-    ? estimateTextTokens(omitInlineBase64Media(options.systemPrompt).text)
-    : 0
+  // The injected instruction messages are part of the request estimate even
+  // though they are not stored messages, so the token budget must reserve room
+  // for the system prompt and the memory block before keeping history.
+  const systemTokens =
+    (options.systemPrompt
+      ? estimateTextTokens(omitInlineBase64Media(options.systemPrompt).text)
+      : 0) +
+    (options.memoryBlock
+      ? estimateTextTokens(omitInlineBase64Media(options.memoryBlock).text)
+      : 0)
 
   let summaryUsed: PlaygroundContextSummary | null = null
   let compressedCount = 0

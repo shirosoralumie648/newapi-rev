@@ -49,7 +49,11 @@ type PlaygroundUserUsage struct {
 	// appended to a counter table that already holds rows, so it carries the
 	// same DEFAULT 0 as the canvas snapshot counters: a NOT NULL column can
 	// only be added to a non-empty table when it has one.
-	Snippets        int64 `json:"snippets" gorm:"not null;default:0"`
+	Snippets int64 `json:"snippets" gorm:"not null;default:0"`
+	// Memories counts the account's stored cross-session notes. The column was
+	// appended to a counter table that already holds rows, so it carries the
+	// same DEFAULT 0 as the other appended counters.
+	Memories        int64 `json:"memories" gorm:"not null;default:0"`
 	AttachmentCount int64 `json:"attachment_count" gorm:"not null"`
 	// AttachmentBytes counts every stored attachment byte, database-backed
 	// legacy rows included, because that is the budget AttachmentUserMaxBytes
@@ -101,6 +105,7 @@ type playgroundUserUsageCounters struct {
 	Sessions                   int64
 	Presets                    int64
 	Snippets                   int64
+	Memories                   int64
 	AttachmentCount            int64
 	AttachmentBytes            int64
 	ObjectBytes                int64
@@ -123,6 +128,7 @@ func (usage *PlaygroundUserUsage) counters() playgroundUserUsageCounters {
 		Sessions:                   usage.Sessions,
 		Presets:                    usage.Presets,
 		Snippets:                   usage.Snippets,
+		Memories:                   usage.Memories,
 		AttachmentCount:            usage.AttachmentCount,
 		AttachmentBytes:            usage.AttachmentBytes,
 		ObjectBytes:                usage.ObjectBytes,
@@ -146,6 +152,7 @@ func (usage *PlaygroundUserUsage) load(counters playgroundUserUsageCounters) {
 	usage.Sessions = counters.Sessions
 	usage.Presets = counters.Presets
 	usage.Snippets = counters.Snippets
+	usage.Memories = counters.Memories
 	usage.AttachmentCount = counters.AttachmentCount
 	usage.AttachmentBytes = counters.AttachmentBytes
 	usage.ObjectBytes = counters.ObjectBytes
@@ -170,6 +177,7 @@ type playgroundUserUsageDelta struct {
 	Sessions                   int64
 	Presets                    int64
 	Snippets                   int64
+	Memories                   int64
 	AttachmentCount            int64
 	AttachmentBytes            int64
 	ObjectBytes                int64
@@ -191,6 +199,7 @@ func (usage *PlaygroundUserUsage) apply(delta playgroundUserUsageDelta) {
 	usage.Sessions = max(0, usage.Sessions+delta.Sessions)
 	usage.Presets = max(0, usage.Presets+delta.Presets)
 	usage.Snippets = max(0, usage.Snippets+delta.Snippets)
+	usage.Memories = max(0, usage.Memories+delta.Memories)
 	usage.AttachmentCount = max(0, usage.AttachmentCount+delta.AttachmentCount)
 	usage.AttachmentBytes = max(0, usage.AttachmentBytes+delta.AttachmentBytes)
 	usage.ObjectBytes = max(0, usage.ObjectBytes+delta.ObjectBytes)
@@ -251,6 +260,7 @@ func savePlaygroundUserUsage(tx *gorm.DB, usage *PlaygroundUserUsage) error {
 		"sessions":                      usage.Sessions,
 		"presets":                       usage.Presets,
 		"snippets":                      usage.Snippets,
+		"memories":                      usage.Memories,
 		"attachment_count":              usage.AttachmentCount,
 		"attachment_bytes":              usage.AttachmentBytes,
 		"object_bytes":                  usage.ObjectBytes,
@@ -282,6 +292,9 @@ func playgroundUserUsageSnapshot(tx *gorm.DB, userID int) (PlaygroundUserUsage, 
 		return usage, err
 	}
 	if err := tx.Model(&PlaygroundSnippet{}).Where("user_id = ?", userID).Count(&usage.Snippets).Error; err != nil {
+		return usage, err
+	}
+	if err := tx.Model(&PlaygroundMemory{}).Where("user_id = ?", userID).Count(&usage.Memories).Error; err != nil {
 		return usage, err
 	}
 	var attachments struct {
@@ -403,7 +416,7 @@ type PlaygroundUsageReconciliation struct {
 // them.
 func playgroundUsageOwnerIDs(db *gorm.DB) ([]int, error) {
 	seen := map[int]bool{}
-	for _, resource := range []any{&PlaygroundSession{}, &PlaygroundPreset{}, &PlaygroundSnippet{}, &PlaygroundAttachment{}, &PlaygroundUpload{}, &PlaygroundArtifact{}, &PlaygroundCanvasProject{}, &PlaygroundCanvasSnapshot{}, &PlaygroundKnowledgeBase{}} {
+	for _, resource := range []any{&PlaygroundSession{}, &PlaygroundPreset{}, &PlaygroundSnippet{}, &PlaygroundMemory{}, &PlaygroundAttachment{}, &PlaygroundUpload{}, &PlaygroundArtifact{}, &PlaygroundCanvasProject{}, &PlaygroundCanvasSnapshot{}, &PlaygroundKnowledgeBase{}} {
 		ids := make([]int, 0)
 		if err := db.Model(resource).Distinct("user_id").Pluck("user_id", &ids).Error; err != nil {
 			return nil, err

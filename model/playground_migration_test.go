@@ -320,6 +320,7 @@ func TestPlaygroundUserUsageCountersMigration(t *testing.T) {
 			require.NoError(t, db.AutoMigrate(&PlaygroundUserUsage{}))
 			require.True(t, db.Migrator().HasColumn(&PlaygroundUserUsage{}, "canvas_snapshot_count"))
 			require.True(t, db.Migrator().HasColumn(&PlaygroundUserUsage{}, "canvas_snapshot_bytes"))
+			require.True(t, db.Migrator().HasColumn(&PlaygroundUserUsage{}, "memories"))
 
 			var stored PlaygroundUserUsage
 			require.NoError(t, db.Where("user_id = ?", 7).First(&stored).Error)
@@ -327,6 +328,7 @@ func TestPlaygroundUserUsageCountersMigration(t *testing.T) {
 			assert.EqualValues(t, 4096, stored.CanvasBytes)
 			assert.Zero(t, stored.CanvasSnapshotCount)
 			assert.Zero(t, stored.CanvasSnapshotBytes)
+			assert.Zero(t, stored.Memories)
 
 			// Counter rows written afterwards carry snapshot usage. The read
 			// uses a fresh destination: the primary key of an already loaded

@@ -38,6 +38,7 @@ import { PlaygroundChat } from './components/chat/playground-chat'
 import { PlaygroundContextStatus } from './components/input/playground-context-status'
 import { PlaygroundInput } from './components/input/playground-input'
 import { PlaygroundSpeechDialog } from './components/message/playground-speech-dialog'
+import { PlaygroundMemoryPanel } from './components/workspace/playground-memory-panel'
 import { PlaygroundPresetPanel } from './components/workspace/playground-preset-panel'
 import { PlaygroundSessionUsage } from './components/workspace/playground-session-usage'
 import { PlaygroundTrashPanel } from './components/workspace/playground-trash-panel'
@@ -59,6 +60,8 @@ import {
   usePlaygroundContext,
   usePlaygroundConversation,
   usePlaygroundMessageCosts,
+  usePlaygroundMemories,
+  usePlaygroundMemoryExtraction,
   usePlaygroundOptions,
   usePlaygroundArtifacts,
   usePlaygroundPreferences,
@@ -69,14 +72,17 @@ import type { CapturedArtifactSource } from './hooks/use-playground-artifacts'
 import {
   appendParallelMessagePair,
   collectMessageRequestIds,
+  formatMemoryBlock,
   getCurrentVersion,
   getMessageContent,
   getMessageContentState,
   hasPendingToolCalls,
   importPlaygroundSessionDocument,
+  loadMemoryExtractionSettings,
   parsePlaygroundSessionExport,
   PLAYGROUND_ATTACHMENT_ERRORS,
   presetSessionSettings,
+  saveMemoryExtractionSettings,
   uploadPlaygroundAttachments,
   uploadPlaygroundSpeechAttachment,
 } from './lib'
@@ -84,6 +90,7 @@ import type {
   AssistantPreset,
   Message,
   MessageAttachment,
+  PlaygroundMemoryExtractionSettings,
   PlaygroundRouteTarget,
 } from './types'
 
@@ -126,6 +133,7 @@ function PlaygroundContent(props: {
   >(null)
   const [presetsOpen, setPresetsOpen] = useState(false)
   const [trashOpen, setTrashOpen] = useState(false)
+  const [memoryOpen, setMemoryOpen] = useState(false)
   const appliedSessionRef = useRef<string | null>(null)
   const [compareModels, setCompareModels] = useState<string[]>([])
   const local = usePlaygroundState()
@@ -165,11 +173,31 @@ function PlaygroundContent(props: {
   const messagesRef = useRef(messages)
   messagesRef.current = messages
 
+  // Cross-session memory: every enabled note of the account is injected after
+  // the system prompt, and extraction is opt-in per account.
+  const memoriesQuery = usePlaygroundMemories(userId)
+  const memoryBlock = useMemo(
+    () => formatMemoryBlock(memoriesQuery.data?.items ?? []),
+    [memoriesQuery.data]
+  )
+  const [memoryExtraction, setMemoryExtraction] =
+    useState<PlaygroundMemoryExtractionSettings>(() =>
+      loadMemoryExtractionSettings(userId)
+    )
+  const handleMemoryExtractionChange = useCallback(
+    (settings: PlaygroundMemoryExtractionSettings) => {
+      setMemoryExtraction(settings)
+      saveMemoryExtractionSettings(userId, settings)
+    },
+    [userId]
+  )
+
   const contextController = usePlaygroundContext({
     sessionId: activeSessionId,
     messages,
     config,
     systemPrompt,
+    memoryBlock,
     settings: context,
     summary: contextSummary,
     onSummaryChange: updateContextSummary,
@@ -191,6 +219,7 @@ function PlaygroundContent(props: {
       config,
       parameterEnabled,
       systemPrompt,
+      memoryBlock,
       contextSettings: context,
       prepareContextSummary: contextController.prepareForSend,
       onMessageUpdate: updateMessages,
@@ -207,6 +236,7 @@ function PlaygroundContent(props: {
     config,
     parameterEnabled,
     systemPrompt,
+    memoryBlock,
     contextSettings: context,
     messages,
     prepareContextSummary: contextController.prepareForSend,
@@ -248,6 +278,19 @@ function PlaygroundContent(props: {
   const canvasSendEnabled = Boolean(
     canonicalSessionId && activeSession?.server && !activeSession.syncPending
   )
+
+  // The extraction runs when a reply or comparison stops being busy; the hook
+  // keeps its own per-reply guard, so a re-render or a late message update does
+  // not call the billed extraction twice for the same answer.
+  usePlaygroundMemoryExtraction({
+    userId,
+    config,
+    contextSettings: context,
+    settings: memoryExtraction,
+    messages,
+    sourceSessionId: canonicalSessionId,
+    isBusy: isGenerating || isComparing,
+  })
 
   const {
     editingMessageKey,
@@ -720,22 +763,32 @@ function PlaygroundContent(props: {
   )
 
   let inspectorView: PlaygroundInspectorView | null = null
-  if (presetsOpen) inspectorView = 'presets'
+  if (memoryOpen) inspectorView = 'memory'
+  else if (presetsOpen) inspectorView = 'presets'
   else if (trashOpen) inspectorView = 'trash'
 
   const handleToggleInspector = useCallback((view: PlaygroundInspectorView) => {
     if (view === 'presets') {
+      setMemoryOpen(false)
       setTrashOpen(false)
       setPresetsOpen((current) => !current)
       return
     }
+    if (view === 'memory') {
+      setPresetsOpen(false)
+      setTrashOpen(false)
+      setMemoryOpen((current) => !current)
+      return
+    }
     setPresetsOpen(false)
+    setMemoryOpen(false)
     setTrashOpen((current) => !current)
   }, [])
 
   const handleCloseInspector = useCallback(() => {
     setPresetsOpen(false)
     setTrashOpen(false)
+    setMemoryOpen(false)
   }, [])
 
   const handleOpenPresets = useCallback(
@@ -746,6 +799,18 @@ function PlaygroundContent(props: {
   const handleOpenTrash = useCallback(
     () => handleToggleInspector('trash'),
     [handleToggleInspector]
+  )
+
+  const handleOpenMemorySource = useCallback(
+    (sessionId: string) => {
+      const match = sessions.find((session) => session.server?.id === sessionId)
+      if (!match) {
+        toast.error(t('The source conversation is no longer available.'))
+        return
+      }
+      if (match.id !== activeSessionId) handleSwitchSession(match.id)
+    },
+    [activeSessionId, handleSwitchSession, sessions, t]
   )
 
   const handleRestoreTrashedCanvas = useCallback(
@@ -834,6 +899,7 @@ function PlaygroundContent(props: {
         }
         syncLabel={syncLabel}
         inspectorView={inspectorView}
+        onToggleInspector={handleToggleInspector}
         onCloseInspector={handleCloseInspector}
         inspector={
           inspectorView === 'presets' ? (
@@ -848,6 +914,16 @@ function PlaygroundContent(props: {
               models={models}
               onApplyPreset={handleApplyPreset}
               onCreateSession={handleCreateSessionWithPreset}
+            />
+          ) : inspectorView === 'memory' ? (
+            <PlaygroundMemoryPanel
+              active
+              disabled={sync.isLoading}
+              extraction={memoryExtraction}
+              models={models}
+              onExtractionChange={handleMemoryExtractionChange}
+              onOpenSourceSession={handleOpenMemorySource}
+              userId={userId}
             />
           ) : inspectorView === 'trash' ? (
             <PlaygroundTrashPanel
