@@ -30,6 +30,7 @@ import {
   buildMessageCanvasSeeds,
   type CanvasSendSeed,
 } from '@/features/canvas/lib/canvas-send'
+import { handleServerError } from '@/lib/handle-server-error'
 import { getServerMessage } from '@/lib/server-error-message'
 import { useAuthStore } from '@/stores/auth-store'
 

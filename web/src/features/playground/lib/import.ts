@@ -144,6 +144,11 @@ const exportedDocumentSchema = z.object({
       .string()
       .max(64 << 10)
       .optional(),
+    opening_message: z
+      .string()
+      .max(8 << 10)
+      .optional(),
+    suggested_questions: z.array(z.string().min(1).max(200)).max(6).optional(),
     config: z.unknown().optional(),
     parameter_enabled: z.unknown().optional(),
     context: z.unknown().optional(),
@@ -167,6 +172,8 @@ export interface PlaygroundImportDocument {
   config: PlaygroundConfig
   parameterEnabled: ParameterEnabled
   systemPrompt: string
+  openingMessage: string
+  suggestedQuestions: string[]
   context: PlaygroundContextSettings
   contextSummary: PlaygroundContextSummary | null
   messages: Message[]
@@ -416,6 +423,8 @@ export function parsePlaygroundSessionExport(
       ...parameterEnabled.data,
     },
     systemPrompt: document.session.system_prompt ?? '',
+    openingMessage: document.session.opening_message ?? '',
+    suggestedQuestions: document.session.suggested_questions ?? [],
     context: mapExportedContextSettings(document.session.context),
     contextSummary: mapExportedContextSummary(document.session.context_summary),
     messages,
@@ -524,6 +533,8 @@ export async function importPlaygroundSessionDocument(
       config: document.config,
       parameter_enabled: document.parameterEnabled,
       system_prompt: document.systemPrompt,
+      opening_message: document.openingMessage,
+      suggested_questions: document.suggestedQuestions,
       context: document.context,
       context_summary: document.contextSummary,
     },
@@ -626,6 +637,8 @@ export async function importPlaygroundSessionDocument(
         config: document.config,
         parameterEnabled: document.parameterEnabled,
         systemPrompt: document.systemPrompt,
+        openingMessage: document.openingMessage,
+        suggestedQuestions: document.suggestedQuestions,
         context: document.context,
         contextSummary: document.contextSummary,
         messages,
