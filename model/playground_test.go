@@ -6787,3 +6787,97 @@ func TestPlaygroundComparisonRunMatrix(t *testing.T) {
 		})
 	}
 }
+
+func TestPlaygroundTaskGenerationMetadataRoundTripAndFilters(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			seed11, seed22, seed33 := int64(11), int64(22), int64(33)
+			tasks := []model.Task{
+				{
+					TaskID: "generation-image", UserId: 7, Platform: "gpt-image-1", Status: model.TaskStatusSuccess,
+					SubmitTime: common.GetTimestamp(),
+					PrivateData: model.TaskPrivateData{PlaygroundOrigin: true, Generation: &model.TaskGenerationParams{
+						Kind: "image", Prompt: "Lighthouse at 100%_dusk", Model: "gpt-image-1", Size: "1024x1024", Quality: "high", Seed: &seed11, Count: 2,
+					}},
+				},
+				{
+					TaskID: "generation-video", UserId: 7, Platform: "sora", Status: model.TaskStatusInProgress,
+					SubmitTime: common.GetTimestamp(),
+					PrivateData: model.TaskPrivateData{PlaygroundOrigin: true, Generation: &model.TaskGenerationParams{
+						Kind: "video", Prompt: "Harbor at noon", Model: "sora", Size: "1280x720", Seed: &seed22, Duration: 5,
+					}},
+				},
+				{
+					TaskID: "generation-other-user", UserId: 8, Platform: "gpt-image-1", Status: model.TaskStatusSuccess,
+					SubmitTime: common.GetTimestamp(),
+					PrivateData: model.TaskPrivateData{PlaygroundOrigin: true, Generation: &model.TaskGenerationParams{
+						Kind: "image", Prompt: "Lighthouse elsewhere", Model: "gpt-image-1", Seed: &seed11, Count: 1,
+					}},
+				},
+				{
+					TaskID: "generation-reflection", UserId: 7, Platform: "gpt-image-1", Status: model.TaskStatusSuccess,
+					SubmitTime: common.GetTimestamp(),
+					PrivateData: model.TaskPrivateData{PlaygroundOrigin: true, Generation: &model.TaskGenerationParams{
+						Kind: "image", Prompt: "Lighthouse reflection", Model: "gpt-image-1", Seed: &seed33, Count: 1,
+					}},
+				},
+				{
+					TaskID: "generation-wildcard", UserId: 7, Platform: "gpt-image-1", Status: model.TaskStatusSuccess,
+					SubmitTime: common.GetTimestamp(),
+					PrivateData: model.TaskPrivateData{PlaygroundOrigin: true, Generation: &model.TaskGenerationParams{
+						Kind: "image", Prompt: "100XXdusk", Model: "other-image", Count: 1,
+					}},
+				},
+				{
+					TaskID: "generation-without-metadata", UserId: 7, Platform: "sunoapi", Status: model.TaskStatusSuccess,
+					SubmitTime: common.GetTimestamp(),
+					PrivateData: model.TaskPrivateData{PlaygroundOrigin: true},
+				},
+			}
+			require.NoError(t, db.Create(&tasks).Error)
+
+			all := model.TaskGetAllUserTask(7, 0, 20, model.SyncTaskQueryParams{})
+			require.Len(t, all, 5)
+			var imageTask *model.Task
+			for _, task := range all {
+				if task.TaskID == "generation-image" {
+					imageTask = task
+				}
+			}
+			require.NotNil(t, imageTask)
+			require.NotNil(t, imageTask.PrivateData.Generation)
+			assert.Equal(t, "Lighthouse at 100%_dusk", imageTask.PrivateData.Generation.Prompt)
+			assert.Equal(t, "1024x1024", imageTask.PrivateData.Generation.Size)
+			assert.Equal(t, "high", imageTask.PrivateData.Generation.Quality)
+			require.NotNil(t, imageTask.PrivateData.Generation.Seed)
+			assert.Equal(t, int64(11), *imageTask.PrivateData.Generation.Seed)
+			assert.Equal(t, 2, imageTask.PrivateData.Generation.Count)
+
+			tests := []struct {
+				name   string
+				params model.SyncTaskQueryParams
+				total  int64
+				ids    []string
+			}{
+				{name: "prompt is case insensitive", params: model.SyncTaskQueryParams{GenerationPrompt: "lighthouse"}, total: 2, ids: []string{"generation-reflection", "generation-image"}},
+				{name: "like wildcards stay literal", params: model.SyncTaskQueryParams{GenerationPrompt: "100%_dusk"}, total: 1, ids: []string{"generation-image"}},
+				{name: "model is exact", params: model.SyncTaskQueryParams{GenerationModel: "gpt-image-1"}, total: 2, ids: []string{"generation-reflection", "generation-image"}},
+				{name: "seed is exact", params: model.SyncTaskQueryParams{GenerationSeed: &seed11}, total: 1, ids: []string{"generation-image"}},
+				{name: "missing metadata never matches", params: model.SyncTaskQueryParams{GenerationSeed: new(int64)}, total: 0},
+				{name: "filters combine", params: model.SyncTaskQueryParams{GenerationPrompt: "lighthouse", GenerationModel: "gpt-image-1", GenerationSeed: &seed33}, total: 1, ids: []string{"generation-reflection"}},
+			}
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					results := model.TaskGetAllUserTask(7, 0, 20, tt.params)
+					ids := make([]string, len(results))
+					for i, task := range results {
+						ids[i] = task.TaskID
+					}
+					assert.ElementsMatch(t, tt.ids, ids)
+					assert.Equal(t, tt.total, model.TaskCountAllUserTask(7, tt.params))
+				})
+			}
+		})
+	}
+}

@@ -73,6 +73,45 @@ func TestTaskLogDTOSeparatesUserAdminAndRootDetails(t *testing.T) {
 	assert.Contains(t, string(rootJSON), "upstream-private")
 }
 
+func TestTaskLogDTOProjectsGenerationMetadataWithoutPrivateFields(t *testing.T) {
+	seed := int64(2026)
+	task := &model.Task{
+		TaskID:   "task_generation",
+		Platform: "gpt-image-1",
+		PrivateData: model.TaskPrivateData{
+			Key:            "channel-secret-canary",
+			UpstreamTaskID: "upstream-private",
+			Generation: &model.TaskGenerationParams{
+				Kind:     "image",
+				Prompt:   "a lighthouse at dusk",
+				Model:    "gpt-image-1",
+				Size:     "1024x1024",
+				Quality:  "high",
+				Seed:     &seed,
+				Count:    2,
+				Duration: 0,
+			},
+		},
+	}
+
+	view := tasksToDto([]*model.Task{task}, false, common.RoleCommonUser)[0]
+	require.NotNil(t, view.Generation)
+	assert.Equal(t, "image", view.Generation.Kind)
+	assert.Equal(t, "a lighthouse at dusk", view.Generation.Prompt)
+	assert.Equal(t, "gpt-image-1", view.Generation.Model)
+	assert.Equal(t, "1024x1024", view.Generation.Size)
+	assert.Equal(t, "high", view.Generation.Quality)
+	require.NotNil(t, view.Generation.Seed)
+	assert.Equal(t, seed, *view.Generation.Seed)
+	assert.Equal(t, 2, view.Generation.Count)
+
+	encoded, err := common.Marshal(view)
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), `"generation"`)
+	assert.NotContains(t, string(encoded), "channel-secret-canary")
+	assert.NotContains(t, string(encoded), "upstream-private")
+}
+
 func TestTaskLogDTODoesNotInventHistoricalPluginProvenance(t *testing.T) {
 	task := &model.Task{
 		TaskID:   "task_without_snapshot",
