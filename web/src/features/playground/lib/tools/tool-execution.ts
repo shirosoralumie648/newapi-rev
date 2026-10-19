@@ -21,7 +21,6 @@ import {
   MESSAGE_ROLES,
   MESSAGE_STATUS,
   PLAYGROUND_TOOL_EXECUTION_ERRORS,
-  TOOL_CALL_STATUS,
 } from '../../constants'
 import type { Message, MessageToolCall, MessageVersion } from '../../types'
 import type { KnowledgeSearchGroup } from '../knowledge/retrieval'
