@@ -19,6 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 package controller
 
 import (
+	"fmt"
+	"hash/fnv"
 	"net/http"
 	"strings"
 
@@ -52,6 +54,54 @@ type playgroundMessageCost struct {
 	// to the same log row. It stays absent for rows stored before the field
 	// existed and for entry points that do not record one.
 	Timing *common.RequestTimingPayload `json:"timing,omitempty"`
+	// CacheTokens is the cached prompt token count the row was billed for. It
+	// is absent for requests without a cache report.
+	CacheTokens *int `json:"cache_tokens,omitempty"`
+	// CacheRatio and ModelRatio are the price ratios the settlement actually
+	// applied. The client can estimate the cache saving from them, and shows
+	// only the token count when either one is missing.
+	CacheRatio *float64 `json:"cache_ratio,omitempty"`
+	ModelRatio *float64 `json:"model_ratio,omitempty"`
+	// GroupRatio is the group multiplier applied to this request.
+	GroupRatio *float64 `json:"group_ratio,omitempty"`
+	// ChannelKey is the channel label this viewer may see. Regular users get a
+	// stable masked number (for example "#4821") with no name and no routing
+	// chain; administrators get the full attempt chain from
+	// admin_info.use_channel, exactly like the log detail view.
+	ChannelKey string `json:"channel_key,omitempty"`
+	// ChannelId and ChannelName are the complete channel identity and are only
+	// populated for administrators.
+	ChannelId   *int   `json:"channel_id,omitempty"`
+	ChannelName string `json:"channel_name,omitempty"`
+}
+
+// playgroundMaskedChannelKey renders the stable label a regular viewer sees
+// instead of the channel id. It is derived from the viewer and the channel, so
+// the same route looks the same across messages, but the real channel
+// identifier never leaves the server.
+func playgroundMaskedChannelKey(userID, channelID int) string {
+	if channelID <= 0 {
+		return ""
+	}
+	digest := fnv.New32a()
+	_, _ = fmt.Fprintf(digest, "playground-channel:%d:%d", userID, channelID)
+	return fmt.Sprintf("#%d", 1000+digest.Sum32()%9000)
+}
+
+// playgroundAdminChannelKey shows administrators the whole attempt chain, so a
+// retry or fallback reads the same way as the admin log view.
+func playgroundAdminChannelKey(channelID int, useChannels []int) string {
+	if len(useChannels) == 0 {
+		if channelID <= 0 {
+			return ""
+		}
+		return fmt.Sprintf("#%d", channelID)
+	}
+	keys := make([]string, 0, len(useChannels))
+	for _, id := range useChannels {
+		keys = append(keys, fmt.Sprintf("#%d", id))
+	}
+	return strings.Join(keys, " → ")
 }
 
 // GetPlaygroundUsage returns the caller's unified Playground resource usage.
@@ -89,9 +139,14 @@ func GetPlaygroundSettings(c *gin.Context) {
 
 // GetPlaygroundMessageCosts resolves the caller's own relay requests to their
 // ordinary consume-log rows, so a conversation can display the tokens and the
-// amount that were actually billed for each message. It is strictly read-only
-// and owner-scoped: another account's request id has no row, the figures come
-// from the settled log, and no quota is reserved, settled or refunded here.
+// amount that were actually billed for each message, together with read-only
+// request diagnostics: the phase timing, the cached prompt tokens and applied
+// prices, the group multiplier and the channel the viewer may see. It is
+// strictly read-only and owner-scoped: another account's request id has no
+// row, the figures come from the settled log, and no quota is reserved,
+// settled or refunded here. Regular users only receive a masked channel
+// label; the complete channel identity is limited to administrators, matching
+// the admin-only admin_info.use_channel scope of the stored log row.
 func GetPlaygroundMessageCosts(c *gin.Context) {
 	userID := c.GetInt("id")
 	if userID <= 0 {
@@ -125,9 +180,11 @@ func GetPlaygroundMessageCosts(c *gin.Context) {
 		return
 	}
 	items := make([]playgroundMessageCost, 0, len(logs))
+	admin := c.GetInt("role") >= common.RoleAdminUser
 	for index := range logs {
 		entry := &logs[index]
-		items = append(items, playgroundMessageCost{
+		fields := model.ParseConsumeLogDisplayFields(entry.Other)
+		item := playgroundMessageCost{
 			RequestId:        entry.RequestId,
 			Quota:            entry.Quota,
 			PromptTokens:     entry.PromptTokens,
@@ -135,8 +192,25 @@ func GetPlaygroundMessageCosts(c *gin.Context) {
 			TotalTokens:      entry.PromptTokens + entry.CompletionTokens,
 			ModelName:        entry.ModelName,
 			CreatedAt:        entry.CreatedAt,
-			Timing:           common.ParseRequestTimingPayload(entry.Other),
-		})
+			Timing:           fields.Timing,
+			CacheTokens:      fields.CacheTokens,
+			CacheRatio:       fields.CacheRatio,
+			ModelRatio:       fields.ModelRatio,
+			GroupRatio:       fields.GroupRatio,
+		}
+		if admin {
+			item.ChannelKey = playgroundAdminChannelKey(entry.ChannelId, fields.UseChannels)
+			if entry.ChannelId > 0 {
+				channelID := entry.ChannelId
+				item.ChannelId = &channelID
+				if channel, err := model.CacheGetChannel(channelID); err == nil && channel != nil {
+					item.ChannelName = channel.Name
+				}
+			}
+		} else {
+			item.ChannelKey = playgroundMaskedChannelKey(userID, entry.ChannelId)
+		}
+		items = append(items, item)
 	}
 	// The enabled flag mirrors the runtime consume-log setting: when logging is
 	// switched off no row will ever appear, so the client stops waiting for one.

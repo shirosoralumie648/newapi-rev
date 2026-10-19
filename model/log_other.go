@@ -3,7 +3,9 @@ package model
 import (
 	"encoding/json"
 	"maps"
+	"math"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -224,6 +226,79 @@ func normalizeLegacyRejectReason(values map[string]json.RawMessage) bool {
 	values[logOtherAdminInfoKey] = encodedAdminInfo
 	delete(values, "reject_reason")
 	return true
+}
+
+// ConsumeLogDisplayFields is the read-only projection of one consume row's
+// stored `other` document that the request's owner may see next to its
+// settled cost: the applied price ratios, the cached prompt tokens and the
+// public request timing. The channel chain lives in the admin-only
+// admin_info.use_channel scope, so UseChannels is populated separately and
+// callers must only project it for administrators.
+type ConsumeLogDisplayFields struct {
+	CacheTokens *int
+	CacheRatio  *float64
+	ModelRatio  *float64
+	GroupRatio  *float64
+	Timing      *common.RequestTimingPayload
+	UseChannels []int
+}
+
+// ParseConsumeLogDisplayFields reads the owner-visible figures out of a
+// stored consume row. Unknown or malformed documents yield an empty
+// projection instead of an error: the settled quota remains displayable even
+// when the metadata cannot be read.
+func ParseConsumeLogDisplayFields(other string) ConsumeLogDisplayFields {
+	var fields ConsumeLogDisplayFields
+	if other == "" {
+		return fields
+	}
+	// The phase breakdown lives in the same document but is parsed by its own
+	// reader, so a row with a malformed price field still keeps its timing.
+	fields.Timing = common.ParseRequestTimingPayload(other)
+	var stored struct {
+		CacheTokens *int     `json:"cache_tokens"`
+		CacheRatio  *float64 `json:"cache_ratio"`
+		ModelRatio  *float64 `json:"model_ratio"`
+		GroupRatio  *float64 `json:"group_ratio"`
+		AdminInfo   struct {
+			UseChannel []json.RawMessage `json:"use_channel"`
+		} `json:"admin_info"`
+	}
+	if err := common.UnmarshalJsonStr(other, &stored); err != nil {
+		return fields
+	}
+	fields.CacheTokens = stored.CacheTokens
+	fields.CacheRatio = stored.CacheRatio
+	fields.ModelRatio = stored.ModelRatio
+	fields.GroupRatio = stored.GroupRatio
+	fields.UseChannels = make([]int, 0, len(stored.AdminInfo.UseChannel))
+	for _, raw := range stored.AdminInfo.UseChannel {
+		if id, ok := parseStoredChannelID(raw); ok {
+			fields.UseChannels = append(fields.UseChannels, id)
+		}
+	}
+	return fields
+}
+
+// parseStoredChannelID accepts both shapes the chain has used: the strings
+// written by service.Distribute and the plain numbers stored by older rows.
+func parseStoredChannelID(raw json.RawMessage) (int, bool) {
+	var text string
+	if err := common.Unmarshal(raw, &text); err == nil {
+		id, err := strconv.Atoi(strings.TrimSpace(text))
+		if err == nil && id > 0 {
+			return id, true
+		}
+		return 0, false
+	}
+	var number float64
+	if err := common.Unmarshal(raw, &number); err != nil {
+		return 0, false
+	}
+	if number <= 0 || number != math.Trunc(number) || number > 1<<31-1 {
+		return 0, false
+	}
+	return int(number), true
 }
 
 // formatLogOtherJSON applies the role projection while keeping untouched JSON
