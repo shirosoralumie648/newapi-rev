@@ -220,6 +220,9 @@ describe('CanvasKnowledgeBaseSheet', () => {
     bases = [base]
     renderSheet()
 
+    expect(
+      await screen.findByText('3 documents · 6 chunks · 2 KiB')
+    ).toBeVisible()
     const file = new File(['# alpha text'], 'handbook.md', { type: '' })
     fireEvent.change(screen.getByLabelText('Upload knowledge base document'), {
       target: { files: [file] },
