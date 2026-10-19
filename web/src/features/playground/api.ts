@@ -57,6 +57,7 @@ import type {
   PlaygroundContextSettings,
   PlaygroundContextSummary,
   PlaygroundExportFormat,
+  PlaygroundModelCatalog,
   PlaygroundMessageCost,
   PlaygroundMemory,
   PlaygroundServerSession,
@@ -238,6 +239,118 @@ export async function getUserGroups(): Promise<GroupOption[]> {
     ratio: info.ratio,
     desc: info.desc,
   }))
+}
+
+const serverModelCatalogDefaultsSchema = z.object({
+  temperature: z.number().finite().optional(),
+  top_p: z.number().finite().optional(),
+  max_tokens: z.number().int().optional(),
+  frequency_penalty: z.number().finite().optional(),
+  presence_penalty: z.number().finite().optional(),
+  seed: z.number().int().optional(),
+  reasoning_effort: z.string().optional(),
+})
+
+const serverModelCatalogEntrySchema = z.object({
+  model: z.string().min(1).max(256),
+  display_name: z.string().max(128).optional(),
+  description: z.string().max(2000).optional(),
+  icon: z.string().max(1024).optional(),
+  group: z.string().max(64).optional(),
+  capabilities: z.array(z.string().max(64)).optional(),
+  hidden: z.boolean().optional(),
+  defaults: serverModelCatalogDefaultsSchema.optional(),
+  limits: z
+    .object({
+      context_length: z.number().int().positive().optional(),
+      max_output_tokens: z.number().int().positive().optional(),
+    })
+    .optional(),
+})
+
+const serverPlaygroundModelCatalogSchema = z.object({
+  groups: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(64),
+        label: z.string().min(1).max(128),
+        description: z.string().max(2000).optional(),
+      })
+    )
+    .optional(),
+  models: z.array(serverModelCatalogEntrySchema).optional(),
+})
+
+/**
+ * Reads the administrator-curated catalog the server resolved for this
+ * account's user group. A missing or empty catalog is a valid answer: the
+ * Playground then keeps its flat, uncategorized model list.
+ */
+export async function getPlaygroundModelCatalog(
+  signal?: AbortSignal
+): Promise<PlaygroundModelCatalog> {
+  const response = await api.get(API_ENDPOINTS.PLAYGROUND_MODEL_CATALOG, {
+    signal,
+  })
+  requireServerSuccess(response.data)
+  const catalog = serverPlaygroundModelCatalogSchema.parse(response.data.data)
+  return {
+    groups: (catalog.groups ?? []).map((group) => ({
+      id: group.id,
+      label: group.label,
+      ...(group.description ? { description: group.description } : {}),
+    })),
+    models: (catalog.models ?? []).map((entry) => ({
+      model: entry.model,
+      ...(entry.display_name ? { displayName: entry.display_name } : {}),
+      ...(entry.description ? { description: entry.description } : {}),
+      ...(entry.icon ? { icon: entry.icon } : {}),
+      ...(entry.group ? { group: entry.group } : {}),
+      ...(entry.capabilities?.length
+        ? { capabilities: entry.capabilities }
+        : {}),
+      ...(entry.hidden ? { hidden: true } : {}),
+      ...(entry.defaults
+        ? {
+            defaults: {
+              ...(entry.defaults.temperature !== undefined
+                ? { temperature: entry.defaults.temperature }
+                : {}),
+              ...(entry.defaults.top_p !== undefined
+                ? { topP: entry.defaults.top_p }
+                : {}),
+              ...(entry.defaults.max_tokens !== undefined
+                ? { maxTokens: entry.defaults.max_tokens }
+                : {}),
+              ...(entry.defaults.frequency_penalty !== undefined
+                ? { frequencyPenalty: entry.defaults.frequency_penalty }
+                : {}),
+              ...(entry.defaults.presence_penalty !== undefined
+                ? { presencePenalty: entry.defaults.presence_penalty }
+                : {}),
+              ...(entry.defaults.seed !== undefined
+                ? { seed: entry.defaults.seed }
+                : {}),
+              ...(entry.defaults.reasoning_effort
+                ? { reasoningEffort: entry.defaults.reasoning_effort }
+                : {}),
+            },
+          }
+        : {}),
+      ...(entry.limits
+        ? {
+            limits: {
+              ...(entry.limits.context_length !== undefined
+                ? { contextLength: entry.limits.context_length }
+                : {}),
+              ...(entry.limits.max_output_tokens !== undefined
+                ? { maxOutputTokens: entry.limits.max_output_tokens }
+                : {}),
+            },
+          }
+        : {}),
+    })),
+  }
 }
 
 // Wire shapes of the session context fields. The server speaks snake_case; the

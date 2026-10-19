@@ -93,6 +93,61 @@ test('persists active session updates without writing legacy config keys', () =>
   expect(localStorage.getItem(`${STORAGE_KEYS.SESSIONS}:9`)).not.toBeNull()
 })
 
+test('catalog defaults seed only a new conversation and presets win', () => {
+  useAuthStore.getState().auth.setUser({ id: 11, username: 'eleven', role: 1 })
+  const hook = renderHook(() => usePlaygroundState())
+
+  act(() =>
+    hook.result.current.createSession({
+      model: 'catalog-model',
+      modelDefaults: {
+        temperature: 0,
+        topP: 0.5,
+        maxTokens: 2048,
+        seed: 42,
+      },
+    })
+  )
+  const catalogSessionId = hook.result.current.activeSessionId
+  expect(hook.result.current.config).toMatchObject({
+    model: 'catalog-model',
+    temperature: 0,
+    top_p: 0.5,
+    max_tokens: 2048,
+    seed: 42,
+  })
+  expect(hook.result.current.parameterEnabled).toMatchObject({
+    temperature: true,
+    top_p: true,
+    max_tokens: true,
+    seed: true,
+  })
+
+  // Changing the model and later creating another conversation never rewrites
+  // the catalog conversation that already stored its values.
+  act(() => hook.result.current.updateConfig('model', 'other-model'))
+  act(() => hook.result.current.createSession({ model: 'other-model' }))
+  act(() => hook.result.current.switchSession(catalogSessionId ?? ''))
+  expect(hook.result.current.config).toMatchObject({
+    model: 'catalog-model',
+    temperature: 0,
+    max_tokens: 2048,
+  })
+
+  // A preset states its own sampling values, so an attached catalog default
+  // must not replace them.
+  act(() =>
+    hook.result.current.createSession({
+      config: { ...DEFAULT_CONFIG, model: 'preset-model', temperature: 1.1 },
+      modelDefaults: { temperature: 0 },
+    })
+  )
+  expect(hook.result.current.config).toMatchObject({
+    model: 'preset-model',
+    temperature: 1.1,
+  })
+})
+
 test('a new conversation starts from the account new-session defaults', () => {
   useAuthStore.getState().auth.setUser({ id: 10, username: 'ten', role: 1 })
   const first = renderHook(() => usePlaygroundState())

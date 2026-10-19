@@ -77,6 +77,8 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"PATCH /api/playground/comparisons/:runId":                                   accessTokenSessionRule,
 	"DELETE /api/playground/comparisons/:runId":                                  accessTokenSessionRule,
 	"GET /api/playground/settings":                                               accessTokenSessionRule,
+	"GET /api/playground/model-catalog":                                          accessTokenSessionRule,
+	"PUT /api/playground/model-catalog":                                          accessTokenScopeRule("option:write"),
 	"GET /api/playground/mcp/servers":                                            accessTokenSessionRule,
 	"POST /api/playground/mcp/:serverId/call":                                    accessTokenSessionRule,
 	"POST /api/playground/search":                                                accessTokenSessionRule,

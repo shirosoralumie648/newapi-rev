@@ -26,11 +26,13 @@ import { requireServerSuccess } from '@/lib/server-error-message'
 import {
   updatePasskeyDomains,
   updatePlaygroundMCP,
+  updatePlaygroundModelCatalog,
   updatePlaygroundWebSearch,
   updateSystemOption,
 } from '../api'
 import type {
   PlaygroundMCPSettingsRequest,
+  PlaygroundModelCatalogSettingsRequest,
   PlaygroundWebSearchSettingsRequest,
   UpdateOptionRequest,
   UpdatePasskeyDomainsRequest,
@@ -117,6 +119,21 @@ export function useUpdatePlaygroundMCP() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['system-options'] })
       toast.success(i18next.t('MCP settings saved'))
+    },
+    onError: (error: Error) =>
+      handleServerError(error, i18next.t('Failed to update setting')),
+  })
+}
+
+export function useUpdatePlaygroundModelCatalog() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (request: PlaygroundModelCatalogSettingsRequest) =>
+      requireServerSuccess(await updatePlaygroundModelCatalog(request)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['system-options'] })
+      toast.success(i18next.t('Model catalog saved'))
     },
     onError: (error: Error) =>
       handleServerError(error, i18next.t('Failed to update setting')),

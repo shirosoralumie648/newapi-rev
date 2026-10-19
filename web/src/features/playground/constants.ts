@@ -171,6 +171,7 @@ export const API_ENDPOINTS = {
   PLAYGROUND_USAGE: '/api/playground/usage',
   PLAYGROUND_STORAGE_BILLING: '/api/playground/storage/billing',
   PLAYGROUND_SETTINGS: '/api/playground/settings',
+  PLAYGROUND_MODEL_CATALOG: '/api/playground/model-catalog',
   PLAYGROUND_SEARCH: '/api/playground/search',
   PLAYGROUND_MCP_SERVERS: '/api/playground/mcp/servers',
   PLAYGROUND_MCP_CALL: '/api/playground/mcp',

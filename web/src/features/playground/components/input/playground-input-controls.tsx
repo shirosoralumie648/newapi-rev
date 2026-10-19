@@ -45,6 +45,7 @@ type PlaygroundInputControlsProps = {
   modelValue: string
   onGroupChange: (value: string) => void
   onModelChange: (value: string) => void
+  onStartNewSession?: (model: string) => void
   onStop?: () => void
   text: string
   tools: ReactNode
@@ -60,6 +61,7 @@ export function PlaygroundInputControls({
   modelValue,
   onGroupChange,
   onModelChange,
+  onStartNewSession,
   onStop,
   text,
   tools,
@@ -101,6 +103,7 @@ export function PlaygroundInputControls({
       selectedGroup={groupValue}
       groups={groups}
       onGroupChange={onGroupChange}
+      onStartNewSession={onStartNewSession}
       disabled={isSelectorDisabled}
     />
   )

@@ -361,6 +361,10 @@ type PlaygroundSetting struct {
 	// MCP is the optional administrator-managed MCP client proxy. It stays off
 	// until an administrator enables it and at least one global connection.
 	MCP *PlaygroundMCPSetting `json:"mcp"`
+	// ModelCatalog is the administrator-curated Playground selector. It is a
+	// separate setting from the resource quotas above: one describes models
+	// and their new-conversation defaults, the other enforces account limits.
+	ModelCatalog *PlaygroundModelCatalogSetting `json:"model_catalog"`
 }
 
 var playgroundSetting = newPlaygroundSetting()
@@ -377,6 +381,7 @@ func newPlaygroundSetting() PlaygroundSetting {
 		StorageBilling: builtinPlaygroundStorageBillingSetting(),
 		WebSearch:      builtinPlaygroundWebSearchSetting(),
 		MCP:            builtinPlaygroundMCPSetting(),
+		ModelCatalog:   builtinPlaygroundModelCatalogSetting(),
 	}
 }
 

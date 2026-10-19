@@ -685,6 +685,12 @@ function PlaygroundContent(props: {
     [config, parameterEnabled]
   )
 
+  const modelDefaultsFor = useCallback(
+    (modelValue: string) =>
+      models.find((model) => model.value === modelValue)?.catalogDefaults,
+    [models]
+  )
+
   const handleCreateSession = useCallback(() => {
     if (sync.isLoading) return
     handleWorkspaceTransition(() => {
@@ -694,15 +700,49 @@ function PlaygroundContent(props: {
       setSpeechSource(null)
       setPendingQuote(null)
       setHighlightedMessageKey(null)
-      createSession()
+      createSession({
+        model: config.model,
+        modelDefaults: modelDefaultsFor(config.model),
+      })
     })
   }, [
+    config.model,
     createSession,
+    modelDefaultsFor,
     sync.isLoading,
     stopBeforeSessionChange,
     handleEditOpenChange,
     handleWorkspaceTransition,
   ])
+
+  // Starts a fresh conversation directly with a model picked in the selector.
+  // Only the new conversation receives the catalog defaults; the previous one
+  // and later model switches keep their own values.
+  const handleCreateSessionWithModel = useCallback(
+    (modelValue: string) => {
+      if (sync.isLoading) return
+      handleWorkspaceTransition(() => {
+        stopBeforeSessionChange()
+        handleEditOpenChange(false)
+        setArtifactSource(null)
+        setSpeechSource(null)
+        setPendingQuote(null)
+        setHighlightedMessageKey(null)
+        createSession({
+          model: modelValue,
+          modelDefaults: modelDefaultsFor(modelValue),
+        })
+      })
+    },
+    [
+      createSession,
+      modelDefaultsFor,
+      sync.isLoading,
+      stopBeforeSessionChange,
+      handleEditOpenChange,
+      handleWorkspaceTransition,
+    ]
+  )
 
   const handleCreateSessionWithPreset = useCallback(
     (preset: AssistantPreset) => {
@@ -1515,6 +1555,7 @@ function PlaygroundContent(props: {
               onConfigChange={updateConfig}
               onClearMessages={handleClearMessages}
               onModelChange={(value) => updateConfig('model', value)}
+              onStartNewSession={handleCreateSessionWithModel}
               onParameterEnabledChange={updateParameterEnabled}
               onRemoveContextSummary={handleRemoveContextSummary}
               onStop={handleStop}
