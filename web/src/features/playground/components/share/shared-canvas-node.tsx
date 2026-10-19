@@ -78,7 +78,7 @@ export function SharedCanvasNodeView(props: NodeProps) {
   return (
     <CanvasNodeCard
       className='h-auto w-64 gap-0 p-0'
-      handles={{ target: true, source: true }}
+      handles={{ target: false, source: false }}
     >
       <NodeHeader className='flex items-center justify-between gap-2 p-2'>
         <NodeTitle className='text-xs font-medium'>

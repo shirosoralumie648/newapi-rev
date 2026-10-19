@@ -415,6 +415,52 @@ export function useCanvasEditor(
     [commit]
   )
 
+  /**
+   * Marks one result of a batch preferred. The source step and every sibling
+   * result are written in one history entry so downstream resolution can
+   * trust a single preferred id.
+   */
+  const setWorkflowPreferredResult = useCallback(
+    (nodeId: string) => {
+      const result = nodesRef.current.find((node) => node.id === nodeId)
+      const sourceNodeId = result?.data.workflow?.sourceNodeId?.trim()
+      if (!sourceNodeId) return
+      let changed = false
+      const nextNodes = nodesRef.current.map((node) => {
+        if (node.id === sourceNodeId) {
+          if (node.data.workflow?.preferredResultNodeId === nodeId) return node
+          changed = true
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              workflow: {
+                ...node.data.workflow,
+                preferredResultNodeId: nodeId,
+              },
+            },
+          }
+        }
+        if (node.data.workflow?.sourceNodeId?.trim() !== sourceNodeId) {
+          return node
+        }
+        const preferred = node.id === nodeId
+        if (node.data.workflow?.preferred === preferred) return node
+        changed = true
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            workflow: { ...node.data.workflow, preferred },
+          },
+        }
+      })
+      if (!changed) return
+      commit(nextNodes, edgesRef.current, { record: true, notify: true })
+    },
+    [commit]
+  )
+
   const deleteSelection = useCallback((): boolean => {
     const selectedNodeIds = new Set(
       nodesRef.current
@@ -851,6 +897,7 @@ export function useCanvasEditor(
     addGraph,
     addLinkedNode,
     updateNodeData,
+    setWorkflowPreferredResult,
     deleteNode,
     deleteSelection,
     nudgeSelection,

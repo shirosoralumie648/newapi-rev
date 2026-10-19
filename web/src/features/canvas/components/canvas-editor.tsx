@@ -82,12 +82,16 @@ import {
   type CanvasGenerationPrefill,
   type CanvasSourceTarget,
 } from '../lib/canvas-navigation'
+import { isCanvasNodeSearchShortcut } from '../lib/canvas-organization'
 import {
   buildArtifactCanvasSeeds,
   buildAttachmentCanvasSeeds,
   type CanvasSendSeed,
 } from '../lib/canvas-send'
-import { canvasWorkflowMentions } from '../lib/canvas-workflow'
+import {
+  canvasWorkflowIsPreferredResult,
+  canvasWorkflowMentions,
+} from '../lib/canvas-workflow'
 import type {
   CanvasFlowEdge,
   CanvasFlowNode,
@@ -106,6 +110,7 @@ import { CanvasImageToolsDialog } from './canvas-image-tools-dialog'
 import { CanvasInspectorViewToggle } from './canvas-inspector-view-toggle'
 import { CanvasFlowNodeView, CanvasGroupNodeView } from './canvas-node'
 import { CanvasNodeInspector } from './canvas-node-inspector'
+import { CanvasNodeSearch } from './canvas-node-search'
 import { CanvasPngExportDialog } from './canvas-png-export-dialog'
 import { CanvasRunBudgetDialog } from './canvas-run-budget-dialog'
 import { CanvasToolbar } from './canvas-toolbar'
@@ -209,6 +214,24 @@ export function CanvasEditor(props: CanvasEditorProps) {
   // The validated run the run-budget dialog is confirming; the dialog opens
   // only when the same click would also start a run.
   const [runPlan, setRunPlan] = useState<CanvasWorkflowRunPlan | null>(null)
+
+  // The in-canvas node search panel. Cmd/Ctrl+P is the keyboard entry, the
+  // toolbar button is the discoverable one; both open the same panel.
+  const [nodeSearchOpen, setNodeSearchOpen] = useState(false)
+  const handleNodeSearchOpenChange = useCallback((open: boolean) => {
+    setNodeSearchOpen(open)
+  }, [])
+  const disabled = props.disabled
+  useEffect(() => {
+    if (disabled) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!isCanvasNodeSearchShortcut(event)) return
+      event.preventDefault()
+      setNodeSearchOpen(true)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [disabled])
 
   const [inspectorView, setInspectorView] =
     useState<CanvasInspectorView>('details')
@@ -543,6 +566,15 @@ export function CanvasEditor(props: CanvasEditorProps) {
   else if (inspectorView === 'library') inspectorTitle = t('Asset library')
   else if (inspectorView === 'artifacts') inspectorTitle = t('Artifacts')
 
+  const selectedResultSourceId =
+    editor.selectedNode?.data.workflow?.sourceNodeId?.trim() ?? ''
+  const selectedResultSiblingCount = selectedResultSourceId
+    ? editor.nodes.filter(
+        (node) =>
+          node.data.workflow?.sourceNodeId?.trim() === selectedResultSourceId
+      ).length
+    : 0
+
   let inspectorBody: ReactNode
   if (inspectorView === 'assistant') {
     inspectorBody = (
@@ -624,17 +656,25 @@ export function CanvasEditor(props: CanvasEditorProps) {
   } else {
     inspectorBody = (
       <CanvasNodeInspector
+        canPreferResult={selectedResultSiblingCount > 1}
         disabled={props.disabled}
         groups={workflowOptions.groups}
         mentions={mentions}
+        modelCapabilities={workflowOptions.modelCapabilities}
         models={workflowOptions.models}
         node={editor.selectedNode}
         onDelete={editor.deleteNode}
         onOpenImageTools={imageTools.open}
         onOpenArtifact={handleOpenArtifact}
         onOpenSource={props.onOpenSource}
+        onPreferResult={editor.setWorkflowPreferredResult}
         onRetry={workflow.retry}
         onUpdateData={editor.updateNodeData}
+        preferredResult={
+          editor.selectedNode
+            ? canvasWorkflowIsPreferredResult(editor.selectedNode, editor.nodes)
+            : false
+        }
         previews={
           editor.selectedNode
             ? (workflow.results[editor.selectedNode.id] ?? [])
@@ -706,6 +746,9 @@ export function CanvasEditor(props: CanvasEditorProps) {
                     canGroup={editor.canGroup}
                     canPaste={editor.hasClipboard}
                     canRedo={editor.canRedo}
+                    canRunSelection={
+                      editor.selectedCount > 0 && workflow.phase !== 'running'
+                    }
                     canSelectAll={editor.nodes.length > 0}
                     canUngroup={editor.canUngroup}
                     canUndo={editor.canUndo}
@@ -743,6 +786,10 @@ export function CanvasEditor(props: CanvasEditorProps) {
                     onPaste={handlePaste}
                     onRedo={editor.redo}
                     onRunWorkflow={() => setRunPlan(workflow.estimate())}
+                    onRunSelection={() =>
+                      setRunPlan(workflow.estimateSelection())
+                    }
+                    onSearchNodes={() => setNodeSearchOpen(true)}
                     onSelectAll={editor.selectAll}
                     onToggleInspectorView={handleToggleInspectorView}
                     onUndo={editor.undo}
@@ -758,6 +805,12 @@ export function CanvasEditor(props: CanvasEditorProps) {
                 <MiniMap className='bg-card!' pannable zoomable />
               </Canvas>
             </CanvasDropZone>
+            <CanvasNodeSearch
+              nodes={editor.nodes}
+              onOpenChange={handleNodeSearchOpenChange}
+              onSelectNode={editor.selectNode}
+              open={nodeSearchOpen}
+            />
           </ReactFlowProvider>
         }
         panelDefaultSize='30'
@@ -799,7 +852,13 @@ export function CanvasEditor(props: CanvasEditorProps) {
           if (!open) setRunPlan(null)
         }}
         onRun={(budget?: CanvasWorkflowRunBudgetRef) => {
+          const scope = runPlan?.scope
           setRunPlan(null)
+          if (!scope) return
+          if (scope === 'selection') {
+            workflow.runSelection(budget)
+            return
+          }
           workflow.run(undefined, budget)
         }}
         open={runPlan !== null}

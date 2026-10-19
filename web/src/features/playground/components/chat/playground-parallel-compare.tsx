@@ -31,13 +31,16 @@ import {
   getActiveVersionIndex,
   getMessageContentState,
   isPendingParallelVersion,
+  linkKnowledgeCitations,
 } from '../../lib'
 import type {
   Message,
+  MessageKnowledgeSnapshot,
   MessageVersion,
   PlaygroundMessageCost,
 } from '../../types'
 import { MessageError } from '../message/message-error'
+import { MessageKnowledgeSources } from '../message/message-knowledge-sources'
 import { MessageMetadata } from '../message/message-metadata'
 import { MessageToolCalls } from '../message/message-tool-calls'
 
@@ -46,6 +49,8 @@ interface PlaygroundParallelCompareProps {
   costs?: ReadonlyMap<string, PlaygroundMessageCost>
   isGenerating?: boolean
   isLastMessage?: boolean
+  /** Snapshot of the user turn the compared replies answer, when it retrieved. */
+  knowledge?: MessageKnowledgeSnapshot | null
   message: Message
   onContinueToolCalls?: (message: Message) => void
   onDenyToolCall?: (message: Message, toolCallId: string) => void
@@ -65,6 +70,8 @@ interface ParallelVersionCardProps {
   isActive: boolean
   isGenerating?: boolean
   isLastMessage?: boolean
+  /** Snapshot of the user turn the compared replies answer, when it retrieved. */
+  knowledge?: MessageKnowledgeSnapshot | null
   message: Message
   onContinueToolCalls?: (message: Message) => void
   onDenyToolCall?: (message: Message, toolCallId: string) => void
@@ -94,6 +101,16 @@ function ParallelVersionCard(props: ParallelVersionCardProps) {
     props.version.content,
     props.version
   ).displayContent
+  const knowledgeAnchorId = `${props.message.key}-${props.versionIndex}`
+  const knowledgeResultCount = props.knowledge?.results.length ?? 0
+  const replyContent =
+    knowledgeResultCount > 0
+      ? linkKnowledgeCitations(
+          displayContent,
+          knowledgeAnchorId,
+          knowledgeResultCount
+        )
+      : displayContent
   const canSelect =
     !isPending && !isFailed && !props.isActive && Boolean(props.onSelectVersion)
 
@@ -134,8 +151,8 @@ function ParallelVersionCard(props: ParallelVersionCardProps) {
         }}
       />
     )
-  } else if (displayContent) {
-    replyBody = <Response final>{displayContent}</Response>
+  } else if (replyContent) {
+    replyBody = <Response final>{replyContent}</Response>
   }
 
   return (
@@ -160,7 +177,15 @@ function ParallelVersionCard(props: ParallelVersionCardProps) {
         ) : null}
       </header>
 
-      <div className='flex-1 px-3 py-2.5 text-sm'>{replyBody}</div>
+      <div className='flex-1 px-3 py-2.5 text-sm'>
+        {!isPending && !isFailed && props.knowledge && (
+          <MessageKnowledgeSources
+            anchorId={knowledgeAnchorId}
+            knowledge={props.knowledge}
+          />
+        )}
+        {replyBody}
+      </div>
 
       <div className='px-3'>
         <MessageToolCalls
@@ -246,6 +271,7 @@ export function PlaygroundParallelCompare(
             isGenerating={props.isGenerating}
             isLastMessage={props.isLastMessage}
             key={version.id}
+            knowledge={props.knowledge}
             message={props.message}
             onContinueToolCalls={props.onContinueToolCalls}
             onDenyToolCall={props.onDenyToolCall}

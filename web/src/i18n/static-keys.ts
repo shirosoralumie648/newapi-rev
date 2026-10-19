@@ -1103,6 +1103,12 @@ export const STATIC_I18N_KEYS = [
   'The step that produced this result is no longer on the canvas.',
   'A connected reference image could not be read.',
   'A connected reference image is larger than the 8 MiB limit.',
+  'Too many reference images are connected to this step.',
+  'The size must use WIDTHxHEIGHT with each side between 64 and 8192 pixels.',
+  'The seed must be an integer between 1 and 2147483647.',
+  "This model's channel metadata does not list image generation.",
+  "This model's channel metadata does not list video generation.",
+  "This model's channel metadata lists neither image nor video generation.",
   // Canvas workflow run budget feedback (BL-03): the estimate dialog reports
   // these keys from constants, so the literal scan cannot see them.
   'The run budget could not be opened.',
@@ -1300,4 +1306,18 @@ export const STATIC_I18N_KEYS = [
   'Select at least one node to export.',
   'The PNG image could not be created.',
   'The PNG image could not be saved to the asset library.',
+  // Canvas node organization and selection runs (CV-13): the palette labels
+  // render through t(key) from CANVAS_NODE_COLOR_LABELS and the two selection
+  // messages come from CANVAS_WORKFLOW_MESSAGES, so the literal scan cannot
+  // see them.
+  'Red',
+  'Orange',
+  'Amber',
+  'Green',
+  'Teal',
+  'Blue',
+  'Violet',
+  'Pink',
+  'Select at least one node to run.',
+  'The selection contains no workflow step to run.',
 ] as const

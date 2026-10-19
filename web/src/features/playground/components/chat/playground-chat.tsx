@@ -37,6 +37,7 @@ import { Message } from '@/components/ai-elements/message'
 import { cn } from '@/lib/utils'
 
 import type { PlaygroundArtifactSummary } from '../../artifact-api'
+import { MESSAGE_ROLES } from '../../constants'
 import {
   getActiveVersionIndex,
   getChatMessageRenderState,
@@ -218,9 +219,13 @@ export function PlaygroundChat({
       editingKey
     )
     const isError = isErrorMessage(message)
-    const previousUserMessage = isError
-      ? getPreviousUserMessage(messages, messageIndex)
-      : null
+    const previousUserMessage = getPreviousUserMessage(messages, messageIndex)
+    // A reply answers the nearest user turn; when that turn retrieved
+    // knowledge, its stored snapshot is the citation list of every version.
+    const knowledge =
+      message.from === MESSAGE_ROLES.ASSISTANT
+        ? (previousUserMessage?.knowledge ?? null)
+        : null
     const alignment = getMessageAlignment(message, messageLayoutMode)
     const isSourceVisible = sourceMessageKeys.has(message.key)
     const isLastMessage = messageIndex === messages.length - 1
@@ -269,6 +274,7 @@ export function PlaygroundChat({
         costs={costs}
         isGenerating={isGenerating}
         isLastMessage={isLastMessage}
+        knowledge={knowledge}
         message={message}
         onContinueToolCalls={onContinueToolCalls}
         onDenyToolCall={onDenyToolCall}
@@ -297,6 +303,7 @@ export function PlaygroundChat({
               isLastMessage={isLastMessage}
               isSourceVisible={isSourceVisible}
               key={`${version.id}-${versionIndex}`}
+              knowledge={knowledge}
               message={message}
               onContinueToolCalls={onContinueToolCalls}
               onDenyToolCall={onDenyToolCall}

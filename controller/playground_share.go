@@ -251,7 +251,7 @@ func GetSharedPlaygroundSession(c *gin.Context) {
 		return
 	}
 	if target.Kind == model.PlaygroundShareKindCanvas {
-		document, err := playgroundSharedCanvasDocument(target.Canvas.Document)
+		document, err := playgroundSharedCanvasDocument(string(target.Canvas.Document))
 		if err != nil {
 			writePlaygroundError(c, err)
 			return

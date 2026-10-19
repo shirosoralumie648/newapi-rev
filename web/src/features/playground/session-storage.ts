@@ -67,7 +67,8 @@ function createSession(
   context: PlaygroundContextSettings = DEFAULT_CONTEXT_SETTINGS,
   contextSummary: PlaygroundContextSummary | null = null,
   openingMessage = '',
-  suggestedQuestions: string[] = []
+  suggestedQuestions: string[] = [],
+  knowledgeBaseIds: string[] = []
 ): PlaygroundSession {
   const now = Date.now()
   return {
@@ -80,6 +81,7 @@ function createSession(
     systemPrompt,
     openingMessage,
     suggestedQuestions: [...suggestedQuestions],
+    knowledgeBaseIds: [...knowledgeBaseIds],
     context: { ...context },
     contextSummary,
     pinned: false,
@@ -107,6 +109,7 @@ function normalizeSession(value: unknown): PlaygroundSession | null {
     systemPrompt: parsed.data.systemPrompt ?? '',
     openingMessage: parsed.data.openingMessage ?? '',
     suggestedQuestions: parsed.data.suggestedQuestions ?? [],
+    knowledgeBaseIds: parsed.data.knowledgeBaseIds ?? [],
     context: normalizeContextSettings(parsed.data.context),
     contextSummary: normalizeContextSummary(parsed.data.contextSummary),
     pinned: parsed.data.archived ? false : (parsed.data.pinned ?? false),
@@ -388,7 +391,8 @@ export function createEmptySession(
   context: PlaygroundContextSettings = DEFAULT_CONTEXT_SETTINGS,
   contextSummary: PlaygroundContextSummary | null = null,
   openingMessage = '',
-  suggestedQuestions: string[] = []
+  suggestedQuestions: string[] = [],
+  knowledgeBaseIds: string[] = []
 ): PlaygroundSession {
   return createSession(
     config,
@@ -397,6 +401,7 @@ export function createEmptySession(
     context,
     contextSummary,
     openingMessage,
-    suggestedQuestions
+    suggestedQuestions,
+    knowledgeBaseIds
   )
 }

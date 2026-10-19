@@ -32,15 +32,19 @@ import type {
 import {
   boundCanvasWorkflowError,
   CANVAS_WORKFLOW_ERRORS,
+  canvasWorkflowGenerationSupport,
   canvasWorkflowGroup,
+  canvasWorkflowIsPreferredResult,
   canvasWorkflowMentionMatches,
   canvasWorkflowMentionQuery,
   canvasWorkflowMentions,
   canvasWorkflowNodeText,
   canvasWorkflowOutputTargets,
+  canvasWorkflowPreferredSibling,
   canvasWorkflowResultKind,
   canvasWorkflowRetryRecord,
   canvasWorkflowRetrySource,
+  canvasWorkflowSelectionScope,
   hasCanvasWorkflowInput,
   insertCanvasWorkflowMention,
   orderCanvasWorkflow,
@@ -430,6 +434,37 @@ test('collects reference images from connected resources', () => {
   ])
 })
 
+test('resolves a connected batch result to its preferred sibling', () => {
+  const step = flowNode('t1', 'task', {
+    workflow: { preferredResultNodeId: 'r2' },
+  })
+  const first = flowNode('r1', 'task-result', {
+    workflow: { sourceNodeId: 't1', preferred: false },
+    ref: { taskId: 'task-1', taskArtifactKey: 'out-1' },
+  })
+  const preferred = flowNode('r2', 'task-result', {
+    workflow: { sourceNodeId: 't1', preferred: true },
+    ref: { taskId: 'task-2', taskArtifactKey: 'out-2' },
+  })
+  const downstream = flowNode('t2', 'task', {
+    workflow: { model: 'gpt-image-1' },
+  })
+  const nodes = [step, first, preferred, downstream]
+  const edges = [flowEdge('r1', 't2'), flowEdge('r2', 't2')]
+
+  expect(canvasWorkflowPreferredSibling(first, nodes)?.id).toBe('r2')
+  expect(canvasWorkflowIsPreferredResult(first, nodes)).toBe(false)
+  expect(canvasWorkflowIsPreferredResult(preferred, nodes)).toBe(true)
+  expect(resolveCanvasWorkflowImageSources(downstream, nodes, edges)).toEqual([
+    {
+      nodeId: 'r2',
+      kind: 'task-result',
+      taskId: 'task-2',
+      artifactKey: 'out-2',
+    },
+  ])
+})
+
 test('bounds the generation parameters of an imported step', () => {
   const step = (workflow: Partial<CanvasNodeWorkflowState>): CanvasFlowNode =>
     flowNode('t1', 'task', { workflow })
@@ -461,6 +496,26 @@ test('bounds the generation parameters of an imported step', () => {
         imageCount: 99,
       })
     )
+  ).toEqual({ generation: 'image', size: '4096x4096' })
+  expect(
+    resolveCanvasWorkflowGeneration(
+      step({
+        ...base,
+        generation: 'image',
+        size: '640x480',
+        seed: 42,
+      })
+    )
+  ).toEqual({ generation: 'image', size: '640x480', seed: 42 })
+  expect(
+    resolveCanvasWorkflowGeneration(
+      step({
+        ...base,
+        generation: 'image',
+        size: '9000x9000',
+        seed: 0,
+      })
+    )
   ).toEqual({ generation: 'image' })
   expect(
     resolveCanvasWorkflowGeneration(
@@ -481,6 +536,37 @@ test('bounds the generation parameters of an imported step', () => {
       step({ ...base, generation: 'video', duration: 7200 })
     )
   ).toEqual({ generation: 'video' })
+})
+
+test('reads generation support from channel endpoint and task usage metadata', () => {
+  expect(canvasWorkflowGenerationSupport(undefined)).toBeNull()
+  expect(
+    canvasWorkflowGenerationSupport({ endpointTypes: [], usageFields: [] })
+  ).toBeNull()
+  expect(
+    canvasWorkflowGenerationSupport({
+      endpointTypes: ['image-generation'],
+      usageFields: [],
+    })
+  ).toEqual({ image: true, video: false })
+  expect(
+    canvasWorkflowGenerationSupport({
+      endpointTypes: ['openai-video'],
+      usageFields: [],
+    })
+  ).toEqual({ image: false, video: true })
+  expect(
+    canvasWorkflowGenerationSupport({
+      endpointTypes: [],
+      usageFields: ['image_count', 'seconds'],
+    })
+  ).toEqual({ image: true, video: true })
+  expect(
+    canvasWorkflowGenerationSupport({
+      endpointTypes: ['openai'],
+      usageFields: [],
+    })
+  ).toEqual({ image: false, video: false })
 })
 
 test('resolves the run group from the step override first', () => {
@@ -516,6 +602,7 @@ test('records the attempt on a result node for a one-click retry', () => {
     inputText: 'a sailing ship',
     group: 'default',
     inputImageCount: 1,
+    seed: 12345,
   })
   expect(record).toMatchObject({
     status: 'succeeded',
@@ -523,6 +610,7 @@ test('records the attempt on a result node for a one-click retry', () => {
     generation: 'video',
     duration: 10,
     size: '1280x720',
+    seed: 12345,
     inputText: 'a sailing ship',
     group: 'default',
     inputImageCount: 1,
@@ -535,4 +623,53 @@ test('records the attempt on a result node for a one-click retry', () => {
   expect(
     canvasWorkflowRetrySource(flowNode('r2', 'task-result', { workflow: {} }))
   ).toBeNull()
+})
+
+test('selection scope keeps selected steps, their ancestors and internal edges', () => {
+  const nodes = [
+    flowNode('p1', 'prompt', { text: 'one' }),
+    modelNode('m1', 'gpt-4o'),
+    flowNode('p2', 'prompt', { text: 'two' }),
+    modelNode('m2', 'gpt-4o'),
+    flowNode('n1', 'note', { text: 'unrelated' }),
+  ]
+  const edges = [flowEdge('p1', 'm1'), flowEdge('p2', 'm2')]
+
+  const scope = canvasWorkflowSelectionScope(nodes, edges, ['m1'])
+
+  expect(scope.nodes.map((node) => node.id).sort()).toEqual(['m1', 'p1'])
+  expect(scope.edges.map((edge) => edge.id)).toEqual(['p1-m1'])
+  expect(orderCanvasWorkflow(scope.nodes, scope.edges)).toEqual({
+    steps: ['m1'],
+  })
+  expect(validateCanvasWorkflow(scope.nodes, scope.edges)).toBeNull()
+})
+
+test('selection scope expands a selected group into its descendants', () => {
+  const nodes = [
+    flowNode('g1', 'group', {}),
+    flowNode('c1', 'prompt', { text: 'inside', parentId: 'g1' }),
+    flowNode('m1', 'model', {
+      parentId: 'g1',
+      workflow: { model: 'gpt-4o' },
+    }),
+    modelNode('m2', 'gpt-4o-mini'),
+  ]
+  const edges = [flowEdge('c1', 'm1'), flowEdge('m1', 'm2')]
+
+  const scope = canvasWorkflowSelectionScope(nodes, edges, ['g1'])
+
+  expect(scope.nodes.map((node) => node.id).sort()).toEqual(['c1', 'g1', 'm1'])
+  expect(scope.edges.map((edge) => edge.id)).toEqual(['c1-m1'])
+})
+
+test('selection scope ignores ids that are not on the board', () => {
+  const scope = canvasWorkflowSelectionScope(
+    [flowNode('n1', 'note', { text: 'only' })],
+    [],
+    ['missing']
+  )
+
+  expect(scope.nodes).toEqual([])
+  expect(scope.edges).toEqual([])
 })

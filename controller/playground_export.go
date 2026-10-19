@@ -59,6 +59,7 @@ type playgroundExportSession struct {
 	SystemPrompt       string          `json:"system_prompt,omitempty"`
 	OpeningMessage     string          `json:"opening_message,omitempty"`
 	SuggestedQuestions json.RawMessage `json:"suggested_questions"`
+	KnowledgeBaseIDs   json.RawMessage `json:"knowledge_base_ids"`
 	Config             json.RawMessage `json:"config"`
 	ParameterEnabled   json.RawMessage `json:"parameter_enabled"`
 	Context            json.RawMessage `json:"context"`
@@ -125,6 +126,7 @@ func playgroundExportJSON(export *model.PlaygroundSessionExport) (string, error)
 			SystemPrompt:       session.SystemPrompt,
 			OpeningMessage:     string(session.OpeningMessage),
 			SuggestedQuestions: playgroundExportRawJSON(session.SuggestedQuestions, "[]"),
+			KnowledgeBaseIDs:   playgroundExportRawJSON(session.KnowledgeBaseIDs, "[]"),
 			Config:             playgroundExportRawJSON(session.Config, "{}"),
 			ParameterEnabled:   playgroundExportRawJSON(session.ParameterEnabled, "{}"),
 			Context:            playgroundExportRawJSON(session.ContextConfig, "{}"),

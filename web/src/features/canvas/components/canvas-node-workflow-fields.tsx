@@ -21,6 +21,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -32,11 +33,17 @@ import { translateServerText } from '@/lib/server-error-message'
 
 import {
   CANVAS_NODE_KIND_LABELS,
+  CANVAS_WORKFLOW_CAPABILITY_MESSAGES,
+  CANVAS_WORKFLOW_CUSTOM_SIZE,
   CANVAS_WORKFLOW_GENERATIONS,
   CANVAS_WORKFLOW_GENERATION_LABELS,
   CANVAS_WORKFLOW_IMAGE_COUNTS,
+  CANVAS_WORKFLOW_IMAGE_INPUT_MAX_COUNT,
   CANVAS_WORKFLOW_IMAGE_QUALITIES,
   CANVAS_WORKFLOW_IMAGE_SIZE_RATIOS,
+  CANVAS_WORKFLOW_MESSAGES,
+  CANVAS_WORKFLOW_SEED_MAX,
+  CANVAS_WORKFLOW_SEED_MIN,
   CANVAS_WORKFLOW_VIDEO_SIZES,
   CANVAS_WORKFLOW_VIDEO_SIZE_RATIOS,
 } from '../constants'
@@ -46,10 +53,13 @@ import type {
 } from '../hooks/use-canvas-editor'
 import type { CanvasWorkflowRunPhase } from '../hooks/use-canvas-workflow-runner'
 import {
+  canvasWorkflowGenerationSupport,
   canvasWorkflowMentionMatches,
   canvasWorkflowMentionQuery,
   insertCanvasWorkflowMention,
+  normalizeCanvasWorkflowSize,
   type CanvasWorkflowMention,
+  type CanvasWorkflowModelCapability,
 } from '../lib/canvas-workflow'
 import type {
   CanvasFlowNode,
@@ -62,6 +72,8 @@ interface CanvasNodeWorkflowFieldsProps {
   node: CanvasFlowNode
   models: ModelOption[]
   groups: GroupOption[]
+  /** Endpoint and task-usage metadata keyed by model name, when available. */
+  modelCapabilities?: Record<string, CanvasWorkflowModelCapability>
   /** Directly connected upstream nodes the instruction can reference. */
   mentions: CanvasWorkflowMention[]
   /** Transient image previews of the current run for this node. */
@@ -97,13 +109,46 @@ export function CanvasNodeWorkflowFields(props: CanvasNodeWorkflowFieldsProps) {
   const isTask = node.data.kind === 'task'
   const generation: CanvasWorkflowGenerationKind =
     workflow?.generation === 'video' ? 'video' : 'image'
-  const size = workflow?.size ?? PLAYGROUND_IMAGE_SIZES[0]
+  const currentSize = workflow?.size?.trim() ?? ''
+  const presetSizes: readonly string[] =
+    generation === 'video'
+      ? CANVAS_WORKFLOW_VIDEO_SIZES
+      : PLAYGROUND_IMAGE_SIZES
+  const size =
+    currentSize || (generation === 'image' ? PLAYGROUND_IMAGE_SIZES[0] : '')
   const duration = workflow?.duration ?? PLAYGROUND_VIDEO_DURATIONS[0]
   const canRetry =
     (status === 'failed' || status === 'canceled') && props.runPhase === 'idle'
+  const capability = props.modelCapabilities?.[model.trim()]
+  const generationSupport = canvasWorkflowGenerationSupport(capability)
+  const generationSupported =
+    generationSupport === null || generationSupport[generation]
+  const bothGenerationsUnsupported =
+    generationSupport !== null &&
+    !generationSupport.image &&
+    !generationSupport.video
+  const capabilityReason =
+    generationSupport === null
+      ? null
+      : bothGenerationsUnsupported
+        ? CANVAS_WORKFLOW_CAPABILITY_MESSAGES.NO_MEDIA
+        : generation === 'image' && !generationSupport.image
+          ? CANVAS_WORKFLOW_CAPABILITY_MESSAGES.IMAGE_UNSUPPORTED
+          : generation === 'video' && !generationSupport.video
+            ? CANVAS_WORKFLOW_CAPABILITY_MESSAGES.VIDEO_UNSUPPORTED
+            : null
 
   const [draft, setDraft] = useState(node.data.text ?? '')
   const [mentionQuery, setMentionQuery] = useState<string | null>(null)
+  const [seedDraft, setSeedDraft] = useState(
+    workflow?.seed === undefined ? '' : String(workflow.seed)
+  )
+  const [seedError, setSeedError] = useState<string | null>(null)
+  const [customSizeOpen, setCustomSizeOpen] = useState(
+    Boolean(currentSize && !presetSizes.includes(currentSize))
+  )
+  const [customSizeDraft, setCustomSizeDraft] = useState(currentSize)
+  const [customSizeError, setCustomSizeError] = useState<string | null>(null)
   const caretRef = useRef(0)
   const mentionMatches =
     mentionQuery === null
@@ -116,6 +161,19 @@ export function CanvasNodeWorkflowFields(props: CanvasNodeWorkflowFieldsProps) {
     setDraft(node.data.text ?? '')
     setMentionQuery(null)
   }, [node.id, node.data.text])
+
+  useEffect(() => {
+    setSeedDraft(workflow?.seed === undefined ? '' : String(workflow.seed))
+    setSeedError(null)
+  }, [node.id, workflow?.seed])
+
+  useEffect(() => {
+    setCustomSizeOpen(
+      Boolean(currentSize && !presetSizes.includes(currentSize))
+    )
+    setCustomSizeDraft(currentSize)
+    setCustomSizeError(null)
+  }, [node.id, generation, currentSize, presetSizes])
 
   const updateWorkflow = (patch: Partial<CanvasNodeWorkflowState>) => {
     props.onUpdateData(
@@ -153,11 +211,61 @@ export function CanvasNodeWorkflowFields(props: CanvasNodeWorkflowFieldsProps) {
     )
   }
 
-  const imageSizeOptions = withCurrentValue(PLAYGROUND_IMAGE_SIZES, size)
+  const commitSeed = () => {
+    const value = seedDraft.trim()
+    if (!value) {
+      setSeedError(null)
+      if (workflow?.seed !== undefined) updateWorkflow({ seed: undefined })
+      return
+    }
+    const seed = Number(value)
+    if (
+      !/^[0-9]+$/.test(value) ||
+      !Number.isSafeInteger(seed) ||
+      seed < CANVAS_WORKFLOW_SEED_MIN ||
+      seed > CANVAS_WORKFLOW_SEED_MAX
+    ) {
+      setSeedError(CANVAS_WORKFLOW_MESSAGES.SEED_INVALID)
+      return
+    }
+    setSeedError(null)
+    setSeedDraft(String(seed))
+    if (workflow?.seed !== seed) updateWorkflow({ seed })
+  }
+
+  const useLastSeed = () => {
+    const lastSeed = workflow?.lastSeed
+    if (!lastSeed) return
+    setSeedDraft(String(lastSeed))
+    setSeedError(null)
+    updateWorkflow({ seed: lastSeed })
+  }
+
+  const applyCustomSize = () => {
+    const normalized = normalizeCanvasWorkflowSize(customSizeDraft)
+    if (!normalized) {
+      setCustomSizeError(CANVAS_WORKFLOW_MESSAGES.SIZE_INVALID)
+      return
+    }
+    setCustomSizeError(null)
+    setCustomSizeDraft(normalized)
+    setCustomSizeOpen(true)
+    if (workflow?.size !== normalized) updateWorkflow({ size: normalized })
+  }
+
   const durationOptions = withCurrentValue(
     PLAYGROUND_VIDEO_DURATIONS.map(String),
     String(duration)
   )
+  const sizeSelectValue = customSizeOpen
+    ? CANVAS_WORKFLOW_CUSTOM_SIZE
+    : presetSizes.includes(currentSize)
+      ? currentSize
+      : size
+  const sizeRatios =
+    generation === 'video'
+      ? CANVAS_WORKFLOW_VIDEO_SIZE_RATIOS
+      : CANVAS_WORKFLOW_IMAGE_SIZE_RATIOS
 
   return (
     <div className='grid gap-3 rounded-md border p-2'>
@@ -275,7 +383,7 @@ export function CanvasNodeWorkflowFields(props: CanvasNodeWorkflowFieldsProps) {
             {t('Generation type')}
           </span>
           <NativeSelect
-            disabled={props.disabled}
+            disabled={props.disabled || bothGenerationsUnsupported}
             onChange={(event) =>
               updateWorkflow({
                 generation: event.target.value as CanvasWorkflowGenerationKind,
@@ -284,38 +392,111 @@ export function CanvasNodeWorkflowFields(props: CanvasNodeWorkflowFieldsProps) {
             value={generation}
           >
             {CANVAS_WORKFLOW_GENERATIONS.map((option) => (
-              <NativeSelectOption key={option} value={option}>
+              <NativeSelectOption
+                disabled={
+                  generationSupport ? !generationSupport[option] : false
+                }
+                key={option}
+                value={option}
+              >
                 {t(CANVAS_WORKFLOW_GENERATION_LABELS[option])}
               </NativeSelectOption>
             ))}
           </NativeSelect>
+          {capabilityReason ? (
+            <p className='text-warning text-xs'>{t(capabilityReason)}</p>
+          ) : null}
         </label>
       ) : null}
 
-      {isTask && generation === 'image' ? (
-        <label className='grid gap-1.5'>
-          <span className='text-muted-foreground text-xs'>{t('Size')}</span>
-          <NativeSelect
-            disabled={props.disabled}
-            onChange={(event) => updateWorkflow({ size: event.target.value })}
-            value={size}
-          >
-            {imageSizeOptions.map((option) => (
-              <NativeSelectOption key={option} value={option}>
-                {CANVAS_WORKFLOW_IMAGE_SIZE_RATIOS[option]
-                  ? `${option} · ${CANVAS_WORKFLOW_IMAGE_SIZE_RATIOS[option]}`
-                  : option}
+      {isTask ? (
+        <div className='grid gap-1.5'>
+          <label className='grid gap-1.5'>
+            <span className='text-muted-foreground text-xs'>
+              {generation === 'video' ? t('Video size') : t('Size')}
+            </span>
+            <NativeSelect
+              disabled={props.disabled || !generationSupported}
+              onChange={(event) => {
+                const value = event.target.value
+                if (value === CANVAS_WORKFLOW_CUSTOM_SIZE) {
+                  setCustomSizeOpen(true)
+                  setCustomSizeDraft(
+                    currentSize && !presetSizes.includes(currentSize)
+                      ? currentSize
+                      : ''
+                  )
+                  setCustomSizeError(null)
+                  return
+                }
+                setCustomSizeOpen(false)
+                updateWorkflow({ size: value || undefined })
+              }}
+              value={sizeSelectValue}
+            >
+              {generation === 'video' ? (
+                <NativeSelectOption value=''>
+                  {t('Channel default')}
+                </NativeSelectOption>
+              ) : null}
+              {presetSizes.map((option) => (
+                <NativeSelectOption key={option} value={option}>
+                  {sizeRatios[option]
+                    ? `${option} · ${sizeRatios[option]}`
+                    : option}
+                </NativeSelectOption>
+              ))}
+              <NativeSelectOption value={CANVAS_WORKFLOW_CUSTOM_SIZE}>
+                {t('Custom size')}
               </NativeSelectOption>
-            ))}
-          </NativeSelect>
-        </label>
+            </NativeSelect>
+          </label>
+          {customSizeOpen ? (
+            <div className='grid gap-1.5'>
+              <div className='flex items-center gap-1.5'>
+                <Input
+                  aria-label={t('Size (WIDTHxHEIGHT)')}
+                  disabled={props.disabled || !generationSupported}
+                  inputMode='text'
+                  onChange={(event) => setCustomSizeDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') applyCustomSize()
+                  }}
+                  placeholder='1024x1024'
+                  value={customSizeDraft}
+                />
+                <Button
+                  disabled={
+                    props.disabled ||
+                    !generationSupported ||
+                    !customSizeDraft.trim()
+                  }
+                  onClick={applyCustomSize}
+                  size='sm'
+                  type='button'
+                  variant='outline'
+                >
+                  {t('Apply')}
+                </Button>
+              </div>
+              <p className='text-muted-foreground text-xs'>
+                {t('WIDTHxHEIGHT, 64 to 8192 pixels per side.')}
+              </p>
+              {customSizeError ? (
+                <p className='text-destructive text-xs'>
+                  {translateServerText(t, customSizeError)}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
       ) : null}
 
       {isTask && generation === 'image' ? (
         <label className='grid gap-1.5'>
           <span className='text-muted-foreground text-xs'>{t('Quality')}</span>
           <NativeSelect
-            disabled={props.disabled}
+            disabled={props.disabled || !generationSupported}
             onChange={(event) =>
               updateWorkflow({ quality: event.target.value })
             }
@@ -337,7 +518,7 @@ export function CanvasNodeWorkflowFields(props: CanvasNodeWorkflowFieldsProps) {
         <label className='grid gap-1.5'>
           <span className='text-muted-foreground text-xs'>{t('Count')}</span>
           <NativeSelect
-            disabled={props.disabled}
+            disabled={props.disabled || !generationSupported}
             onChange={(event) =>
               updateWorkflow({
                 imageCount:
@@ -360,26 +541,10 @@ export function CanvasNodeWorkflowFields(props: CanvasNodeWorkflowFieldsProps) {
         </label>
       ) : null}
 
-      {isTask && generation === 'video' ? (
-        <label className='grid gap-1.5'>
-          <span className='text-muted-foreground text-xs'>
-            {t('Video size')}
-          </span>
-          <NativeSelect
-            disabled={props.disabled}
-            onChange={(event) => updateWorkflow({ size: event.target.value })}
-            value={workflow?.size ?? ''}
-          >
-            <NativeSelectOption value=''>
-              {t('Channel default')}
-            </NativeSelectOption>
-            {CANVAS_WORKFLOW_VIDEO_SIZES.map((option) => (
-              <NativeSelectOption key={option} value={option}>
-                {`${option} · ${CANVAS_WORKFLOW_VIDEO_SIZE_RATIOS[option]}`}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-        </label>
+      {isTask && generation === 'image' ? (
+        <p className='text-muted-foreground text-xs'>
+          {t('Each generated image gets its own result node.')}
+        </p>
       ) : null}
 
       {isTask && generation === 'video' ? (
@@ -388,7 +553,7 @@ export function CanvasNodeWorkflowFields(props: CanvasNodeWorkflowFieldsProps) {
             {t('Duration (seconds)')}
           </span>
           <NativeSelect
-            disabled={props.disabled}
+            disabled={props.disabled || !generationSupported}
             onChange={(event) =>
               updateWorkflow({ duration: Number(event.target.value) })
             }
@@ -403,9 +568,70 @@ export function CanvasNodeWorkflowFields(props: CanvasNodeWorkflowFieldsProps) {
         </label>
       ) : null}
 
+      {isTask ? (
+        <div className='grid gap-1.5'>
+          <label className='grid gap-1.5'>
+            <span className='text-muted-foreground text-xs'>{t('Seed')}</span>
+            <Input
+              aria-label={t('Seed')}
+              disabled={props.disabled || !generationSupported}
+              inputMode='numeric'
+              onBlur={commitSeed}
+              onChange={(event) => {
+                setSeedDraft(event.target.value)
+                setSeedError(null)
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') commitSeed()
+              }}
+              placeholder={t('Random')}
+              value={seedDraft}
+            />
+          </label>
+          <div className='flex flex-wrap items-center justify-between gap-2'>
+            <p className='text-muted-foreground text-xs'>
+              {workflow?.seed === undefined
+                ? t('Leave empty for a random seed.')
+                : t('The same seed will be reused on every run.')}
+            </p>
+            <Button
+              disabled={
+                props.disabled ||
+                !generationSupported ||
+                workflow?.lastSeed === undefined
+              }
+              onClick={useLastSeed}
+              size='sm'
+              type='button'
+              variant='ghost'
+            >
+              {t('Use last result')}
+            </Button>
+          </div>
+          {workflow?.lastSeed !== undefined ? (
+            <p className='text-muted-foreground text-xs'>
+              {t('Last seed: {{seed}}', { seed: workflow.lastSeed })}
+            </p>
+          ) : null}
+          {seedError ? (
+            <p className='text-destructive text-xs'>
+              {translateServerText(t, seedError)}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
       {workflow?.inputImageCount ? (
         <p className='text-muted-foreground text-xs'>
           {t('Reference images')}: {workflow.inputImageCount}
+        </p>
+      ) : null}
+
+      {props.mentions.some((mention) => mention.hasImage) ? (
+        <p className='text-muted-foreground text-xs'>
+          {t('Connect at most {{count}} reference images to one step.', {
+            count: CANVAS_WORKFLOW_IMAGE_INPUT_MAX_COUNT,
+          })}
         </p>
       ) : null}
 

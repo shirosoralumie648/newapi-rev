@@ -117,6 +117,7 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.PATCH("/knowledge-bases/:kbId", controller.UpdatePlaygroundKnowledgeBase)
 			playgroundRoute.DELETE("/knowledge-bases/:kbId", controller.DeletePlaygroundKnowledgeBase)
 			playgroundRoute.GET("/knowledge-bases/:kbId/documents", controller.ListPlaygroundKnowledgeDocuments)
+			playgroundRoute.POST("/knowledge-bases/:kbId/search", controller.SearchPlaygroundKnowledgeBase)
 			playgroundRoute.POST("/knowledge-bases/:kbId/documents", controller.CreatePlaygroundKnowledgeDocument)
 			playgroundRoute.GET("/knowledge-bases/:kbId/documents/:documentId", controller.GetPlaygroundKnowledgeDocument)
 			playgroundRoute.DELETE("/knowledge-bases/:kbId/documents/:documentId", controller.DeletePlaygroundKnowledgeDocument)

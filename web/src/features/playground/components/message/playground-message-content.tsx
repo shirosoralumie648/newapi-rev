@@ -45,16 +45,19 @@ import {
   getMessageAlignmentClass,
   getMessageContentState,
   isErrorMessage,
+  linkKnowledgeCitations,
   type MessageAlignment,
 } from '../../lib'
 import { getMessageContentStyles } from '../../lib/message/message-styles'
 import type {
   Message,
+  MessageKnowledgeSnapshot,
   MessageVersion,
   PlaygroundMessageCost,
 } from '../../types'
 import { MessageAttachmentList } from './message-attachment-list'
 import { MessageError } from './message-error'
+import { MessageKnowledgeSources } from './message-knowledge-sources'
 import { MessageMetadata } from './message-metadata'
 import { MessageSpeech } from './message-speech'
 import { MessageToolCalls } from './message-tool-calls'
@@ -68,6 +71,8 @@ type PlaygroundMessageContentProps = {
   isGenerating?: boolean
   isLastMessage?: boolean
   isSourceVisible?: boolean
+  /** Knowledge snapshot of the user turn this reply answers, when it retrieved. */
+  knowledge?: MessageKnowledgeSnapshot | null
   message: Message
   onContinueToolCalls?: (message: Message) => void
   onDenyToolCall?: (message: Message, toolCallId: string) => void
@@ -87,6 +92,7 @@ export function PlaygroundMessageContent({
   isGenerating = false,
   isLastMessage = false,
   isSourceVisible = false,
+  knowledge = null,
   message,
   onContinueToolCalls,
   onDenyToolCall,
@@ -111,6 +117,17 @@ export function PlaygroundMessageContent({
   const hasAttachments = (version.attachments?.length ?? 0) > 0
   const hasVisibleContent =
     versionContent.length > 0 || hasAttachments || Boolean(version.speech)
+  // The [n] markers of a reply that retrieved knowledge context link to the
+  // citation list derived from the user turn's snapshot.
+  const knowledgeResultCount = knowledge?.results.length ?? 0
+  const knowledgeContent =
+    knowledgeResultCount > 0
+      ? linkKnowledgeCitations(
+          displayContent,
+          message.key,
+          knowledgeResultCount
+        )
+      : displayContent
 
   return (
     <div
@@ -132,6 +149,10 @@ export function PlaygroundMessageContent({
             ))}
           </SourcesContent>
         </Sources>
+      )}
+
+      {knowledge && (
+        <MessageKnowledgeSources anchorId={message.key} knowledge={knowledge} />
       )}
 
       {hasReasoning && (
@@ -191,7 +212,7 @@ export function PlaygroundMessageContent({
                   variant='flat'
                   className={cn(getMessageContentStyles())}
                 >
-                  <Response final={isMessageFinal}>{displayContent}</Response>
+                  <Response final={isMessageFinal}>{knowledgeContent}</Response>
                 </MessageContent>
               )}
               {version.speech ? (

@@ -18,6 +18,21 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type { Edge, Node } from '@xyflow/react'
 
+/**
+ * A stable color marker of one canvas node. The stored value is only this key;
+ * the palette and its classes are presentation details of the client, so an
+ * older board never persists a theme-dependent class name.
+ */
+export type CanvasNodeColor =
+  | 'red'
+  | 'orange'
+  | 'amber'
+  | 'green'
+  | 'teal'
+  | 'blue'
+  | 'violet'
+  | 'pink'
+
 export type CanvasNodeKind =
   | 'text'
   | 'note'
@@ -89,6 +104,18 @@ export type CanvasNodeWorkflowState = {
   imageCount?: number
   /** Video duration in seconds used by a video generation step. */
   duration?: number
+  /**
+   * Fixed sampling seed. Absent keeps the step random: the runner picks a
+   * fresh seed per attempt and records it in `lastSeed` for the inherit
+   * shortcut. A seed is not a billing multiplier.
+   */
+  seed?: number
+  /** The seed the last attempt actually sent, including a random one. */
+  lastSeed?: number
+  /** Canvas-local id of the preferred result among a batch. */
+  preferredResultNodeId?: string
+  /** Set on each result node of a batch; the preferred one wins downstream. */
+  preferred?: boolean
   /** User group the step runs in; empty means the canvas group. */
   group?: string
   /** Input text resolved on the last attempt, reused by retry. */
@@ -138,6 +165,11 @@ export type CanvasNodeData = {
   snapshot?: CanvasMessageSnapshot
   ref?: CanvasNodeRef
   label?: string
+  // Optional organization aids. Both live in the opaque node `data` the server
+  // stores, so they round-trip through save, export and import without a schema
+  // change; the editor normalizes them on read and on every edit.
+  color?: CanvasNodeColor
+  tags?: string[]
   // Declared media type of an `attachment` node. Older boards were image-only
   // and carry no value, which keeps rendering as an image.
   mediaType?: string

@@ -381,6 +381,19 @@ export function usePlaygroundState() {
     [updateSession]
   )
 
+  const updateKnowledgeBaseIds = useCallback(
+    (knowledgeBaseIds: string[]) => {
+      const currentActiveSessionId = latestActiveSessionIdRef.current
+      if (!currentActiveSessionId) return
+
+      updateSession(currentActiveSessionId, (session) => ({
+        ...session,
+        knowledgeBaseIds: [...knowledgeBaseIds],
+      }))
+    },
+    [updateSession]
+  )
+
   const updateMessages = useCallback<MessageUpdate>(
     (updater, sessionId = latestActiveSessionIdRef.current) => {
       if (!sessionId) return
@@ -432,6 +445,7 @@ export function usePlaygroundState() {
       systemPrompt?: string
       openingMessage?: string
       suggestedQuestions?: string[]
+      knowledgeBaseIds?: string[]
     }) => {
       const currentSession = latestSessionsRef.current.find(
         (session) => session.id === latestActiveSessionIdRef.current
@@ -450,7 +464,8 @@ export function usePlaygroundState() {
         DEFAULT_CONTEXT_SETTINGS,
         null,
         overrides?.openingMessage ?? '',
-        overrides?.suggestedQuestions ?? []
+        overrides?.suggestedQuestions ?? [],
+        overrides?.knowledgeBaseIds ?? []
       )
       const nextSessions = [
         { ...nextSession, syncPending: true },
@@ -599,6 +614,7 @@ export function usePlaygroundState() {
     updateSystemPrompt,
     updateContextSettings,
     updateContextSummary,
+    updateKnowledgeBaseIds,
     applySessionSettings,
     updateMessages,
     clearMessages,
