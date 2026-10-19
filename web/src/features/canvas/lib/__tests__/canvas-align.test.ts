@@ -217,6 +217,31 @@ test('auto layout never rewrites edges or node data', () => {
   }
 })
 
+test('a scoped auto layout re-fits a frame around its moved members', () => {
+  const nodes = [
+    node('frame', 0, 0, 600, 400, { kind: 'frame' }),
+    node('source', 40, 40, 100, 50, { kind: 'prompt' }),
+    node('result', 300, 40, 100, 50, { kind: 'model' }),
+    node('outside', 2000, 0, 100, 50, { kind: 'task-result' }),
+  ]
+
+  const next = canvasAutoLayout(
+    nodes,
+    [{ source: 'source', target: 'result' }],
+    'horizontal',
+    ['source', 'result']
+  )
+
+  const frame = next?.find((entry) => entry.id === 'frame')
+  expect(frame?.position).toEqual({ x: 16, y: -20 })
+  expect(frame?.width).toBe(344)
+  expect(frame?.height).toBe(160)
+  expect(next?.find((entry) => entry.id === 'outside')?.position).toEqual({
+    x: 2000,
+    y: 0,
+  })
+})
+
 test('a frame carries its contained nodes into a selection export', () => {
   const nodes = [
     node('frame', 0, 0, 500, 400, { kind: 'frame', selected: true }),

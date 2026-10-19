@@ -706,11 +706,11 @@ export function canvasAutoLayout(
     return { ...node, position }
   })
   const nextById = new Map(nextNodes.map((node) => [node.id, node]))
+  // A frame is never ranked itself, so it follows its members: a visible frame
+  // is re-fitted whenever the layout touches one of its members, including a
+  // selection-scoped layout that moves a member of a frame outside the scope.
   const frameNodes = nodes.filter(
-    (node) =>
-      node.hidden !== true &&
-      canvasNodeKind(node) === 'frame' &&
-      (!scope || scope.has(node.id))
+    (node) => node.hidden !== true && canvasNodeKind(node) === 'frame'
   )
   for (const frame of frameNodes) {
     const members = [...canvasFrameMemberIds(nodes, [frame.id])].filter((id) =>
