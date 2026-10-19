@@ -1694,11 +1694,16 @@ func TestPlaygroundCanvasTemplateLibrary(t *testing.T) {
 				canvasRefNode("a1", "attachment", map[string]any{"sessionId": canvasID, "attachmentId": attachmentID}),
 				map[string]any{
 					"id": "m1", "type": "model", "position": map[string]any{"x": 360, "y": 0},
-					"data": map[string]any{"kind": "model", "label": "Generate", "workflow": map[string]any{
-						"model": "test-model", "size": "1024x1024", "imageCount": float64(1),
-						"status": "succeeded", "output": "leaked output", "inputText": "leaked input",
-						"resultImageCount": float64(1), "error": "leaked error", "attempts": float64(2),
-					}},
+					"data": map[string]any{
+						"kind": "model", "label": "Generate", "preferred": true,
+						"snapshot": map[string]any{"sessionId": "leaked-session", "text": "leaked preview"},
+						"workflow": map[string]any{
+							"model": "test-model", "size": "1024x1024", "imageCount": float64(1),
+							"status": "succeeded", "output": "leaked output", "inputText": "leaked input",
+							"resultImageCount": float64(1), "error": "leaked error", "attempts": float64(2),
+							"lastSeed": float64(1234), "preferredResultNodeId": "m1-result-1",
+						},
+					},
 				},
 			}, []any{
 				map[string]any{"id": "e1", "source": "p1", "target": "m1"},
@@ -1754,11 +1759,19 @@ func TestPlaygroundCanvasTemplateLibrary(t *testing.T) {
 			require.Len(t, nodes, 3)
 			attachmentNode := nodes[1].(map[string]any)["data"].(map[string]any)
 			assert.Equal(t, map[string]any{"attachmentId": attachmentID}, attachmentNode["ref"], "only the attachment claim survives")
-			workflow := nodes[2].(map[string]any)["data"].(map[string]any)["workflow"].(map[string]any)
+			modelData := nodes[2].(map[string]any)["data"].(map[string]any)
+			workflow := modelData["workflow"].(map[string]any)
 			assert.Equal(t, "test-model", workflow["model"])
 			assert.Equal(t, "1024x1024", workflow["size"])
-			for _, key := range []string{"status", "output", "inputText", "resultImageCount", "error", "attempts"} {
+			for _, key := range []string{
+				"status", "output", "inputText", "resultImageCount", "error", "attempts",
+				"lastSeed", "preferredResultNodeId",
+			} {
 				_, present := workflow[key]
+				assert.False(t, present, key)
+			}
+			for _, key := range []string{"preferred", "snapshot", "sourceDeleted"} {
+				_, present := modelData[key]
 				assert.False(t, present, key)
 			}
 			assets := make([]model.PlaygroundCanvasTemplateAsset, 0)
@@ -1784,6 +1797,38 @@ func TestPlaygroundCanvasTemplateLibrary(t *testing.T) {
 			require.NoError(t, db.Where("id = ?", structure.Template.ID).First(&structureRow).Error)
 			assert.False(t, strings.Contains(string(structureRow.Document), `"attachmentId"`))
 			assert.Contains(t, string(structureRow.Document), `"test-model"`)
+
+			// An administrator can save their own canvas directly as a global
+			// market template. The row is ownerless, keeps no system key and
+			// consumes no account quota; a foreign canvas stays unreadable.
+			adminCanvasID := createCanvasProject(t, 9, "admin-global-template")["id"].(string)
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 9, http.MethodPatch, "/api/playground/canvases/"+adminCanvasID, map[string]any{
+				"revision": 0, "document": document,
+			}, controller.UpdatePlaygroundCanvasProject).Code)
+			globalResponse := playgroundRequest(t, 9, http.MethodPost, "/api/playground/canvas-templates/global", map[string]any{
+				"canvas_id": adminCanvasID, "name": "Admin chain", "category": "translation", "inline_assets": false,
+			}, controller.CreateGlobalPlaygroundCanvasTemplate)
+			require.Equal(t, http.StatusOK, globalResponse.Code, globalResponse.Body.String())
+			var globalEnvelope struct {
+				Data templateWriteResponse `json:"data"`
+			}
+			require.NoError(t, common.Unmarshal(globalResponse.Body.Bytes(), &globalEnvelope))
+			assert.Equal(t, "Admin chain", globalEnvelope.Data.Template.Name)
+			assert.Equal(t, model.PlaygroundCanvasTemplateVisibilityGlobal, globalEnvelope.Data.Template.Visibility)
+			var globalRow model.PlaygroundCanvasTemplate
+			require.NoError(t, db.Where("id = ?", globalEnvelope.Data.Template.ID).First(&globalRow).Error)
+			assert.Zero(t, globalRow.UserID)
+			assert.Empty(t, globalRow.SystemKey)
+			assert.NotContains(t, string(globalRow.Document), `"snapshot"`)
+			assert.NotContains(t, string(globalRow.Document), `"lastSeed"`)
+			var adminUsage model.PlaygroundUserUsage
+			require.NoError(t, db.Where("user_id = ?", 9).First(&adminUsage).Error)
+			assert.Zero(t, adminUsage.CanvasTemplateCount)
+			assert.Zero(t, adminUsage.CanvasTemplateBytes)
+			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 8, http.MethodPost, "/api/playground/canvas-templates/global", map[string]any{
+				"canvas_id": adminCanvasID, "name": "Stolen chain", "inline_assets": false,
+			}, controller.CreateGlobalPlaygroundCanvasTemplate).Code)
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 9, http.MethodDelete, "/api/playground/canvas-templates/global/"+globalEnvelope.Data.Template.ID, nil, controller.DeleteGlobalPlaygroundCanvasTemplate).Code)
 
 			var usage model.PlaygroundUserUsage
 			require.NoError(t, db.Where("user_id = ?", 7).First(&usage).Error)

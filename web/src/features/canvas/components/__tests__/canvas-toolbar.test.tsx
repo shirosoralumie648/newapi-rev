@@ -57,6 +57,7 @@ function toolbarProps(runPhase: CanvasWorkflowRunPhase = 'idle') {
     onGroupSelection: vi.fn(),
     onImportArchiveFile: vi.fn(),
     onImportFile: vi.fn(),
+    onOpenTemplates: vi.fn(),
     onPaste: vi.fn(),
     onRedo: vi.fn(),
     onRunWorkflow: vi.fn(),
@@ -113,6 +114,15 @@ test('opens the node search panel from the toolbar', async () => {
 
   await user.click(screen.getByRole('button', { name: 'Search nodes' }))
   expect(props.onSearchNodes).toHaveBeenCalledTimes(1)
+})
+
+test('opens the template library from the toolbar', async () => {
+  const user = userEvent.setup()
+  const props = toolbarProps()
+  render(<CanvasToolbar {...props} />)
+
+  await user.click(screen.getByRole('button', { name: 'Templates' }))
+  expect(props.onOpenTemplates).toHaveBeenCalledTimes(1)
 })
 
 test('disables edit actions that do not apply to the selection', async () => {

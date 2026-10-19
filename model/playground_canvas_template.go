@@ -199,6 +199,7 @@ func CreateGlobalPlaygroundCanvasTemplate(template *PlaygroundCanvasTemplate, as
 		return ErrPlaygroundCanvasTemplateLimit
 	}
 	template.Visibility = PlaygroundCanvasTemplateVisibilityGlobal
+	template.SystemKey = ""
 	template.DeletedAt = 0
 	return DB.Transaction(func(tx *gorm.DB) error {
 		var count int64

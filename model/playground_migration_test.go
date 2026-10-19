@@ -331,9 +331,6 @@ func TestPlaygroundShareCanvasColumnMigration(t *testing.T) {
 		})
 	}
 }
-		})
-	}
-}
 
 // A counter row written before the snapshot columns existed must gain them
 // with DEFAULT 0 on upgrade, keep its existing values, and the migration must

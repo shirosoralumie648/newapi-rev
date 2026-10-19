@@ -644,12 +644,13 @@ export async function getCanvasTemplate(
   )
 }
 
-export async function createCanvasTemplate(
+async function createCanvasTemplateAt(
+  endpoint: string,
   input: CanvasTemplateInput,
   signal?: AbortSignal
 ): Promise<CanvasTemplateWriteResult> {
   const response = await api.post(
-    CANVAS_TEMPLATE_ENDPOINT,
+    endpoint,
     {
       canvas_id: input.canvasId,
       name: input.name,
@@ -661,6 +662,25 @@ export async function createCanvasTemplate(
   )
   requireServerSuccess(response.data)
   return mapCanvasTemplateWrite(response.data.data)
+}
+
+export function createCanvasTemplate(
+  input: CanvasTemplateInput,
+  signal?: AbortSignal
+): Promise<CanvasTemplateWriteResult> {
+  return createCanvasTemplateAt(CANVAS_TEMPLATE_ENDPOINT, input, signal)
+}
+
+/** Stores the administrator's current canvas as a shared market template. */
+export function createGlobalCanvasTemplate(
+  input: CanvasTemplateInput,
+  signal?: AbortSignal
+): Promise<CanvasTemplateWriteResult> {
+  return createCanvasTemplateAt(
+    `${CANVAS_TEMPLATE_ENDPOINT}/global`,
+    input,
+    signal
+  )
 }
 
 export interface CanvasTemplateUpdateInput {
