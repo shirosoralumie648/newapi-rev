@@ -2702,7 +2702,7 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	t.Cleanup(func() {
 		model.LOG_DB, common.RedisEnabled, common.SessionSecret, common.GlobalApiRateLimitEnable = oldLog, oldRedis, oldSecret, oldLimit
 	})
-	user := model.User{Id: 990087, Username: "artifact-owner", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1}
+	user := model.User{Id: 990087, Username: "artifact-owner", AffCode: "pg-aff-990087", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1}
 	require.NoError(t, db.Create(&user).Error)
 	now := time.Now().Unix()
 	key, err := common.GenerateRandomCharsKey(32)
@@ -2716,7 +2716,7 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	pat := model.UserAccessToken{Name: "artifact route denial", TokenHash: model.AccessTokenFingerprint(patRaw), TokenHint: model.AccessTokenHint(patRaw)}
 	require.NoError(t, pat.SetScopes([]string{"profile:read"}))
 	require.NoError(t, model.CreateUserAccessToken(user.Id, &pat, service.AccessTokenMaxPerUser))
-	admin := model.User{Id: 990088, Username: "catalog-admin", Role: common.RoleAdminUser, Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1}
+	admin := model.User{Id: 990088, Username: "catalog-admin", AffCode: "pg-aff-990088", Role: common.RoleAdminUser, Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1}
 	require.NoError(t, db.Create(&admin).Error)
 	adminKey, err := common.GenerateRandomCharsKey(32)
 	require.NoError(t, err)
