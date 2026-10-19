@@ -108,6 +108,7 @@ func playgroundOwnedObjectKeySets() (map[string]struct{}, map[string]struct{}, e
 		&PlaygroundCanvasProject{},
 		&PlaygroundCanvasSnapshot{},
 		&PlaygroundTaskArtifact{},
+		&PlaygroundKnowledgeDocument{},
 	}
 	for _, store := range stores {
 		keys := make([]string, 0)

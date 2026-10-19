@@ -98,6 +98,27 @@ function PlaygroundUsageSummary(props: { userId: number | null }) {
       bytes: true,
     },
     {
+      key: 'knowledge-bases',
+      label: t('Knowledge bases'),
+      metric: usage.knowledgeBases,
+      counts: true,
+      bytes: false,
+    },
+    {
+      key: 'kb-documents',
+      label: t('Knowledge base documents'),
+      metric: usage.knowledgeBaseDocuments,
+      counts: true,
+      bytes: false,
+    },
+    {
+      key: 'kb-chunks',
+      label: t('Knowledge base chunks'),
+      metric: usage.knowledgeBaseChunks,
+      counts: true,
+      bytes: true,
+    },
+    {
       key: 'storage',
       label: t('Object storage'),
       metric: usage.storage,

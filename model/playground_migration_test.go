@@ -71,7 +71,7 @@ func playgroundMigrationDB(t *testing.T, dialect string) *gorm.DB {
 		sqlDB.SetMaxOpenConns(1)
 	}
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&PlaygroundMessage{}, &PlaygroundAttachment{}, &PlaygroundUserUsage{}))
+		require.NoError(t, db.Migrator().DropTable(&PlaygroundMessage{}, &PlaygroundAttachment{}, &PlaygroundUserUsage{}, &PlaygroundPreset{}, &PlaygroundSession{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
@@ -200,6 +200,77 @@ func TestPlaygroundAttachmentStorageSchemaMigration(t *testing.T) {
 			require.NotNil(t, stored.Data)
 			assert.Equal(t, payload, string(*stored.Data))
 			assert.Equal(t, system_setting.ObjectStoreBackendDB, stored.StorageBackend)
+		})
+	}
+}
+
+// A database written before the preset market existed has no visibility or
+// intro columns. AutoMigrate must add them without touching the stored preset,
+// NULL must read back as the pre-market defaults, and the same holds for the
+// nullable intro columns added to an existing conversation. Repeating the
+// migration changes nothing on any supported dialect.
+func TestPlaygroundPresetSchemaMigration(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundMigrationDB(t, dialect)
+			quote := "`"
+			if dialect == "postgres" {
+				quote = `"`
+			}
+			q := func(name string) string { return quote + name + quote }
+
+			presetTable := db.NamingStrategy.TableName("PlaygroundPreset")
+			presetColumns := []string{"id", "user_id", "name", "avatar", "config", "parameter_enabled", "system_prompt", "created_at", "updated_at"}
+			presetTypes := []string{"varchar(32) PRIMARY KEY", "bigint NOT NULL", "varchar(100) NOT NULL", "varchar(2048) NOT NULL", "text NOT NULL", "text NOT NULL", "text NOT NULL", "bigint NOT NULL", "bigint NOT NULL"}
+			definitions := make([]string, len(presetColumns))
+			quoted := make([]string, len(presetColumns))
+			for index, name := range presetColumns {
+				definitions[index] = q(name) + " " + presetTypes[index]
+				quoted[index] = q(name)
+			}
+			require.NoError(t, db.Exec("CREATE TABLE "+q(presetTable)+" ("+strings.Join(definitions, ", ")+")").Error)
+			require.NoError(t, db.Exec("INSERT INTO "+q(presetTable)+" ("+strings.Join(quoted, ", ")+") VALUES ("+strings.Repeat("?,", len(presetColumns)-1)+"?)",
+				"pgp_legacy", 7, "Legacy preset", "🧩", `{"model":"legacy"}`, `{}`, "Legacy prompt", 111, 111).Error)
+
+			for range 2 {
+				require.NoError(t, db.AutoMigrate(&PlaygroundPreset{}))
+			}
+			for _, column := range []string{"visibility", "opening_message", "suggested_questions"} {
+				assert.True(t, db.Migrator().HasColumn(&PlaygroundPreset{}, column), column)
+			}
+			var preset PlaygroundPreset
+			require.NoError(t, db.Where("id = ?", "pgp_legacy").First(&preset).Error)
+			assert.Equal(t, "Legacy preset", preset.Name)
+			assert.Equal(t, "Legacy prompt", string(preset.SystemPrompt))
+			assert.Empty(t, preset.Visibility)
+			assert.Empty(t, preset.OpeningMessage)
+			assert.Empty(t, preset.SuggestedQuestions)
+			assert.Equal(t, PlaygroundPresetVisibilityPrivate, PlaygroundPresetVisibility(preset.Visibility))
+
+			sessionTable := db.NamingStrategy.TableName("PlaygroundSession")
+			sessionColumns := []string{"id", "user_id", "client_id", "title", "config", "parameter_enabled", "system_prompt", "context_config", "context_summary", "deleted_at", "revision", "message_revision", "created_at", "updated_at"}
+			sessionTypes := []string{"varchar(128) PRIMARY KEY", "bigint NOT NULL", "varchar(128) NULL", "varchar(200) NOT NULL", "text NOT NULL", "text NOT NULL", "text NULL", "text NULL", "text NULL", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL"}
+			definitions = make([]string, len(sessionColumns))
+			quoted = make([]string, len(sessionColumns))
+			for index, name := range sessionColumns {
+				definitions[index] = q(name) + " " + sessionTypes[index]
+				quoted[index] = q(name)
+			}
+			require.NoError(t, db.Exec("CREATE TABLE "+q(sessionTable)+" ("+strings.Join(definitions, ", ")+")").Error)
+			require.NoError(t, db.Exec("INSERT INTO "+q(sessionTable)+" ("+strings.Join(quoted, ", ")+") VALUES ("+strings.Repeat("?,", len(sessionColumns)-1)+"?)",
+				"pgs_legacy", 7, nil, "Legacy conversation", `{"model":"legacy"}`, `{}`, nil, nil, nil, 0, 0, 0, 111, 111).Error)
+
+			for range 2 {
+				require.NoError(t, db.AutoMigrate(&PlaygroundSession{}))
+			}
+			for _, column := range []string{"opening_message", "suggested_questions"} {
+				assert.True(t, db.Migrator().HasColumn(&PlaygroundSession{}, column), column)
+			}
+			var session PlaygroundSession
+			require.NoError(t, db.Where("id = ?", "pgs_legacy").First(&session).Error)
+			assert.Equal(t, "Legacy conversation", session.Title)
+			assert.Empty(t, session.OpeningMessage)
+			assert.Empty(t, session.SuggestedQuestions)
 		})
 	}
 }
