@@ -27,7 +27,7 @@ import { beforeEach, expect, test, vi } from 'vitest'
 import en from '@/i18n/locales/en.json'
 import { api } from '@/lib/api'
 
-import { PlaygroundAssetLibrary } from '../playground-asset-library'
+import { CanvasAssetLibrary } from '../canvas-asset-library'
 
 Object.defineProperty(HTMLElement.prototype, 'getAnimations', {
   configurable: true,
@@ -185,7 +185,7 @@ function mockLibraryApi() {
 }
 
 function renderLibrary(
-  overrides: Partial<ComponentProps<typeof PlaygroundAssetLibrary>> = {}
+  overrides: Partial<ComponentProps<typeof CanvasAssetLibrary>> = {}
 ) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -200,7 +200,7 @@ function renderLibrary(
   const view = render(
     <I18nextProvider i18n={testI18n}>
       <QueryClientProvider client={client}>
-        <PlaygroundAssetLibrary
+        <CanvasAssetLibrary
           active
           userId={7}
           {...callbacks}

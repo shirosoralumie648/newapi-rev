@@ -55,23 +55,23 @@ import type {
   PlaygroundArtifactKind,
   PlaygroundArtifactResult,
   PlaygroundArtifactSummary,
-} from '../../artifact-api'
+} from '@/features/playground/artifact-api'
 import type {
   ArtifactDraft,
   usePlaygroundArtifacts,
-} from '../../hooks/use-playground-artifacts'
-import { downloadArtifactText } from '../../lib/artifact-utils'
+} from '@/features/playground/hooks/use-playground-artifacts'
+import { downloadArtifactText } from '@/features/playground/lib/artifact-utils'
 import { SandboxedArtifactPreview } from './sandboxed-artifact-preview'
 
 type ArtifactController = ReturnType<typeof usePlaygroundArtifacts>
 
-interface PlaygroundArtifactPanelProps {
+interface CanvasArtifactPanelProps {
   controller: ArtifactController
   onClose: () => void
   onSendToCanvas?: (artifact: PlaygroundArtifactSummary) => void
 }
 
-export function PlaygroundArtifactPanel(props: PlaygroundArtifactPanelProps) {
+export function CanvasArtifactPanel(props: CanvasArtifactPanelProps) {
   const { t } = useTranslation()
   const controller = props.controller
   const state = controller.state

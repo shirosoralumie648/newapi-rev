@@ -397,6 +397,8 @@ export const MESSAGE_ACTION_LABELS = {
   EDIT: 'Edit',
   DELETE: 'Delete',
   SEND_TO_CANVAS: 'Send to canvas',
+  GENERATE_IMAGE: 'Generate image',
+  GENERATE_VIDEO: 'Generate video',
   NO_CONTENT: 'No content to copy',
   WAIT_GENERATION: 'Please wait for the current generation to complete',
 } as const

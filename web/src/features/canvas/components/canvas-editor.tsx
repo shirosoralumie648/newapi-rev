@@ -23,6 +23,7 @@ import {
   type Viewport,
 } from '@xyflow/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -36,7 +37,12 @@ import {
 } from '@/lib/server-error-message'
 
 import { exportCanvasArchive } from '../api'
-import { CANVAS_DROP_MESSAGES, CANVAS_EDIT_MESSAGES } from '../constants'
+import {
+  CANVAS_DROP_MESSAGES,
+  CANVAS_EDIT_MESSAGES,
+  CANVAS_NODE_ADD_BASE,
+  CANVAS_NODE_ADD_OFFSET,
+} from '../constants'
 import {
   useCanvasAssistant,
   type CanvasAssistantMessage,
@@ -60,7 +66,17 @@ import {
   validateCanvasDocument,
 } from '../lib/canvas-document'
 import { CanvasDropError, canvasDropEntries } from '../lib/canvas-drop'
-import type { CanvasSourceTarget } from '../lib/canvas-navigation'
+import {
+  canvasGenerationPrefillGraph,
+  type CanvasArtifactTarget,
+  type CanvasGenerationPrefill,
+  type CanvasSourceTarget,
+} from '../lib/canvas-navigation'
+import {
+  buildArtifactCanvasSeeds,
+  buildAttachmentCanvasSeeds,
+  type CanvasSendSeed,
+} from '../lib/canvas-send'
 import { canvasWorkflowMentions } from '../lib/canvas-workflow'
 import type {
   CanvasFlowEdge,
@@ -70,6 +86,8 @@ import type {
   CanvasServerDocument,
   CanvasServerProject,
 } from '../types'
+import { CanvasArtifactBrowser } from './artifacts/canvas-artifact-browser'
+import { CanvasAssetLibrary } from './assets/canvas-asset-library'
 import { CanvasAssistantPanel } from './canvas-assistant-panel'
 import { CanvasDropZone } from './canvas-drop-zone'
 import { CanvasImageToolsDialog } from './canvas-image-tools-dialog'
@@ -78,6 +96,8 @@ import { CanvasFlowNodeView, CanvasGroupNodeView } from './canvas-node'
 import { CanvasNodeInspector } from './canvas-node-inspector'
 import { CanvasRunBudgetDialog } from './canvas-run-budget-dialog'
 import { CanvasToolbar } from './canvas-toolbar'
+import type { CanvasToolbarInspectorView } from './canvas-toolbar'
+import { CanvasGenerationPanel } from './generation/canvas-generation-panel'
 
 const canvasNodeTypes: NodeTypes = {
   text: CanvasFlowNodeView,
@@ -98,6 +118,18 @@ const canvasNodeTypes: NodeTypes = {
 interface CanvasEditorProps {
   project: CanvasServerProject
   disabled?: boolean
+  /** Owner scope the asset library and artifact browser list under. */
+  userId: number | null
+  /**
+   * Generation prefill a conversation message action deep-linked: a prompt and
+   * optionally the message's reference images. The editor turns it into a task
+   * node graph exactly once.
+   */
+  generationPrefill?: CanvasGenerationPrefill | null
+  /** Artifact a conversation creation or canvas deep link opens. */
+  artifactTarget?: CanvasArtifactTarget | null
+  /** Reports that the generation prefill was consumed, so it is not repeated. */
+  onGenerationPrefillApplied?: () => void
   onChange: (document: CanvasServerDocument) => void
   onImportArchive: (file: File) => void
   /**
@@ -106,6 +138,8 @@ interface CanvasEditorProps {
    */
   onBeforeExportArchive?: () => Promise<void>
   onOpenSource?: (target: CanvasSourceTarget) => void
+  /** Opens a conversation the artifact browser or library points back at. */
+  onOpenConversation?: (sessionId: string) => void
 }
 
 /** Saves one generated canvas file through a transient object URL. */
@@ -158,6 +192,8 @@ export function CanvasEditor(props: CanvasEditorProps) {
 
   const [inspectorView, setInspectorView] =
     useState<CanvasInspectorView>('details')
+  const [artifactSelection, setArtifactSelection] =
+    useState<CanvasArtifactTarget | null>(props.artifactTarget ?? null)
 
   const imageTools = useCanvasImageTools({
     canvasId: props.project.id,
@@ -230,14 +266,95 @@ export function CanvasEditor(props: CanvasEditorProps) {
     [assistant]
   )
 
-  const handleToggleAssistant = useCallback(() => {
-    setInspectorView((view) => (view === 'assistant' ? 'details' : 'assistant'))
-  }, [])
+  const handleToggleInspectorView = useCallback(
+    (view: CanvasToolbarInspectorView) => {
+      setInspectorView((current) => (current === view ? 'details' : view))
+    },
+    []
+  )
 
   const handleCloseInspector = useCallback(() => {
     editor.clearSelection()
     setInspectorView('details')
   }, [editor])
+
+  // A generation prefill arrives from a conversation message action. The task
+  // node carries the prompt and the message's reference images become attached
+  // nodes, so the whole step runs (and settles) on the canvas side. The graph
+  // is added once: the workspace clears the deep link right after.
+  const generationPrefill = props.generationPrefill
+  const generationPrefillApplied = props.onGenerationPrefillApplied
+  const addGraph = editor.addGraph
+  const selectNode = editor.selectNode
+  const appliedPrefillRef = useRef(false)
+  useEffect(() => {
+    if (appliedPrefillRef.current || !generationPrefill) return
+    appliedPrefillRef.current = true
+    const graph = canvasGenerationPrefillGraph(
+      generationPrefill,
+      editor.nodes.length
+    )
+    const created = addGraph(graph.entries, graph.links)
+    if (!created) {
+      toast.error(t(CANVAS_ERRORS.TOO_MANY_NODES))
+    } else {
+      selectNode(created[0] ?? null)
+      toast.success(t('Generation step added to the canvas.'))
+    }
+    generationPrefillApplied?.()
+  }, [
+    addGraph,
+    editor.nodes.length,
+    generationPrefill,
+    generationPrefillApplied,
+    selectNode,
+    t,
+  ])
+
+  // A deep link that points at one saved artifact opens the artifact browser
+  // instead of the node details; it is re-opened only when the target changes.
+  const artifactTarget = props.artifactTarget
+  const appliedArtifactRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!artifactTarget) return
+    setArtifactSelection(artifactTarget)
+    if (appliedArtifactRef.current === artifactTarget.artifactId) return
+    appliedArtifactRef.current = artifactTarget.artifactId
+    setInspectorView('artifacts')
+  }, [artifactTarget])
+
+  const handleOpenArtifact = useCallback((target: CanvasSourceTarget) => {
+    if (!target.artifactId) return
+    setArtifactSelection({
+      sessionId: target.sessionId,
+      artifactId: target.artifactId,
+    })
+    setInspectorView('artifacts')
+  }, [])
+
+  /** Adds conversation/asset/library seeds to the current canvas. */
+  const handleAddSeeds = useCallback(
+    (seeds: CanvasSendSeed[]) => {
+      const entries: CanvasAddedNode[] = seeds.map((seed, index) => {
+        const { kind, ...data } = seed
+        const cascade =
+          CANVAS_NODE_ADD_OFFSET * ((editor.nodes.length + index) % 8)
+        return {
+          kind,
+          position: {
+            x: CANVAS_NODE_ADD_BASE + cascade,
+            y: CANVAS_NODE_ADD_BASE + cascade,
+          },
+          data,
+        }
+      })
+      if (entries.length === 0) return
+      if (editor.addNodes(entries) < entries.length) {
+        toast.error(t(CANVAS_ERRORS.TOO_MANY_NODES))
+      }
+    },
+    [editor, t]
+  )
 
   const handleMoveEnd = useCallback(
     (_event: MouseEvent | TouchEvent | null, viewport: Viewport) => {
@@ -329,6 +446,114 @@ export function CanvasEditor(props: CanvasEditorProps) {
     [editor, t]
   )
 
+  let inspectorTitle = t('Node details')
+  if (inspectorView === 'assistant') inspectorTitle = t('Assistant')
+  else if (inspectorView === 'generate') inspectorTitle = t('Generate')
+  else if (inspectorView === 'library') inspectorTitle = t('Asset library')
+  else if (inspectorView === 'artifacts') inspectorTitle = t('Artifacts')
+
+  let inspectorBody: ReactNode
+  if (inspectorView === 'assistant') {
+    inspectorBody = (
+      <CanvasAssistantPanel
+        anchorLabel={assistant.anchorLabel}
+        canGenerate={assistant.canGenerate}
+        contextCount={assistant.contextCount}
+        disabled={props.disabled}
+        messages={assistant.messages}
+        mode={assistant.mode}
+        model={assistant.model}
+        models={workflowOptions.models}
+        onGenerate={handleGenerateAssistantReply}
+        onInsertReply={handleInsertAssistantReply}
+        onModeChange={assistant.setMode}
+        onModelChange={assistant.setModel}
+        onSend={assistant.send}
+        onStop={assistant.stop}
+        streaming={assistant.streaming}
+        workflowPhase={workflow.phase}
+      />
+    )
+  } else if (inspectorView === 'generate') {
+    inspectorBody = (
+      <CanvasGenerationPanel
+        active
+        disabled={props.disabled}
+        group={workflowOptions.group}
+        models={workflowOptions.models}
+        onSendToCanvas={handleAddSeeds}
+      />
+    )
+  } else if (inspectorView === 'library') {
+    inspectorBody = (
+      <CanvasAssetLibrary
+        active
+        onOpenConversation={(sessionId) =>
+          props.onOpenConversation?.(sessionId)
+        }
+        onSendSeedsToCanvas={handleAddSeeds}
+        onSendToCanvas={(asset) =>
+          handleAddSeeds(
+            asset.kind === 'attachment'
+              ? buildAttachmentCanvasSeeds({
+                  sessionId: asset.sessionId,
+                  attachmentId: asset.id,
+                  filename: asset.title || undefined,
+                  mediaType: asset.mediaType,
+                })
+              : buildArtifactCanvasSeeds({
+                  sessionId: asset.sessionId,
+                  artifactId: asset.id,
+                  title: asset.title,
+                })
+          )
+        }
+        userId={props.userId}
+      />
+    )
+  } else if (inspectorView === 'artifacts') {
+    inspectorBody = (
+      <CanvasArtifactBrowser
+        active
+        initialArtifactId={artifactSelection?.artifactId}
+        initialSessionId={artifactSelection?.sessionId}
+        onAddToCanvas={(artifact) =>
+          handleAddSeeds(
+            buildArtifactCanvasSeeds({
+              sessionId: artifact.session_id,
+              artifactId: artifact.id,
+              title: artifact.title,
+            })
+          )
+        }
+        onClose={handleCloseInspector}
+        userId={props.userId}
+      />
+    )
+  } else {
+    inspectorBody = (
+      <CanvasNodeInspector
+        disabled={props.disabled}
+        groups={workflowOptions.groups}
+        mentions={mentions}
+        models={workflowOptions.models}
+        node={editor.selectedNode}
+        onDelete={editor.deleteNode}
+        onOpenImageTools={imageTools.open}
+        onOpenArtifact={handleOpenArtifact}
+        onOpenSource={props.onOpenSource}
+        onRetry={workflow.retry}
+        onUpdateData={editor.updateNodeData}
+        previews={
+          editor.selectedNode
+            ? (workflow.results[editor.selectedNode.id] ?? [])
+            : []
+        }
+        runPhase={workflow.phase}
+      />
+    )
+  }
+
   const inspector = (
     <div className='bg-muted/10 flex h-full min-h-0 w-full flex-col overflow-hidden border-l'>
       {isMobile ? (
@@ -339,45 +564,7 @@ export function CanvasEditor(props: CanvasEditorProps) {
           />
         </div>
       ) : null}
-      {inspectorView === 'assistant' ? (
-        <CanvasAssistantPanel
-          anchorLabel={assistant.anchorLabel}
-          canGenerate={assistant.canGenerate}
-          contextCount={assistant.contextCount}
-          disabled={props.disabled}
-          messages={assistant.messages}
-          mode={assistant.mode}
-          model={assistant.model}
-          models={workflowOptions.models}
-          onGenerate={handleGenerateAssistantReply}
-          onInsertReply={handleInsertAssistantReply}
-          onModeChange={assistant.setMode}
-          onModelChange={assistant.setModel}
-          onSend={assistant.send}
-          onStop={assistant.stop}
-          streaming={assistant.streaming}
-          workflowPhase={workflow.phase}
-        />
-      ) : (
-        <CanvasNodeInspector
-          disabled={props.disabled}
-          groups={workflowOptions.groups}
-          mentions={mentions}
-          models={workflowOptions.models}
-          node={editor.selectedNode}
-          onDelete={editor.deleteNode}
-          onOpenImageTools={imageTools.open}
-          onOpenSource={props.onOpenSource}
-          onRetry={workflow.retry}
-          onUpdateData={editor.updateNodeData}
-          previews={
-            editor.selectedNode
-              ? (workflow.results[editor.selectedNode.id] ?? [])
-              : []
-          }
-          runPhase={workflow.phase}
-        />
-      )}
+      {inspectorBody}
     </div>
   )
 
@@ -386,13 +573,11 @@ export function CanvasEditor(props: CanvasEditorProps) {
       <WorkspaceInspector
         open={
           isMobile
-            ? inspectorView === 'assistant' || editor.selectedNode !== null
+            ? inspectorView !== 'details' || editor.selectedNode !== null
             : true
         }
         onClose={handleCloseInspector}
-        title={
-          inspectorView === 'assistant' ? t('Assistant') : t('Node details')
-        }
+        title={inspectorTitle}
         main={
           <ReactFlowProvider>
             <CanvasDropZone
@@ -414,7 +599,6 @@ export function CanvasEditor(props: CanvasEditorProps) {
               >
                 <Panel position='top-left'>
                   <CanvasToolbar
-                    assistantOpen={inspectorView === 'assistant'}
                     canCopy={editor.selectedCount > 0}
                     canExportSelection={editor.selectedCount > 0}
                     canGroup={editor.canGroup}
@@ -426,6 +610,7 @@ export function CanvasEditor(props: CanvasEditorProps) {
                     disabled={props.disabled}
                     group={workflowOptions.group}
                     groups={workflowOptions.groups}
+                    inspectorView={inspectorView}
                     onAddNode={handleAddNode}
                     onCancelRun={() => void workflow.cancel()}
                     onCopy={() => void editor.copySelection()}
@@ -446,7 +631,7 @@ export function CanvasEditor(props: CanvasEditorProps) {
                     onRedo={editor.redo}
                     onRunWorkflow={() => setRunPlan(workflow.estimate())}
                     onSelectAll={editor.selectAll}
-                    onToggleAssistant={handleToggleAssistant}
+                    onToggleInspectorView={handleToggleInspectorView}
                     onUndo={editor.undo}
                     onUngroupSelection={() => void editor.ungroupSelection()}
                     runPhase={workflow.phase}
