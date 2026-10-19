@@ -22,9 +22,9 @@ import {
   DEFAULT_CONFIG,
   DEFAULT_CONTEXT_SETTINGS,
   DEFAULT_PARAMETER_ENABLED,
-} from '../../constants'
-import type { Message, PlaygroundSession } from '../../types'
-import { searchPlaygroundMessages } from './message-search-utils'
+} from '../../../constants'
+import type { Message, PlaygroundSession } from '../../../types'
+import { searchPlaygroundMessages } from '../message-search-utils'
 
 function message(content: string, overrides: Partial<Message> = {}): Message {
   return {

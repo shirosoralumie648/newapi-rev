@@ -22,10 +22,10 @@ import {
   DEFAULT_CONFIG,
   DEFAULT_PARAMETER_ENABLED,
   PLAYGROUND_QUOTE_TEXT_MAX_CHARS,
-} from '../../constants'
-import type { Message } from '../../types'
-import { buildChatCompletionPayload } from '../streaming/payload-builder'
-import { buildQuoteRequestMessage, createPendingQuote } from './quote-utils'
+} from '../../../constants'
+import type { Message } from '../../../types'
+import { buildChatCompletionPayload } from '../../streaming/payload-builder'
+import { buildQuoteRequestMessage, createPendingQuote } from '../quote-utils'
 
 function message(overrides: Partial<Message> = {}): Message {
   return {
