@@ -16,7 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { exportPlaygroundPreset, exportPlaygroundSession } from '../api'
+import {
+  exportPlaygroundPreset,
+  exportPlaygroundSession,
+  exportPlaygroundSnippet,
+} from '../api'
 import type { PlaygroundPresetScope } from '../api'
 import type { PlaygroundExportFormat } from '../types'
 
@@ -55,4 +59,14 @@ export async function exportPlaygroundPresetFile(
   scope: PlaygroundPresetScope = 'private'
 ): Promise<void> {
   downloadServerFile(await exportPlaygroundPreset(presetId, scope))
+}
+
+/**
+ * Downloads one prompt snippet with its portable revision history. The server
+ * renders the same document the snippet import endpoint accepts.
+ */
+export async function exportPlaygroundSnippetFile(
+  snippetId: string
+): Promise<void> {
+  downloadServerFile(await exportPlaygroundSnippet(snippetId))
 }
