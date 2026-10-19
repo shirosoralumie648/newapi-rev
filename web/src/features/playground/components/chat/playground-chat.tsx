@@ -51,6 +51,7 @@ import {
 import type {
   Message as MessageType,
   PlaygroundContextSummary,
+  PlaygroundDeveloperResponseFormat,
   PlaygroundMessageCost,
   PlaygroundMessageLayoutMode,
 } from '../../types'
@@ -111,6 +112,11 @@ interface PlaygroundChatProps {
   suggestedQuestions?: string[]
   /** Undo the compression: the stored messages stay, the node is removed. */
   onRemoveContextSummary?: () => void
+  /**
+   * Response format of the active conversation's developer settings when it
+   * asks for JSON; the preview of settled replies keys off it.
+   */
+  responseFormat?: PlaygroundDeveloperResponseFormat | null
   /** Saved artifacts of the conversation, shown as lightweight canvas links. */
   artifacts?: PlaygroundArtifactSummary[]
   onOpenArtifact?: (artifact: PlaygroundArtifactSummary) => void
@@ -145,6 +151,7 @@ export function PlaygroundChat({
   onSaveEditAndSubmit,
   messageLayoutMode = 'alternating',
   contextSummary,
+  responseFormat = null,
   openingMessage,
   suggestedQuestions,
   onRemoveContextSummary,
@@ -308,6 +315,7 @@ export function PlaygroundChat({
               onContinueToolCalls={onContinueToolCalls}
               onDenyToolCall={onDenyToolCall}
               onProvideToolResult={onProvideToolResult}
+              responseFormat={responseFormat}
               version={version}
             />
           ))}

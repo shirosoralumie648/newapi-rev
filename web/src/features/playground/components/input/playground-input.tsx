@@ -45,6 +45,7 @@ import type {
   PlaygroundConfig,
   PlaygroundContextSettings,
   PlaygroundContextSummary,
+  PlaygroundDeveloperOptions,
 } from '../../types'
 import type { PlaygroundKnowledgeDiagnostics } from './playground-context-panel'
 import { PlaygroundInputControls } from './playground-input-controls'
@@ -95,6 +96,10 @@ interface PlaygroundInputProps {
   onContextSettingsChange: (settings: PlaygroundContextSettings) => void
   onRemoveContextSummary: () => void
   onSummarizeContext: () => void
+  /** Request-side developer settings of the active conversation. */
+  developerOptions?: PlaygroundDeveloperOptions
+  /** Stores changed developer settings on the active conversation. */
+  onDeveloperOptionsChange?: (options: PlaygroundDeveloperOptions) => void
   /** Knowledge bases the account may bind to the active conversation. */
   knowledgeBases?: KnowledgeBase[]
   /** Bases bound to the active conversation; at most three. */
@@ -158,6 +163,8 @@ export function PlaygroundInput({
   onContextSettingsChange,
   onRemoveContextSummary,
   onSummarizeContext,
+  developerOptions,
+  onDeveloperOptionsChange,
   knowledgeBases,
   knowledgeBaseIds,
   onKnowledgeBaseIdsChange,
@@ -257,6 +264,7 @@ export function PlaygroundInput({
                 contextPlan={contextPlan}
                 contextSettings={contextSettings}
                 contextSummary={contextSummary}
+                developerOptions={developerOptions}
                 disabled={disabled}
                 hasCapturedRequest={hasCapturedRequest}
                 hasMessages={hasMessages}
@@ -277,6 +285,7 @@ export function PlaygroundInput({
                 onClearMessages={onClearMessages}
                 onConfigChange={onConfigChange}
                 onContextSettingsChange={onContextSettingsChange}
+                onDeveloperOptionsChange={onDeveloperOptionsChange}
                 onDictateTranscript={appendText}
                 onInsertText={appendText}
                 onKnowledgeBaseIdsChange={onKnowledgeBaseIdsChange}

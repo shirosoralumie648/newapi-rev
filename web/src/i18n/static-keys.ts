@@ -1357,4 +1357,39 @@ export const STATIC_I18N_KEYS = [
   'Pink',
   'Select at least one node to run.',
   'The selection contains no workflow step to run.',
+  // Playground request-side developer settings (PG2-03): the panel labels its
+  // tool-choice and response-format options from constants, the editor
+  // messages come from PLAYGROUND_DEVELOPER_ERRORS, the response preview
+  // composes its mismatch lines from VIOLATION_MESSAGES, and the server
+  // returns the limit sentence from Go. The literal scan cannot see any of
+  // them.
+  'Provider default',
+  'Automatic',
+  'Never call a tool',
+  'Must call a tool',
+  'JSON object',
+  'JSON Schema',
+  'The JSON Schema must be a valid JSON object.',
+  'Every tool needs a name.',
+  'Names can contain at most {{count}} characters.',
+  'Tool names must be unique.',
+  'The description is too long.',
+  'A single JSON Schema can be at most 64 KiB. Shorten it before saving.',
+  'A conversation can define at most {{count}} tools.',
+  'The response schema needs a name.',
+  'The developer settings are too large to save. Shorten the schemas.',
+  'Expected {{detail}}',
+  'Missing required property "{{detail}}"',
+  'Unexpected property "{{detail}}"',
+  'Value is not one of the allowed values',
+  'Value does not equal the required constant',
+  'Value is below the minimum {{detail}}',
+  'Value is above the maximum {{detail}}',
+  'Text is shorter than {{detail}} characters',
+  'Text is longer than {{detail}} characters',
+  'List has fewer than {{detail}} items',
+  'List has more than {{detail}} items',
+  'Value matches none of the allowed shapes',
+  'Value does not match every required shape',
+  'Playground developer options limit exceeded.',
 ] as const
