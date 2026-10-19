@@ -63,6 +63,28 @@ test('creating a canvas link sends the selected expiry and shows the one-time UR
   expect(post.mock.calls[0][1]).toEqual({ expires_in_days: 30 })
 })
 
+test('revoking an existing canvas link works before creating a new one', async () => {
+  const user = userEvent.setup()
+  const remove = vi.spyOn(api, 'delete').mockResolvedValue({
+    data: { success: true, data: { revoked: true } },
+  })
+
+  render(<CanvasShareDialog canvasId='pgc_one' title='Board' />)
+
+  await user.click(screen.getByRole('button', { name: 'Share Board' }))
+  await user.click(await screen.findByRole('button', { name: 'Revoke link' }))
+
+  await waitFor(() =>
+    expect(remove).toHaveBeenCalledWith(
+      '/api/playground/canvases/pgc_one/share',
+      expect.anything()
+    )
+  )
+  expect(
+    screen.getByRole('button', { name: 'Create share link' })
+  ).toBeVisible()
+})
+
 test('revoking a canvas link clears the URL and offers creation again', async () => {
   const user = userEvent.setup()
   vi.spyOn(api, 'post').mockResolvedValue(createdShare)

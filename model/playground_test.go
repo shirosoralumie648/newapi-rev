@@ -2385,6 +2385,8 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodGet, "/api/playground/sessions/" + sessionID + "/export"},
 		{http.MethodPost, "/api/playground/sessions/" + sessionID + "/share"},
 		{http.MethodDelete, "/api/playground/sessions/" + sessionID + "/share"},
+		{http.MethodPost, "/api/playground/canvases/missing/share"},
+		{http.MethodDelete, "/api/playground/canvases/missing/share"},
 		{http.MethodPost, "/api/playground/sessions/" + sessionID + "/restore"},
 		{http.MethodPost, "/api/playground/tasks/missing/cancel"},
 		{http.MethodPost, "/pg/embeddings"},
@@ -2458,6 +2460,50 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	anonymousMissing := playgroundAuthenticatedRequest(t, engine, "", http.MethodGet, "/api/playground/shared/unknown-token", nil)
 	assert.Equal(t, 404, anonymousMissing.Code)
 	assert.Contains(t, anonymousMissing.Body.String(), "PLAYGROUND_SHARE_NOT_FOUND")
+
+	// A canvas link uses the same public route and headers as a conversation
+	// link. Creating and revoking it through the real router also proves the
+	// canvas share routes are wired behind the session guard.
+	canvasCreated := playgroundAuthenticatedRequest(t, engine, token, http.MethodPost, "/api/playground/canvases", map[string]any{
+		"title":    "Route canvas",
+		"document": map[string]any{"nodes": []any{}, "edges": []any{}},
+	})
+	require.Equal(t, 200, canvasCreated.Code, canvasCreated.Body.String())
+	var canvasEnvelope struct {
+		Success bool
+		Data    struct {
+			ID string `json:"id"`
+		}
+	}
+	require.NoError(t, common.Unmarshal(canvasCreated.Body.Bytes(), &canvasEnvelope))
+	require.True(t, canvasEnvelope.Success, canvasCreated.Body.String())
+	require.NotEmpty(t, canvasEnvelope.Data.ID)
+	canvasSharePath := "/api/playground/canvases/" + canvasEnvelope.Data.ID + "/share"
+	canvasShare := playgroundAuthenticatedRequest(t, engine, token, http.MethodPost, canvasSharePath, map[string]any{})
+	require.Equal(t, 200, canvasShare.Code, canvasShare.Body.String())
+	var canvasShareEnvelope struct {
+		Success bool
+		Data    struct {
+			Token   string `json:"token"`
+			URLPath string `json:"url_path"`
+		}
+	}
+	require.NoError(t, common.Unmarshal(canvasShare.Body.Bytes(), &canvasShareEnvelope))
+	require.True(t, canvasShareEnvelope.Success, canvasShare.Body.String())
+	require.NotEmpty(t, canvasShareEnvelope.Data.Token)
+	assert.Equal(t, "/share/"+canvasShareEnvelope.Data.Token, canvasShareEnvelope.Data.URLPath)
+	anonymousCanvas := playgroundAuthenticatedRequest(t, engine, "", http.MethodGet, "/api/playground/shared/"+canvasShareEnvelope.Data.Token, nil)
+	require.Equal(t, 200, anonymousCanvas.Code, anonymousCanvas.Body.String())
+	assert.Contains(t, anonymousCanvas.Header().Get("Cache-Control"), "no-store")
+	assert.Contains(t, anonymousCanvas.Body.String(), `"kind":"canvas"`)
+	assert.Contains(t, anonymousCanvas.Body.String(), "Route canvas")
+	assert.Equal(t, "noindex, nofollow, noarchive", anonymousCanvas.Header().Get("X-Robots-Tag"))
+	assert.Equal(t, "no-referrer", anonymousCanvas.Header().Get("Referrer-Policy"))
+	canvasRevoked := playgroundAuthenticatedRequest(t, engine, token, http.MethodDelete, canvasSharePath, nil)
+	require.Equal(t, 200, canvasRevoked.Code, canvasRevoked.Body.String())
+	revokedCanvas := playgroundAuthenticatedRequest(t, engine, "", http.MethodGet, "/api/playground/shared/"+canvasShareEnvelope.Data.Token, nil)
+	assert.Equal(t, 404, revokedCanvas.Code)
+	assert.Equal(t, anonymousMissing.Body.String(), revokedCanvas.Body.String())
 
 	// Global preset maintenance is administrator-only. A personal access
 	// token is admitted by the dashboard authentication layer only with the

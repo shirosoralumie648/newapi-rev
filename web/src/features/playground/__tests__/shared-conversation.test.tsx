@@ -172,6 +172,56 @@ test('a canvas share renders its read-only board shell without media requests', 
   expect(document.querySelector('a[href*="attachment"]')).toBeNull()
 })
 
+test('a shared canvas renders sanitized node previews from its document', async () => {
+  const get = vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        kind: 'canvas',
+        title: 'Shared board',
+        updated_at: 100,
+        document: {
+          viewport: { x: 0, y: 0, zoom: 1 },
+          nodes: [
+            {
+              id: 'n-text',
+              type: 'text',
+              position: { x: 0, y: 0 },
+              data: { kind: 'text', text: 'Visible prompt' },
+            },
+            {
+              id: 'n-artifact',
+              type: 'artifact',
+              position: { x: 280, y: 0 },
+              data: {
+                kind: 'artifact',
+                label: 'chart.png',
+                mediaType: 'image/png',
+                snapshot: { text: 'Chart preview' },
+              },
+            },
+          ],
+          edges: [{ id: 'e1', source: 'n-text', target: 'n-artifact' }],
+        },
+      },
+    },
+  })
+
+  mount()
+
+  expect(await screen.findByText('Visible prompt')).toBeVisible()
+  expect(screen.getByText('Chart preview')).toBeVisible()
+  expect(screen.getByText('chart.png')).toBeVisible()
+  expect(screen.getByText('image/png')).toBeVisible()
+  expect(screen.getByText('Preview not available')).toBeVisible()
+  // Only the sanitized snapshot was requested; the page never asks for
+  // attachment or artifact bytes.
+  expect(get).toHaveBeenCalledTimes(1)
+  expect(get.mock.calls[0][0]).toBe('/api/playground/shared/share-token')
+  expect(document.querySelector('img')).toBeNull()
+  expect(document.querySelector('a[href*="attachment"]')).toBeNull()
+})
+
 test('a shared media node exposes only its label and declared type', () => {
   renderSharedCanvasNode({
     kind: 'artifact',
