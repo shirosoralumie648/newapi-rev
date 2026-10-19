@@ -193,7 +193,14 @@ func TestClaudeTokenCountingEndpointRequiresAuthAndAvailableModel(t *testing.T) 
 // /v1/messages path, the caller's quota is settled and a consume log is written.
 func TestPlaygroundProtocolBridgeBillsThroughRelay(t *testing.T) {
 	setupRelayRouterTestDB(t)
-	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.Log{}, &model.UserSession{}))
+	require.NoError(t, model.DB.AutoMigrate(
+		&model.Channel{}, &model.Ability{}, &model.Log{}, &model.UserSession{},
+		// The relay bills through the ordinary subscription/wallet pipeline,
+		// which reads the subscription and wallet accounting tables.
+		&model.UserSubscription{},
+		&model.WalletHold{}, &model.WalletHoldGrant{}, &model.WalletDebt{},
+		&model.CreditGrant{}, &model.WalletLedgerEntry{},
+	))
 	ratio_setting.InitRatioSettings()
 
 	upstreamPaths := make(chan string, 1)
