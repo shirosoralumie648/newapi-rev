@@ -396,13 +396,12 @@ test('the style reference dialog needs a usable image and a prompt', async () =>
 })
 
 test('the style reference dialog rejects an unsupported style file', async () => {
-  const user = userEvent.setup()
+  const user = userEvent.setup({ applyAccept: false })
   const { onStyleReference } = renderDialog({ tool: 'styleReference' })
 
   await user.upload(
     screen.getByLabelText('Style image'),
-    new File(['vector'], 'style.svg', { type: 'image/svg+xml' }),
-    { applyAccept: false }
+    new File(['vector'], 'style.svg', { type: 'image/svg+xml' })
   )
 
   expect(
