@@ -21,6 +21,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 import {
   indexKnowledgeDocument,
   requestKnowledgeEmbeddings,
+  searchKnowledgeBase,
 } from '../knowledge-api'
 
 const apiMock = vi.hoisted(() => ({
@@ -86,6 +87,74 @@ describe('requestKnowledgeEmbeddings', () => {
         headers: { 'X-Playground-Group': 'vip' },
       })
     )
+  })
+})
+
+describe('searchKnowledgeBase', () => {
+  test('sends the ranked request and maps hits plus stale documents', async () => {
+    const signal = new AbortController().signal
+    apiMock.post.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          knowledge_base: { id: 'kb-1', name: 'Handbook' },
+          hits: [
+            {
+              knowledge_base_id: 'kb-1',
+              knowledge_base_name: 'Handbook',
+              document_id: 'doc-1',
+              filename: 'handbook.txt',
+              chunk_id: 'chunk-1',
+              chunk_index: 0,
+              score: 0.875,
+              text: 'Alpha paragraph.',
+              truncated: true,
+            },
+          ],
+          stale_documents: [
+            {
+              id: 'doc-2',
+              filename: 'legacy.txt',
+              embedding_model: 'embed-old',
+            },
+          ],
+        },
+      },
+    })
+
+    const result = await searchKnowledgeBase(
+      'kb-1',
+      { query: 'release notes', topK: 6, group: 'vip' },
+      signal
+    )
+
+    expect(apiMock.post).toHaveBeenCalledWith(
+      '/api/playground/knowledge-bases/kb-1/search',
+      { query: 'release notes', top_k: 6, group: 'vip' },
+      { signal }
+    )
+    expect(result).toEqual({
+      hits: [
+        {
+          knowledgeBaseId: 'kb-1',
+          knowledgeBaseName: 'Handbook',
+          documentId: 'doc-1',
+          filename: 'handbook.txt',
+          chunkId: 'chunk-1',
+          chunkIndex: 0,
+          score: 0.875,
+          text: 'Alpha paragraph.',
+          truncated: true,
+        },
+      ],
+      staleDocuments: [
+        {
+          id: 'doc-2',
+          filename: 'legacy.txt',
+          embeddingModel: 'embed-old',
+        },
+      ],
+    })
   })
 })
 

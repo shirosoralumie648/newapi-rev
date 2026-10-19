@@ -1310,6 +1310,14 @@ export const STATIC_I18N_KEYS = [
   'Unable to load or save Playground knowledge bases.',
   'Playground knowledge object store wrote an unexpected size.',
   'Knowledge indexing failed in the browser.',
+  // Playground knowledge retrieval (LB-08): these server and client messages
+  // are returned as English keys after an embedding/search failure rather than
+  // appearing as t('...') literals.
+  'A conversation can bind at most three knowledge bases.',
+  'Invalid Playground knowledge base binding.',
+  'You do not have access to this group.',
+  'The embedding provider returned no usable vector.',
+  'The embedding request failed.',
   // Canvas PNG export problem messages render through t(error.message) from
   // CANVAS_PNG_EXPORT_MESSAGES, so the literal scan cannot see them.
   'The canvas has no nodes to export.',

@@ -107,3 +107,58 @@ test('serves every export tab and shows the cURL command with a placeholder key'
   expect(panel).toHaveTextContent('$NEWAPI_API_KEY')
   expect(panel).not.toHaveTextContent(PIXEL_PNG_BASE64)
 })
+
+test('every export tab copies its own snippet without attachment bytes', async () => {
+  const user = userEvent.setup()
+  const writeText = vi.spyOn(navigator.clipboard, 'writeText')
+  render(
+    <PlaygroundRequestViewer
+      open
+      onOpenChange={() => undefined}
+      request={{ payload, capturedAt: Date.now() }}
+    />
+  )
+
+  const tabs = [
+    {
+      name: 'Messages JSON',
+      copy: 'Copy Messages JSON',
+      snippets: ['"gpt-4o"', 'attachment://attachment-1.png'],
+    },
+    {
+      name: 'cURL',
+      copy: 'Copy cURL',
+      snippets: ['/v1/chat/completions', 'attachment://attachment-1.png'],
+    },
+    {
+      name: 'Python',
+      copy: 'Copy Python',
+      snippets: [
+        'from openai import OpenAI',
+        '_attachment_data_url("attachment-1.png", "image/png")',
+      ],
+    },
+    {
+      name: 'Node.js',
+      copy: 'Copy Node.js',
+      snippets: [
+        'import OpenAI from "openai"',
+        'attachmentDataUrl("attachment-1.png", "image/png")',
+      ],
+    },
+  ] as const
+
+  for (const tab of tabs) {
+    await user.click(screen.getByRole('tab', { name: tab.name }))
+    await user.click(await screen.findByRole('button', { name: tab.copy }))
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
+    const copied = writeText.mock.calls[0][0]
+    for (const snippet of tab.snippets) {
+      expect(copied).toContain(snippet)
+    }
+    // The bytes of the inline data URL never reach the clipboard.
+    expect(copied).not.toContain(PIXEL_PNG_BASE64)
+    writeText.mockClear()
+  }
+})
