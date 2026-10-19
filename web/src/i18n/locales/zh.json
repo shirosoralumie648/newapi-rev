@@ -8314,6 +8314,24 @@
     "Grace": "宽限期",
     "Playground storage billing for {{date}}: {{quota}} quota charged, {{bytes}} bytes billed": "{{date}} 的 Playground 存储计费：已扣 {{quota}} 额度，计费 {{bytes}} 字节",
     "You have reached the daily Playground storage download limit. It resets with the next storage day.": "你已达到 Playground 存储的每日下载上限，将在下一个存储日重置。",
-    "Playground storage settlement left {{count}} accounts read-only with {{quota}} quota uncovered; see the playground_storage_settle system task result": "Playground 存储结算有 {{count}} 个账户因 {{quota}} 额度未结清而保持只读；详见 playground_storage_settle 系统任务结果"
+    "Playground storage settlement left {{count}} accounts read-only with {{quota}} quota uncovered; see the playground_storage_settle system task result": "Playground 存储结算有 {{count}} 个账户因 {{quota}} 额度未结清而保持只读；详见 playground_storage_settle 系统任务结果",
+    "Remove tag": "移除标签",
+    "Pinned": "已置顶",
+    "Archived": "已归档",
+    "Untagged": "未打标签",
+    "Filter conversations by tag": "按标签筛选会话",
+    "Filter by tag {{tag}}": "按标签 {{tag}} 筛选",
+    "Pin conversation": "置顶会话",
+    "Unpin conversation": "取消置顶",
+    "Archive conversation": "归档会话",
+    "Restore conversation": "取消归档",
+    "Manage tags": "管理标签",
+    "Organize {{name}}": "整理 {{name}}",
+    "Conversation tags": "会话标签",
+    "Organize \"{{name}}\" with up to {{count}} labels. Each label can contain up to {{length}} characters.": "为“{{name}}”添加最多 {{count}} 个标签，以便快速查找。每个标签最多 {{length}} 个字符。",
+    "Add a tag...": "添加标签...",
+    "Save tags": "保存标签",
+    "Invalid Playground conversation tags.": "Playground 会话标签无效。",
+    "Cannot pin an archived Playground conversation.": "无法置顶已归档的 Playground 会话。"
   }
 }

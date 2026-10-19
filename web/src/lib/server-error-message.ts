@@ -99,6 +99,8 @@ const serverErrorMessageKeys = {
   PLAYGROUND_DOCUMENT_NO_TEXT: 'The document contains no extractable text.',
   PLAYGROUND_CONTEXT_SUMMARY_LIMIT_EXCEEDED:
     'Playground context summary limit exceeded.',
+  PLAYGROUND_SESSION_ARCHIVED:
+    'Cannot pin an archived Playground conversation.',
   PLAYGROUND_PARALLEL_LIMIT_EXCEEDED:
     'Playground parallel comparison limit exceeded.',
   PLAYGROUND_WALLET_DEBT_READ_ONLY:

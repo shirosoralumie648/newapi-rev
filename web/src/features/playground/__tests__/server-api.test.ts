@@ -50,7 +50,20 @@ afterEach(() => vi.restoreAllMocks())
 
 test('server session responses map timestamps and settings into workspace state', async () => {
   vi.spyOn(api, 'get').mockResolvedValue({
-    data: { success: true, data: { items: [wireSession], total: 1 } },
+    data: {
+      success: true,
+      data: {
+        items: [
+          {
+            ...wireSession,
+            pinned: true,
+            pinned_at: 30,
+            tags: [' Work ', 'work', 'ideas'],
+          },
+        ],
+        total: 1,
+      },
+    },
   })
   const sessions = await getPlaygroundSessions()
   expect(sessions[0]).toMatchObject({
@@ -59,6 +72,9 @@ test('server session responses map timestamps and settings into workspace state'
     createdAt: 10000,
     updatedAt: 20000,
     parameterEnabled: { temperature: false },
+    pinned: true,
+    archived: false,
+    tags: ['work', 'ideas'],
     revision: 1,
     messageRevision: 2,
   })
@@ -129,6 +145,9 @@ test('session updates serialize context fields into the wire shape and clear the
   })
   await updatePlaygroundSession('pgs_one', {
     revision: 1,
+    pinned: true,
+    archived: false,
+    tags: ['work'],
     context: {
       historyLimit: 9,
       tokenBudget: 1000,
@@ -145,6 +164,9 @@ test('session updates serialize context fields into the wire shape and clear the
     },
   })
   expect(patch.mock.calls[0][1]).toMatchObject({
+    pinned: true,
+    archived: false,
+    tags: ['work'],
     context: {
       history_limit: 9,
       token_budget: 1000,

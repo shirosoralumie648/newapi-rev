@@ -203,6 +203,10 @@ export const STORAGE_KEYS = {
 
 export const DEFAULT_SESSION_TITLE = 'New conversation'
 export const MAX_STORED_SESSIONS = 20
+// Conversation tags are a client-side organizing aid. The server enforces the
+// same bounds and stays authoritative.
+export const MAX_SESSION_TAGS = 10
+export const MAX_SESSION_TAG_LENGTH = 24
 
 // Assistant preset display bounds. The server validates the same values and
 // owns the authoritative per-account quota (preset count and prompt bytes).

@@ -39,6 +39,7 @@ const baseProps = {
   onCreate: vi.fn(),
   onSwitch: vi.fn(),
   onRename: vi.fn(),
+  onOrganize: vi.fn(),
   onDelete: vi.fn(),
   inspectorView: null,
   inspector: <div>Inspector body</div>,

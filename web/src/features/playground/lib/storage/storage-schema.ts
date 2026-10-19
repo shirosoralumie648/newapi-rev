@@ -175,6 +175,14 @@ export const playgroundSessionSchema = z.object({
   context: playgroundContextSchema.optional(),
   /** Absent or null when the conversation sends its full stored history. */
   contextSummary: playgroundContextSummarySchema.nullable().optional(),
+  /**
+   * Organization fields added after the first server sync. They stay optional
+   * for older snapshots, and a corrupt value degrades to the neutral state
+   * instead of rejecting the whole conversation.
+   */
+  pinned: z.boolean().catch(false).optional(),
+  archived: z.boolean().catch(false).optional(),
+  tags: z.array(z.string()).catch([]).optional(),
   messages: messagesSchema,
   server: z
     .object({

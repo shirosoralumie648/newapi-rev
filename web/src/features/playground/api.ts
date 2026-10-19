@@ -32,6 +32,7 @@ import {
   normalizeContextSettings,
   normalizeContextSummary,
 } from './lib/context/playground-context'
+import { normalizeSessionTags } from './lib/session-organization'
 import {
   messagesSchema,
   playgroundConfigSchema,
@@ -185,6 +186,11 @@ const serverSessionSchema = z.object({
   suggested_questions: z.array(z.string()).optional(),
   context: serverContextSettingsSchema.optional(),
   context_summary: serverContextSummarySchema.nullable().optional(),
+  pinned: z.boolean().optional(),
+  archived: z.boolean().optional(),
+  pinned_at: z.number().int().nonnegative().optional(),
+  archived_at: z.number().int().nonnegative().optional(),
+  tags: z.array(z.string()).optional(),
   created_at: z.number().int().nonnegative(),
   updated_at: z.number().int().nonnegative(),
   revision: z.number().int().nonnegative(),
@@ -201,6 +207,9 @@ export interface PlaygroundSessionInput {
   suggested_questions?: string[]
   context?: PlaygroundContextSettings
   context_summary?: PlaygroundContextSummary | null
+  pinned?: boolean
+  archived?: boolean
+  tags?: string[]
   revision?: number
   messages?: Message[]
 }
@@ -382,6 +391,7 @@ function mapServerContextSummary(value: unknown): unknown {
 
 function mapServerSession(value: unknown): PlaygroundServerSession {
   const session = serverSessionSchema.parse(value)
+  const archived = session.archived ?? (session.archived_at ?? 0) > 0
   return {
     id: session.id,
     clientId: session.client_id,
@@ -403,6 +413,9 @@ function mapServerSession(value: unknown): PlaygroundServerSession {
     contextSummary: normalizeContextSummary(
       mapServerContextSummary(session.context_summary)
     ),
+    pinned: archived ? false : (session.pinned ?? (session.pinned_at ?? 0) > 0),
+    archived,
+    tags: normalizeSessionTags(session.tags),
     createdAt: session.created_at * 1000,
     updatedAt: session.updated_at * 1000,
     revision: session.revision,

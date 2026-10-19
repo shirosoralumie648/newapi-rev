@@ -8314,6 +8314,24 @@
     "Grace": "Gia hạn",
     "Playground storage billing for {{date}}: {{quota}} quota charged, {{bytes}} bytes billed": "Tính phí lưu trữ Playground cho {{date}}: đã trừ {{quota}} quota, tính phí {{bytes}} byte",
     "You have reached the daily Playground storage download limit. It resets with the next storage day.": "Bạn đã đạt giới hạn tải xuống hằng ngày của kho lưu trữ Playground. Giới hạn sẽ đặt lại vào ngày lưu trữ tiếp theo.",
-    "Playground storage settlement left {{count}} accounts read-only with {{quota}} quota uncovered; see the playground_storage_settle system task result": "Quyết toán lưu trữ Playground khiến {{count}} tài khoản ở chế độ chỉ đọc với {{quota}} quota chưa thanh toán; xem kết quả tác vụ hệ thống playground_storage_settle"
+    "Playground storage settlement left {{count}} accounts read-only with {{quota}} quota uncovered; see the playground_storage_settle system task result": "Quyết toán lưu trữ Playground khiến {{count}} tài khoản ở chế độ chỉ đọc với {{quota}} quota chưa thanh toán; xem kết quả tác vụ hệ thống playground_storage_settle",
+    "Remove tag": "Xóa thẻ",
+    "Pinned": "Đã ghim",
+    "Archived": "Đã lưu trữ",
+    "Untagged": "Chưa gắn thẻ",
+    "Filter conversations by tag": "Lọc cuộc trò chuyện theo thẻ",
+    "Filter by tag {{tag}}": "Lọc theo thẻ {{tag}}",
+    "Pin conversation": "Ghim cuộc trò chuyện",
+    "Unpin conversation": "Bỏ ghim cuộc trò chuyện",
+    "Archive conversation": "Lưu trữ cuộc trò chuyện",
+    "Restore conversation": "Khôi phục cuộc trò chuyện",
+    "Manage tags": "Quản lý thẻ",
+    "Organize {{name}}": "Sắp xếp {{name}}",
+    "Conversation tags": "Thẻ cuộc trò chuyện",
+    "Organize \"{{name}}\" with up to {{count}} labels. Each label can contain up to {{length}} characters.": "Sắp xếp \"{{name}}\" với tối đa {{count}} thẻ. Mỗi thẻ có thể chứa tối đa {{length}} ký tự.",
+    "Add a tag...": "Thêm thẻ...",
+    "Save tags": "Lưu thẻ",
+    "Invalid Playground conversation tags.": "Thẻ cuộc trò chuyện Playground không hợp lệ.",
+    "Cannot pin an archived Playground conversation.": "Không thể ghim cuộc trò chuyện Playground đã lưu trữ."
   }
 }

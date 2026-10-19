@@ -4060,6 +4060,163 @@ func TestPlaygroundSessionSystemPrompt(t *testing.T) {
 	}
 }
 
+// Conversation organization: pinning and archiving are explicit PATCH
+// switches, tags replace the whole list under the stored bounds, archived
+// conversations stay in the ordinary list page, and a legacy NULL tags column
+// reads back as no tags. A pin request against an archived conversation is a
+// stable 400 and leaves the revision untouched.
+func TestPlaygroundSessionOrganization(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+
+			type sessionView struct {
+				ID         string   `json:"id"`
+				Revision   int64    `json:"revision"`
+				Pinned     bool     `json:"pinned"`
+				Archived   bool     `json:"archived"`
+				PinnedAt   int64    `json:"pinned_at"`
+				ArchivedAt int64    `json:"archived_at"`
+				Tags       []string `json:"tags"`
+			}
+			decode := func(recorder *httptest.ResponseRecorder) sessionView {
+				t.Helper()
+				var envelope struct {
+					Success bool        `json:"success"`
+					Data    sessionView `json:"data"`
+				}
+				require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &envelope))
+				require.True(t, envelope.Success, recorder.Body.String())
+				return envelope.Data
+			}
+
+			created := playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions", map[string]any{
+				"title": "Organize me", "client_id": "organization-session",
+				"config": map[string]any{"model": "test-model"}, "parameter_enabled": map[string]bool{},
+				"pinned": true, "tags": []string{" Work ", "ideas", "Work"},
+			}, controller.CreatePlaygroundSession)
+			require.Equal(t, http.StatusOK, created.Code, created.Body.String())
+			session := decode(created)
+			assert.True(t, session.Pinned)
+			assert.False(t, session.Archived)
+			assert.NotZero(t, session.PinnedAt)
+			assert.Zero(t, session.ArchivedAt)
+			assert.Equal(t, []string{"Work", "ideas"}, session.Tags)
+			id := session.ID
+			path := "/api/playground/sessions/" + id
+
+			archived := playgroundRequest(t, 7, http.MethodPatch, path, map[string]any{
+				"revision": session.Revision, "archived": true,
+			}, controller.UpdatePlaygroundSession)
+			require.Equal(t, http.StatusOK, archived.Code, archived.Body.String())
+			session = decode(archived)
+			assert.True(t, session.Archived)
+			assert.False(t, session.Pinned)
+			assert.NotZero(t, session.ArchivedAt)
+			assert.Zero(t, session.PinnedAt)
+
+			pinArchived := playgroundRequest(t, 7, http.MethodPatch, path, map[string]any{
+				"revision": session.Revision, "pinned": true,
+			}, controller.UpdatePlaygroundSession)
+			assert.Equal(t, http.StatusBadRequest, pinArchived.Code, pinArchived.Body.String())
+			assert.Contains(t, pinArchived.Body.String(), "PLAYGROUND_SESSION_ARCHIVED")
+
+			// An archive request in the same update wins over a simultaneous
+			// pin, so the archived row is never pinned.
+			archiveWins := playgroundRequest(t, 7, http.MethodPatch, path, map[string]any{
+				"revision": session.Revision, "archived": true, "pinned": true,
+			}, controller.UpdatePlaygroundSession)
+			require.Equal(t, http.StatusOK, archiveWins.Code, archiveWins.Body.String())
+			session = decode(archiveWins)
+			assert.True(t, session.Archived)
+			assert.False(t, session.Pinned)
+
+			// The rejected pin left the revision untouched; the successful
+			// archive request above advanced it, and that revision can now
+			// unarchive the conversation.
+			unarchived := playgroundRequest(t, 7, http.MethodPatch, path, map[string]any{
+				"revision": session.Revision, "archived": false,
+			}, controller.UpdatePlaygroundSession)
+			require.Equal(t, http.StatusOK, unarchived.Code, unarchived.Body.String())
+			session = decode(unarchived)
+			assert.False(t, session.Archived)
+			assert.False(t, session.Pinned)
+
+			pinned := playgroundRequest(t, 7, http.MethodPatch, path, map[string]any{
+				"revision": session.Revision, "pinned": true,
+			}, controller.UpdatePlaygroundSession)
+			require.Equal(t, http.StatusOK, pinned.Code, pinned.Body.String())
+			session = decode(pinned)
+			assert.True(t, session.Pinned)
+			assert.NotZero(t, session.PinnedAt)
+
+			// Omitting the switches keeps the stored state.
+			renamed := playgroundRequest(t, 7, http.MethodPatch, path, map[string]any{
+				"revision": session.Revision, "title": "Renamed",
+			}, controller.UpdatePlaygroundSession)
+			require.Equal(t, http.StatusOK, renamed.Code, renamed.Body.String())
+			session = decode(renamed)
+			assert.True(t, session.Pinned)
+			assert.Equal(t, []string{"Work", "ideas"}, session.Tags)
+
+			cleared := playgroundRequest(t, 7, http.MethodPatch, path, map[string]any{
+				"revision": session.Revision, "tags": []string{},
+			}, controller.UpdatePlaygroundSession)
+			require.Equal(t, http.StatusOK, cleared.Code, cleared.Body.String())
+			session = decode(cleared)
+			assert.Empty(t, session.Tags)
+			assert.True(t, session.Pinned)
+
+			for name, tags := range map[string][]string{
+				"too many": {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"},
+				"too long": {strings.Repeat("界", playgroundSessionTagMaxLength+1)},
+				"nul byte": {"a\x00b"},
+			} {
+				t.Run(name, func(t *testing.T) {
+					rejected := playgroundRequest(t, 7, http.MethodPatch, path, map[string]any{
+						"revision": session.Revision, "tags": tags,
+					}, controller.UpdatePlaygroundSession)
+					assert.Equal(t, http.StatusBadRequest, rejected.Code, rejected.Body.String())
+				})
+			}
+
+			// The rejected tag writes did not consume the revision either.
+			archived = playgroundRequest(t, 7, http.MethodPatch, path, map[string]any{
+				"revision": session.Revision, "archived": true,
+			}, controller.UpdatePlaygroundSession)
+			require.Equal(t, http.StatusOK, archived.Code, archived.Body.String())
+			session = decode(archived)
+			assert.True(t, session.Archived)
+			assert.False(t, session.Pinned)
+
+			// The server list keeps archived conversations in the ordinary
+			// updated_at ordering; grouping happens in the client.
+			list := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions?p=1&page_size=20", nil, controller.ListPlaygroundSessions)
+			require.Equal(t, http.StatusOK, list.Code, list.Body.String())
+			var page struct {
+				Success bool `json:"success"`
+				Data    struct {
+					Items []sessionView `json:"items"`
+					Total int           `json:"total"`
+				} `json:"data"`
+			}
+			require.NoError(t, common.Unmarshal(list.Body.Bytes(), &page))
+			require.True(t, page.Success, list.Body.String())
+			assert.Equal(t, 1, page.Data.Total)
+			require.Len(t, page.Data.Items, 1)
+			assert.True(t, page.Data.Items[0].Archived)
+
+			// A row written before the tags column existed keeps NULL and reads
+			// back as an empty list on every dialect.
+			require.NoError(t, db.Model(&model.PlaygroundSession{}).Where("id = ? AND user_id = ?", id, 7).
+				Update("tags", gorm.Expr("NULL")).Error)
+			legacy := playgroundRequest(t, 7, http.MethodGet, path, nil, controller.GetPlaygroundSession)
+			require.Equal(t, http.StatusOK, legacy.Code, legacy.Body.String())
+			assert.Empty(t, decode(legacy).Tags)
+		})
+	}
+}
+
 // Conversation context management: the per-session context settings and the
 // persisted compression node round-trip through the owner-scoped session
 // endpoints on every dialect. A request that omits them keeps the stored

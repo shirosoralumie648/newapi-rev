@@ -8314,6 +8314,24 @@
     "Grace": "寬限期",
     "Playground storage billing for {{date}}: {{quota}} quota charged, {{bytes}} bytes billed": "{{date}} 的 Playground 儲存計費：已扣 {{quota}} 額度，計費 {{bytes}} 位元組",
     "You have reached the daily Playground storage download limit. It resets with the next storage day.": "你已達到 Playground 儲存的每日下載上限，將在下一個儲存日重置。",
-    "Playground storage settlement left {{count}} accounts read-only with {{quota}} quota uncovered; see the playground_storage_settle system task result": "Playground 儲存結算有 {{count}} 個帳戶因 {{quota}} 額度未結清而保持唯讀；詳見 playground_storage_settle 系統任務結果"
+    "Playground storage settlement left {{count}} accounts read-only with {{quota}} quota uncovered; see the playground_storage_settle system task result": "Playground 儲存結算有 {{count}} 個帳戶因 {{quota}} 額度未結清而保持唯讀；詳見 playground_storage_settle 系統任務結果",
+    "Remove tag": "移除標籤",
+    "Pinned": "已置頂",
+    "Archived": "已封存",
+    "Untagged": "未加標籤",
+    "Filter conversations by tag": "依標籤篩選對話",
+    "Filter by tag {{tag}}": "依標籤 {{tag}} 篩選",
+    "Pin conversation": "置頂對話",
+    "Unpin conversation": "取消置頂",
+    "Archive conversation": "封存對話",
+    "Restore conversation": "取消封存",
+    "Manage tags": "管理標籤",
+    "Organize {{name}}": "整理 {{name}}",
+    "Conversation tags": "對話標籤",
+    "Organize \"{{name}}\" with up to {{count}} labels. Each label can contain up to {{length}} characters.": "為「{{name}}」新增最多 {{count}} 個標籤，以便快速尋找。每個標籤最多 {{length}} 個字元。",
+    "Add a tag...": "新增標籤...",
+    "Save tags": "儲存標籤",
+    "Invalid Playground conversation tags.": "Playground 對話標籤無效。",
+    "Cannot pin an archived Playground conversation.": "無法置頂已封存的 Playground 對話。"
   }
 }
