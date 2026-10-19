@@ -9134,6 +9134,23 @@
     "ZIP archive of selected nodes": "選択したノードの ZIP アーカイブ",
     "Zoom": "ズーム",
     "Zoom in": "拡大",
-    "Zoom out": "縮小"
+    "Zoom out": "縮小",
+    "Frame": "フレーム",
+    "Sticky note": "付箋",
+    "Align left": "左揃え",
+    "Align center": "中央揃え",
+    "Align right": "右揃え",
+    "Align top": "上揃え",
+    "Align middle": "上下中央揃え",
+    "Align bottom": "下揃え",
+    "Auto layout horizontally": "横方向に自動レイアウト",
+    "Auto layout vertically": "縦方向に自動レイアウト",
+    "Collapse selection": "選択範囲を折りたたむ",
+    "Expand selection": "選択範囲を展開",
+    "Collapse group": "グループを折りたたむ",
+    "Expand group": "グループを展開",
+    "Collapsed": "折りたたみ済み",
+    "Preview frame": "フレームをプレビュー",
+    "Export frame": "フレームをエクスポート"
   }
 }

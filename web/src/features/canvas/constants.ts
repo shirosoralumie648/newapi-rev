@@ -90,6 +90,8 @@ export const CANVAS_NODE_KINDS = [
   'video',
   'audio',
   'group',
+  'frame',
+  'sticky',
 ] as const
 
 // Stable organization palette. A node stores only the color key; these class
@@ -167,6 +169,8 @@ export const CANVAS_NODE_KIND_LABELS: Record<CanvasNodeKind, string> = {
   video: 'Video',
   audio: 'Audio',
   group: 'Group',
+  frame: 'Frame',
+  sticky: 'Sticky note',
 }
 
 // Editing operations that change the graph (copy/paste and grouping). The
@@ -185,6 +189,43 @@ export const CANVAS_NODE_ESTIMATED_HEIGHT = 140
 // Nested groups are not created by the editor (an imported board may contain
 // them, so traversals stay bounded).
 export const CANVAS_GROUP_MAX_DEPTH = 8
+
+// A frame is a titled visual region behind its contents, not a second grouping
+// mechanism: membership is geometric, so moving or collapsing a group inside a
+// frame never changes the frame tree. Frames render below ordinary nodes.
+export const CANVAS_FRAME_DEFAULT_WIDTH = 480
+export const CANVAS_FRAME_DEFAULT_HEIGHT = 320
+export const CANVAS_FRAME_MIN_WIDTH = 240
+export const CANVAS_FRAME_MIN_HEIGHT = 160
+export const CANVAS_FRAME_PADDING = 24
+export const CANVAS_FRAME_HEADER_HEIGHT = 36
+export const CANVAS_STICKY_DEFAULT_WIDTH = 224
+export const CANVAS_STICKY_DEFAULT_HEIGHT = 160
+export const CANVAS_STICKY_MIN_WIDTH = 120
+export const CANVAS_STICKY_MIN_HEIGHT = 80
+// Frames sit behind ordinary cards; every other node keeps the default content
+// layer. The value is runtime-only and is recomputed when a document is read.
+export const CANVAS_FRAME_Z_INDEX = 0
+export const CANVAS_CONTENT_Z_INDEX = 1
+
+// Default footprint of the annotation kinds created from the toolbar. A group
+// box is still produced by grouping a selection instead of a blank add.
+export const CANVAS_NODE_DEFAULT_SIZES: Partial<
+  Record<CanvasNodeKind, { width: number; height: number }>
+> = {
+  frame: {
+    width: CANVAS_FRAME_DEFAULT_WIDTH,
+    height: CANVAS_FRAME_DEFAULT_HEIGHT,
+  },
+  sticky: {
+    width: CANVAS_STICKY_DEFAULT_WIDTH,
+    height: CANVAS_STICKY_DEFAULT_HEIGHT,
+  },
+}
+
+// Auto layout gaps between layers and between sibling cards.
+export const CANVAS_AUTO_LAYOUT_GAP_X = 96
+export const CANVAS_AUTO_LAYOUT_GAP_Y = 64
 
 // Files dropped on the pane are uploaded into the canvas' own attachment
 // partition and become one attachment node each, laid out to the right of the

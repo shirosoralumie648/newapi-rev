@@ -72,6 +72,31 @@ test('selection expands a selected group to its children', () => {
   )
 })
 
+test('selection expands a selected frame to its contained nodes', () => {
+  const nodes = [
+    node('frame', 0, 0, 400, 300, { kind: 'frame', selected: true }),
+    node('inside', 40, 40, 100, 50),
+    node('outside', 600, 40, 100, 50),
+  ]
+  expect(canvasPngExportNodeIds(nodes, 'selection')).toEqual(
+    new Set(['frame', 'inside'])
+  )
+  expect(canvasPngExportNodeIds(nodes, 'selection', ['frame'])).toEqual(
+    new Set(['frame', 'inside'])
+  )
+})
+
+test('canvas export skips nodes hidden by a collapsed group', () => {
+  const nodes = [
+    node('group', 0, 0, 300, 200, { kind: 'group' }),
+    { ...node('child', 10, 10), hidden: true },
+    node('free', 500, 0),
+  ]
+  expect(canvasPngExportNodeIds(nodes, 'canvas')).toEqual(
+    new Set(['group', 'free'])
+  )
+})
+
 test('selection without a selected node has no export ids', () => {
   expect(canvasPngExportNodeIds([node('n1', 0, 0)], 'selection')).toBeNull()
 })

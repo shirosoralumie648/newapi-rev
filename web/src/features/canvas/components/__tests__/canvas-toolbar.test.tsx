@@ -26,8 +26,12 @@ import { CanvasToolbar } from '../canvas-toolbar'
 function toolbarProps(runPhase: CanvasWorkflowRunPhase = 'idle') {
   return {
     inspectorView: 'details' as const,
+    canAlign: false,
+    canAutoLayout: false,
+    canCollapse: false,
     canCopy: false,
     canDistribute: false,
+    canExpand: false,
     canExportSelection: false,
     canGroup: false,
     canPaste: false,
@@ -44,10 +48,14 @@ function toolbarProps(runPhase: CanvasWorkflowRunPhase = 'idle') {
       { label: 'vip', value: 'vip', ratio: 1 },
     ],
     onAddNode: vi.fn(),
+    onAlign: vi.fn(),
+    onAutoLayout: vi.fn(),
     onCancelRun: vi.fn(),
+    onCollapseSelection: vi.fn(),
     onCopy: vi.fn(),
     onDistributeHorizontal: vi.fn(),
     onDistributeVertical: vi.fn(),
+    onExpandSelection: vi.fn(),
     onExport: vi.fn(),
     onExportArchive: vi.fn(),
     onExportPng: vi.fn(),
@@ -137,8 +145,18 @@ test('disables edit actions that do not apply to the selection', async () => {
     'Paste',
     'Group selection',
     'Ungroup selection',
+    'Align left',
+    'Align center',
+    'Align right',
+    'Align top',
+    'Align middle',
+    'Align bottom',
     'Distribute horizontally',
     'Distribute vertically',
+    'Auto layout horizontally',
+    'Auto layout vertically',
+    'Collapse selection',
+    'Expand selection',
   ]) {
     expect(screen.getByRole('menuitem', { name })).toHaveAttribute(
       'aria-disabled',
@@ -154,8 +172,12 @@ test('runs the edit actions the selection allows', async () => {
   const user = userEvent.setup()
   const props = {
     ...toolbarProps(),
+    canAlign: true,
+    canAutoLayout: true,
+    canCollapse: true,
     canCopy: true,
     canDistribute: true,
+    canExpand: true,
     canGroup: true,
     canPaste: true,
     canRedo: true,
@@ -179,6 +201,24 @@ test('runs the edit actions the selection allows', async () => {
   await user.click(screen.getByRole('button', { name: 'Edit' }))
   await user.click(screen.getByRole('menuitem', { name: 'Ungroup selection' }))
   expect(props.onUngroupSelection).toHaveBeenCalledTimes(1)
+
+  await user.click(screen.getByRole('button', { name: 'Edit' }))
+  await user.click(screen.getByRole('menuitem', { name: 'Align left' }))
+  expect(props.onAlign).toHaveBeenCalledWith('left')
+
+  await user.click(screen.getByRole('button', { name: 'Edit' }))
+  await user.click(
+    screen.getByRole('menuitem', { name: 'Auto layout vertically' })
+  )
+  expect(props.onAutoLayout).toHaveBeenCalledWith('vertical')
+
+  await user.click(screen.getByRole('button', { name: 'Edit' }))
+  await user.click(screen.getByRole('menuitem', { name: 'Collapse selection' }))
+  expect(props.onCollapseSelection).toHaveBeenCalledTimes(1)
+
+  await user.click(screen.getByRole('button', { name: 'Edit' }))
+  await user.click(screen.getByRole('menuitem', { name: 'Expand selection' }))
+  expect(props.onExpandSelection).toHaveBeenCalledTimes(1)
 
   await user.click(screen.getByRole('button', { name: 'Edit' }))
   await user.click(

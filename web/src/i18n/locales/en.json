@@ -9134,6 +9134,23 @@
     "ZIP archive of selected nodes": "ZIP archive of selected nodes",
     "Zoom": "Zoom",
     "Zoom in": "Zoom in",
-    "Zoom out": "Zoom out"
+    "Zoom out": "Zoom out",
+    "Frame": "Frame",
+    "Sticky note": "Sticky note",
+    "Align left": "Align left",
+    "Align center": "Align center",
+    "Align right": "Align right",
+    "Align top": "Align top",
+    "Align middle": "Align middle",
+    "Align bottom": "Align bottom",
+    "Auto layout horizontally": "Auto layout horizontally",
+    "Auto layout vertically": "Auto layout vertically",
+    "Collapse selection": "Collapse selection",
+    "Expand selection": "Expand selection",
+    "Collapse group": "Collapse group",
+    "Expand group": "Expand group",
+    "Collapsed": "Collapsed",
+    "Preview frame": "Preview frame",
+    "Export frame": "Export frame"
   }
 }

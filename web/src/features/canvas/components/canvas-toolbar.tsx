@@ -17,13 +17,22 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import {
+  AlignCenterHorizontal,
+  AlignCenterVertical,
+  AlignEndHorizontal,
+  AlignEndVertical,
   AlignHorizontalSpaceAround,
+  AlignStartHorizontal,
+  AlignStartVertical,
   AlignVerticalSpaceAround,
   Bot,
+  ChevronDown,
+  ChevronRight,
   Download,
   FileText,
   FolderOpen,
   History,
+  LayoutGrid,
   LayoutTemplate,
   ListChecks,
   Pencil,
@@ -52,6 +61,10 @@ import type { GroupOption } from '@/features/playground/types'
 
 import { CANVAS_NODE_KINDS, CANVAS_NODE_KIND_LABELS } from '../constants'
 import type { CanvasWorkflowRunPhase } from '../hooks/use-canvas-workflow-runner'
+import type {
+  CanvasAlignAxis,
+  CanvasAutoLayoutDirection,
+} from '../lib/canvas-align'
 import type { CanvasInspectorView, CanvasNodeKind } from '../types'
 
 /** Inspector views the toolbar can open; the creator owns the whole domain. */
@@ -72,6 +85,10 @@ interface CanvasToolbarProps {
   canGroup: boolean
   canUngroup: boolean
   canDistribute: boolean
+  canAlign: boolean
+  canAutoLayout: boolean
+  canCollapse: boolean
+  canExpand: boolean
   /** Whether exporting the selected nodes is possible. */
   canExportSelection: boolean
   /** Whether the selected subgraph can be run now. */
@@ -91,6 +108,10 @@ interface CanvasToolbarProps {
   onSelectAll: () => void
   onGroupSelection: () => void
   onUngroupSelection: () => void
+  onAlign: (alignment: CanvasAlignAxis) => void
+  onAutoLayout: (direction: CanvasAutoLayoutDirection) => void
+  onCollapseSelection: () => void
+  onExpandSelection: () => void
   onDistributeHorizontal: () => void
   onDistributeVertical: () => void
   onImportFile: (file: File) => void
@@ -204,6 +225,48 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
+            disabled={props.disabled || !props.canAlign}
+            onClick={() => props.onAlign('left')}
+          >
+            <AlignStartVertical aria-hidden='true' />
+            {t('Align left')}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={props.disabled || !props.canAlign}
+            onClick={() => props.onAlign('center')}
+          >
+            <AlignCenterVertical aria-hidden='true' />
+            {t('Align center')}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={props.disabled || !props.canAlign}
+            onClick={() => props.onAlign('right')}
+          >
+            <AlignEndVertical aria-hidden='true' />
+            {t('Align right')}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={props.disabled || !props.canAlign}
+            onClick={() => props.onAlign('top')}
+          >
+            <AlignStartHorizontal aria-hidden='true' />
+            {t('Align top')}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={props.disabled || !props.canAlign}
+            onClick={() => props.onAlign('middle')}
+          >
+            <AlignCenterHorizontal aria-hidden='true' />
+            {t('Align middle')}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={props.disabled || !props.canAlign}
+            onClick={() => props.onAlign('bottom')}
+          >
+            <AlignEndHorizontal aria-hidden='true' />
+            {t('Align bottom')}
+          </DropdownMenuItem>
+          <DropdownMenuItem
             disabled={props.disabled || !props.canDistribute}
             onClick={props.onDistributeHorizontal}
           >
@@ -216,6 +279,36 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
           >
             <AlignVerticalSpaceAround aria-hidden='true' />
             {t('Distribute vertically')}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            disabled={props.disabled || !props.canAutoLayout}
+            onClick={() => props.onAutoLayout('horizontal')}
+          >
+            <LayoutGrid aria-hidden='true' />
+            {t('Auto layout horizontally')}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={props.disabled || !props.canAutoLayout}
+            onClick={() => props.onAutoLayout('vertical')}
+          >
+            <LayoutGrid aria-hidden='true' />
+            {t('Auto layout vertically')}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            disabled={props.disabled || !props.canCollapse}
+            onClick={props.onCollapseSelection}
+          >
+            <ChevronDown aria-hidden='true' />
+            {t('Collapse selection')}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={props.disabled || !props.canExpand}
+            onClick={props.onExpandSelection}
+          >
+            <ChevronRight aria-hidden='true' />
+            {t('Expand selection')}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

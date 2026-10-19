@@ -16,9 +16,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { NodeProps } from '@xyflow/react'
-import { FileText, ImageIcon, Music, Unlink, Video, Zap } from 'lucide-react'
-import { useState } from 'react'
+import { NodeResizer, type NodeProps } from '@xyflow/react'
+import {
+  ChevronDown,
+  ChevronRight,
+  FileText,
+  ImageIcon,
+  Music,
+  Unlink,
+  Video,
+  Zap,
+} from 'lucide-react'
+import { createContext, useContext, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -35,10 +44,14 @@ import { translateServerText } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
 import {
+  CANVAS_FRAME_MIN_HEIGHT,
+  CANVAS_FRAME_MIN_WIDTH,
   CANVAS_NODE_COLOR_BORDER_CLASSES,
   CANVAS_NODE_COLOR_DOT_CLASSES,
   CANVAS_NODE_COLOR_LABELS,
   CANVAS_NODE_KIND_LABELS,
+  CANVAS_STICKY_MIN_HEIGHT,
+  CANVAS_STICKY_MIN_WIDTH,
 } from '../constants'
 import { useCanvasNodeArtifact } from '../hooks/use-canvas-node-artifact'
 import type { CanvasNodeColor, CanvasNodeData, CanvasNodeKind } from '../types'
@@ -60,6 +73,13 @@ const CANVAS_ATTACHMENT_ICONS = {
   audio: Music,
   file: FileText,
 } as const
+
+/** Editor actions a node view can trigger without knowing the hook. */
+export interface CanvasNodeActions {
+  onToggleGroupCollapsed?: (groupId: string) => void
+}
+
+export const CanvasNodeActionsContext = createContext<CanvasNodeActions>({})
 
 export function CanvasNodeColorDot(props: { color?: CanvasNodeColor }) {
   const { t } = useTranslation()
@@ -100,7 +120,9 @@ function CanvasNodeTags(props: { tags?: string[] }) {
  */
 export function CanvasGroupNodeView(props: NodeProps) {
   const { t } = useTranslation()
+  const actions = useContext(CanvasNodeActionsContext)
   const data = props.data as CanvasNodeData
+  const collapsed = data.collapsed === true
   return (
     <div
       className={cn(
@@ -112,13 +134,106 @@ export function CanvasGroupNodeView(props: NodeProps) {
       )}
     >
       <div className='flex items-center gap-1.5 px-2 py-1'>
+        <button
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? t('Expand group') : t('Collapse group')}
+          className='text-muted-foreground hover:text-foreground hover:bg-muted rounded p-0.5'
+          disabled={!actions.onToggleGroupCollapsed}
+          onClick={(event) => {
+            event.stopPropagation()
+            actions.onToggleGroupCollapsed?.(props.id)
+          }}
+          onPointerDown={(event) => event.stopPropagation()}
+          type='button'
+        >
+          {collapsed ? (
+            <ChevronRight aria-hidden='true' className='size-3.5' />
+          ) : (
+            <ChevronDown aria-hidden='true' className='size-3.5' />
+          )}
+        </button>
         <CanvasNodeColorDot color={data.color} />
         <span className='text-muted-foreground min-w-0 truncate text-xs font-medium'>
           {readNodePreview(data) || t('Group')}
         </span>
+        {collapsed ? (
+          <Badge className='shrink-0 text-[10px]' variant='secondary'>
+            {t('Collapsed')}
+          </Badge>
+        ) : null}
       </div>
       {data.tags && data.tags.length > 0 ? (
         <div className='px-2 pb-1'>
+          <CanvasNodeTags tags={data.tags} />
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+/**
+ * A frame is a titled region painted below the cards it contains. Membership is
+ * geometric, so it is not a group parent. The header is the drag surface and
+ * the body stays click-through; resizing writes width/height through the normal
+ * node-change pipeline, which keeps the edit undoable and autosaved.
+ */
+export function CanvasFrameNodeView(props: NodeProps) {
+  const { t } = useTranslation()
+  const data = props.data as CanvasNodeData
+  return (
+    <div
+      className={cn(
+        'bg-muted/10 relative size-full rounded-xl border',
+        data.color
+          ? CANVAS_NODE_COLOR_BORDER_CLASSES[data.color]
+          : 'border-border/80',
+        props.selected && 'ring-ring ring-2'
+      )}
+    >
+      <NodeResizer
+        isVisible={props.selected}
+        minHeight={CANVAS_FRAME_MIN_HEIGHT}
+        minWidth={CANVAS_FRAME_MIN_WIDTH}
+      />
+      <div className='bg-background/70 flex h-9 cursor-grab items-center gap-1.5 rounded-t-xl border-b px-3'>
+        <CanvasNodeColorDot color={data.color} />
+        <span className='text-muted-foreground min-w-0 truncate text-xs font-medium'>
+          {readNodePreview(data) || t('Frame')}
+        </span>
+        {data.tags && data.tags.length > 0 ? (
+          <div className='ml-auto min-w-0'>
+            <CanvasNodeTags tags={data.tags} />
+          </div>
+        ) : null}
+      </div>
+      <div className='pointer-events-none absolute inset-x-0 top-9 bottom-0' />
+    </div>
+  )
+}
+
+/** A plain text sticky note is an annotation, not a workflow node. */
+export function CanvasStickyNodeView(props: NodeProps) {
+  const { t } = useTranslation()
+  const data = props.data as CanvasNodeData
+  const preview = readNodePreview(data)
+  return (
+    <div
+      className={cn(
+        'border-amber-300/80 bg-amber-100 text-amber-950 relative size-full rounded-lg border p-3 shadow-sm dark:border-amber-500/40 dark:bg-amber-950/70 dark:text-amber-50',
+        data.color && CANVAS_NODE_COLOR_BORDER_CLASSES[data.color],
+        props.selected && 'ring-ring ring-2'
+      )}
+    >
+      <NodeResizer
+        isVisible={props.selected}
+        minHeight={CANVAS_STICKY_MIN_HEIGHT}
+        minWidth={CANVAS_STICKY_MIN_WIDTH}
+      />
+      <p className='line-clamp-6 text-sm leading-5 break-words whitespace-pre-wrap'>
+        {preview || t('Sticky note')}
+      </p>
+      {data.tags && data.tags.length > 0 ? (
+        <div className='mt-2'>
           <CanvasNodeTags tags={data.tags} />
         </div>
       ) : null}

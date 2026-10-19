@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { ReactFlowProvider } from '@xyflow/react'
 import { expect, test, vi } from 'vitest'
 
@@ -25,7 +26,13 @@ import { useAttachmentPreviewUrl } from '@/features/playground/hooks/use-attachm
 import { getTaskArtifacts } from '@/features/usage-logs/api'
 
 import type { CanvasNodeData } from '../../types'
-import { CanvasFlowNodeView, CanvasGroupNodeView } from '../canvas-node'
+import {
+  CanvasFlowNodeView,
+  CanvasFrameNodeView,
+  CanvasGroupNodeView,
+  CanvasNodeActionsContext,
+  CanvasStickyNodeView,
+} from '../canvas-node'
 
 vi.mock('@/features/usage-logs/api', () => ({
   getTaskArtifacts: vi.fn(),
@@ -289,6 +296,58 @@ test('renders a group as a dashed box without handles', () => {
 
   expect(screen.getByText('Scene')).toBeInTheDocument()
   expect(container.querySelector('.react-flow__handle')).toBeNull()
+})
+
+test('toggles a collapsed group from its header', async () => {
+  const onToggleGroupCollapsed = vi.fn()
+  const client = new QueryClient()
+  render(
+    <QueryClientProvider client={client}>
+      <ReactFlowProvider>
+        <CanvasNodeActionsContext.Provider value={{ onToggleGroupCollapsed }}>
+          <CanvasGroupNodeView
+            {...nodeProps({ kind: 'group', text: 'Scene', collapsed: true })}
+          />
+        </CanvasNodeActionsContext.Provider>
+      </ReactFlowProvider>
+    </QueryClientProvider>
+  )
+
+  const toggle = screen.getByRole('button', { name: 'Expand group' })
+  expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  expect(screen.getByText('Collapsed')).toBeInTheDocument()
+
+  await userEvent.setup().click(toggle)
+  expect(onToggleGroupCollapsed).toHaveBeenCalledWith('n1')
+})
+
+test('renders a frame as a titled region behind its contents', () => {
+  const client = new QueryClient()
+  const { container } = render(
+    <QueryClientProvider client={client}>
+      <ReactFlowProvider>
+        <CanvasFrameNodeView {...nodeProps({ kind: 'frame', text: 'Scene' })} />
+      </ReactFlowProvider>
+    </QueryClientProvider>
+  )
+
+  expect(screen.getByText('Scene')).toBeInTheDocument()
+  expect(container.querySelector('.react-flow__handle')).toBeNull()
+})
+
+test('renders a sticky note as plain text', () => {
+  const client = new QueryClient()
+  render(
+    <QueryClientProvider client={client}>
+      <ReactFlowProvider>
+        <CanvasStickyNodeView
+          {...nodeProps({ kind: 'sticky', text: 'Remember this' })}
+        />
+      </ReactFlowProvider>
+    </QueryClientProvider>
+  )
+
+  expect(screen.getByText('Remember this')).toBeInTheDocument()
 })
 
 test('shows the color marker and tags of a node', () => {

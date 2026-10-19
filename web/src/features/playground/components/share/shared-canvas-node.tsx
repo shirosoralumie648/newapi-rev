@@ -76,6 +76,26 @@ export function SharedCanvasNodeView(props: NodeProps) {
     )
   }
 
+  if (kind === 'frame') {
+    return (
+      <div className='border-border/80 bg-muted/10 size-full rounded-xl border'>
+        <span className='bg-background/70 text-muted-foreground block h-9 truncate rounded-t-xl border-b px-3 py-2 text-xs font-medium'>
+          {preview || t('Frame')}
+        </span>
+      </div>
+    )
+  }
+
+  if (kind === 'sticky') {
+    return (
+      <div className='size-full rounded-lg border border-amber-300/80 bg-amber-100 p-3 text-amber-950 dark:border-amber-500/40 dark:bg-amber-950/70 dark:text-amber-50'>
+        <p className='line-clamp-6 text-sm leading-5 break-words whitespace-pre-wrap'>
+          {preview || t('Sticky note')}
+        </p>
+      </div>
+    )
+  }
+
   return (
     <CanvasNodeCard
       className='h-auto w-64 gap-0 p-0'

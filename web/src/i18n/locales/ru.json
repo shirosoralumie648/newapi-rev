@@ -9134,6 +9134,23 @@
     "ZIP archive of selected nodes": "ZIP-архив выбранных узлов",
     "Zoom": "Zoom",
     "Zoom in": "Увеличить",
-    "Zoom out": "Уменьшить"
+    "Zoom out": "Уменьшить",
+    "Frame": "Фрейм",
+    "Sticky note": "Стикер",
+    "Align left": "Выровнять по левому краю",
+    "Align center": "Выровнять по центру",
+    "Align right": "Выровнять по правому краю",
+    "Align top": "Выровнять по верху",
+    "Align middle": "Выровнять по середине",
+    "Align bottom": "Выровнять по низу",
+    "Auto layout horizontally": "Горизонтальная авторазметка",
+    "Auto layout vertically": "Вертикальная авторазметка",
+    "Collapse selection": "Свернуть выделение",
+    "Expand selection": "Развернуть выделение",
+    "Collapse group": "Свернуть группу",
+    "Expand group": "Развернуть группу",
+    "Collapsed": "Свернуто",
+    "Preview frame": "Просмотр фрейма",
+    "Export frame": "Экспортировать фрейм"
   }
 }

@@ -9134,6 +9134,23 @@
     "ZIP archive of selected nodes": "Tệp nén ZIP của các nút đã chọn",
     "Zoom": "Zoom",
     "Zoom in": "Phóng to",
-    "Zoom out": "Thu nhỏ"
+    "Zoom out": "Thu nhỏ",
+    "Frame": "Khung",
+    "Sticky note": "Ghi chú dán",
+    "Align left": "Căn trái",
+    "Align center": "Căn giữa",
+    "Align right": "Căn phải",
+    "Align top": "Căn trên",
+    "Align middle": "Căn giữa theo chiều dọc",
+    "Align bottom": "Căn dưới",
+    "Auto layout horizontally": "Tự động bố cục ngang",
+    "Auto layout vertically": "Tự động bố cục dọc",
+    "Collapse selection": "Thu gọn vùng chọn",
+    "Expand selection": "Mở rộng vùng chọn",
+    "Collapse group": "Thu gọn nhóm",
+    "Expand group": "Mở rộng nhóm",
+    "Collapsed": "Đã thu gọn",
+    "Preview frame": "Xem trước khung",
+    "Export frame": "Xuất khung"
   }
 }

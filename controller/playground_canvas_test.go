@@ -50,7 +50,7 @@ func TestPlaygroundCanvasDocumentAcceptsWorkflowNodeKinds(t *testing.T) {
 	policy := playground_setting.GetPlaygroundQuotaPolicy("")
 	for _, kind := range []string{
 		"text", "note", "prompt", "message", "attachment", "image", "artifact",
-		"model", "task", "task-result", "video", "audio", "group",
+		"model", "task", "task-result", "video", "audio", "group", "frame", "sticky",
 	} {
 		var request playgroundCanvasRequest
 		require.NoError(t, common.UnmarshalJsonStr(`{
@@ -68,6 +68,31 @@ func TestPlaygroundCanvasDocumentAcceptsWorkflowNodeKinds(t *testing.T) {
 		assert.Equal(t, 2, nodeCount)
 		assert.Equal(t, 1, edgeCount)
 	}
+}
+
+func TestPlaygroundCanvasAnnotationKindsRoundTrip(t *testing.T) {
+	policy := playground_setting.GetPlaygroundQuotaPolicy("")
+	var request playgroundCanvasRequest
+	require.NoError(t, common.UnmarshalJsonStr(`{
+		"document": {
+			"nodes": [
+				{"id": "f1", "type": "frame", "position": {"x": 20, "y": 30}, "width": 480, "height": 320, "data": {"kind": "frame", "text": "Scene"}},
+				{"id": "s1", "type": "sticky", "position": {"x": 60, "y": 80}, "width": 224, "height": 160, "data": {"kind": "sticky", "text": "Draft"}},
+				{"id": "g1", "type": "group", "position": {"x": 0, "y": 0}, "width": 200, "height": 120, "data": {"kind": "group", "collapsed": true}}
+			],
+			"edges": []
+		}
+	}`, &request))
+	require.NotNil(t, request.Document)
+
+	encoded, nodeCount, edgeCount, err := normalizePlaygroundCanvasDocument(request.Document, policy)
+	require.NoError(t, err)
+	assert.Equal(t, 3, nodeCount)
+	assert.Zero(t, edgeCount)
+	assert.Contains(t, encoded, `"type":"frame"`)
+	assert.Contains(t, encoded, `"type":"sticky"`)
+	assert.Contains(t, encoded, `"collapsed":true`)
+	assert.Contains(t, encoded, `"width":480`)
 }
 
 func TestPlaygroundCanvasDocumentRejectsUnknownNodeKinds(t *testing.T) {

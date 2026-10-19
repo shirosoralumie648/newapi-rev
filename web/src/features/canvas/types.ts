@@ -47,6 +47,8 @@ export type CanvasNodeKind =
   | 'video'
   | 'audio'
   | 'group'
+  | 'frame'
+  | 'sticky'
 
 /**
  * Workflow steps are the nodes a run executes: a `model` chat completion and a
@@ -190,6 +192,10 @@ export type CanvasNodeData = {
   // the parent here and the editor derives the xyflow parent/child layout
   // (`parentId` + `extent`) from it, so a nested board round-trips.
   parentId?: string
+  // Stored on a `group` node only. A collapsed group keeps its own box visible
+  // while its descendants and their incident edges are hidden at read time, so
+  // the visibility state round-trips without adding a second document shape.
+  collapsed?: boolean
 }
 
 export type CanvasFlowNode = Node<CanvasNodeData>

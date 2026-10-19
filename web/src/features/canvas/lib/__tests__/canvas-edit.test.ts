@@ -21,11 +21,14 @@ import { expect, test } from 'vitest'
 import { CANVAS_MAX_NODES, CANVAS_PASTE_OFFSET } from '../../constants'
 import type { CanvasFlowEdge, CanvasFlowNode } from '../../types'
 import {
+  canvasCollapseSelection,
   canvasCopySelection,
   canvasExpandRemovedNodes,
+  canvasExpandSelection,
   canvasGroupSelection,
   canvasPasteClipboard,
   canvasSelectAll,
+  canvasToggleGroupCollapsed,
   canvasUngroupSelection,
 } from '../canvas-edit'
 
@@ -251,4 +254,72 @@ test('removing a group also removes its children', () => {
     new Set([grouped!.groupId])
   )
   expect([...expanded].sort()).toEqual([grouped!.groupId, 'a', 'b'].sort())
+})
+
+test('collapsing a selection hides its children and incident edges', () => {
+  const nodes = select(
+    [
+      node('a', 'text', { x: 0, y: 0 }, { width: 100, height: 50 }),
+      node('b', 'model', { x: 200, y: 0 }, { width: 100, height: 50 }),
+      node('c', 'task', { x: 500, y: 0 }, { width: 100, height: 50 }),
+    ],
+    ['a', 'b']
+  )
+  const edges: CanvasFlowEdge[] = [
+    { id: 'ab', source: 'a', target: 'b' },
+    { id: 'bc', source: 'b', target: 'c' },
+  ]
+
+  const collapsed = canvasCollapseSelection(nodes, edges)
+  const group = collapsed?.nodes.find((item) => item.id === collapsed.groupId)
+  expect(group?.data.collapsed).toBe(true)
+  expect(collapsed?.nodes.find((item) => item.id === 'a')?.hidden).toBe(true)
+  expect(collapsed?.nodes.find((item) => item.id === 'b')?.hidden).toBe(true)
+  expect(collapsed?.nodes.find((item) => item.id === 'c')?.hidden).toBeFalsy()
+  expect(collapsed?.edges.find((edge) => edge.id === 'ab')?.hidden).toBe(true)
+  expect(collapsed?.edges.find((edge) => edge.id === 'bc')?.hidden).toBe(true)
+})
+
+test('toggling or expanding a collapsed group restores its children', () => {
+  const collapsed = canvasCollapseSelection(
+    select(
+      [
+        node('a', 'text', { x: 0, y: 0 }, { width: 100, height: 50 }),
+        node('b', 'model', { x: 200, y: 0 }, { width: 100, height: 50 }),
+      ],
+      ['a', 'b']
+    ),
+    []
+  )
+  const toggled = canvasToggleGroupCollapsed(
+    collapsed!.nodes,
+    collapsed!.edges,
+    collapsed!.groupId
+  )
+  expect(toggled?.nodes.find((item) => item.id === 'a')?.hidden).toBe(false)
+  expect(toggled?.nodes.find((item) => item.id === 'b')?.hidden).toBe(false)
+
+  const recollapsed = canvasToggleGroupCollapsed(
+    collapsed!.nodes,
+    collapsed!.edges,
+    collapsed!.groupId
+  )
+  expect(recollapsed?.nodes.find((item) => item.id === 'a')?.hidden).toBe(true)
+  const expanded = canvasExpandSelection(
+    collapsed!.nodes,
+    collapsed!.edges
+  )
+  expect(expanded?.nodes.find((item) => item.id === 'a')?.hidden).toBe(false)
+})
+
+test('select all skips hidden collapsed children', () => {
+  const nodes = [
+    node('group', 'group', { x: 0, y: 0 }),
+    { ...node('child', 'text', { x: 10, y: 10 }), hidden: true },
+    node('free', 'text', { x: 300, y: 0 }),
+  ]
+  const selected = canvasSelectAll(nodes)
+  expect(selected.find((item) => item.id === 'group')?.selected).toBe(true)
+  expect(selected.find((item) => item.id === 'free')?.selected).toBe(true)
+  expect(selected.find((item) => item.id === 'child')?.selected).toBe(false)
 })
