@@ -49,6 +49,7 @@ import {
   type PlaygroundInspectorView,
 } from './components/workspace/playground-workspace'
 import {
+  DEFAULT_SESSION_TITLE,
   PLAYGROUND_IMPORT_ERRORS,
   PLAYGROUND_IMPORT_MAX_FILE_BYTES,
   PLAYGROUND_PARALLEL_MIN_MODELS,
@@ -56,6 +57,7 @@ import {
 } from './constants'
 import {
   useAutoReadAloud,
+  useAutoSessionTitle,
   useChatHandler,
   useParallelChat,
   usePlaygroundContext,
@@ -262,6 +264,19 @@ function PlaygroundContent(props: {
   const activeSession = sessions.find(
     (session) => session.id === activeSessionId
   )
+  // Automatic naming runs after a reply or comparison completes. It is silent,
+  // only replaces the untouched default title and writes through the ordinary
+  // rename/autosave chain.
+  useAutoSessionTitle({
+    enabled: preferences.isAutoTitleEnabled(activeSessionId),
+    sessionId: activeSessionId,
+    sessionTitle: activeSession?.title ?? DEFAULT_SESSION_TITLE,
+    messages,
+    model: context.summaryModel.trim() || config.model,
+    group: config.group,
+    isBusy: isGenerating || isComparing,
+    onRename: renameSession,
+  })
   const canonicalSessionId = activeSession?.server?.id ?? null
   const artifactController = usePlaygroundArtifacts(userId, canonicalSessionId)
   const artifactCreationEnabled = Boolean(
@@ -1041,12 +1056,24 @@ function PlaygroundContent(props: {
               autoReadHasOverride={preferences.hasSessionAutoReadOverride(
                 activeSessionId
               )}
+              autoTitleDefaultEnabled={preferences.autoTitleDefault}
+              autoTitleEnabled={preferences.isAutoTitleEnabled(activeSessionId)}
+              autoTitleHasOverride={preferences.hasSessionAutoTitleOverride(
+                activeSessionId
+              )}
               onAutoReadChange={(value) =>
                 preferences.setSessionAutoRead(activeSessionId, value)
               }
               onAutoReadDefaultChange={preferences.setAutoReadDefault}
               onAutoReadUseDefault={() =>
                 preferences.setSessionAutoRead(activeSessionId, null)
+              }
+              onAutoTitleChange={(value) =>
+                preferences.setSessionAutoTitle(activeSessionId, value)
+              }
+              onAutoTitleDefaultChange={preferences.setAutoTitleDefault}
+              onAutoTitleUseDefault={() =>
+                preferences.setSessionAutoTitle(activeSessionId, null)
               }
               disabled={
                 isGenerating ||

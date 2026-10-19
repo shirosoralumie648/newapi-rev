@@ -98,6 +98,15 @@ interface PlaygroundInputProps {
   onAutoReadChange: (value: boolean) => void
   onAutoReadUseDefault: () => void
   onAutoReadDefaultChange: (value: boolean) => void
+  /** Effective automatic naming state of the active conversation. */
+  autoTitleEnabled: boolean
+  /** Account default applied to conversations without an override. */
+  autoTitleDefaultEnabled: boolean
+  /** Whether the active conversation carries an explicit naming choice. */
+  autoTitleHasOverride: boolean
+  onAutoTitleChange: (value: boolean) => void
+  onAutoTitleUseDefault: () => void
+  onAutoTitleDefaultChange: (value: boolean) => void
 }
 
 export function PlaygroundInput({
@@ -136,6 +145,12 @@ export function PlaygroundInput({
   onAutoReadChange,
   onAutoReadUseDefault,
   onAutoReadDefaultChange,
+  autoTitleEnabled,
+  autoTitleDefaultEnabled,
+  autoTitleHasOverride,
+  onAutoTitleChange,
+  onAutoTitleUseDefault,
+  onAutoTitleDefaultChange,
 }: PlaygroundInputProps) {
   const { t } = useTranslation()
   const { text, updateText, appendText, handleKeyDown, rememberSubmittedText } =
@@ -208,6 +223,9 @@ export function PlaygroundInput({
                 autoReadDefaultEnabled={autoReadDefaultEnabled}
                 autoReadEnabled={autoReadEnabled}
                 autoReadHasOverride={autoReadHasOverride}
+                autoTitleDefaultEnabled={autoTitleDefaultEnabled}
+                autoTitleEnabled={autoTitleEnabled}
+                autoTitleHasOverride={autoTitleHasOverride}
                 config={config}
                 contextPlan={contextPlan}
                 contextSettings={contextSettings}
@@ -219,6 +237,9 @@ export function PlaygroundInput({
                 onAutoReadChange={onAutoReadChange}
                 onAutoReadDefaultChange={onAutoReadDefaultChange}
                 onAutoReadUseDefault={onAutoReadUseDefault}
+                onAutoTitleChange={onAutoTitleChange}
+                onAutoTitleDefaultChange={onAutoTitleDefaultChange}
+                onAutoTitleUseDefault={onAutoTitleUseDefault}
                 compareModels={compareModels}
                 onCompareModelsChange={onCompareModelsChange}
                 onClearMessages={onClearMessages}

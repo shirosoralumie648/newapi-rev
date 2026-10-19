@@ -43,6 +43,7 @@ import type {
 } from '../../types'
 import { PlaygroundAssetPicker } from './playground-asset-picker'
 import { PlaygroundAutoReadControl } from './playground-auto-read-control'
+import { PlaygroundAutoTitleControl } from './playground-auto-title-control'
 import { PlaygroundComparePanel } from './playground-compare-panel'
 import { PlaygroundContextPanel } from './playground-context-panel'
 import { PlaygroundDictationPanel } from './playground-dictation-panel'
@@ -90,6 +91,15 @@ type PlaygroundInputToolsProps = {
   onAutoReadChange: (value: boolean) => void
   onAutoReadUseDefault: () => void
   onAutoReadDefaultChange: (value: boolean) => void
+  /** Effective automatic naming state of the active conversation. */
+  autoTitleEnabled: boolean
+  /** Account default applied to conversations without an override. */
+  autoTitleDefaultEnabled: boolean
+  /** Whether the active conversation carries an explicit naming choice. */
+  autoTitleHasOverride: boolean
+  onAutoTitleChange: (value: boolean) => void
+  onAutoTitleUseDefault: () => void
+  onAutoTitleDefaultChange: (value: boolean) => void
 }
 
 export function PlaygroundInputTools({
@@ -120,6 +130,12 @@ export function PlaygroundInputTools({
   onAutoReadChange,
   onAutoReadUseDefault,
   onAutoReadDefaultChange,
+  autoTitleEnabled,
+  autoTitleDefaultEnabled,
+  autoTitleHasOverride,
+  onAutoTitleChange,
+  onAutoTitleUseDefault,
+  onAutoTitleDefaultChange,
 }: PlaygroundInputToolsProps) {
   const { t } = useTranslation()
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
@@ -179,6 +195,16 @@ export function PlaygroundInputTools({
           onDefaultChange={onAutoReadDefaultChange}
           onEnabledChange={onAutoReadChange}
           onUseDefault={onAutoReadUseDefault}
+        />
+
+        <PlaygroundAutoTitleControl
+          defaultEnabled={autoTitleDefaultEnabled}
+          disabled={disabled}
+          enabled={autoTitleEnabled}
+          hasOverride={autoTitleHasOverride}
+          onDefaultChange={onAutoTitleDefaultChange}
+          onEnabledChange={onAutoTitleChange}
+          onUseDefault={onAutoTitleUseDefault}
         />
 
         <PlaygroundComparePanel

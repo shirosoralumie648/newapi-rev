@@ -224,17 +224,28 @@ export const STORAGE_KEYS = {
   MEMORY_EXTRACTION: 'playground_memory_extraction',
   NEW_SESSION_DEFAULTS: 'playground_new_session_defaults',
   AUTO_READ_ALOUD: 'playground_auto_read_aloud',
+  AUTO_TITLE: 'playground_auto_title',
 } as const
 
 // The new-conversation defaults are a client-side preference, not a store: the
 // system prompt copied into a new conversation is bounded by the same byte
 // budget the server accepts for a stored prompt.
 export const PLAYGROUND_NEW_SESSION_PROMPT_MAX_BYTES = 16 << 10
-// Bound the per-account auto read-aloud overrides so a corrupted store cannot
-// grow without limit.
-export const PLAYGROUND_AUTO_READ_OVERRIDE_MAX_ENTRIES = 200
+// Bound the per-account preference overrides so a corrupted store cannot grow
+// without limit.
+export const PLAYGROUND_PREFERENCE_OVERRIDE_MAX_ENTRIES = 200
 
 export const DEFAULT_SESSION_TITLE = 'New conversation'
+
+// Automatic conversation naming. The title request is one ordinary billed
+// non-streaming `/pg/chat/completions` call; it reads only the first user
+// message and the latest completed reply, so its input and output stay bounded.
+export const PLAYGROUND_AUTO_TITLE_MAX_LENGTH = 50
+export const PLAYGROUND_AUTO_TITLE_INPUT_MAX_CHARS = 4000
+export const PLAYGROUND_AUTO_TITLE_MAX_TOKENS = 64
+// This is model input, not user interface text, so it stays untranslated.
+export const PLAYGROUND_AUTO_TITLE_SYSTEM_PROMPT = `Write a short title for the following conversation. Use the language of the conversation, keep it at most ${PLAYGROUND_AUTO_TITLE_MAX_LENGTH} characters, and reply with the title only, without quotes or ending punctuation.`
+
 export const MAX_STORED_SESSIONS = 20
 
 // Assistant preset display bounds. The server validates the same values and
