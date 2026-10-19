@@ -58,6 +58,29 @@ test('the read-aloud action reports the message it was used on', async () => {
   expect(onReadAloud).toHaveBeenCalledWith(message)
 })
 
+test('the generate actions hand the message and the media kind to the canvas', async () => {
+  const user = userEvent.setup()
+  const onGenerateMedia = vi.fn()
+
+  render(<MessageActions message={message} onGenerateMedia={onGenerateMedia} />)
+  await user.click(screen.getByRole('button', { name: 'Generate image' }))
+  await user.click(screen.getByRole('button', { name: 'Generate video' }))
+
+  expect(onGenerateMedia).toHaveBeenNthCalledWith(1, message, 'image')
+  expect(onGenerateMedia).toHaveBeenNthCalledWith(2, message, 'video')
+})
+
+test('the generate actions are hidden without a handler', () => {
+  render(<MessageActions message={message} />)
+
+  expect(
+    screen.queryByRole('button', { name: 'Generate image' })
+  ).not.toBeInTheDocument()
+  expect(
+    screen.queryByRole('button', { name: 'Generate video' })
+  ).not.toBeInTheDocument()
+})
+
 test('the read-aloud action is hidden without a handler', () => {
   render(<MessageActions message={message} />)
 

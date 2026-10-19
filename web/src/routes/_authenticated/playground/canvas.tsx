@@ -16,15 +16,26 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createFileRoute, redirect } from '@tanstack/react-router'
+import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router'
 import z from 'zod'
 
 import { Main } from '@/components/layout'
 import { CanvasWorkspace } from '@/features/canvas'
+import {
+  canvasGenerationPrefill,
+  type CanvasArtifactTarget,
+  type CanvasGenerationSearch,
+} from '@/features/canvas/lib/canvas-navigation'
 import { isSidebarModuleEnabled } from '@/lib/nav-modules'
 
 const canvasSearchSchema = z.object({
   project: z.string().optional(),
+  prompt: z.string().optional(),
+  generate: z.enum(['image', 'video']).optional(),
+  session: z.string().optional(),
+  message: z.string().optional(),
+  attachment: z.string().optional(),
+  artifact: z.string().optional(),
 })
 
 export const Route = createFileRoute('/_authenticated/playground/canvas')({
@@ -39,9 +50,26 @@ export const Route = createFileRoute('/_authenticated/playground/canvas')({
 
 function CanvasPage() {
   const search = Route.useSearch()
+  const navigate = useNavigate()
+  const prefill = canvasGenerationPrefill(search as CanvasGenerationSearch)
+  const artifactTarget: CanvasArtifactTarget | null =
+    search.artifact && search.session
+      ? { sessionId: search.session, artifactId: search.artifact }
+      : null
   return (
     <Main className='p-0'>
-      <CanvasWorkspace initialProjectId={search.project} />
+      <CanvasWorkspace
+        artifactTarget={artifactTarget}
+        generationPrefill={prefill}
+        initialProjectId={search.project}
+        onGenerationPrefillApplied={() => {
+          void navigate({
+            to: '/playground/canvas',
+            search: search.project ? { project: search.project } : {},
+            replace: true,
+          })
+        }}
+      />
     </Main>
   )
 }

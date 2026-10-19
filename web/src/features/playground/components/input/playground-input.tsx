@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -27,7 +27,6 @@ import {
   PromptInputAttachments,
   PromptInputFooter,
   PromptInputTextarea,
-  usePromptInputAttachments,
   type PromptInputMessage,
 } from '@/components/ai-elements/prompt-input'
 
@@ -90,16 +89,6 @@ interface PlaygroundInputProps {
   onContextSettingsChange: (settings: PlaygroundContextSettings) => void
   onRemoveContextSummary: () => void
   onSummarizeContext: () => void
-  /**
-   * Files the workspace wants added to the composer (for example "send to
-   * chat" from the asset library). Each array is consumed once and validated
-   * through the normal attachment path.
-   */
-  pendingFiles?: File[]
-  onPendingFilesConsumed?: () => void
-  /** Text appended to the composer exactly once, e.g. an artifact body. */
-  pendingText?: string | null
-  onPendingTextConsumed?: () => void
 }
 
 export function PlaygroundInput({
@@ -132,21 +121,11 @@ export function PlaygroundInput({
   onContextSettingsChange,
   onRemoveContextSummary,
   onSummarizeContext,
-  pendingFiles,
-  onPendingFilesConsumed,
-  pendingText,
-  onPendingTextConsumed,
 }: PlaygroundInputProps) {
   const { t } = useTranslation()
   const { text, updateText, appendText, handleKeyDown, rememberSubmittedText } =
     usePlaygroundComposerMemory(sessionId)
   const [submitting, setSubmitting] = useState(false)
-
-  useEffect(() => {
-    if (pendingText == null) return
-    appendText(pendingText)
-    onPendingTextConsumed?.()
-  }, [appendText, onPendingTextConsumed, pendingText])
 
   const handleSubmit = async (message: PromptInputMessage) => {
     if (disabled || submitting) return
@@ -177,12 +156,6 @@ export function PlaygroundInput({
         onError={(error) => toast.error(error.message)}
         onSubmit={handleSubmit}
       >
-        {pendingFiles && pendingFiles.length > 0 ? (
-          <PlaygroundPendingFiles
-            files={pendingFiles}
-            onConsumed={onPendingFilesConsumed}
-          />
-        ) : null}
         <div className='flex flex-wrap gap-1.5 px-3 pt-3 empty:hidden'>
           <PromptInputAttachments>
             {(attachment) => <PromptInputAttachment data={attachment} />}
@@ -245,27 +218,4 @@ export function PlaygroundInput({
       </PromptInput>
     </div>
   )
-}
-
-/**
- * Hands a batch of externally supplied files to the composer exactly once.
- * It must live inside PromptInput so it joins the same local attachments
- * context as the file picker, and the batch identity guard keeps re-renders
- * from adding the same files again.
- */
-function PlaygroundPendingFiles(props: {
-  files: File[]
-  onConsumed?: () => void
-}) {
-  const attachments = usePromptInputAttachments()
-  const consumedRef = useRef<File[] | null>(null)
-
-  useEffect(() => {
-    if (props.files.length === 0 || consumedRef.current === props.files) return
-    consumedRef.current = props.files
-    attachments.add(props.files)
-    props.onConsumed?.()
-  }, [attachments, props.files, props.onConsumed])
-
-  return null
 }

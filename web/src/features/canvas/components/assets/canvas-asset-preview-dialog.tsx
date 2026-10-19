@@ -29,13 +29,13 @@ import { Markdown } from '@/components/ui/markdown'
 import { TaskArtifactMedia } from '@/features/usage-logs/components/task-artifacts'
 import { getServerMessage } from '@/lib/server-error-message'
 
-import { getPlaygroundArtifact } from '../../artifact-api'
-import type { PlaygroundAssetItem } from '../../asset-api'
-import { playgroundAttachmentKind } from '../../constants'
-import { useAttachmentPreviewUrl } from '../../hooks'
-import { playgroundQueryKeys } from '../../lib/query-keys'
+import { getPlaygroundArtifact } from '@/features/playground/artifact-api'
+import type { PlaygroundAssetItem } from '@/features/playground/asset-api'
+import { playgroundAttachmentKind } from '@/features/playground/constants'
+import { useAttachmentPreviewUrl } from '@/features/playground/hooks'
+import { playgroundQueryKeys } from '@/features/playground/lib/query-keys'
 
-interface PlaygroundAssetPreviewDialogProps {
+interface CanvasAssetPreviewDialogProps {
   asset: PlaygroundAssetItem | null
   userId: number | null
   onOpenChange: (open: boolean) => void
@@ -47,8 +47,8 @@ interface PlaygroundAssetPreviewDialogProps {
  * the ordinary artifact endpoint, so both keep the server as the source of
  * truth and never embed stored bytes in the list itself.
  */
-export function PlaygroundAssetPreviewDialog(
-  props: PlaygroundAssetPreviewDialogProps
+export function CanvasAssetPreviewDialog(
+  props: CanvasAssetPreviewDialogProps
 ) {
   const { t } = useTranslation()
   const asset = props.asset

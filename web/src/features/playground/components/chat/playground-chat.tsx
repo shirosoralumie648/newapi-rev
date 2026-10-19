@@ -72,6 +72,7 @@ interface PlaygroundChatProps {
   onSelectVersion?: (message: MessageType, versionIndex: number) => void
   onCreateArtifact?: (message: MessageType) => void
   onSendToCanvas?: (message: MessageType) => void
+  onGenerateMedia?: (message: MessageType, kind: 'image' | 'video') => void
   onSelectPrompt?: (prompt: string) => void
   onProvideToolResult?: (
     message: MessageType,
@@ -106,6 +107,7 @@ export function PlaygroundChat({
   onSelectVersion,
   onCreateArtifact,
   onSendToCanvas,
+  onGenerateMedia,
   onSelectPrompt,
   onProvideToolResult,
   onDenyToolCall,
@@ -182,6 +184,7 @@ export function PlaygroundChat({
         onDelete={onDeleteMessage}
         onCreateArtifact={onCreateArtifact}
         onSendToCanvas={onSendToCanvas}
+        onGenerateMedia={onGenerateMedia}
         isSourceVisible={isSourceVisible}
         isGenerating={isGenerating}
         alwaysVisible={alwaysShowActions}

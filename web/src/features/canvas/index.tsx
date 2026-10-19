@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useNavigate } from '@tanstack/react-router'
 import { History, Menu, PanelLeft } from 'lucide-react'
-import { useCallback, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -45,13 +45,23 @@ import {
   useCanvasProject,
   type CanvasSaveStatus,
 } from './hooks/use-canvas-project'
-import { canvasSourceSearch } from './lib/canvas-navigation'
+import {
+  canvasSourceSearch,
+  type CanvasArtifactTarget,
+  type CanvasGenerationPrefill,
+} from './lib/canvas-navigation'
 import type { CanvasSourceTarget } from './lib/canvas-navigation'
 import type { CanvasServerDocument } from './types'
 
 interface CanvasWorkspaceProps {
   /** Project to open on first load; overrides the last-used selection. */
   initialProjectId?: string
+  /** Task node a conversation message action asked to prefill. */
+  generationPrefill?: CanvasGenerationPrefill | null
+  /** Saved artifact a conversation creation or canvas link opens. */
+  artifactTarget?: CanvasArtifactTarget | null
+  /** Clears the one-shot generation deep link after the editor applied it. */
+  onGenerationPrefillApplied?: () => void
 }
 
 export function CanvasWorkspace(props: CanvasWorkspaceProps) {
@@ -60,6 +70,9 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps) {
     <CanvasWorkspaceContent
       key={userId ?? 'signed-out'}
       initialProjectId={props.initialProjectId}
+      generationPrefill={props.generationPrefill}
+      artifactTarget={props.artifactTarget}
+      onGenerationPrefillApplied={props.onGenerationPrefillApplied}
     />
   )
 }
@@ -82,6 +95,8 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
   const [listOpen, setListOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [epoch, setEpoch] = useState(0)
+  const createdForPrefill = useRef(false)
+  const { project, status, error, dirty, conflict } = controller
 
   const reportError = useCallback(
     (error: unknown) => {
@@ -199,7 +214,29 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
     [navigate]
   )
 
-  const { project, status, error, dirty, conflict } = controller
+  const handleOpenConversation = useCallback(
+    (sessionId: string) => {
+      void navigate({ to: '/playground', search: { session: sessionId } })
+    },
+    [navigate]
+  )
+
+  // A generation prefill needs a board to land on. When the account has no
+  // canvas yet, create one before the editor mounts so the task node is kept.
+  const prefill = props.generationPrefill
+  useEffect(() => {
+    if (
+      !prefill ||
+      project ||
+      status !== 'ready' ||
+      createdForPrefill.current
+    ) {
+      return
+    }
+    createdForPrefill.current = true
+    void handleCreate()
+  }, [handleCreate, prefill, project, status])
+
   const projectList = (
     <CanvasProjectList
       activeProjectId={project?.id ?? null}
@@ -231,12 +268,17 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
     body = (
       <CanvasEditor
         key={`${project.id}:${epoch}`}
+        artifactTarget={props.artifactTarget}
         disabled={status === 'loading'}
+        generationPrefill={props.generationPrefill}
         onBeforeExportArchive={controller.flushNow}
         onChange={handleDocumentChange}
+        onGenerationPrefillApplied={props.onGenerationPrefillApplied}
         onImportArchive={handleImportArchive}
+        onOpenConversation={handleOpenConversation}
         onOpenSource={handleOpenSource}
         project={project}
+        userId={userId}
       />
     )
   } else {

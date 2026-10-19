@@ -20,6 +20,7 @@ import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router'
 import z from 'zod'
 
 import { Main } from '@/components/layout'
+import type { CanvasRouteSearch } from '@/features/canvas/lib/canvas-navigation'
 import { Playground } from '@/features/playground'
 import { isSidebarModuleEnabled } from '@/lib/nav-modules'
 
@@ -42,16 +43,14 @@ export const Route = createFileRoute('/_authenticated/playground/')({
 function PlaygroundPage() {
   const search = Route.useSearch()
   const navigate = useNavigate()
+  const openCanvas = (target: CanvasRouteSearch) => {
+    void navigate({ to: '/playground/canvas', search: target })
+  }
   return (
     <Main className='p-0'>
       <Playground
         target={search}
-        onOpenCanvas={(projectId) => {
-          void navigate({
-            to: '/playground/canvas',
-            search: { project: projectId },
-          })
-        }}
+        onOpenCanvas={openCanvas}
         onOpenUpgrade={() => void navigate({ to: '/wallet' })}
       />
     </Main>

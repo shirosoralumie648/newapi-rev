@@ -25,7 +25,7 @@ import {
   PLAYGROUND_ARTIFACT_IFRAME_ALLOW,
   PLAYGROUND_ARTIFACT_IFRAME_SANDBOX,
   type PlaygroundSandboxArtifactKind,
-} from '../../lib/sandbox/artifact-sandbox'
+} from '@/features/playground/lib/sandbox/artifact-sandbox'
 
 interface SandboxedArtifactPreviewProps {
   kind: PlaygroundSandboxArtifactKind
