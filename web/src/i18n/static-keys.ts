@@ -1221,4 +1221,10 @@ export const STATIC_I18N_KEYS = [
   // them.
   'Pending',
   'Grace',
+  // Canvas PNG export problem messages render through t(error.message) from
+  // CANVAS_PNG_EXPORT_MESSAGES, so the literal scan cannot see them.
+  'The canvas has no nodes to export.',
+  'Select at least one node to export.',
+  'The PNG image could not be created.',
+  'The PNG image could not be saved to the asset library.',
 ] as const

@@ -17,6 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import {
+  AlignHorizontalSpaceAround,
+  AlignVerticalSpaceAround,
   Bot,
   Download,
   Pencil,
@@ -35,6 +37,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
@@ -53,8 +56,10 @@ interface CanvasToolbarProps {
   canSelectAll: boolean
   canGroup: boolean
   canUngroup: boolean
+  canDistribute: boolean
   /** Whether exporting the selected nodes is possible. */
   canExportSelection: boolean
+  exportingPng: boolean
   runPhase: CanvasWorkflowRunPhase
   /** Whether the inspector shows the assistant instead of node details. */
   assistantOpen: boolean
@@ -69,9 +74,13 @@ interface CanvasToolbarProps {
   onSelectAll: () => void
   onGroupSelection: () => void
   onUngroupSelection: () => void
+  onDistributeHorizontal: () => void
+  onDistributeVertical: () => void
   onImportFile: (file: File) => void
   onImportArchiveFile: (file: File) => void
   onExport: () => void
+  onExportPng: () => void
+  onExportSelectionPng: () => void
   onExportArchive: () => void
   onExportSelectionArchive: () => void
   onToggleAssistant: () => void
@@ -162,6 +171,21 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
           >
             {t('Ungroup selection')}
           </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            disabled={props.disabled || !props.canDistribute}
+            onClick={props.onDistributeHorizontal}
+          >
+            <AlignHorizontalSpaceAround aria-hidden='true' />
+            {t('Distribute horizontally')}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={props.disabled || !props.canDistribute}
+            onClick={props.onDistributeVertical}
+          >
+            <AlignVerticalSpaceAround aria-hidden='true' />
+            {t('Distribute vertically')}
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -239,6 +263,19 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
           {t('Export')}
         </DropdownMenuTrigger>
         <DropdownMenuContent align='start' className='w-44'>
+          <DropdownMenuItem
+            disabled={props.exportingPng}
+            onClick={props.onExportPng}
+          >
+            {t('PNG image')}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={props.exportingPng || !props.canExportSelection}
+            onClick={props.onExportSelectionPng}
+          >
+            {t('PNG of selected nodes')}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem onClick={props.onExport}>
             {t('JSON file')}
           </DropdownMenuItem>

@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import {
   MiniMap,
   ReactFlowProvider,
+  type EdgeTypes,
   type NodeTypes,
   type Viewport,
 } from '@xyflow/react'
@@ -29,6 +30,7 @@ import { toast } from 'sonner'
 import { Canvas } from '@/components/ai-elements/canvas'
 import { Panel } from '@/components/ai-elements/panel'
 import { WorkspaceInspector } from '@/components/workspace-inspector'
+import { uploadPlaygroundAttachmentDirect } from '@/features/playground/lib/attachment-upload'
 import { useIsMobile } from '@/hooks/use-mobile'
 import {
   getServerMessage,
@@ -36,7 +38,12 @@ import {
 } from '@/lib/server-error-message'
 
 import { exportCanvasArchive } from '../api'
-import { CANVAS_DROP_MESSAGES, CANVAS_EDIT_MESSAGES } from '../constants'
+import {
+  CANVAS_DROP_MESSAGES,
+  CANVAS_EDIT_MESSAGES,
+  CANVAS_NODE_KIND_LABELS,
+  CANVAS_PNG_EXPORT_MESSAGES,
+} from '../constants'
 import {
   useCanvasAssistant,
   type CanvasAssistantMessage,
@@ -60,6 +67,12 @@ import {
   validateCanvasDocument,
 } from '../lib/canvas-document'
 import { CanvasDropError, canvasDropEntries } from '../lib/canvas-drop'
+import {
+  CanvasPngExportError,
+  renderCanvasPng,
+  type CanvasPngExportResult,
+  type CanvasPngExportScope,
+} from '../lib/canvas-export'
 import type { CanvasSourceTarget } from '../lib/canvas-navigation'
 import { canvasWorkflowMentions } from '../lib/canvas-workflow'
 import type {
@@ -70,14 +83,18 @@ import type {
   CanvasServerDocument,
   CanvasServerProject,
 } from '../types'
+import { CanvasAlignmentGuides } from './canvas-alignment-guides'
 import { CanvasAssistantPanel } from './canvas-assistant-panel'
 import { CanvasDropZone } from './canvas-drop-zone'
+import { CanvasFlowEdgeView } from './canvas-edge'
 import { CanvasImageToolsDialog } from './canvas-image-tools-dialog'
 import { CanvasInspectorViewToggle } from './canvas-inspector-view-toggle'
 import { CanvasFlowNodeView, CanvasGroupNodeView } from './canvas-node'
 import { CanvasNodeInspector } from './canvas-node-inspector'
+import { CanvasPngExportDialog } from './canvas-png-export-dialog'
 import { CanvasRunBudgetDialog } from './canvas-run-budget-dialog'
 import { CanvasToolbar } from './canvas-toolbar'
+import { CanvasViewportControls } from './canvas-viewport-controls'
 
 const canvasNodeTypes: NodeTypes = {
   text: CanvasFlowNodeView,
@@ -93,6 +110,12 @@ const canvasNodeTypes: NodeTypes = {
   video: CanvasFlowNodeView,
   audio: CanvasFlowNodeView,
   group: CanvasGroupNodeView,
+}
+
+// `toServerDocument` persists only server-known edge fields, so the custom edge
+// keeps its interactions local (delete through xyflow) instead of storing data.
+const canvasEdgeTypes: EdgeTypes = {
+  default: CanvasFlowEdgeView,
 }
 
 interface CanvasEditorProps {
@@ -158,6 +181,11 @@ export function CanvasEditor(props: CanvasEditorProps) {
 
   const [inspectorView, setInspectorView] =
     useState<CanvasInspectorView>('details')
+
+  const [pngExport, setPngExport] = useState<CanvasPngExportResult | null>(null)
+  const [pngBusy, setPngBusy] = useState(false)
+  const [pngSaving, setPngSaving] = useState(false)
+  const [pngSaved, setPngSaved] = useState(false)
 
   const imageTools = useCanvasImageTools({
     canvasId: props.project.id,
@@ -295,6 +323,72 @@ export function CanvasEditor(props: CanvasEditorProps) {
     )
   }, [editor.edges, editor.nodes, props.project.title])
 
+  const handleExportPng = useCallback(
+    async (scope: CanvasPngExportScope) => {
+      setPngBusy(true)
+      try {
+        const kindLabels = Object.fromEntries(
+          Object.entries(CANVAS_NODE_KIND_LABELS).map(([kind, labelKey]) => [
+            kind,
+            t(labelKey),
+          ])
+        )
+        const result = await renderCanvasPng(
+          editor.nodes,
+          editor.edges,
+          scope,
+          props.project.title,
+          {
+            theme: document.documentElement.classList.contains('dark')
+              ? 'dark'
+              : 'light',
+            kindLabels,
+          }
+        )
+        setPngExport(result)
+        setPngSaved(false)
+      } catch (error) {
+        toast.error(
+          t(
+            error instanceof CanvasPngExportError
+              ? error.message
+              : CANVAS_PNG_EXPORT_MESSAGES.FAILED
+          )
+        )
+      } finally {
+        setPngBusy(false)
+      }
+    },
+    [editor.edges, editor.nodes, props.project.title, t]
+  )
+
+  const handleDownloadPng = useCallback(() => {
+    if (!pngExport) return
+    downloadCanvasFile(pngExport.filename, pngExport.blob)
+  }, [pngExport])
+
+  const handleSavePng = useCallback(async () => {
+    if (!pngExport || pngSaving) return
+    setPngSaving(true)
+    try {
+      await uploadPlaygroundAttachmentDirect(
+        { canvasId: props.project.id },
+        new File([pngExport.blob], pngExport.filename, { type: 'image/png' })
+      )
+      setPngSaved(true)
+      toast.success(t('PNG saved to the library.'))
+    } catch (error) {
+      toast.error(
+        translateServerText(
+          t,
+          getServerMessage(error) ?? CANVAS_PNG_EXPORT_MESSAGES.SAVE_FAILED
+        )
+      )
+    } finally {
+      setPngSaving(false)
+    }
+  }, [pngExport, pngSaving, props.project.id, t])
+
   const handleExportArchive = useCallback(
     async (nodeIds?: string[]) => {
       try {
@@ -403,6 +497,8 @@ export function CanvasEditor(props: CanvasEditorProps) {
             >
               <Canvas
                 defaultViewport={props.project.document.viewport}
+                deleteKeyCode={null}
+                edgeTypes={canvasEdgeTypes}
                 edges={editor.edges}
                 fitView={!props.project.document.viewport}
                 nodeTypes={canvasNodeTypes}
@@ -410,33 +506,53 @@ export function CanvasEditor(props: CanvasEditorProps) {
                 onConnect={editor.handleConnect}
                 onEdgesChange={editor.handleEdgesChange}
                 onMoveEnd={handleMoveEnd}
+                onNodeDrag={editor.handleNodeDrag}
+                onNodeDragStart={editor.handleNodeDragStart}
+                onNodeDragStop={editor.handleNodeDragStop}
                 onNodesChange={editor.handleNodesChange}
+                onReconnect={(edge, connection) =>
+                  editor.handleReconnect(edge as CanvasFlowEdge, connection)
+                }
+                showControls={false}
               >
+                <CanvasAlignmentGuides guides={editor.alignmentGuides} />
                 <Panel position='top-left'>
                   <CanvasToolbar
                     assistantOpen={inspectorView === 'assistant'}
                     canCopy={editor.selectedCount > 0}
+                    canDistribute={editor.canDistribute}
                     canExportSelection={editor.selectedCount > 0}
                     canGroup={editor.canGroup}
                     canPaste={editor.hasClipboard}
                     canRedo={editor.canRedo}
                     canSelectAll={editor.nodes.length > 0}
-                    canUndo={editor.canUndo}
                     canUngroup={editor.canUngroup}
+                    canUndo={editor.canUndo}
                     disabled={props.disabled}
+                    exportingPng={pngBusy}
                     group={workflowOptions.group}
                     groups={workflowOptions.groups}
                     onAddNode={handleAddNode}
                     onCancelRun={() => void workflow.cancel()}
                     onCopy={() => void editor.copySelection()}
+                    onDistributeHorizontal={() =>
+                      editor.distributeSelection('horizontal')
+                    }
+                    onDistributeVertical={() =>
+                      editor.distributeSelection('vertical')
+                    }
                     onExport={handleExport}
                     onExportArchive={() => void handleExportArchive()}
+                    onExportPng={() => void handleExportPng('canvas')}
                     onExportSelectionArchive={() =>
                       void handleExportArchive(
                         editor.nodes
                           .filter((node) => node.selected === true)
                           .map((node) => node.id)
                       )
+                    }
+                    onExportSelectionPng={() =>
+                      void handleExportPng('selection')
                     }
                     onGroupChange={workflowOptions.setGroup}
                     onGroupSelection={() => void editor.groupSelection()}
@@ -451,6 +567,11 @@ export function CanvasEditor(props: CanvasEditorProps) {
                     onUngroupSelection={() => void editor.ungroupSelection()}
                     runPhase={workflow.phase}
                   />
+                </Panel>
+                <Panel position='bottom-left'>
+                  <div className='bg-card rounded-md border shadow-sm'>
+                    <CanvasViewportControls />
+                  </div>
                 </Panel>
                 <MiniMap className='bg-card!' pannable zoomable />
               </Canvas>
@@ -473,6 +594,21 @@ export function CanvasEditor(props: CanvasEditorProps) {
         source={imageTools.source}
         sourceSize={imageTools.sourceSize}
         tool={imageTools.tool}
+      />
+
+      <CanvasPngExportDialog
+        onDownload={handleDownloadPng}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPngExport(null)
+            setPngSaved(false)
+          }
+        }}
+        onSave={() => void handleSavePng()}
+        open={pngExport !== null}
+        result={pngExport}
+        saved={pngSaved}
+        saving={pngSaving}
       />
 
       <CanvasRunBudgetDialog
