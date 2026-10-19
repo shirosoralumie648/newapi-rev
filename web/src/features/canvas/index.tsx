@@ -18,14 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useNavigate } from '@tanstack/react-router'
 import { BookOpen, History, Menu, PanelLeft } from 'lucide-react'
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -49,7 +42,6 @@ import { CanvasKnowledgeBaseSheet } from './components/canvas-knowledge-base-she
 import { CanvasProjectList } from './components/canvas-project-list'
 import { CanvasShareDialog } from './components/canvas-share-dialog'
 import { CanvasSnapshotHistory } from './components/canvas-snapshot-history'
-import { CanvasImageWorkbench } from './components/image/canvas-image-workbench'
 import { CANVAS_DEFAULT_TITLE } from './constants'
 import {
   useCanvasProject,
@@ -61,11 +53,7 @@ import {
   type CanvasGenerationPrefill,
 } from './lib/canvas-navigation'
 import type { CanvasSourceTarget } from './lib/canvas-navigation'
-import type {
-  CanvasProjectMode,
-  CanvasServerDocument,
-  CanvasServerProject,
-} from './types'
+import type { CanvasProjectMode, CanvasServerDocument } from './types'
 
 interface CanvasWorkspaceProps {
   /** Project to open on first load; overrides the last-used selection. */
@@ -110,30 +98,15 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
   const [historyOpen, setHistoryOpen] = useState(false)
   const [knowledgeOpen, setKnowledgeOpen] = useState(false)
   const [epoch, setEpoch] = useState(0)
-  // Image projects start in the workbench; the board stays one toggle away.
-  const [view, setView] = useState<'workbench' | 'board'>('workbench')
   const createdForPrefill = useRef(false)
   const { project, status, error, dirty, conflict } = controller
 
-  // The mounted view owns its local editor state until it unmounts. The last
-  // document it reported is kept here keyed by project + epoch, so switching
-  // workbench/board remounts from the fresh document instead of the stale
-  // project row the save loop has not replaced yet.
-  const liveDocumentRef = useRef<{
-    key: string
-    document: CanvasServerDocument
-  } | null>(null)
-  const projectKey = project ? `${project.id}:${epoch}` : ''
-  const liveDocument =
-    project && liveDocumentRef.current?.key === projectKey
-      ? liveDocumentRef.current.document
-      : project?.document
-  const activeProject = useMemo(() => {
-    if (!project) return null
-    return liveDocument && liveDocument !== project.document
-      ? { ...project, document: liveDocument }
-      : project
-  }, [liveDocument, project])
+  const reportError = useCallback(
+    (error: unknown) => {
+      toast.error(t(getServerMessage(error) ?? 'Canvas operation failed.'))
+    },
+    [t]
+  )
 
   const handleCreate = useCallback(
     async (mode: CanvasProjectMode = 'infinite') => {
@@ -146,22 +119,6 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
     },
     [controller, reportError]
   )
-
-  const reportError = useCallback(
-    (error: unknown) => {
-      toast.error(t(getServerMessage(error) ?? 'Canvas operation failed.'))
-    },
-    [t]
-  )
-
-  const handleCreate = useCallback(async () => {
-    try {
-      await controller.createNewProject()
-      setListOpen(false)
-    } catch (error) {
-      reportError(error)
-    }
-  }, [controller, reportError])
 
   const handleSelect = useCallback(
     async (projectId: string) => {
@@ -337,7 +294,7 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
         description={t('Create a canvas to start arranging nodes.')}
         title={t('No canvas projects yet')}
         action={
-          <Button onClick={handleCreate} type='button'>
+          <Button onClick={() => void handleCreate()} type='button'>
             {t('New canvas')}
           </Button>
         }
