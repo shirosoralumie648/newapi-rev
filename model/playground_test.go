@@ -119,14 +119,14 @@ func playgroundTestDB(t *testing.T, dialect string) *gorm.DB {
 	common.SetDatabaseTypes(common.DatabaseType(dialect), previousLog)
 	model.DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundKnowledgeChunk{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasTemplateAsset{}, &model.PlaygroundCanvasTemplate{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundComparisonRun{}, &model.PlaygroundUserUsage{}, &model.PlaygroundUpload{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundMessage{}, &model.PlaygroundSessionShare{}, &model.PlaygroundSession{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundKnowledgeChunk{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasTemplateAsset{}, &model.PlaygroundCanvasTemplate{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundComparisonRun{}, &model.PlaygroundWorkflowRun{}, &model.PlaygroundUserUsage{}, &model.PlaygroundUpload{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundMessage{}, &model.PlaygroundSessionShare{}, &model.PlaygroundSession{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
 		model.DB = previous
 		common.SetDatabaseTypes(previousMain, previousLog)
 	})
-	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundSessionShare{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUpload{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasTemplate{}, &model.PlaygroundCanvasTemplateAsset{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeChunk{}, &model.PlaygroundComparisonRun{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundSessionShare{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUpload{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasTemplate{}, &model.PlaygroundCanvasTemplateAsset{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeChunk{}, &model.PlaygroundComparisonRun{}, &model.PlaygroundWorkflowRun{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -6917,7 +6917,7 @@ func TestPlaygroundTaskGenerationMetadataRoundTripAndFilters(t *testing.T) {
 				},
 				{
 					TaskID: "generation-without-metadata", UserId: 7, Platform: "sunoapi", Status: model.TaskStatusSuccess,
-					SubmitTime: common.GetTimestamp(),
+					SubmitTime:  common.GetTimestamp(),
 					PrivateData: model.TaskPrivateData{PlaygroundOrigin: true},
 				},
 			}
