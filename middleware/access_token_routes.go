@@ -113,6 +113,8 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/playground/sessions/:id":                                           accessTokenSessionRule,
 	"PATCH /api/playground/sessions/:id":                                         accessTokenSessionRule,
 	"DELETE /api/playground/sessions/:id":                                        accessTokenSessionRule,
+	"POST /api/playground/sessions/:id/share":                                    accessTokenSessionRule,
+	"DELETE /api/playground/sessions/:id/share":                                  accessTokenSessionRule,
 	"POST /api/playground/sessions/:id/restore":                                  accessTokenSessionRule,
 	"GET /api/playground/sessions/:id/export":                                    accessTokenSessionRule,
 	"GET /api/playground/sessions/:id/messages":                                  accessTokenSessionRule,

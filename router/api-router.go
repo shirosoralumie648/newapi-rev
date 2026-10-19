@@ -72,6 +72,12 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/verify/methods", middleware.UserAuth(), middleware.DisableCache(), controller.GetVerificationMethods)
 		apiRouter.POST("/verify", middleware.UserAuth(), middleware.CriticalRateLimit(), middleware.UserCriticalRateLimit("security-verification"), middleware.DisableCache(), controller.UniversalVerify)
 
+		// A public share link is anonymous and read-only. It is registered
+		// outside the authenticated /playground group; the handler still
+		// validates the token hash on every request and returns one identical
+		// 404 for revoked, expired and unknown links.
+		apiRouter.GET("/playground/shared/:token", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.GetSharedPlaygroundSession)
+
 		playgroundRoute := apiRouter.Group("/playground")
 		playgroundRoute.Use(middleware.DisableCache(), middleware.UserAuth())
 		{
@@ -131,6 +137,10 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.GET("/sessions/:id", controller.GetPlaygroundSession)
 			playgroundRoute.PATCH("/sessions/:id", controller.UpdatePlaygroundSession)
 			playgroundRoute.DELETE("/sessions/:id", controller.DeletePlaygroundSession)
+			// A share link is revocable; creating a new one rotates (revokes)
+			// the previous link because the plaintext is never stored.
+			playgroundRoute.POST("/sessions/:id/share", controller.CreatePlaygroundSessionShare)
+			playgroundRoute.DELETE("/sessions/:id/share", controller.DeletePlaygroundSessionShare)
 			// The trash keeps a deleted conversation recoverable for the
 			// configured window; export also works while it waits there.
 			playgroundRoute.POST("/sessions/:id/restore", controller.RestorePlaygroundSession)

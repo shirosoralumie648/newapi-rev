@@ -157,7 +157,7 @@ test('opens the trash from the session list footer', async () => {
   expect(onAction).toHaveBeenCalledTimes(1)
 })
 
-test('offers export only for a persisted conversation', async () => {
+test('offers share and export only for a persisted conversation', async () => {
   const user = userEvent.setup()
   render(
     <PlaygroundSessionList
@@ -171,8 +171,14 @@ test('offers export only for a persisted conversation', async () => {
   )
 
   expect(
+    screen.queryByRole('button', { name: 'Share Older conversation' })
+  ).toBeNull()
+  expect(
     screen.queryByRole('button', { name: 'Export Older conversation' })
   ).toBeNull()
+  expect(
+    screen.getByRole('button', { name: 'Share Saved conversation' })
+  ).toBeVisible()
   await user.click(
     screen.getByRole('button', { name: 'Export Saved conversation' })
   )

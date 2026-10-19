@@ -304,6 +304,43 @@ export interface PlaygroundServerSession extends Omit<
 /** File format of a conversation export rendered by the host. */
 export type PlaygroundExportFormat = 'markdown' | 'json'
 
+/** One public, revocable read-only link to a conversation. */
+export interface PlaygroundSessionShare {
+  token: string
+  /** Root-relative page path; the browser combines it with its origin. */
+  urlPath: string
+  expiresAt: number
+  createdAt: number
+}
+
+/** One attachment placeholder in a public share; bytes are never exposed. */
+export interface PlaygroundSharedAttachment {
+  filename?: string
+  mediaType?: string
+}
+
+/** The only tool-call information a public share exposes. */
+export interface PlaygroundSharedToolCall {
+  name: string
+  status: MessageToolCallStatus
+}
+
+/** One text-first message of a public share. */
+export interface PlaygroundSharedMessage {
+  key: string
+  from: 'user' | 'assistant'
+  content: string
+  toolCalls: PlaygroundSharedToolCall[]
+  attachments: PlaygroundSharedAttachment[]
+}
+
+/** The anonymous read contract of `/api/playground/shared/:token`. */
+export interface PlaygroundSharedConversation {
+  title: string
+  openingMessage: string
+  messages: PlaygroundSharedMessage[]
+}
+
 /** One conversation export file: body, media type and suggested filename. */
 export interface PlaygroundSessionExport {
   format: PlaygroundExportFormat

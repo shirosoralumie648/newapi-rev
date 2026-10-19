@@ -118,14 +118,14 @@ func playgroundTestDB(t *testing.T, dialect string) *gorm.DB {
 	common.SetDatabaseTypes(common.DatabaseType(dialect), previousLog)
 	model.DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundKnowledgeChunk{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundUserUsage{}, &model.PlaygroundUpload{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundMessage{}, &model.PlaygroundSession{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundKnowledgeChunk{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundUserUsage{}, &model.PlaygroundUpload{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundMessage{}, &model.PlaygroundSessionShare{}, &model.PlaygroundSession{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
 		model.DB = previous
 		common.SetDatabaseTypes(previousMain, previousLog)
 	})
-	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUpload{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeChunk{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundSessionShare{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUpload{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeChunk{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -159,6 +159,9 @@ func playgroundRequest(t *testing.T, user int, method, path string, body any, ha
 	parts := strings.Split(parsed.Path, "/")
 	if len(parts) > 4 {
 		c.Params = gin.Params{{Key: "id", Value: parts[4]}}
+		if parts[3] == "shared" {
+			c.Params = append(c.Params, gin.Param{Key: "token", Value: parts[4]})
+		}
 		if parts[3] == "canvases" {
 			c.Params = append(c.Params, gin.Param{Key: "canvasId", Value: parts[4]})
 		}
@@ -2268,6 +2271,8 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodGet, "/api/playground/assets?kind=attachment"},
 		{http.MethodGet, "/api/playground/trash"},
 		{http.MethodGet, "/api/playground/sessions/" + sessionID + "/export"},
+		{http.MethodPost, "/api/playground/sessions/" + sessionID + "/share"},
+		{http.MethodDelete, "/api/playground/sessions/" + sessionID + "/share"},
 		{http.MethodPost, "/api/playground/sessions/" + sessionID + "/restore"},
 		{http.MethodPost, "/api/playground/tasks/missing/cancel"},
 		{http.MethodGet, "/api/playground/presets"},
@@ -2317,6 +2322,28 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		assert.Equal(t, 403, response.Code, response.Body.String())
 		assert.Contains(t, response.Body.String(), "AUTH_SESSION_REQUIRED")
 	}
+
+	// A share link is readable anonymously through the real router, while an
+	// unknown token uses the same non-enumerable 404 contract.
+	shareResponse := playgroundAuthenticatedRequest(t, engine, token, http.MethodPost, "/api/playground/sessions/"+sessionID+"/share", map[string]any{})
+	require.Equal(t, 200, shareResponse.Code, shareResponse.Body.String())
+	var shareEnvelope struct {
+		Success bool
+		Data    struct {
+			Token   string `json:"token"`
+			URLPath string `json:"url_path"`
+		}
+	}
+	require.NoError(t, common.Unmarshal(shareResponse.Body.Bytes(), &shareEnvelope))
+	require.True(t, shareEnvelope.Success, shareResponse.Body.String())
+	require.NotEmpty(t, shareEnvelope.Data.Token)
+	anonymousRead := playgroundAuthenticatedRequest(t, engine, "", http.MethodGet, "/api/playground/shared/"+shareEnvelope.Data.Token, nil)
+	require.Equal(t, 200, anonymousRead.Code, anonymousRead.Body.String())
+	assert.Contains(t, anonymousRead.Header().Get("Cache-Control"), "no-store")
+	assert.Equal(t, "noindex, nofollow, noarchive", anonymousRead.Header().Get("X-Robots-Tag"))
+	anonymousMissing := playgroundAuthenticatedRequest(t, engine, "", http.MethodGet, "/api/playground/shared/unknown-token", nil)
+	assert.Equal(t, 404, anonymousMissing.Code)
+	assert.Contains(t, anonymousMissing.Body.String(), "PLAYGROUND_SHARE_NOT_FOUND")
 
 	// Global preset maintenance is administrator-only. A personal access
 	// token is admitted by the dashboard authentication layer only with the
@@ -5491,6 +5518,223 @@ func TestPlaygroundKnowledgeBaseMatrix(t *testing.T) {
 			var remaining int64
 			require.NoError(t, db.Model(&model.PlaygroundKnowledgeChunk{}).Where("user_id = ?", 7).Count(&remaining).Error)
 			assert.Zero(t, remaining)
+		})
+	}
+}
+
+// TestPlaygroundSessionShares protects the public read-only link contract:
+// hash-only storage, rotation, anonymous sanitization, indistinguishable 404s,
+// expiry, trash/purge cleanup and owner isolation on all supported databases.
+func TestPlaygroundSessionShares(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			session := createPlayground(t, 7, "share-session")
+			sessionID := session["id"].(string)
+			require.NoError(t, db.Model(&model.PlaygroundSession{}).Where("id = ?", sessionID).
+				Update("opening_message", "Welcome to the shared conversation").Error)
+
+			now := common.GetTimestamp()
+			storedPayloads := []map[string]any{
+				{
+					"key": "shared-user", "from": "user",
+					"versions": []any{map[string]any{
+						"id": "shared-user-v1", "content": "Hello from the user",
+						"attachments": []any{map[string]any{
+							"id": "att-secret", "media_type": "image/png", "filename": "diagram.png", "byte_size": 42,
+						}},
+					}},
+				},
+				{
+					"key": "shared-assistant", "from": "assistant", "activeVersionIndex": 1,
+					"versions": []any{
+						map[string]any{"id": "shared-assistant-v0", "content": "Draft answer"},
+						map[string]any{
+							"id": "shared-assistant-v1", "content": "Final answer",
+							"toolCalls": []any{map[string]any{
+								"id": "call-secret", "name": "web_search", "arguments": "private arguments",
+								"status": "completed", "result": "private result",
+							}},
+							"attachments": []any{map[string]any{
+								"id": "att-secret-assistant", "media_type": "application/pdf", "filename": "notes.pdf", "byte_size": 99,
+							}},
+						},
+					},
+					"reasoning": map[string]any{"content": "private reasoning", "duration": 1},
+					"sources":   []any{map[string]any{"href": "https://private.example", "title": "Private source"}},
+					"requestId": "private-request-id",
+				},
+			}
+			for index, payload := range storedPayloads {
+				encoded, err := common.Marshal(payload)
+				require.NoError(t, err)
+				require.NoError(t, db.Create(&model.PlaygroundMessage{
+					SessionID: sessionID, UserID: 7, ClientKey: payload["key"].(string),
+					Position: index * 1024, Payload: model.LongText(encoded), CreatedAt: now, UpdatedAt: now,
+				}).Error)
+			}
+
+			createPath := "/api/playground/sessions/" + sessionID + "/share"
+			missingToken := "this-token-does-not-exist"
+			missing := playgroundRequest(t, 0, http.MethodGet, "/api/playground/shared/"+missingToken, nil, controller.GetSharedPlaygroundSession)
+			require.Equal(t, http.StatusNotFound, missing.Code, missing.Body.String())
+			assert.Contains(t, missing.Body.String(), "PLAYGROUND_SHARE_NOT_FOUND")
+			notFoundBody := missing.Body.String()
+
+			foreignCreate := playgroundRequest(t, 8, http.MethodPost, createPath, map[string]any{"expires_in_days": 7}, controller.CreatePlaygroundSessionShare)
+			assert.Equal(t, http.StatusNotFound, foreignCreate.Code, foreignCreate.Body.String())
+			foreignDelete := playgroundRequest(t, 8, http.MethodDelete, createPath, nil, controller.DeletePlaygroundSessionShare)
+			assert.Equal(t, http.StatusNotFound, foreignDelete.Code, foreignDelete.Body.String())
+			var shareCount int64
+			require.NoError(t, db.Model(&model.PlaygroundSessionShare{}).Where("session_id = ?", sessionID).Count(&shareCount).Error)
+			assert.Zero(t, shareCount)
+
+			createShare := func(expiresInDays int) (string, int64) {
+				response := playgroundRequest(t, 7, http.MethodPost, createPath, map[string]any{"expires_in_days": expiresInDays}, controller.CreatePlaygroundSessionShare)
+				require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+				var envelope struct {
+					Success bool
+					Data    struct {
+						Token     string `json:"token"`
+						URLPath   string `json:"url_path"`
+						ExpiresAt int64  `json:"expires_at"`
+						CreatedAt int64  `json:"created_at"`
+					}
+				}
+				require.NoError(t, common.Unmarshal(response.Body.Bytes(), &envelope))
+				require.True(t, envelope.Success, response.Body.String())
+				require.NotEmpty(t, envelope.Data.Token)
+				assert.Equal(t, "/share/"+envelope.Data.Token, envelope.Data.URLPath)
+				assert.NotContains(t, envelope.Data.URLPath, "..")
+				return envelope.Data.Token, envelope.Data.ExpiresAt
+			}
+			readShared := func(token string) *httptest.ResponseRecorder {
+				return playgroundRequest(t, 0, http.MethodGet, "/api/playground/shared/"+token, nil, controller.GetSharedPlaygroundSession)
+			}
+
+			firstToken, firstExpiry := createShare(7)
+			assert.GreaterOrEqual(t, firstExpiry, now+7*24*60*60)
+			var storedShare model.PlaygroundSessionShare
+			require.NoError(t, db.Where("session_id = ? AND revoked_at = 0", sessionID).First(&storedShare).Error)
+			hash := sha256.Sum256([]byte(firstToken))
+			assert.Equal(t, hex.EncodeToString(hash[:]), storedShare.TokenHash)
+			assert.NotEqual(t, firstToken, storedShare.TokenHash)
+			assert.NotContains(t, storedShare.TokenHash, firstToken)
+
+			read := readShared(firstToken)
+			require.Equal(t, http.StatusOK, read.Code, read.Body.String())
+			assert.Equal(t, "noindex, nofollow, noarchive", read.Header().Get("X-Robots-Tag"))
+			assert.Equal(t, "no-referrer", read.Header().Get("Referrer-Policy"))
+			assert.Equal(t, "nosniff", read.Header().Get("X-Content-Type-Options"))
+			var snapshot struct {
+				Success bool
+				Data    struct {
+					Title          string `json:"title"`
+					OpeningMessage string `json:"opening_message"`
+					Messages       []struct {
+						Key       string `json:"key"`
+						From      string `json:"from"`
+						Content   string `json:"content"`
+						ToolCalls []struct {
+							Name   string `json:"name"`
+							Status string `json:"status"`
+						} `json:"tool_calls"`
+						Attachments []struct {
+							Filename  string `json:"filename"`
+							MediaType string `json:"media_type"`
+						} `json:"attachments"`
+					} `json:"messages"`
+				} `json:"data"`
+			}
+			require.NoError(t, common.Unmarshal(read.Body.Bytes(), &snapshot))
+			require.True(t, snapshot.Success)
+			assert.Equal(t, "Conversation", snapshot.Data.Title)
+			assert.Equal(t, "Welcome to the shared conversation", snapshot.Data.OpeningMessage)
+			require.Len(t, snapshot.Data.Messages, 2)
+			assert.Equal(t, "shared-user", snapshot.Data.Messages[0].Key)
+			assert.Equal(t, "Hello from the user", snapshot.Data.Messages[0].Content)
+			require.Len(t, snapshot.Data.Messages[0].Attachments, 1)
+			assert.Equal(t, "diagram.png", snapshot.Data.Messages[0].Attachments[0].Filename)
+			assert.Equal(t, "image/png", snapshot.Data.Messages[0].Attachments[0].MediaType)
+			assert.Equal(t, "shared-assistant", snapshot.Data.Messages[1].Key)
+			assert.Equal(t, "Final answer", snapshot.Data.Messages[1].Content)
+			require.Len(t, snapshot.Data.Messages[1].ToolCalls, 1)
+			assert.Equal(t, "web_search", snapshot.Data.Messages[1].ToolCalls[0].Name)
+			assert.Equal(t, "completed", snapshot.Data.Messages[1].ToolCalls[0].Status)
+			require.Len(t, snapshot.Data.Messages[1].Attachments, 1)
+			assert.Equal(t, "notes.pdf", snapshot.Data.Messages[1].Attachments[0].Filename)
+			assert.Equal(t, "application/pdf", snapshot.Data.Messages[1].Attachments[0].MediaType)
+			for _, secret := range []string{
+				"Draft answer", "private arguments", "private result", "private reasoning",
+				"private-request-id", "private.example", "att-secret", "call-secret", sessionID,
+			} {
+				assert.NotContains(t, read.Body.String(), secret)
+			}
+			assert.NotContains(t, read.Body.String(), `"user_id"`)
+			assert.NotContains(t, read.Body.String(), `"token"`)
+
+			// Exporting the conversation never includes link material: the
+			// share table is an access mechanism, not conversation content.
+			exported := playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+sessionID+"/export", nil, controller.ExportPlaygroundSession)
+			require.Equal(t, http.StatusOK, exported.Code, exported.Body.String())
+			assert.NotContains(t, exported.Body.String(), firstToken)
+			assert.NotContains(t, exported.Body.String(), storedShare.TokenHash)
+
+			// Creating a link revokes the previous one; only the new token
+			// resolves, and the response never echoes the old token.
+			secondToken, _ := createShare(0)
+			assert.NotEqual(t, firstToken, secondToken)
+			old := readShared(firstToken)
+			assert.Equal(t, http.StatusNotFound, old.Code)
+			assert.Equal(t, notFoundBody, old.Body.String())
+			require.Equal(t, http.StatusOK, readShared(secondToken).Code)
+
+			for _, invalid := range []int{-1, 366} {
+				response := playgroundRequest(t, 7, http.MethodPost, createPath, map[string]any{"expires_in_days": invalid}, controller.CreatePlaygroundSessionShare)
+				assert.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+			}
+
+			// An expired link returns exactly the same response as an unknown
+			// one; the row remains for audit until the conversation is purged.
+			expiredToken, _ := createShare(1)
+			expiredHash := sha256.Sum256([]byte(expiredToken))
+			require.NoError(t, db.Model(&model.PlaygroundSessionShare{}).
+				Where("token_hash = ?", hex.EncodeToString(expiredHash[:])).
+				Update("expires_at", common.GetTimestamp()-1).Error)
+			expired := readShared(expiredToken)
+			assert.Equal(t, http.StatusNotFound, expired.Code)
+			assert.Equal(t, notFoundBody, expired.Body.String())
+
+			// Revocation is idempotent and revoked links are indistinguishable
+			// from a token that never existed.
+			for range 2 {
+				response := playgroundRequest(t, 7, http.MethodDelete, createPath, nil, controller.DeletePlaygroundSessionShare)
+				require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+				assert.Contains(t, response.Body.String(), `"revoked":true`)
+			}
+			revoked := readShared(secondToken)
+			assert.Equal(t, http.StatusNotFound, revoked.Code)
+			assert.Equal(t, notFoundBody, revoked.Body.String())
+
+			// Entering the trash revokes the current link, restoring does not
+			// resurrect it, and a purge removes every share row.
+			trashToken, _ := createShare(30)
+			require.Equal(t, http.StatusOK, readShared(trashToken).Code)
+			require.NoError(t, model.DeletePlaygroundSession(7, sessionID))
+			trashedRead := readShared(trashToken)
+			assert.Equal(t, http.StatusNotFound, trashedRead.Code)
+			assert.Equal(t, notFoundBody, trashedRead.Body.String())
+			trashedCreate := playgroundRequest(t, 7, http.MethodPost, createPath, nil, controller.CreatePlaygroundSessionShare)
+			assert.Equal(t, http.StatusNotFound, trashedCreate.Code)
+			trashedRevoke := playgroundRequest(t, 7, http.MethodDelete, createPath, nil, controller.DeletePlaygroundSessionShare)
+			assert.Equal(t, http.StatusOK, trashedRevoke.Code, trashedRevoke.Body.String())
+			_, err := model.RestorePlaygroundSession(7, sessionID)
+			require.NoError(t, err)
+			assert.Equal(t, http.StatusNotFound, readShared(trashToken).Code)
+			require.NoError(t, model.DeletePlaygroundSession(7, sessionID))
+			require.NoError(t, model.PurgePlaygroundSession(7, sessionID))
+			require.NoError(t, db.Model(&model.PlaygroundSessionShare{}).Where("session_id = ?", sessionID).Count(&shareCount).Error)
+			assert.Zero(t, shareCount)
 		})
 	}
 }
