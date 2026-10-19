@@ -290,6 +290,16 @@ func writePlaygroundError(c *gin.Context, err error) {
 		code = "PLAYGROUND_NOT_FOUND"
 		err = common.NewMessage(err.Error())
 	}
+	if errors.Is(err, model.ErrPlaygroundMemoryNotFound) {
+		status = http.StatusNotFound
+		code = "PLAYGROUND_NOT_FOUND"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundMemorySourceNotFound) {
+		status = http.StatusBadRequest
+		code = "PLAYGROUND_INVALID_REQUEST"
+		err = common.NewMessage(err.Error())
+	}
 	if errors.Is(err, model.ErrPlaygroundConflict) {
 		status = http.StatusConflict
 		code = "PLAYGROUND_CONFLICT"
@@ -325,6 +335,16 @@ func writePlaygroundError(c *gin.Context, err error) {
 	if errors.Is(err, model.ErrPlaygroundSnippetContentLimit) {
 		status = http.StatusUnprocessableEntity
 		code = "PLAYGROUND_SNIPPET_CONTENT_LIMIT_EXCEEDED"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundMemoryLimit) {
+		status = http.StatusUnprocessableEntity
+		code = "PLAYGROUND_MEMORY_LIMIT_EXCEEDED"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundMemoryContentLimit) {
+		status = http.StatusUnprocessableEntity
+		code = "PLAYGROUND_MEMORY_CONTENT_LIMIT_EXCEEDED"
 		err = common.NewMessage(err.Error())
 	}
 	if errors.Is(err, model.ErrPlaygroundSystemPromptLimit) {

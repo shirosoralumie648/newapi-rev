@@ -473,6 +473,7 @@ func migrateDB() error {
 		&PlaygroundMessage{},
 		&PlaygroundPreset{},
 		&PlaygroundSnippet{},
+		&PlaygroundMemory{},
 		&PlaygroundArtifact{},
 		&PlaygroundArtifactVersion{},
 		&PlaygroundAttachment{},

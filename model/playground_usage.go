@@ -36,6 +36,7 @@ type PlaygroundUsageMetric struct {
 type PlaygroundResourceUsage struct {
 	Group           string                `json:"group"`
 	Sessions        PlaygroundUsageMetric `json:"sessions"`
+	Memories        PlaygroundUsageMetric `json:"memories"`
 	Attachments     PlaygroundUsageMetric `json:"attachments"`
 	Artifacts       PlaygroundUsageMetric `json:"artifacts"`
 	Canvas          PlaygroundUsageMetric `json:"canvas"`
@@ -60,6 +61,9 @@ func PlaygroundUsageForUser(userID int) (*PlaygroundResourceUsage, error) {
 		Group: group,
 		Sessions: PlaygroundUsageMetric{
 			Limit: int64(policy.SessionMaxCount),
+		},
+		Memories: PlaygroundUsageMetric{
+			Limit: int64(policy.MemoryUserMaxCount),
 		},
 		Attachments: PlaygroundUsageMetric{
 			Limit:      int64(policy.AttachmentUserMaxCount),
@@ -91,6 +95,7 @@ func PlaygroundUsageForUser(userID int) (*PlaygroundResourceUsage, error) {
 		return nil, err
 	}
 	usage.Sessions.Used = counters.Sessions
+	usage.Memories.Used = counters.Memories
 	usage.Attachments.Used = counters.AttachmentCount
 	usage.Attachments.UsedBytes = counters.AttachmentBytes
 	usage.Artifacts.Used = counters.ArtifactCount

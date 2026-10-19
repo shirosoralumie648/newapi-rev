@@ -403,6 +403,13 @@ func purgePlaygroundSessionTx(tx *gorm.DB, userID int, session *PlaygroundSessio
 	if err := tx.Where("session_id = ? AND user_id = ?", session.ID, userID).Delete(&PlaygroundMessage{}).Error; err != nil {
 		return nil, err
 	}
+	// Memories outlive the conversation they were extracted from, but a purged
+	// conversation can no longer be opened as their source. Keep the note and
+	// drop only the dangling pointer.
+	if err := tx.Model(&PlaygroundMemory{}).Where("user_id = ? AND source_session_id = ?", userID, session.ID).
+		Update("source_session_id", nil).Error; err != nil {
+		return nil, err
+	}
 	if err := tx.Where("id = ? AND user_id = ?", session.ID, userID).Delete(&PlaygroundSession{}).Error; err != nil {
 		return nil, err
 	}
