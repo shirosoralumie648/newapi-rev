@@ -182,7 +182,11 @@ export const API_ENDPOINTS = {
   PLAYGROUND_WORKFLOW_ESTIMATE: '/api/playground/workflows/estimate',
   PLAYGROUND_WORKFLOW_RUNS: '/api/playground/workflows/runs',
   PLAYGROUND_COMPARISONS: '/api/playground/comparisons',
+  PLAYGROUND_ARENA: '/api/playground/arena',
 } as const
+
+// One optional note of an arena vote mirrors the server's rune limit.
+export const PLAYGROUND_ARENA_NOTE_MAX_LENGTH = 500
 
 // The relay answers every request with the request id it recorded, so a
 // finished generation can be associated with its consume log row.

@@ -497,6 +497,11 @@ func purgePlaygroundSessionTx(tx *gorm.DB, userID int, session *PlaygroundSessio
 	if err := tx.Where("session_id = ? AND user_id = ?", session.ID, userID).Delete(&PlaygroundMessage{}).Error; err != nil {
 		return nil, err
 	}
+	// Votes are raw preferences about this conversation only; they leave with
+	// it instead of becoming orphaned rows in the instance summary.
+	if err := tx.Where("session_id = ? AND user_id = ?", session.ID, userID).Delete(&PlaygroundArenaVote{}).Error; err != nil {
+		return nil, err
+	}
 	// A workflow run is tied to the conversation only when one was open while
 	// the board ran; the counters are remeasured below, so the rows only need
 	// to leave with their conversation.
@@ -950,6 +955,13 @@ func playgroundMessagesByPosition(messages map[string]*PlaygroundMessage) []*Pla
 }
 
 func deletePlaygroundMessageRow(tx *gorm.DB, userID int, sessionID string, message *PlaygroundMessage) error {
+	// The vote identifies the group by its client key, so removing the group
+	// removes the preference instead of leaving a summary that cannot be
+	// traced back to a stored comparison.
+	if err := tx.Where("user_id = ? AND session_id = ? AND message_key = ?", userID, sessionID, message.ClientKey).
+		Delete(&PlaygroundArenaVote{}).Error; err != nil {
+		return err
+	}
 	return tx.Where("id = ? AND session_id = ? AND user_id = ?", message.ID, sessionID, userID).Delete(&PlaygroundMessage{}).Error
 }
 

@@ -107,6 +107,9 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.POST("/mcp/:serverId/call", controller.CallPlaygroundMCPTool)
 			playgroundRoute.POST("/search", middleware.SearchRateLimit(), controller.PlaygroundWebSearch)
 			playgroundRoute.GET("/message-costs", controller.GetPlaygroundMessageCosts)
+			// The arena summary is read-only: personal totals belong to the
+			// account, while the instance projection is admin-only.
+			playgroundRoute.GET("/arena/summary", controller.GetPlaygroundArenaVoteSummary)
 			playgroundRoute.GET("/logs/:logRef/replay", controller.GetPlaygroundLogReplay)
 			playgroundRoute.DELETE("/logs/:logRef/capture", controller.DeletePlaygroundLogCapture)
 			playgroundRoute.GET("/trash", controller.ListPlaygroundTrash)
@@ -172,6 +175,8 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.GET("/sessions/:id/export", controller.ExportPlaygroundSession)
 			playgroundRoute.GET("/sessions/:id/messages", controller.ListPlaygroundMessages)
 			playgroundRoute.PATCH("/sessions/:id/messages", controller.ApplyPlaygroundMessagesDelta)
+			playgroundRoute.GET("/sessions/:id/arena/votes", controller.ListPlaygroundArenaVotes)
+			playgroundRoute.PUT("/sessions/:id/arena/votes/:messageKey", controller.UpsertPlaygroundArenaVote)
 			// Deprecated compatibility shim: the full snapshot endpoint is kept for
 			// one release and translated into incremental writes server-side.
 			playgroundRoute.PUT("/sessions/:id/messages", controller.ReplacePlaygroundMessages)

@@ -477,6 +477,7 @@ func migrateDB() error {
 		&PlaygroundSession{},
 		&PlaygroundSessionShare{},
 		&PlaygroundMessage{},
+		&PlaygroundArenaVote{},
 		&PlaygroundPreset{},
 		&PlaygroundSnippet{},
 		&PlaygroundSnippetVersion{},

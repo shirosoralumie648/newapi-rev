@@ -54,6 +54,88 @@ export function isParallelMessage(
   return message?.from === MESSAGE_ROLES.ASSISTANT && message.parallel === true
 }
 
+/** Whether the comparison is one anonymous two-reply arena round. */
+export function isAnonymousParallelMessage(
+  message: Message | undefined
+): message is Message & { parallel: true; anonymous: true } {
+  return isParallelMessage(message) && message.anonymous === true
+}
+
+/** Stable display label of one anonymous reply; the real model stays hidden. */
+export function anonymousParallelModelLabel(versionIndex: number): string {
+  return versionIndex === 1 ? t('Model B') : t('Model A')
+}
+
+/**
+ * Replace the compared model names in text that may reach the reader before or
+ * after the server redacts it. Longer names win so one model name that is a
+ * prefix of another cannot be replaced partially.
+ */
+export function redactAnonymousParallelContent(
+  content: string,
+  models: Array<string | undefined>
+): string {
+  if (!content) return content
+  const replacements = models.flatMap((rawModel, index) => {
+    const model = rawModel?.trim()
+    if (!model) return []
+    return [
+      {
+        model,
+        key: model.toLowerCase(),
+        label: anonymousParallelModelLabel(index),
+      },
+    ]
+  })
+  if (replacements.length === 0) return content
+  replacements.sort((a, b) => b.model.length - a.model.length)
+  const pattern = new RegExp(
+    replacements
+      .map((replacement) =>
+        replacement.model.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      )
+      .join('|'),
+    'gi'
+  )
+  const labels = new Map(
+    replacements.map((replacement) => [replacement.key, replacement.label])
+  )
+  return content.replace(
+    pattern,
+    (match) => labels.get(match.toLowerCase()) ?? match
+  )
+}
+
+/**
+ * Render-safe copy of one anonymous group: real model names are removed from
+ * the versions and every reply or reasoning text, so a provider error that
+ * echoed a model name cannot reveal it. Retry and continuation still use the
+ * original message because callbacks receive that object, not this copy.
+ */
+export function anonymizeParallelMessage(message: Message): Message {
+  if (!isAnonymousParallelMessage(message)) return message
+  const models = message.versions.map((version) => version.model)
+  return {
+    ...message,
+    ...(message.reasoning
+      ? {
+          reasoning: {
+            ...message.reasoning,
+            content: redactAnonymousParallelContent(
+              message.reasoning.content,
+              models
+            ),
+          },
+        }
+      : {}),
+    versions: message.versions.map((version) => ({
+      ...version,
+      model: undefined,
+      content: redactAnonymousParallelContent(version.content, models),
+    })),
+  }
+}
+
 /**
  * Normalize the models one comparison may hold: trimmed, deduplicated in the
  * order the user picked and bounded by the client ceiling. The server applies
@@ -92,12 +174,15 @@ export function createParallelMessageVersion(model: string): MessageVersion {
 export function createParallelReplyMessage(
   models: string[],
   startedAt: number = Date.now(),
-  sources?: Message['sources']
+  sources?: Message['sources'],
+  anonymous = false
 ): Message {
+  const normalizedModels = normalizeParallelModels(models)
   return {
     key: nanoid(),
     from: MESSAGE_ROLES.ASSISTANT,
     parallel: true,
+    ...(anonymous && normalizedModels.length === 2 ? { anonymous: true } : {}),
     createdAt: startedAt,
     startedAt,
     ...(sources && sources.length > 0 ? { sources } : {}),
@@ -105,7 +190,7 @@ export function createParallelReplyMessage(
     isContentComplete: false,
     isReasoningStreaming: false,
     status: MESSAGE_STATUS.LOADING,
-    versions: normalizeParallelModels(models).map((model) =>
+    versions: normalizedModels.map((model) =>
       createParallelMessageVersion(model)
     ),
   }
@@ -121,7 +206,8 @@ export function appendParallelMessagePair(
   attachments: MessageAttachment[] | undefined,
   models: string[],
   submittedAt: number = Date.now(),
-  search?: MessageSearchSnapshot
+  search?: MessageSearchSnapshot,
+  anonymous = false
 ): Message[] {
   return [
     ...messages,
@@ -129,7 +215,8 @@ export function appendParallelMessagePair(
     createParallelReplyMessage(
       models,
       submittedAt,
-      getMessageSearchSources(search)
+      getMessageSearchSources(search),
+      anonymous
     ),
   ]
 }

@@ -303,6 +303,12 @@ export interface Message {
    * continues the conversation. Messages from ordinary sends leave it unset.
    */
   parallel?: boolean
+  /**
+   * Anonymous A/B arena group: exactly two versions whose model names and
+   * channels stay hidden while the reader votes on the replies. The names
+   * remain on the versions for retry and continuation.
+   */
+  anonymous?: boolean
   /** Index of the active version in `versions`; defaults to 0 for legacy data. */
   activeVersionIndex?: number
   createdAt?: number
@@ -324,6 +330,36 @@ export interface Message {
   isContentComplete?: boolean
   status?: MessageStatus
   errorCode?: string | null
+}
+
+/** One raw preference vote of an anonymous A/B comparison. */
+export type PlaygroundArenaChoice = 'a' | 'b' | 'tie' | 'both_bad'
+
+export interface PlaygroundArenaVote {
+  id: number
+  messageKey: string
+  choice: PlaygroundArenaChoice
+  note: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface PlaygroundArenaVoteCounts {
+  a: number
+  b: number
+  tie: number
+  bothBad: number
+}
+
+/**
+ * Read-only choice totals. Personal scope counts only the caller's votes;
+ * instance scope counts every account and is only available to administrators.
+ */
+export interface PlaygroundArenaVoteSummary {
+  scope: 'personal' | 'instance'
+  total: number
+  choices: PlaygroundArenaVoteCounts
+  notes: number
 }
 
 /**
