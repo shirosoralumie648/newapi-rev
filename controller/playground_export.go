@@ -53,18 +53,20 @@ type playgroundExportEnvelope struct {
 // string twice; a legacy NULL column reads back as an empty object (or null
 // for the summary).
 type playgroundExportSession struct {
-	ID               string          `json:"id"`
-	Title            string          `json:"title"`
-	ClientID         *string         `json:"client_id,omitempty"`
-	SystemPrompt     string          `json:"system_prompt,omitempty"`
-	Config           json.RawMessage `json:"config"`
-	ParameterEnabled json.RawMessage `json:"parameter_enabled"`
-	Context          json.RawMessage `json:"context"`
-	ContextSummary   json.RawMessage `json:"context_summary"`
-	Trashed          bool            `json:"trashed"`
-	CreatedAt        int64           `json:"created_at"`
-	UpdatedAt        int64           `json:"updated_at"`
-	MessageRevision  int64           `json:"message_revision"`
+	ID                 string          `json:"id"`
+	Title              string          `json:"title"`
+	ClientID           *string         `json:"client_id,omitempty"`
+	SystemPrompt       string          `json:"system_prompt,omitempty"`
+	OpeningMessage     string          `json:"opening_message,omitempty"`
+	SuggestedQuestions json.RawMessage `json:"suggested_questions"`
+	Config             json.RawMessage `json:"config"`
+	ParameterEnabled   json.RawMessage `json:"parameter_enabled"`
+	Context            json.RawMessage `json:"context"`
+	ContextSummary     json.RawMessage `json:"context_summary"`
+	Trashed            bool            `json:"trashed"`
+	CreatedAt          int64           `json:"created_at"`
+	UpdatedAt          int64           `json:"updated_at"`
+	MessageRevision    int64           `json:"message_revision"`
 }
 
 type playgroundExportMessage struct {
@@ -120,15 +122,17 @@ func playgroundExportJSON(export *model.PlaygroundSessionExport) (string, error)
 		ExportedAt: common.GetTimestamp(),
 		Session: playgroundExportSession{
 			ID: session.ID, Title: session.Title, ClientID: session.ClientID,
-			SystemPrompt:     session.SystemPrompt,
-			Config:           playgroundExportRawJSON(session.Config, "{}"),
-			ParameterEnabled: playgroundExportRawJSON(session.ParameterEnabled, "{}"),
-			Context:          playgroundExportRawJSON(session.ContextConfig, "{}"),
-			ContextSummary:   playgroundExportRawJSON(session.ContextSummary, "null"),
-			Trashed:          session.DeletedAt > 0,
-			CreatedAt:        session.CreatedAt,
-			UpdatedAt:        session.UpdatedAt,
-			MessageRevision:  session.MessageRevision,
+			SystemPrompt:       session.SystemPrompt,
+			OpeningMessage:     string(session.OpeningMessage),
+			SuggestedQuestions: playgroundExportRawJSON(session.SuggestedQuestions, "[]"),
+			Config:             playgroundExportRawJSON(session.Config, "{}"),
+			ParameterEnabled:   playgroundExportRawJSON(session.ParameterEnabled, "{}"),
+			Context:            playgroundExportRawJSON(session.ContextConfig, "{}"),
+			ContextSummary:     playgroundExportRawJSON(session.ContextSummary, "null"),
+			Trashed:            session.DeletedAt > 0,
+			CreatedAt:          session.CreatedAt,
+			UpdatedAt:          session.UpdatedAt,
+			MessageRevision:    session.MessageRevision,
 		},
 		Messages: make([]playgroundExportMessage, 0, len(export.Messages)),
 	}
@@ -176,6 +180,16 @@ func playgroundExportMarkdown(export *model.PlaygroundSessionExport) string {
 	}
 	if prompt := strings.TrimSpace(session.SystemPrompt); prompt != "" {
 		builder.WriteString("## System prompt\n\n" + prompt + "\n\n")
+	}
+	if opening := strings.TrimSpace(string(session.OpeningMessage)); opening != "" {
+		builder.WriteString("## Opening message\n\n" + opening + "\n\n")
+	}
+	if questions := playgroundExportSuggestedQuestions(session.SuggestedQuestions); len(questions) > 0 {
+		builder.WriteString("## Suggested questions\n\n")
+		for _, question := range questions {
+			builder.WriteString("- " + playgroundExportSingleLine(question) + "\n")
+		}
+		builder.WriteString("\n")
 	}
 	if summary := playgroundExportContextSummary(session.ContextSummary); summary != "" {
 		builder.WriteString("## Context summary\n\n" + summary + "\n\n")
@@ -269,6 +283,18 @@ func playgroundExportRoleName(from string) string {
 		return "System"
 	}
 	return "Message"
+}
+
+func playgroundExportSuggestedQuestions(stored string) []string {
+	trimmed := strings.TrimSpace(stored)
+	if trimmed == "" || trimmed == "null" {
+		return nil
+	}
+	var questions []string
+	if err := common.UnmarshalJsonStr(trimmed, &questions); err != nil {
+		return nil
+	}
+	return questions
 }
 
 func playgroundExportContextSummary(stored string) string {

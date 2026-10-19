@@ -150,6 +150,8 @@ function PlaygroundContent(props: {
     config,
     parameterEnabled,
     systemPrompt,
+    openingMessage,
+    suggestedQuestions,
     context,
     contextSummary,
     messages,
@@ -1017,6 +1019,8 @@ function PlaygroundContent(props: {
               currentConfig={config}
               currentParameterEnabled={parameterEnabled}
               currentSystemPrompt={systemPrompt}
+              currentOpeningMessage={openingMessage}
+              currentSuggestedQuestions={suggestedQuestions}
               disabled={sync.isLoading}
               models={models}
               onApplyPreset={handleApplyPreset}
@@ -1106,6 +1110,8 @@ function PlaygroundContent(props: {
               onSaveEdit={(newContent) => applyEdit(newContent, false)}
               onSaveEditAndSubmit={(newContent) => applyEdit(newContent, true)}
               contextSummary={contextSummary}
+              openingMessage={openingMessage}
+              suggestedQuestions={suggestedQuestions}
               onRemoveContextSummary={handleRemoveContextSummary}
             />
           </div>

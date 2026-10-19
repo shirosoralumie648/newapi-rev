@@ -27,6 +27,8 @@ export type PlaygroundSessionSettings = {
   config: PlaygroundConfig
   parameterEnabled: ParameterEnabled
   systemPrompt: string
+  openingMessage: string
+  suggestedQuestions: string[]
 }
 
 /**
@@ -53,6 +55,8 @@ export function presetSessionSettings(
     },
     parameterEnabled: { ...preset.parameterEnabled },
     systemPrompt: preset.systemPrompt,
+    openingMessage: preset.openingMessage,
+    suggestedQuestions: [...preset.suggestedQuestions],
   }
 }
 
@@ -81,6 +85,8 @@ export function presetInputFromSettings(
     },
     parameter_enabled: { ...settings.parameterEnabled },
     system_prompt: settings.systemPrompt,
+    opening_message: settings.openingMessage,
+    suggested_questions: settings.suggestedQuestions,
   }
 }
 

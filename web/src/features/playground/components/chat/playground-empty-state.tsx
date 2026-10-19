@@ -29,6 +29,10 @@ import { Button } from '@/components/ui/button'
 
 type PlaygroundEmptyStateProps = {
   onSelectPrompt: (prompt: string) => void
+  /** Display-only greeting of the preset that started the conversation. */
+  openingMessage?: string
+  /** Starter questions of that preset; they replace the generic examples. */
+  suggestedQuestions?: string[]
 }
 
 const starterPrompts = [
@@ -40,8 +44,12 @@ const starterPrompts = [
 
 export function PlaygroundEmptyState({
   onSelectPrompt,
+  openingMessage = '',
+  suggestedQuestions = [],
 }: PlaygroundEmptyStateProps) {
   const { t } = useTranslation()
+  const greeting = openingMessage.trim()
+  const questions = suggestedQuestions.filter((question) => question.trim())
 
   return (
     <div className='flex min-h-[min(520px,calc(100svh-18rem))] items-center justify-center px-1 py-8 md:py-12'>
@@ -61,23 +69,51 @@ export function PlaygroundEmptyState({
           </p>
         </div>
 
-        <div className='grid gap-2 sm:grid-cols-2'>
-          {starterPrompts.map(({ icon: Icon, text }) => {
-            const prompt = t(text)
+        {greeting && (
+          <div className='bg-muted/30 rounded-xl border p-4 text-left text-sm leading-6 break-words whitespace-pre-wrap'>
+            {greeting}
+          </div>
+        )}
 
-            return (
-              <Button
-                className='h-auto min-h-11 justify-start gap-2 px-3 py-2.5 text-left whitespace-normal'
-                key={text}
-                onClick={() => onSelectPrompt(prompt)}
-                variant='outline'
-              >
-                <Icon className='text-muted-foreground size-4' />
-                <span>{prompt}</span>
-              </Button>
-            )
-          })}
-        </div>
+        {questions.length > 0 && (
+          <div className='grid gap-2 text-left'>
+            <p className='text-muted-foreground text-xs font-medium'>
+              {t('Suggested questions')}
+            </p>
+            <div className='grid gap-2 sm:grid-cols-2'>
+              {questions.map((question) => (
+                <Button
+                  className='h-auto min-h-11 justify-start px-3 py-2.5 text-left whitespace-normal'
+                  key={question}
+                  onClick={() => onSelectPrompt(question)}
+                  variant='outline'
+                >
+                  <span>{question}</span>
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {questions.length === 0 && (
+          <div className='grid gap-2 sm:grid-cols-2'>
+            {starterPrompts.map(({ icon: Icon, text }) => {
+              const prompt = t(text)
+
+              return (
+                <Button
+                  className='h-auto min-h-11 justify-start gap-2 px-3 py-2.5 text-left whitespace-normal'
+                  key={text}
+                  onClick={() => onSelectPrompt(prompt)}
+                  variant='outline'
+                >
+                  <Icon className='text-muted-foreground size-4' />
+                  <span>{prompt}</span>
+                </Button>
+              )
+            })}
+          </div>
+        )}
       </div>
     </div>
   )

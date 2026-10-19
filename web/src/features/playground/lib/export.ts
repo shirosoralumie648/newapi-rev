@@ -16,8 +16,23 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { exportPlaygroundSession } from '../api'
+import { exportPlaygroundPreset, exportPlaygroundSession } from '../api'
+import type { PlaygroundPresetScope } from '../api'
 import type { PlaygroundExportFormat } from '../types'
+
+function downloadServerFile(download: {
+  filename: string
+  contentType: string
+  content: string
+}): void {
+  const blob = new Blob([download.content], { type: download.contentType })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = download.filename
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
 
 /**
  * Downloads one conversation export. The host renders the file with attachment
@@ -28,12 +43,16 @@ export async function exportPlaygroundSessionFile(
   sessionId: string,
   format: PlaygroundExportFormat
 ): Promise<void> {
-  const download = await exportPlaygroundSession(sessionId, format)
-  const blob = new Blob([download.content], { type: download.contentType })
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = download.filename
-  anchor.click()
-  URL.revokeObjectURL(url)
+  downloadServerFile(await exportPlaygroundSession(sessionId, format))
+}
+
+/**
+ * Downloads one preset as the JSON document the import endpoint accepts. The
+ * server renders it, so a private and a global preset share the same format.
+ */
+export async function exportPlaygroundPresetFile(
+  presetId: string,
+  scope: PlaygroundPresetScope = 'private'
+): Promise<void> {
+  downloadServerFile(await exportPlaygroundPreset(presetId, scope))
 }
