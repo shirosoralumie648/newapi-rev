@@ -17,13 +17,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { ColumnDef } from '@tanstack/react-table'
-import { GitBranch, Sparkles, KeyRound } from 'lucide-react'
+import { GitBranch, Play, Sparkles, KeyRound } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { GroupBadge } from '@/components/group-badge'
 import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Button } from '@/components/ui/button'
 import {
   Popover,
   PopoverContent,
@@ -66,6 +67,10 @@ import {
   renderAuditContent,
   renderLogContent,
 } from '../../lib/format'
+import {
+  buildPlaygroundReplayHref,
+  buildPlaygroundReplayLink,
+} from '../../lib/replay'
 import {
   isDisplayableLogType,
   isTimingLogType,
@@ -811,6 +816,12 @@ export function useCommonLogsColumns(
           const [dialogOpen, setDialogOpen] = useState(false)
           const log = row.original
           const other = parseLogOther(log.other)
+          const replayLink = buildPlaygroundReplayLink(log, other, {
+            includeOwner: isAdmin,
+          })
+          const replayHref = replayLink
+            ? buildPlaygroundReplayHref(replayLink)
+            : null
 
           const pricingData = usePricingData(
             log.type === 2 &&
@@ -868,14 +879,34 @@ export function useCommonLogsColumns(
 
           return (
             <>
-              <button
-                type='button'
-                className='group flex max-w-[200px] items-center gap-1 text-left text-xs'
-                onClick={() => setDialogOpen(true)}
-                title={t('Click to view full details')}
-              >
-                {detailPreview}
-              </button>
+              <div className='flex max-w-[200px] items-center gap-1'>
+                <button
+                  type='button'
+                  className='group flex min-w-0 items-center gap-1 text-left text-xs'
+                  onClick={() => setDialogOpen(true)}
+                  title={t('Click to view full details')}
+                >
+                  {detailPreview}
+                </button>
+                {replayHref && (
+                  <Button
+                    variant='ghost'
+                    size='icon'
+                    className='text-muted-foreground hover:text-foreground size-5 shrink-0'
+                    render={
+                      <a
+                        href={replayHref}
+                        target='_blank'
+                        rel='noreferrer'
+                        aria-label={t('Open in Playground')}
+                        title={t('Open in Playground')}
+                      />
+                    }
+                  >
+                    <Play className='size-3.5' aria-hidden='true' />
+                  </Button>
+                )}
+              </div>
               <DetailsDialog
                 log={log}
                 isAdmin={isAdmin}
