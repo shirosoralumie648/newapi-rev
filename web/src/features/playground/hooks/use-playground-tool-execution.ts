@@ -24,6 +24,7 @@ import {
   updateVersionToolCallStatus,
 } from '../lib/message/message-tool-call-utils'
 import { getCurrentVersion } from '../lib/message/message-utils'
+import type { PlaygroundMCPToolRef } from '../lib/tools/mcp-tools'
 import {
   countToolRoundsSinceLastUser,
   getPendingExecutableToolCalls,
@@ -45,6 +46,12 @@ interface UsePlaygroundToolExecutionOptions {
   isBusy: boolean
   /** Bases bound to the active conversation. */
   knowledgeBaseIds: readonly string[]
+  /**
+   * MCP tools the account may call right now. Must keep a stable identity
+   * while the catalog is unchanged so a reactor render does not retry; when
+   * the catalog arrives late the pending calls still execute.
+   */
+  mcpTools?: readonly PlaygroundMCPToolRef[]
   maxRounds: number
   messages: Message[]
   /** Continues the last settled tool-call reply through the normal chain. */
@@ -144,7 +151,10 @@ export function usePlaygroundToolExecution(
     const versionKey = toolCallVersionKey(loopMessage, version)
     const attempted = attemptedRef.current
 
-    const pendingCalls = getPendingExecutableToolCalls(loopMessage).filter(
+    const pendingCalls = getPendingExecutableToolCalls(
+      loopMessage,
+      options.mcpTools
+    ).filter(
       (call) =>
         !attempted.has(toolCallExecutionKey(loopMessage, version, call.id))
     )
@@ -184,6 +194,7 @@ export function usePlaygroundToolExecution(
     const scope: ToolExecutionScope = {
       knowledgeBaseIds: options.knowledgeBaseIds,
       group: options.group,
+      mcpTools: options.mcpTools ?? [],
       resultMaxBytes: options.resultMaxBytes,
       signal: controller.signal,
     }
@@ -231,6 +242,7 @@ export function usePlaygroundToolExecution(
     options.isBusy,
     options.knowledgeBaseIds,
     options.maxRounds,
+    options.mcpTools,
     options.messages,
     options.resultMaxBytes,
     options.sessionId,

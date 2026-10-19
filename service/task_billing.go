@@ -197,6 +197,11 @@ func taskBillingOther(task *model.Task) *model.LogOther {
 	other := model.NewLogOther()
 	// 前端列表按 is_task 选择任务档位渲染分支,缺失会把差额/退款日志误判成普通 relay 动态计费
 	other.SetPublic("is_task", true)
+	// 任务行保留了提交时的 Playground 来源标记；差额与退款日志没有请求上下文,
+	// 因此从任务自身恢复该标记,供只读用量分析区分 Playground 与 API 花费。
+	if task.PrivateData.PlaygroundOrigin {
+		other.SetPublic(model.PlaygroundOriginLogOtherKey, true)
+	}
 	if bc := task.PrivateData.BillingContext; bc != nil {
 		other.SetPublic("model_price", bc.ModelPrice)
 		if bc.ModelRatio > 0 {

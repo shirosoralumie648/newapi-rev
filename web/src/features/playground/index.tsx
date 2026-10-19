@@ -77,6 +77,7 @@ import {
   usePlaygroundMessageCosts,
   usePlaygroundMemories,
   usePlaygroundMemoryExtraction,
+  usePlaygroundMCPCatalog,
   usePlaygroundOptions,
   usePlaygroundArtifacts,
   usePlaygroundPreferences,
@@ -108,6 +109,11 @@ import {
   uploadPlaygroundAttachments,
   uploadPlaygroundSpeechAttachment,
 } from './lib'
+import {
+  buildMCPToolDeclarations,
+  buildMCPToolRefs,
+  summarizeMCPServers,
+} from './lib/tools/mcp-tools'
 import type {
   AssistantPreset,
   Message,
@@ -277,6 +283,51 @@ function PlaygroundContent(props: {
   const [webSearchEnabled, setWebSearchEnabled] = useState(false)
 
   const preferences = usePlaygroundPreferences(userId)
+  // MCP tools are declared to the model only while the administrator feature,
+  // the account switch and the LB-09 tool loop are all on. The catalog is
+  // requested only then, so a disabled feature never touches the connections;
+  // the refs are the same set the loop may execute, resolved from the catalog
+  // rather than from a model-produced name.
+  const mcpActive =
+    serverSettings.data?.mcpEnabled === true &&
+    preferences.mcpEnabled &&
+    preferences.toolExecutionEnabled
+  const mcpCatalog = usePlaygroundMCPCatalog(userId, mcpActive)
+  // The catalog stays cached after a switch turns off, so the refs are gated
+  // on the active flag too: while any switch is off the request carries no MCP
+  // declaration and no MCP call may execute.
+  const mcpToolRefs = useMemo(
+    () => (mcpActive ? buildMCPToolRefs(mcpCatalog.data) : []),
+    [mcpActive, mcpCatalog.data]
+  )
+  const mcpToolDeclarations = useMemo(
+    () => buildMCPToolDeclarations(mcpToolRefs),
+    [mcpToolRefs]
+  )
+  const mcpServers = useMemo(
+    () => summarizeMCPServers(mcpCatalog.data),
+    [mcpCatalog.data]
+  )
+  const mcpControl = useMemo(
+    () =>
+      serverSettings.data?.mcpEnabled
+        ? {
+            enabled: preferences.mcpEnabled,
+            failed: mcpCatalog.isError,
+            loading: mcpCatalog.isLoading,
+            onEnabledChange: preferences.setMCPEnabled,
+            servers: mcpServers,
+          }
+        : undefined,
+    [
+      mcpCatalog.isError,
+      mcpCatalog.isLoading,
+      mcpServers,
+      preferences.mcpEnabled,
+      preferences.setMCPEnabled,
+      serverSettings.data?.mcpEnabled,
+    ]
+  )
   // Automatic read-aloud runs after a reply completes. It is fire-and-forget:
   // the composer is never disabled and a late take from another conversation is
   // discarded by the hook's sequence guard.
@@ -300,6 +351,7 @@ function PlaygroundContent(props: {
     memoryBlock,
     contextSettings: context,
     developerOptions,
+    mcpTools: mcpToolDeclarations,
     prepareContextSummary: contextController.prepareForSend,
     prepareKnowledge,
     onMessageUpdate: updateMessages,
@@ -412,6 +464,7 @@ function PlaygroundContent(props: {
     isBusy: isGenerating || isComparing,
     knowledgeBaseIds,
     maxRounds: preferences.toolExecutionMaxRounds,
+    mcpTools: mcpToolRefs,
     messages,
     onContinue: handleContinueToolCalls,
     onUpdateMessages: updateMessages,
@@ -1449,6 +1502,7 @@ function PlaygroundContent(props: {
               knowledgeBases={knowledgeBases}
               knowledgeDiagnostics={knowledgeDiagnostics}
               knowledgeLoading={knowledgeBasesQuery.isLoading}
+              mcp={mcpControl}
               modelValue={config.model}
               models={models}
               compareModels={compareModels}

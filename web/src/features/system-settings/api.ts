@@ -22,6 +22,7 @@ import type {
   ConfirmPaymentComplianceResponse,
   FetchUpstreamRatiosRequest,
   LogCleanupTask,
+  PlaygroundMCPSettingsRequest,
   PlaygroundWebSearchSettingsRequest,
   SystemOptionsResponse,
   SystemTaskListResponse,
@@ -50,6 +51,16 @@ export async function updatePlaygroundWebSearch(
 ) {
   const res = await api.put<UpdateOptionResponse>(
     '/api/option/playground/web_search',
+    request
+  )
+  return res.data
+}
+
+export async function updatePlaygroundMCP(
+  request: PlaygroundMCPSettingsRequest
+) {
+  const res = await api.put<UpdateOptionResponse>(
+    '/api/option/playground/mcp',
     request
   )
   return res.data

@@ -18,8 +18,9 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { getServerMessage } from '@/lib/server-error-message'
 
-import { searchPlaygroundWeb } from '../../api'
+import { callPlaygroundMCPTool, searchPlaygroundWeb } from '../../api'
 import {
+  PLAYGROUND_MCP_TOOL_NAME_PREFIX,
   PLAYGROUND_TOOL_EXECUTION_ERRORS,
   TOOL_CALL_STATUS,
 } from '../../constants'
@@ -30,6 +31,11 @@ import {
   KNOWLEDGE_RETRIEVAL_TOP_K,
   mergeKnowledgeSearchResults,
 } from '../knowledge/retrieval'
+import {
+  buildMCPToolResult,
+  findMCPToolRef,
+  type PlaygroundMCPToolRef,
+} from './mcp-tools'
 import {
   buildKnowledgeSearchToolResult,
   buildTimeToolResult,
@@ -48,6 +54,8 @@ export interface ToolExecutionScope {
   knowledgeBaseIds: readonly string[]
   /** Group used for the embedding route, matching normal retrieval. */
   group: string
+  /** MCP tools the administrator enabled and this account may call. */
+  mcpTools?: readonly PlaygroundMCPToolRef[]
   /** Server policy budget for one stored result. */
   resultMaxBytes: number
   signal?: AbortSignal
@@ -147,6 +155,43 @@ async function executeKnowledgeSearch(
   }
 }
 
+async function executeMCPTool(
+  ref: PlaygroundMCPToolRef,
+  args: Record<string, unknown>,
+  scope: ToolExecutionScope
+): Promise<ToolExecutionOutcome> {
+  const result = await callPlaygroundMCPTool(
+    ref.serverId,
+    ref.toolName,
+    args,
+    scope.signal
+  )
+  // An upstream tool failure is a completed answer: the gateway already
+  // normalized the content, and the model decides what to do with it. Only a
+  // transport or gateway failure becomes a stored error.
+  return {
+    status: TOOL_CALL_STATUS.COMPLETED,
+    result: truncateToolResultBytes(
+      buildMCPToolResult(ref, result),
+      scope.resultMaxBytes
+    ),
+  }
+}
+
+/** Maps a thrown execution failure to the stored outcome the model reads. */
+function toolExecutionFailure(
+  error: unknown,
+  maxBytes: number
+): ToolExecutionOutcome {
+  if (error instanceof ToolExecutionError) {
+    return failedOutcome(error.message, maxBytes)
+  }
+  return failedOutcome(
+    getServerMessage(error) || PLAYGROUND_TOOL_EXECUTION_ERRORS.FAILED,
+    maxBytes
+  )
+}
+
 /**
  * Answer one declared executable call. The stored arguments are read as data
  * only; unsupported names are never reached because the caller filters them.
@@ -161,7 +206,28 @@ export async function executeSupportedToolCall(
   }
   const kind = getExecutableToolKind(call.name)
   if (!kind) {
-    return failedOutcome(PLAYGROUND_TOOL_EXECUTION_ERRORS.FAILED, maxBytes)
+    // A name outside the built-in set is still callable while it belongs to a
+    // connection of the current catalog. A name that only looks like an MCP
+    // tool reports the stable unavailable error instead of a generic failure.
+    const mcpRef = findMCPToolRef(call.name, scope.mcpTools ?? [])
+    if (!mcpRef) {
+      const message = call.name.startsWith(PLAYGROUND_MCP_TOOL_NAME_PREFIX)
+        ? PLAYGROUND_TOOL_EXECUTION_ERRORS.MCP_TOOL_UNAVAILABLE
+        : PLAYGROUND_TOOL_EXECUTION_ERRORS.FAILED
+      return failedOutcome(message, maxBytes)
+    }
+    const mcpArgs = parseToolArguments(call.arguments)
+    if (!mcpArgs) {
+      return failedOutcome(
+        PLAYGROUND_TOOL_EXECUTION_ERRORS.INVALID_ARGUMENTS,
+        maxBytes
+      )
+    }
+    try {
+      return await executeMCPTool(mcpRef, mcpArgs, scope)
+    } catch (error) {
+      return toolExecutionFailure(error, maxBytes)
+    }
   }
   const args = parseToolArguments(call.arguments)
   if (!args) {
@@ -190,13 +256,6 @@ export async function executeSupportedToolCall(
         return await executeKnowledgeSearch(args, scope)
     }
   } catch (error) {
-    if (error instanceof ToolExecutionError) {
-      return failedOutcome(error.message, maxBytes)
-    }
-    const serverMessage = getServerMessage(error)
-    return failedOutcome(
-      serverMessage || PLAYGROUND_TOOL_EXECUTION_ERRORS.FAILED,
-      maxBytes
-    )
+    return toolExecutionFailure(error, maxBytes)
   }
 }

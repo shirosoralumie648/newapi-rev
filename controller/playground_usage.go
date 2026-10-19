@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -37,6 +38,12 @@ const (
 	playgroundCostLookupMaxRequestIds = 100
 	// playgroundCostRequestIdMaxLength matches the logs.request_id column.
 	playgroundCostRequestIdMaxLength = 64
+	// playgroundUsageAnalyticsDefaultDays is the range the Inspector opens on.
+	playgroundUsageAnalyticsDefaultDays = 7
+	// playgroundUsageAnalyticsMaxDays bounds one analytics answer; the query
+	// already aggregates in the log database, so a wider window only raises
+	// the scanned row count, not the response size.
+	playgroundUsageAnalyticsMaxDays = 90
 )
 
 // playgroundMessageCost is one message's settled cost, read from the caller's
@@ -119,6 +126,39 @@ func GetPlaygroundUsage(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, usage)
+}
+
+// GetPlaygroundUsageAnalytics returns the caller's own settled usage over a
+// bounded day range, grouped by day, model and origin (Playground workspace vs
+// direct API). It is strictly read-only: the figures are the sums the gateway
+// already logged, and nothing is reserved, settled or recalculated. The empty
+// answer is a valid one, so a deployment with consume logging off degrades
+// safely instead of failing.
+func GetPlaygroundUsageAnalytics(c *gin.Context) {
+	userID := c.GetInt("id")
+	if userID <= 0 {
+		common.ApiErrorStatus(c, http.StatusUnauthorized, common.NewMessage("Authentication required."))
+		return
+	}
+	days := playgroundUsageAnalyticsDefaultDays
+	if raw := strings.TrimSpace(c.Query("days")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > playgroundUsageAnalyticsMaxDays {
+			writePlaygroundError(c, common.NewMessage("Invalid Playground request."))
+			return
+		}
+		days = parsed
+	}
+	now := common.GetTimestamp()
+	// The range covers whole UTC days including today, matching the day bucket
+	// the aggregate query forms from created_at.
+	startTimestamp := now/86400*86400 - int64(days-1)*86400
+	analytics, err := model.PlaygroundUsageAnalyticsForUser(userID, startTimestamp, now)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, analytics)
 }
 
 // GetPlaygroundSettings returns the Playground feature switches the browser

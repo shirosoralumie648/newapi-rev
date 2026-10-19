@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { AlertTriangle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -25,6 +26,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 
 import { PLAYGROUND_PROTOCOL_OPTIONS } from '../../constants'
 import type { PlaygroundProtocol } from '../../types'
@@ -33,6 +39,8 @@ interface PlaygroundProtocolSelectProps {
   disabled?: boolean
   value: PlaygroundProtocol
   onChange: (protocol: PlaygroundProtocol) => void
+  /** Payload fields the chosen protocol does not send; reported as a warning. */
+  unsupportedFields?: string[]
 }
 
 function isPlaygroundProtocol(value: unknown): value is PlaygroundProtocol {
@@ -50,30 +58,53 @@ export function PlaygroundProtocolSelect(props: PlaygroundProtocolSelectProps) {
     value: option.value,
     label: t(option.labelKey),
   }))
+  const unsupported = props.unsupportedFields ?? []
+  const warning =
+    unsupported.length > 0
+      ? t('Not sent with this protocol: {{fields}}', {
+          fields: unsupported.join(', '),
+        })
+      : ''
 
   return (
-    <Select
-      disabled={props.disabled}
-      items={items}
-      onValueChange={(value: unknown) => {
-        if (isPlaygroundProtocol(value)) props.onChange(value)
-      }}
-      value={props.value}
-    >
-      <SelectTrigger
-        aria-label={t('API protocol')}
-        className='h-8 w-[150px] text-xs'
-        size='sm'
+    <span className='inline-flex items-center gap-1'>
+      <Select
+        disabled={props.disabled}
+        items={items}
+        onValueChange={(value: unknown) => {
+          if (isPlaygroundProtocol(value)) props.onChange(value)
+        }}
+        value={props.value}
       >
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {PLAYGROUND_PROTOCOL_OPTIONS.map((option) => (
-          <SelectItem key={option.value} value={option.value}>
-            {t(option.labelKey)}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+        <SelectTrigger
+          aria-label={t('API protocol')}
+          className='h-8 w-[150px] text-xs'
+          size='sm'
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {PLAYGROUND_PROTOCOL_OPTIONS.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {t(option.labelKey)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {warning !== '' && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <span aria-label={warning} className='text-amber-500' role='img'>
+                <AlertTriangle aria-hidden='true' size={14} />
+              </span>
+            }
+          />
+          <TooltipContent>
+            <p>{warning}</p>
+          </TooltipContent>
+        </Tooltip>
+      )}
+    </span>
   )
 }

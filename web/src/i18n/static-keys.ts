@@ -1148,6 +1148,12 @@ export const STATIC_I18N_KEYS = [
   'Compare run size limit',
   'Compare runs per user',
   'Compare run storage per user',
+  // Canvas workflow-run quota labels and group heading.
+  'Workflow runs',
+  'Steps per workflow run',
+  'Workflow run size limit',
+  'Workflow runs per user',
+  'Workflow run storage per user',
   // Channel priority ordering API errors.
   'Channel priorities changed. Refresh and try again.',
   'Invalid channel priority move',
@@ -1183,6 +1189,20 @@ export const STATIC_I18N_KEYS = [
   "This model's channel metadata does not list image generation.",
   "This model's channel metadata does not list video generation.",
   "This model's channel metadata lists neither image nor video generation.",
+  // Canvas workflow run history: status/kind labels and rerun diff reasons
+  // render from maps, and the toast fallbacks sit inside helper calls, so the
+  // literal scan cannot see them.
+  'Generation',
+  'Skipped',
+  'Only in the newer run',
+  'Only in the older run',
+  'Status changed',
+  'Cost changed',
+  'Duration changed',
+  'Cache use changed',
+  'Output changed',
+  'The workflow run could not be loaded.',
+  'The workflow run could not be deleted.',
   // Canvas workflow run budget feedback (BL-03): the estimate dialog reports
   // these keys from constants, so the literal scan cannot see them.
   'The run budget could not be opened.',
@@ -1461,6 +1481,23 @@ export const STATIC_I18N_KEYS = [
   'Value matches none of the allowed shapes',
   'Value does not match every required shape',
   'Playground developer options limit exceeded.',
+  // Playground MCP client proxy (LB-10): the composer suffix, the admin editor
+  // hints and the validation messages are passed to t() as values from
+  // constants, helpers and field-level results, so the literal scan cannot see
+  // them.
+  'This MCP tool is no longer available.',
+  'The stored token is removed when you save.',
+  'A token is stored on the server.',
+  'Sent to the connection only, never returned to the browser.',
+  'Save MCP settings',
+  'At most 20 MCP connections can be configured.',
+  'Use 1-24 letters, digits, hyphens or underscores, starting with a letter or digit.',
+  'Each MCP connection needs a unique id.',
+  'Enter a name of at most 100 characters.',
+  'Enter a valid HTTP header name.',
+  'This header is reserved by the MCP client.',
+  'The token is invalid.',
+  'Choose a header before storing a token.',
   'cURL',
   'Python',
   'Node.js',

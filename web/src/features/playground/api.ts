@@ -62,8 +62,11 @@ import type {
   PlaygroundServerSession,
   PlaygroundPresetExport,
   PlaygroundSessionExport,
+  PlaygroundSnippetExport,
   PlaygroundTrashListing,
   PromptSnippet,
+  PromptSnippetDetail,
+  PromptSnippetVersion,
 } from './types'
 
 /** One non-streaming completion plus the relay request id it was recorded as. */
@@ -1079,11 +1082,13 @@ const playgroundUsageSchema = z.object({
   storage: playgroundUsageMetricSchema,
   tasks: playgroundUsageMetricSchema,
   comparison_runs: playgroundUsageMetricSchema,
+  workflow_runs: playgroundUsageMetricSchema,
 })
 
 const playgroundSettingsSchema = z.object({
   sandbox_preview_enabled: z.boolean(),
   web_search_enabled: z.boolean().optional(),
+  mcp_enabled: z.boolean().optional(),
   tool_call_result_max_bytes: z.number().int().positive().optional(),
 })
 
@@ -1113,6 +1118,7 @@ export interface PlaygroundResourceUsage {
   storage: PlaygroundUsageMetric
   tasks: PlaygroundUsageMetric
   comparisonRuns: PlaygroundUsageMetric
+  workflowRuns: PlaygroundUsageMetric
 }
 
 /**
@@ -1252,6 +1258,7 @@ export async function getPlaygroundUsage(
     storage: toMetric(metrics.storage),
     tasks: toMetric(metrics.tasks),
     comparisonRuns: toMetric(metrics.comparison_runs),
+    workflowRuns: toMetric(metrics.workflow_runs),
   }
 }
 
@@ -1366,11 +1373,13 @@ export async function getPlaygroundStorageBilling(
  * sandboxed preview; while it is false the browser must keep artifact content
  * inert. `webSearchEnabled` is the administrator opt-in for the
  * search-with-this-turn control; the browser never sees the provider endpoint
- * or credential.
+ * or credential. `mcpEnabled` is the administrator opt-in for the global MCP
+ * connections; while it is false the MCP catalog is not requested at all.
  */
 export interface PlaygroundServerSettings {
   sandboxPreviewEnabled: boolean
   webSearchEnabled: boolean
+  mcpEnabled: boolean
   /**
    * Authoritative byte budget the server validates one tool result against.
    * Older servers omit it; the local default applies until they report it.
@@ -1387,6 +1396,7 @@ export async function getPlaygroundSettings(
   return {
     sandboxPreviewEnabled: settings.sandbox_preview_enabled,
     webSearchEnabled: settings.web_search_enabled === true,
+    mcpEnabled: settings.mcp_enabled === true,
     toolCallResultMaxBytes:
       settings.tool_call_result_max_bytes ??
       PLAYGROUND_TOOL_CALL_RESULT_DEFAULT_MAX_BYTES,
@@ -1441,6 +1451,147 @@ export async function searchPlaygroundWeb(
     query: parsed.query,
     provider: parsed.provider ?? '',
     results: parsed.results,
+  }
+}
+
+/**
+ * One tool exposed by an administrator-configured MCP connection. The wire
+ * names mirror the gateway; `functionName` is the provider-safe
+ * `mcp__<server>__<tool>` name the model calls.
+ */
+export interface PlaygroundMCPServerTool {
+  name: string
+  functionName: string
+  description: string
+  inputSchema?: Record<string, unknown>
+}
+
+/** One administrator-configured MCP connection as the catalog reports it. */
+export interface PlaygroundMCPServer {
+  id: string
+  name: string
+  /** False while the connection is enabled but its catalog is unreachable. */
+  available: boolean
+  tools: PlaygroundMCPServerTool[]
+}
+
+/** One normalized content item of a proxied MCP tool result. */
+export interface PlaygroundMCPContent {
+  type: string
+  text?: string
+  mimeType?: string
+  uri?: string
+  name?: string
+}
+
+/**
+ * The normalized answer of one proxied tools/call. `isError` is the upstream
+ * tool failure flag, not a gateway failure: the model still receives the
+ * content and can react to it.
+ */
+export interface PlaygroundMCPCallResult {
+  isError: boolean
+  content: PlaygroundMCPContent[]
+  structuredContent?: unknown
+}
+
+const playgroundMCPServerToolSchema = z.object({
+  name: z.string().min(1).max(128),
+  function_name: z.string().min(1).max(128),
+  description: z.string().optional(),
+  input_schema: z.unknown().optional(),
+})
+
+const playgroundMCPServerSchema = z.object({
+  id: z.string().min(1).max(64),
+  name: z.string().max(200),
+  available: z.boolean(),
+  tools: z.array(playgroundMCPServerToolSchema),
+})
+
+const playgroundMCPServersResponseSchema = z.object({
+  enabled: z.boolean(),
+  servers: z.array(playgroundMCPServerSchema),
+})
+
+const playgroundMCPContentSchema = z.object({
+  type: z.string().max(32),
+  text: z.string().optional(),
+  mime_type: z.string().max(128).optional(),
+  uri: z.string().max(2048).optional(),
+  name: z.string().max(256).optional(),
+})
+
+const playgroundMCPCallResponseSchema = z.object({
+  is_error: z.boolean(),
+  content: z.array(playgroundMCPContentSchema),
+  structured_content: z.unknown().optional(),
+})
+
+function toInputSchema(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return undefined
+  }
+  return value as Record<string, unknown>
+}
+
+/**
+ * Reads the global MCP catalog: the tools of every connection an administrator
+ * enabled. Endpoints and credentials stay on the gateway, and a connection
+ * whose catalog failed is reported with `available: false` instead of hiding
+ * the other connections.
+ */
+export async function getPlaygroundMCPServers(
+  signal?: AbortSignal
+): Promise<PlaygroundMCPServer[]> {
+  const response = await api.get(API_ENDPOINTS.PLAYGROUND_MCP_SERVERS, {
+    signal,
+  })
+  requireServerSuccess(response.data)
+  const parsed = playgroundMCPServersResponseSchema.parse(response.data.data)
+  return parsed.servers.map((server) => ({
+    id: server.id,
+    name: server.name,
+    available: server.available,
+    tools: server.tools.map((tool) => ({
+      name: tool.name,
+      functionName: tool.function_name,
+      description: tool.description ?? '',
+      inputSchema: toInputSchema(tool.input_schema),
+    })),
+  }))
+}
+
+/**
+ * One tools/call through the gateway. The browser names only a configured
+ * connection and a tool; the gateway fixes the JSON-RPC method, enforces its
+ * time and size budgets and never reveals the endpoint or its credential.
+ */
+export async function callPlaygroundMCPTool(
+  serverId: string,
+  tool: string,
+  args: Record<string, unknown>,
+  signal?: AbortSignal
+): Promise<PlaygroundMCPCallResult> {
+  const response = await api.post(
+    `${API_ENDPOINTS.PLAYGROUND_MCP_CALL}/${encodeURIComponent(serverId)}/call`,
+    { tool, arguments: args },
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  const parsed = playgroundMCPCallResponseSchema.parse(response.data.data)
+  return {
+    isError: parsed.is_error,
+    content: parsed.content.map((item) => ({
+      type: item.type,
+      ...(item.text !== undefined ? { text: item.text } : {}),
+      ...(item.mime_type !== undefined ? { mimeType: item.mime_type } : {}),
+      ...(item.uri !== undefined ? { uri: item.uri } : {}),
+      ...(item.name !== undefined ? { name: item.name } : {}),
+    })),
+    ...(parsed.structured_content !== undefined
+      ? { structuredContent: parsed.structured_content }
+      : {}),
   }
 }
 
@@ -1688,12 +1839,26 @@ export async function importPlaygroundPreset(
   return mapServerPreset(response.data.data)
 }
 
+const serverSnippetVersionSchema = z.object({
+  version: z.number().int().positive(),
+  content: z.string(),
+  byte_size: z.number().int().nonnegative(),
+  created_at: z.number().int().nonnegative(),
+})
+
 const serverSnippetSchema = z.object({
   id: z.string().min(1),
   name: z.string(),
   content: z.string(),
+  current_version: z.number().int().nonnegative(),
+  production_version: z.number().int().nonnegative(),
+  version_count: z.number().int().nonnegative(),
   created_at: z.number().int().nonnegative(),
   updated_at: z.number().int().nonnegative(),
+})
+
+const serverSnippetDetailSchema = serverSnippetSchema.extend({
+  versions: z.array(serverSnippetVersionSchema),
 })
 
 export interface PlaygroundSnippetInput {
@@ -1710,14 +1875,35 @@ export interface PlaygroundSnippetListing {
   limit: number
 }
 
+function mapServerSnippetVersion(value: unknown): PromptSnippetVersion {
+  const version = serverSnippetVersionSchema.parse(value)
+  return {
+    version: version.version,
+    content: version.content,
+    byteSize: version.byte_size,
+    createdAt: version.created_at * 1000,
+  }
+}
+
 function mapServerSnippet(value: unknown): PromptSnippet {
   const snippet = serverSnippetSchema.parse(value)
   return {
     id: snippet.id,
     name: snippet.name,
     content: snippet.content,
+    currentVersion: snippet.current_version,
+    productionVersion: snippet.production_version,
+    versionCount: snippet.version_count,
     createdAt: snippet.created_at * 1000,
     updatedAt: snippet.updated_at * 1000,
+  }
+}
+
+function mapServerSnippetDetail(value: unknown): PromptSnippetDetail {
+  const detail = serverSnippetDetailSchema.parse(value)
+  return {
+    ...mapServerSnippet(detail),
+    versions: detail.versions.map(mapServerSnippetVersion),
   }
 }
 
@@ -1774,6 +1960,88 @@ export async function deletePlaygroundSnippet(
     { signal }
   )
   requireServerSuccess(response.data)
+}
+
+/**
+ * Read one owned snippet with its immutable revisions. The list endpoint omits
+ * the revision bodies on purpose; the history dialog fetches them only when it
+ * opens.
+ */
+export async function getPlaygroundSnippet(
+  snippetId: string,
+  signal?: AbortSignal
+): Promise<PromptSnippetDetail> {
+  const response = await api.get(
+    `${API_ENDPOINTS.PLAYGROUND_SNIPPETS}/${encodeURIComponent(snippetId)}`,
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  return mapServerSnippetDetail(response.data.data)
+}
+
+/**
+ * Move the production pointer of one snippet to a stored revision. History is
+ * append-only, so this is reversible by choosing a later version again.
+ */
+export async function rollbackPlaygroundSnippet(
+  snippetId: string,
+  version: number,
+  signal?: AbortSignal
+): Promise<PromptSnippetDetail> {
+  const response = await api.post(
+    `${API_ENDPOINTS.PLAYGROUND_SNIPPETS}/${encodeURIComponent(snippetId)}/rollback`,
+    { version },
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  return mapServerSnippetDetail(response.data.data)
+}
+
+/** Render the JSON document that the snippet import endpoint accepts. */
+export async function exportPlaygroundSnippet(
+  snippetId: string,
+  signal?: AbortSignal
+): Promise<PlaygroundSnippetExport> {
+  const response = await api.get(
+    `${API_ENDPOINTS.PLAYGROUND_SNIPPETS}/${encodeURIComponent(snippetId)}/export`,
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  const data = z
+    .object({
+      format: z.literal('json'),
+      filename: z.string().min(1),
+      content_type: z.string().min(1),
+      content: z.string(),
+    })
+    .parse(response.data.data)
+  return {
+    format: data.format,
+    filename: data.filename,
+    contentType: data.content_type,
+    content: data.content,
+  }
+}
+
+/**
+ * Store one exported template document for the caller. The server validates the
+ * format, schema version, revision sequence and the effective quotas before it
+ * writes anything.
+ */
+export async function importPlaygroundSnippet(
+  content: string,
+  signal?: AbortSignal
+): Promise<PromptSnippetDetail> {
+  const response = await api.post(
+    `${API_ENDPOINTS.PLAYGROUND_SNIPPETS}/import`,
+    content,
+    {
+      headers: { 'Content-Type': 'application/json' },
+      signal,
+    }
+  )
+  requireServerSuccess(response.data)
+  return mapServerSnippetDetail(response.data.data)
 }
 
 const serverMemorySchema = z.object({

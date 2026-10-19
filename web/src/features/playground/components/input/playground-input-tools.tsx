@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Code2, GlobeIcon, Table2Icon, Trash2Icon } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -35,6 +35,8 @@ import {
 import { DEFAULT_DEVELOPER_OPTIONS } from '../../constants'
 import type { KnowledgeBase } from '../../knowledge-api'
 import type { PlaygroundContextPlan } from '../../lib'
+import { playgroundProtocolUnsupportedFields } from '../../lib/protocol/protocol-payload'
+import { buildChatCompletionPayload } from '../../lib/streaming/payload-builder'
 import type {
   ModelOption,
   ParameterEnabled,
@@ -57,7 +59,10 @@ import { PlaygroundParameterPanel } from './playground-parameter-panel'
 import { PlaygroundProtocolSelect } from './playground-protocol-select'
 import { PlaygroundSnippetPanel } from './playground-snippet-panel'
 import { PlaygroundSystemPromptPanel } from './playground-system-prompt-panel'
-import { PlaygroundToolExecutionControl } from './playground-tool-execution-control'
+import {
+  PlaygroundToolExecutionControl,
+  type PlaygroundToolExecutionMCPProps,
+} from './playground-tool-execution-control'
 
 type PlaygroundInputToolsProps = {
   config: PlaygroundConfig
@@ -135,6 +140,8 @@ type PlaygroundInputToolsProps = {
   toolExecutionMaxRounds: number
   onToolExecutionEnabledChange: (value: boolean) => void
   onToolExecutionMaxRoundsChange: (value: number) => void
+  /** Account-level MCP switch and catalog; absent while the server has MCP off. */
+  mcp?: PlaygroundToolExecutionMCPProps
 }
 
 export function PlaygroundInputTools({
@@ -188,9 +195,30 @@ export function PlaygroundInputTools({
   toolExecutionMaxRounds,
   onToolExecutionEnabledChange,
   onToolExecutionMaxRoundsChange,
+  mcp,
 }: PlaygroundInputToolsProps) {
   const { t } = useTranslation()
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
+  // Probe the payload of the next send so the warning names exactly what the
+  // selected protocol drops; a disabled parameter never appears because the
+  // real builder is used instead of a static per-protocol list.
+  const unsupportedFields = useMemo(
+    () =>
+      playgroundProtocolUnsupportedFields(
+        buildChatCompletionPayload(
+          [],
+          config,
+          parameterEnabled,
+          '',
+          undefined,
+          '',
+          null,
+          developerOptions
+        ),
+        config.protocol
+      ),
+    [config, parameterEnabled, developerOptions]
+  )
 
   const handleClearMessages = () => {
     onClearMessages?.()
@@ -269,6 +297,7 @@ export function PlaygroundInputTools({
           disabled={disabled}
           enabled={toolExecutionEnabled}
           maxRounds={toolExecutionMaxRounds}
+          mcp={mcp}
           onEnabledChange={onToolExecutionEnabledChange}
           onMaxRoundsChange={onToolExecutionMaxRoundsChange}
         />
@@ -304,6 +333,7 @@ export function PlaygroundInputTools({
         <PlaygroundProtocolSelect
           disabled={disabled}
           onChange={(protocol) => onConfigChange('protocol', protocol)}
+          unsupportedFields={unsupportedFields}
           value={config.protocol}
         />
 

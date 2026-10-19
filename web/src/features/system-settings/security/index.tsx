@@ -48,6 +48,7 @@ const defaultSecuritySettings: SecuritySettings = {
     '{"enabled":false,"price_usd_per_gb_month":0.015,"free_gb":1,"group_free_gb":{},"apply_group_ratio":false,"grace_days":7,"egress":{"mode":"unmetered","price_usd_per_gb":0,"daily_bytes_limit":0,"daily_requests_limit":0}}',
   'playground_setting.web_search':
     '{"enabled":false,"provider":"tavily","base_url":"","price_usd_per_call":0,"group_price_usd_per_call":{}}',
+  'playground_setting.mcp': '{"enabled":false,"servers":[]}',
   'playground_setting.sandbox_preview_enabled': false,
 }
 

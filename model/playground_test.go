@@ -40,6 +40,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/controller"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/router"
@@ -2516,11 +2517,14 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	attachmentBase := "/api/playground/sessions/" + sessionID + "/attachments"
 	for _, route := range []struct{ method, path string }{
 		{http.MethodGet, "/api/playground/usage"},
+		{http.MethodGet, "/api/playground/usage/analytics"},
 		{http.MethodGet, "/api/playground/settings"},
 		{http.MethodGet, "/api/playground/message-costs?request_ids=route-cost"},
 		{http.MethodGet, "/api/playground/logs/route-cost/replay"},
 		{http.MethodDelete, "/api/playground/logs/route-cost/capture"},
 		{http.MethodGet, "/api/playground/assets?kind=attachment"},
+		{http.MethodGet, "/api/playground/mcp/servers"},
+		{http.MethodPost, "/api/playground/mcp/missing/call"},
 		{http.MethodGet, "/api/playground/trash"},
 		{http.MethodGet, "/api/playground/sessions/" + sessionID + "/export"},
 		{http.MethodPost, "/api/playground/sessions/" + sessionID + "/share"},
@@ -2558,9 +2562,12 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodPut, "/api/playground/knowledge-bases/missing/documents/missing/chunks"},
 		{http.MethodGet, "/api/playground/snippets"},
 		{http.MethodPost, "/api/playground/snippets"},
+		{http.MethodPost, "/api/playground/snippets/import"},
 		{http.MethodGet, "/api/playground/snippets/missing"},
 		{http.MethodPatch, "/api/playground/snippets/missing"},
 		{http.MethodDelete, "/api/playground/snippets/missing"},
+		{http.MethodGet, "/api/playground/snippets/missing/export"},
+		{http.MethodPost, "/api/playground/snippets/missing/rollback"},
 		{http.MethodGet, "/api/playground/memories"},
 		{http.MethodPost, "/api/playground/memories"},
 		{http.MethodGet, "/api/playground/memories/missing"},
@@ -5639,6 +5646,253 @@ func TestPlaygroundMessageCostLookup(t *testing.T) {
 	}
 }
 
+// The Playground origin marker is written to the settled consume/error row's
+// public metadata when the request came from the workspace; a direct API call
+// keeps exactly the metadata it had. The marker is what the usage analytics
+// reads back, so its write path is verified on every supported database.
+func TestPlaygroundLogOriginMarker(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			previousLog := model.LOG_DB
+			previousConsumeEnabled := common.LogConsumeEnabled
+			model.LOG_DB = db
+			common.LogConsumeEnabled = true
+			require.NoError(t, db.AutoMigrate(&model.Log{}))
+			t.Cleanup(func() {
+				common.LogConsumeEnabled = previousConsumeEnabled
+				model.LOG_DB = previousLog
+				require.NoError(t, db.Migrator().DropTable(&model.Log{}))
+			})
+			newRequestContext := func(marked bool, requestID string) *gin.Context {
+				recorder := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(recorder)
+				c.Set("id", 7)
+				c.Set(common.RequestIdKey, requestID)
+				c.Request = httptest.NewRequest(http.MethodPost, "/pg/chat/completions", nil)
+				if marked {
+					c.Set(string(constant.ContextKeyPlaygroundOrigin), true)
+				}
+				return c
+			}
+			model.RecordConsumeLog(newRequestContext(true, "pg-origin-consume"), 7, model.RecordConsumeLogParams{
+				ModelName: "origin-model", Quota: 10, Other: model.NewLogOther(),
+			})
+			model.RecordConsumeLog(newRequestContext(false, "api-origin-consume"), 7, model.RecordConsumeLogParams{
+				ModelName: "origin-model", Quota: 10,
+			})
+			model.RecordErrorLog(newRequestContext(true, "pg-origin-error"), 7, 3, "origin-model", "", "upstream failed", 0, 1, false, "default", nil)
+			model.RecordErrorLog(newRequestContext(false, "api-origin-error"), 7, 3, "origin-model", "", "upstream failed", 0, 1, false, "default", model.NewLogOther())
+
+			var logs []model.Log
+			require.NoError(t, db.Where("request_id IN ?", []string{
+				"pg-origin-consume", "api-origin-consume", "pg-origin-error", "api-origin-error",
+			}).Find(&logs).Error)
+			require.Len(t, logs, 4)
+			byRequestID := make(map[string]model.Log, len(logs))
+			for _, entry := range logs {
+				byRequestID[entry.RequestId] = entry
+			}
+			assert.Contains(t, byRequestID["pg-origin-consume"].Other, `"playground_origin":true`)
+			assert.NotContains(t, byRequestID["api-origin-consume"].Other, "playground_origin")
+			assert.Contains(t, byRequestID["pg-origin-error"].Other, `"playground_origin":true`)
+			assert.NotContains(t, byRequestID["api-origin-error"].Other, "playground_origin")
+			// A marked error row that arrived without any other metadata still
+			// gets a document, so the analytics can classify it.
+			assert.NotEmpty(t, byRequestID["pg-origin-error"].Other)
+		})
+	}
+}
+
+// The usage analytics folds the caller's own settled rows into day x model x
+// origin buckets: quota and tokens are summed, errors are counted next to
+// requests, and the total time and first-token averages are derived from the
+// stored measurements. Another account's rows, rows outside the range and
+// malformed `other` documents are excluded or treated as absent.
+func TestPlaygroundUsageAnalytics(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			previousLog := model.LOG_DB
+			previousLogDatabaseType := common.LogDatabaseType()
+			model.LOG_DB = db
+			// The fixture keeps the log connection on the same database as the
+			// main one, so the dialect SQL is exercised for real.
+			common.SetLogDatabaseType(common.DatabaseType(dialect))
+			require.NoError(t, db.AutoMigrate(&model.Log{}))
+			t.Cleanup(func() {
+				common.SetLogDatabaseType(previousLogDatabaseType)
+				model.LOG_DB = previousLog
+				require.NoError(t, db.Migrator().DropTable(&model.Log{}))
+			})
+
+			now := common.GetTimestamp()
+			today := now / 86400 * 86400
+			yesterday := today - 86400
+			outside := today - 40*86400
+			require.NoError(t, db.Create(&[]model.Log{
+				// Playground workspace, today: two settled rows with cache
+				// reports, one modern timing breakdown and one legacy `frt`.
+				{UserId: 7, Type: model.LogTypeConsume, ModelName: "alpha", CreatedAt: today + 100, Quota: 100, PromptTokens: 1000, CompletionTokens: 200, UseTime: 10,
+					Other: `{"playground_origin":true,"cache_tokens":400,"request_timing":{"first_token_ms":500}}`},
+				{UserId: 7, Type: model.LogTypeConsume, ModelName: "alpha", CreatedAt: today + 200, Quota: 50, PromptTokens: 500, CompletionTokens: 100, UseTime: 30,
+					Other: `{"playground_origin":true,"cache_tokens":100,"frt":700}`},
+				// Direct API, yesterday: no request timing start recorded, so
+				// it contributes a first-token sample but no time average.
+				{UserId: 7, Type: model.LogTypeConsume, ModelName: "alpha", CreatedAt: yesterday + 100, Quota: 200, PromptTokens: 2000, CompletionTokens: 300,
+					Other: `{"cache_tokens":50,"request_timing":{"first_token_ms":900}}`},
+				// Errors count beside requests and keep their origin.
+				{UserId: 7, Type: model.LogTypeError, ModelName: "beta", CreatedAt: today + 300, Other: `{"error_type":"channel_error"}`},
+				{UserId: 7, Type: model.LogTypeError, ModelName: "beta", CreatedAt: yesterday + 100, Other: `{"playground_origin":true}`},
+				// A malformed document must not fail the aggregate; it stays
+				// an API-origin row with no cache or first-token figure.
+				{UserId: 7, Type: model.LogTypeConsume, ModelName: "gamma", CreatedAt: today + 400, Quota: 5, PromptTokens: 10, UseTime: 5, Other: "not json"},
+				// Another account and an out-of-range row are never read.
+				{UserId: 8, Type: model.LogTypeConsume, ModelName: "alpha", CreatedAt: today + 500, Quota: 999999, Other: `{"playground_origin":true}`},
+				{UserId: 7, Type: model.LogTypeConsume, ModelName: "alpha", CreatedAt: outside + 100, Quota: 7, Other: `{"playground_origin":true}`},
+			}).Error)
+
+			analytics, err := model.PlaygroundUsageAnalyticsForUser(7, yesterday, now)
+			require.NoError(t, err)
+			assert.Equal(t, common.LogConsumeEnabled, analytics.Enabled)
+			assert.Equal(t, yesterday, analytics.StartTimestamp)
+			assert.Equal(t, now, analytics.EndTimestamp)
+			require.Len(t, analytics.Buckets, 5)
+			type bucketKey struct {
+				DayStart int64
+				Model    string
+				Origin   string
+			}
+			byKey := make(map[bucketKey]model.PlaygroundUsageAnalyticsBucket, len(analytics.Buckets))
+			for _, bucket := range analytics.Buckets {
+				byKey[bucketKey{bucket.DayStart, bucket.ModelName, bucket.Origin}] = bucket
+			}
+
+			playgroundToday := byKey[bucketKey{today, "alpha", model.PlaygroundUsageOriginPlayground}]
+			assert.EqualValues(t, 150, playgroundToday.Quota)
+			assert.EqualValues(t, 1500, playgroundToday.PromptTokens)
+			assert.EqualValues(t, 300, playgroundToday.CompletionTokens)
+			assert.EqualValues(t, 500, playgroundToday.CacheTokens)
+			assert.EqualValues(t, 2, playgroundToday.Requests)
+			assert.Zero(t, playgroundToday.Errors)
+			assert.EqualValues(t, 20, playgroundToday.AvgTimeSeconds)
+			assert.EqualValues(t, 600, playgroundToday.AvgFirstTokenMs)
+
+			apiYesterday := byKey[bucketKey{yesterday, "alpha", model.PlaygroundUsageOriginAPI}]
+			assert.EqualValues(t, 200, apiYesterday.Quota)
+			assert.EqualValues(t, 2000, apiYesterday.PromptTokens)
+			assert.EqualValues(t, 50, apiYesterday.CacheTokens)
+			assert.EqualValues(t, 1, apiYesterday.Requests)
+			assert.Zero(t, apiYesterday.AvgTimeSeconds)
+			assert.EqualValues(t, 900, apiYesterday.AvgFirstTokenMs)
+
+			apiTodayError := byKey[bucketKey{today, "beta", model.PlaygroundUsageOriginAPI}]
+			assert.Zero(t, apiTodayError.Quota)
+			assert.Zero(t, apiTodayError.Requests)
+			assert.EqualValues(t, 1, apiTodayError.Errors)
+			playgroundYesterdayError := byKey[bucketKey{yesterday, "beta", model.PlaygroundUsageOriginPlayground}]
+			assert.EqualValues(t, 1, playgroundYesterdayError.Errors)
+			assert.EqualValues(t, model.PlaygroundUsageOriginPlayground, playgroundYesterdayError.Origin)
+
+			malformed := byKey[bucketKey{today, "gamma", model.PlaygroundUsageOriginAPI}]
+			assert.EqualValues(t, 5, malformed.Quota)
+			assert.Zero(t, malformed.CacheTokens)
+			assert.Zero(t, malformed.AvgFirstTokenMs)
+			assert.EqualValues(t, 5, malformed.AvgTimeSeconds)
+
+			for _, bucket := range analytics.Buckets {
+				assert.NotEqual(t, int64(999999), bucket.Quota, "another account's rows must not be aggregated")
+				assert.NotEqual(t, outside, bucket.DayStart, "rows before the range must not be aggregated")
+			}
+
+			// An inverted or empty range is a valid empty answer, not an error.
+			inverted, err := model.PlaygroundUsageAnalyticsForUser(7, now, yesterday)
+			require.NoError(t, err)
+			assert.Empty(t, inverted.Buckets)
+			unknownUser, err := model.PlaygroundUsageAnalyticsForUser(0, yesterday, now)
+			require.NoError(t, err)
+			assert.Empty(t, unknownUser.Buckets)
+
+			// With consume logging off the row set stays readable but the flag
+			// tells the client that no new row will appear.
+			previousConsumeEnabled := common.LogConsumeEnabled
+			t.Cleanup(func() {
+				common.LogConsumeEnabled = previousConsumeEnabled
+			})
+			common.LogConsumeEnabled = false
+			disabled, err := model.PlaygroundUsageAnalyticsForUser(7, yesterday, now)
+			require.NoError(t, err)
+			assert.False(t, disabled.Enabled)
+			assert.NotEmpty(t, disabled.Buckets)
+		})
+	}
+}
+
+// The analytics endpoint accepts only a bounded day window and stays behind
+// the authenticated Playground routes, so a malformed range is rejected before
+// the log database is read.
+func TestPlaygroundUsageAnalyticsEndpoint(t *testing.T) {
+	db := playgroundTestDB(t, "sqlite")
+	previousLog := model.LOG_DB
+	model.LOG_DB = db
+	require.NoError(t, db.AutoMigrate(&model.Log{}))
+	t.Cleanup(func() {
+		model.LOG_DB = previousLog
+		require.NoError(t, db.Migrator().DropTable(&model.Log{}))
+	})
+	now := common.GetTimestamp()
+	today := now / 86400 * 86400
+	require.NoError(t, db.Create(&model.Log{
+		UserId: 7, Type: model.LogTypeConsume, ModelName: "endpoint-model", CreatedAt: today + 10,
+		Quota: 42, PromptTokens: 5, CompletionTokens: 6, Other: `{"playground_origin":true}`,
+	}).Error)
+
+	defaultResponse := playgroundRequest(t, 7, http.MethodGet, "/api/playground/usage/analytics", nil, controller.GetPlaygroundUsageAnalytics)
+	require.Equal(t, http.StatusOK, defaultResponse.Code, defaultResponse.Body.String())
+	var envelope struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Enabled        bool  `json:"enabled"`
+			StartTimestamp int64 `json:"start_timestamp"`
+			EndTimestamp   int64 `json:"end_timestamp"`
+			Buckets        []struct {
+				DayStart    int64  `json:"day_start"`
+				ModelName   string `json:"model_name"`
+				Origin      string `json:"origin"`
+				Quota       int64  `json:"quota"`
+				Requests    int64  `json:"requests"`
+				CacheTokens int64  `json:"cache_tokens"`
+			} `json:"buckets"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(defaultResponse.Body.Bytes(), &envelope))
+	require.True(t, envelope.Success, defaultResponse.Body.String())
+	assert.Equal(t, common.LogConsumeEnabled, envelope.Data.Enabled)
+	assert.GreaterOrEqual(t, envelope.Data.EndTimestamp, now)
+	// The default range covers seven whole UTC days including today, so the
+	// start is aligned to midnight and the span reaches back at least six days.
+	assert.Zero(t, envelope.Data.StartTimestamp%86400)
+	assert.GreaterOrEqual(t, envelope.Data.EndTimestamp-envelope.Data.StartTimestamp, int64(6*86400))
+	require.Len(t, envelope.Data.Buckets, 1)
+	assert.Equal(t, model.PlaygroundUsageOriginPlayground, envelope.Data.Buckets[0].Origin)
+	assert.EqualValues(t, 42, envelope.Data.Buckets[0].Quota)
+
+	wideResponse := playgroundRequest(t, 7, http.MethodGet, "/api/playground/usage/analytics?days=90", nil, controller.GetPlaygroundUsageAnalytics)
+	require.Equal(t, http.StatusOK, wideResponse.Code, wideResponse.Body.String())
+	require.NoError(t, common.Unmarshal(wideResponse.Body.Bytes(), &envelope))
+	assert.Zero(t, envelope.Data.StartTimestamp%86400)
+	assert.GreaterOrEqual(t, envelope.Data.EndTimestamp-envelope.Data.StartTimestamp, int64(89*86400))
+
+	for _, query := range []string{"days=0", "days=91", "days=-1", "days=abc", "days=1.5"} {
+		rejected := playgroundRequest(t, 7, http.MethodGet, "/api/playground/usage/analytics?"+query, nil, controller.GetPlaygroundUsageAnalytics)
+		assert.Equal(t, http.StatusBadRequest, rejected.Code, query)
+		assert.Contains(t, rejected.Body.String(), "PLAYGROUND_INVALID_REQUEST", query)
+	}
+
+	anonymous := playgroundRequest(t, 0, http.MethodGet, "/api/playground/usage/analytics", nil, controller.GetPlaygroundUsageAnalytics)
+	assert.Equal(t, http.StatusUnauthorized, anonymous.Code, anonymous.Body.String())
+}
+
 // Persisted generation results are owner-scoped records with a retention
 // window. Their bytes count against the account result budget, the pin
 // endpoints and canvas documents keep a result past the window, and the
@@ -7218,6 +7472,9 @@ func TestPlaygroundLogCapture(t *testing.T) {
 			t.Cleanup(func() {
 				model.LOG_DB = previousLog
 				require.NoError(t, db.Migrator().DropTable(&model.Log{}, &model.PlaygroundLogCapture{}))
+				// The replay audit rows use the unprefixed audit_logs table,
+				// which the shared real-database test instance also uses.
+				require.NoError(t, db.Migrator().DropTable("audit_logs"))
 			})
 			require.NoError(t, db.Create(&[]model.Log{
 				{UserId: 7, Type: model.LogTypeConsume, RequestId: "pg-replay-owner", ModelName: "replay-model", Group: "default", IsStream: true, Quota: 42, PromptTokens: 10, CompletionTokens: 20, CreatedAt: 1000,

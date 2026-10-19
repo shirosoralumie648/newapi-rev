@@ -119,6 +119,13 @@ function PlaygroundUsageSummary(props: { userId: number | null }) {
       bytes: true,
     },
     {
+      key: 'workflow-runs',
+      label: t('Workflow runs'),
+      metric: usage.workflowRuns,
+      counts: true,
+      bytes: true,
+    },
+    {
       key: 'knowledge-bases',
       label: t('Knowledge bases'),
       metric: usage.knowledgeBases,
