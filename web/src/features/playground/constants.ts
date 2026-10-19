@@ -112,6 +112,7 @@ export const API_ENDPOINTS = {
   PLAYGROUND_SEARCH: '/api/playground/search',
   PLAYGROUND_MESSAGE_COSTS: '/api/playground/message-costs',
   PLAYGROUND_ASSETS: '/api/playground/assets',
+  PLAYGROUND_SHARED: '/api/playground/shared',
   PLAYGROUND_TASKS: '/api/playground/tasks',
   PLAYGROUND_WORKFLOW_ESTIMATE: '/api/playground/workflows/estimate',
   PLAYGROUND_WORKFLOW_RUNS: '/api/playground/workflows/runs',

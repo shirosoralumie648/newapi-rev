@@ -116,6 +116,7 @@ const serverErrorMessageKeys = {
     'Insufficient wallet quota to cover this run budget.',
   PLAYGROUND_WORKFLOW_RUN_NOT_FOUND: 'Workflow run not found.',
   PLAYGROUND_WORKFLOW_RUN_SETTLE_FAILED: 'Unable to settle the run budget.',
+  PLAYGROUND_SHARE_NOT_FOUND: 'Shared conversation not found.',
   workflow_budget_exceeded:
     'This workflow run has reached its budget cap; the remaining steps were not started.',
 } as const

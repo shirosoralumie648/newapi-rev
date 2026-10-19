@@ -32,6 +32,7 @@ import type {
 } from '../../types'
 import { PlaygroundSessionExportMenu } from './playground-session-export-menu'
 import { PlaygroundSessionOrganizationMenu } from './playground-session-organization-menu'
+import { PlaygroundSessionShareDialog } from './playground-session-share-dialog'
 
 interface PlaygroundSessionItemProps {
   disabled?: boolean
@@ -172,11 +173,19 @@ export function PlaygroundSessionItem(props: PlaygroundSessionItemProps) {
           session={props.session}
         />
         {props.session.server && (
-          <PlaygroundSessionExportMenu
-            className='text-muted-foreground hover:text-foreground opacity-70 group-hover:opacity-100 focus-visible:opacity-100'
-            sessionId={props.session.server.id}
-            title={displayTitle}
-          />
+          <>
+            <PlaygroundSessionShareDialog
+              className='text-muted-foreground hover:text-foreground opacity-70 group-hover:opacity-100 focus-visible:opacity-100'
+              disabled={props.disabled}
+              sessionId={props.session.server.id}
+              title={displayTitle}
+            />
+            <PlaygroundSessionExportMenu
+              className='text-muted-foreground hover:text-foreground opacity-70 group-hover:opacity-100 focus-visible:opacity-100'
+              sessionId={props.session.server.id}
+              title={displayTitle}
+            />
+          </>
         )}
         <Button
           disabled={props.disabled}

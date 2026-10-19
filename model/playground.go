@@ -369,9 +369,18 @@ func DeletePlaygroundSession(userID int, id string) error {
 		if err != nil {
 			return err
 		}
+		now := common.GetTimestamp()
+		// A public link must stop resolving as soon as the conversation enters
+		// the trash. Restoring it later does not resurrect the old link; the
+		// owner has to create a new one deliberately.
+		if err := tx.Model(&PlaygroundSessionShare{}).
+			Where("session_id = ? AND user_id = ? AND revoked_at = 0", session.ID, userID).
+			Update("revoked_at", now).Error; err != nil {
+			return err
+		}
 		return tx.Model(&PlaygroundSession{}).
 			Where("id = ? AND user_id = ? AND deleted_at = 0", session.ID, userID).
-			Update("deleted_at", common.GetTimestamp()).Error
+			Update("deleted_at", now).Error
 	})
 }
 
@@ -470,6 +479,11 @@ func purgePlaygroundSessionTx(tx *gorm.DB, userID int, session *PlaygroundSessio
 		return nil, err
 	}
 	if err := tx.Where("session_id = ? AND user_id = ?", session.ID, userID).Delete(&PlaygroundMessage{}).Error; err != nil {
+		return nil, err
+	}
+	// Share links are an access mechanism, not content: they are deleted with
+	// the conversation and their hashes never enter an export.
+	if err := tx.Where("session_id = ? AND user_id = ?", session.ID, userID).Delete(&PlaygroundSessionShare{}).Error; err != nil {
 		return nil, err
 	}
 	// Memories outlive the conversation they were extracted from, but a purged
