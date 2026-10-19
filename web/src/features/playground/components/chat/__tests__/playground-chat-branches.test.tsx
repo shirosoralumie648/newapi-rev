@@ -247,4 +247,20 @@ describe('PlaygroundChat message highlight', () => {
       screen.getByText('Message number 29').closest('[data-message-key]')
     ).not.toHaveAttribute('data-highlighted')
   })
+
+  test('highlights a message whose key contains selector punctuation', () => {
+    const key = 'imported"\\key'
+    render(
+      <PlaygroundChat
+        highlightedMessageKey={key}
+        messages={[historyMessage(key, 'user', 'Punctuated key')]}
+      />
+    )
+
+    const highlighted = screen
+      .getByText('Punctuated key')
+      .closest('[data-message-key]')
+    expect(highlighted).toHaveAttribute('data-message-key', key)
+    expect(highlighted).toHaveAttribute('data-highlighted', 'true')
+  })
 })
