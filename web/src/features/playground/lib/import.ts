@@ -496,20 +496,25 @@ export async function importPlaygroundSessionDocument(
   }
 
   const blobs = new Map<string, Blob>()
-  await Promise.all(
-    [...sources.values()].map(async (source) => {
-      try {
-        const blob = await getPlaygroundAttachmentContent(
-          playgroundAttachmentContentUrl(document.sourceSessionId, source.id),
-          signal
-        )
-        blobs.set(source.id, blob)
-      } catch {
-        // The bytes are gone or belong to another account; the reference
-        // degrades to a placeholder below instead of failing the import.
-      }
-    })
-  )
+  const pendingSources = [...sources.values()]
+  // Bounded batches keep a large export from opening hundreds of content
+  // requests at once while still resolving independent files in parallel.
+  for (let index = 0; index < pendingSources.length; index += 6) {
+    await Promise.all(
+      pendingSources.slice(index, index + 6).map(async (source) => {
+        try {
+          const blob = await getPlaygroundAttachmentContent(
+            playgroundAttachmentContentUrl(document.sourceSessionId, source.id),
+            signal
+          )
+          blobs.set(source.id, blob)
+        } catch {
+          // The bytes are gone or belong to another account; the reference
+          // degrades to a placeholder below instead of failing the import.
+        }
+      })
+    )
+  }
 
   const localId = nanoid()
   const created = await createPlaygroundSession(
