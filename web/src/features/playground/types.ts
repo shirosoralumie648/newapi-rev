@@ -243,6 +243,63 @@ export interface PlaygroundContextSummary {
 }
 
 /**
+ * One function tool definition injected into a request. The shape is the
+ * OpenAI wire shape the relay forwards unchanged, so the client never
+ * translates it. The Playground defines tools but never executes one: a
+ * requested call waits for the user to paste the result obtained elsewhere.
+ */
+export interface ChatCompletionTool {
+  type: 'function'
+  function: {
+    name: string
+    description?: string
+    /** JSON Schema object describing the arguments of the tool. */
+    parameters?: Record<string, unknown>
+    strict?: boolean
+  }
+}
+
+/** Named JSON Schema of a structured response format (OpenAI wire shape). */
+export interface ChatCompletionJsonSchema {
+  name: string
+  description?: string
+  schema: Record<string, unknown>
+  strict?: boolean
+}
+
+export interface ChatCompletionResponseFormat {
+  type: 'text' | 'json_object' | 'json_schema'
+  json_schema?: ChatCompletionJsonSchema
+}
+
+/** How the model may call the defined tools; empty means unset. */
+export type PlaygroundDeveloperToolChoice = '' | 'auto' | 'none' | 'required'
+
+/**
+ * Response format of one conversation in the client shape: `jsonSchema` is
+ * present only for `json_schema`. The server stores the OpenAI wire shape and
+ * the payload builder converts back when a request is sent.
+ */
+export interface PlaygroundDeveloperResponseFormat {
+  type: 'text' | 'json_object' | 'json_schema'
+  jsonSchema?: ChatCompletionJsonSchema
+}
+
+/**
+ * Request-side developer settings of one conversation: the master switch, the
+ * function tool definitions and the response format the client injects into
+ * every send. Stored with the conversation (never per message), so every turn
+ * of the conversation sees the same contract. Disabled settings inject
+ * nothing, so the request is identical to a conversation without them.
+ */
+export interface PlaygroundDeveloperOptions {
+  enabled: boolean
+  tools: ChatCompletionTool[]
+  toolChoice: PlaygroundDeveloperToolChoice
+  responseFormat: PlaygroundDeveloperResponseFormat
+}
+
+/**
  * A partial organization change for one conversation. An omitted switch keeps
  * its stored value; `tags` replaces the complete list when present.
  */
@@ -274,6 +331,12 @@ export interface PlaygroundSession {
   context: PlaygroundContextSettings
   /** Persisted compression node, or null when the full history is sent. */
   contextSummary: PlaygroundContextSummary | null
+  /**
+   * Request-side developer settings (tools and response format) injected into
+   * every send. Disabled and empty by default; the stored definitions survive
+   * a disable so the user can switch them back on.
+   */
+  developerOptions: PlaygroundDeveloperOptions
   /** Conversation stays in the pinned section of the client-side list. */
   pinned: boolean
   /** Archived conversations collapse into their own client-side section. */
@@ -528,6 +591,19 @@ export interface ChatCompletionRequest {
    * `high`, `xhigh`, `max`) or empty while the parameter stays unset.
    */
   reasoning_effort?: string
+  /**
+   * Function tools of the conversation's developer settings. Present only
+   * while at least one tool is defined and the settings are enabled; the
+   * gateway relays them and never executes one.
+   */
+  tools?: ChatCompletionTool[]
+  /** How the model may call the tools; present only beside `tools`. */
+  tool_choice?: Exclude<PlaygroundDeveloperToolChoice, ''>
+  /**
+   * Response format the model should answer with; present only while the
+   * settings ask for JSON. `json_schema` includes the named JSON Schema.
+   */
+  response_format?: ChatCompletionResponseFormat
 }
 
 export interface ChatCompletionChunk {

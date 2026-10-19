@@ -301,7 +301,17 @@ func TestPlaygroundShareCanvasColumnMigration(t *testing.T) {
 			q := func(name string) string { return quote + name + quote }
 			table := db.NamingStrategy.TableName("PlaygroundSessionShare")
 			legacyColumns := []string{"id", "session_id", "user_id", "token_hash", "expires_at", "revoked_at", "created_at"}
-			legacyTypes := []string{"bigint PRIMARY KEY", "varchar(128) NOT NULL", "bigint NOT NULL", "varchar(64) NOT NULL", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL"}
+			// The pre-canvas model already declared an auto-incrementing int64
+			// primary key, so reproduce the table AutoMigrate created then: a
+			// plain PRIMARY KEY column cannot accept rows without an explicit id.
+			legacyIDType := "integer PRIMARY KEY AUTOINCREMENT"
+			switch dialect {
+			case "mysql":
+				legacyIDType = "bigint AUTO_INCREMENT PRIMARY KEY"
+			case "postgres":
+				legacyIDType = "bigserial PRIMARY KEY"
+			}
+			legacyTypes := []string{legacyIDType, "varchar(128) NOT NULL", "bigint NOT NULL", "varchar(64) NOT NULL", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL"}
 			definitions := make([]string, len(legacyColumns))
 			quoted := make([]string, len(legacyColumns))
 			for index, name := range legacyColumns {

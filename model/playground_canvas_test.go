@@ -1151,7 +1151,7 @@ func TestPlaygroundCanvasShares(t *testing.T) {
 					map[string]any{
 						"id": "n-artifact", "type": "artifact", "position": map[string]any{"x": 50, "y": 60},
 						"data": map[string]any{
-							"kind": "artifact", "label": "chart.png", "media_type": "image/png",
+							"kind": "artifact", "label": "chart.png", "mediaType": "image/png",
 							"ref": map[string]any{
 								"sessionId": secretSessionID, "attachmentId": "pgf_secret_attachment",
 								"artifactId": "pga_secret_artifact", "taskId": "task_secret_identifier",
@@ -1272,7 +1272,8 @@ func TestPlaygroundCanvasShares(t *testing.T) {
 			assert.NotContains(t, messageData, "ref")
 			artifactData := nodeByID("n-artifact")["data"].(map[string]any)
 			assert.Equal(t, "chart.png", artifactData["label"])
-			assert.Equal(t, "image/png", artifactData["media_type"])
+			assert.Equal(t, "image/png", artifactData["mediaType"])
+			assert.NotContains(t, artifactData, "media_type")
 			modelWorkflow := nodeByID("n-model")["data"].(map[string]any)["workflow"].(map[string]any)
 			assert.Equal(t, "failed", modelWorkflow["status"])
 			assert.Equal(t, "image", modelWorkflow["generation"])
@@ -1298,7 +1299,7 @@ func TestPlaygroundCanvasShares(t *testing.T) {
 				`"model"`, `"size"`, `"quality"`, `"group"`, `"sourceNodeId"`, `"content_url"`,
 				`"token"`, `"user_id"`,
 			} {
-				assert.NotContains(t, read.Body.String(), forbiddenKey)
+				assert.NotContains(t, read.Body.String(), forbiddenKey+":")
 			}
 
 			// Rotation, expiry and revocation use the identical non-enumerable

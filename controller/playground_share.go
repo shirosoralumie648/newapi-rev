@@ -98,7 +98,7 @@ type playgroundSharedCanvasNodeData struct {
 	Text      string                        `json:"text,omitempty"`
 	Snapshot  *playgroundSharedNodeSnapshot `json:"snapshot,omitempty"`
 	Label     string                        `json:"label,omitempty"`
-	MediaType string                        `json:"media_type,omitempty"`
+	MediaType string                        `json:"mediaType,omitempty"`
 	Workflow  *playgroundSharedWorkflow     `json:"workflow,omitempty"`
 	ParentID  string                        `json:"parentId,omitempty"`
 }

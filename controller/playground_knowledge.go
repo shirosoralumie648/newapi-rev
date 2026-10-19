@@ -93,8 +93,9 @@ type playgroundKnowledgeSearchRequest struct {
 }
 
 type playgroundKnowledgeSearchResponse struct {
-	Hits  []model.PlaygroundKnowledgeSearchHit     `json:"hits"`
-	Stale []model.PlaygroundKnowledgeStaleDocument `json:"stale_documents"`
+	KnowledgeBase playgroundKnowledgeBaseResponse          `json:"knowledge_base"`
+	Hits          []model.PlaygroundKnowledgeSearchHit     `json:"hits"`
+	Stale         []model.PlaygroundKnowledgeStaleDocument `json:"stale_documents"`
 }
 
 type playgroundKnowledgeBaseResponse struct {

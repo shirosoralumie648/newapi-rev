@@ -1345,8 +1345,9 @@ test('a selection run executes and prices only the selected subgraph', async () 
   act(() => {
     plan = hook.result.current.runner.estimateSelection()
   })
-  expect(plan?.scope).toBe('selection')
-  expect(plan?.steps.map((step) => step.nodeId)).toEqual(['m1'])
+  const selectedPlan = plan as CanvasWorkflowRunPlan | null
+  expect(selectedPlan?.scope).toBe('selection')
+  expect(selectedPlan?.steps.map((step) => step.nodeId)).toEqual(['m1'])
 
   act(() => hook.result.current.runner.runSelection())
   await waitFor(() => expect(hook.result.current.runner.phase).toBe('idle'))

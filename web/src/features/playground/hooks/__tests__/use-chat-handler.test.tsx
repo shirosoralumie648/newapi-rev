@@ -31,6 +31,19 @@ import { useChatHandler } from '../use-chat-handler'
 
 vi.mock('../../api', () => ({ sendChatCompletion: vi.fn() }))
 
+const streamRequestMocks = vi.hoisted(() => ({
+  sendStreamRequest: vi.fn(),
+  stopStream: vi.fn(),
+}))
+
+vi.mock('../use-stream-request', () => ({
+  useStreamRequest: () => ({
+    sendStreamRequest: streamRequestMocks.sendStreamRequest,
+    stopStream: streamRequestMocks.stopStream,
+    isStreaming: false,
+  }),
+}))
+
 afterEach(() => vi.restoreAllMocks())
 
 const userMessage: Message = {
@@ -185,4 +198,82 @@ test('a stopped reply keeps its text and is labelled interrupted', () => {
     content: 'Once upon a time',
     finishReason: 'interrupted',
   })
+})
+
+test('a send exposes the exact payload it delivers for the request viewer', async () => {
+  vi.mocked(sendChatCompletion).mockResolvedValue({
+    response: {
+      id: 'chatcmpl-capture',
+      object: 'chat.completion',
+      created: 1,
+      model: 'gpt-4o',
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: 'ok' },
+          finish_reason: 'stop',
+        },
+      ],
+    },
+    requestId: 'req-capture',
+  })
+  const hook = renderHook(() =>
+    useChatHandler({
+      config: {
+        ...DEFAULT_CONFIG,
+        model: 'gpt-4o',
+        group: 'vip',
+        stream: false,
+      },
+      parameterEnabled: { ...DEFAULT_PARAMETER_ENABLED },
+      systemPrompt: 'You are terse.',
+      memoryBlock: 'Remember: the user prefers metric units.',
+      contextSettings: { ...DEFAULT_CONTEXT_SETTINGS },
+      onMessageUpdate: () => undefined,
+      sessionId: 'session-1',
+    })
+  )
+
+  await act(async () => {
+    hook.result.current.sendChat([userMessage])
+  })
+
+  await waitFor(() => expect(sendChatCompletion).toHaveBeenCalledTimes(1))
+  const delivered = vi.mocked(sendChatCompletion).mock.calls[0][0]
+  expect(hook.result.current.capturedRequest?.payload).toEqual(delivered)
+  // The request the viewer explains includes the injected system prompt and
+  // the routing group of the conversation.
+  expect(delivered.messages.slice(0, 2)).toEqual([
+    { role: 'system', content: 'You are terse.' },
+    { role: 'system', content: 'Remember: the user prefers metric units.' },
+  ])
+  expect(delivered).toMatchObject({
+    model: 'gpt-4o',
+    group: 'vip',
+    stream: false,
+  })
+})
+
+test('a streaming send captures the payload it hands to the stream transport', async () => {
+  const hook = renderHook(() =>
+    useChatHandler({
+      config: { ...DEFAULT_CONFIG, stream: true },
+      parameterEnabled: { ...DEFAULT_PARAMETER_ENABLED },
+      systemPrompt: '',
+      contextSettings: { ...DEFAULT_CONTEXT_SETTINGS },
+      onMessageUpdate: () => undefined,
+      sessionId: 'session-1',
+    })
+  )
+
+  await act(async () => {
+    hook.result.current.sendChat([userMessage])
+  })
+
+  await waitFor(() =>
+    expect(streamRequestMocks.sendStreamRequest).toHaveBeenCalledTimes(1)
+  )
+  const delivered = streamRequestMocks.sendStreamRequest.mock.calls[0][0]
+  expect(hook.result.current.capturedRequest?.payload).toEqual(delivered)
+  expect(delivered.stream).toBe(true)
 })
