@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Code2, GlobeIcon, Trash2Icon } from 'lucide-react'
+import { Code2, GlobeIcon, Table2Icon, Trash2Icon } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -68,6 +68,8 @@ type PlaygroundInputToolsProps = {
   /** Models of the next comparison; empty or single means an ordinary send. */
   compareModels: string[]
   onCompareModelsChange: (models: string[]) => void
+  /** Opens the batch compare-runs workbench. */
+  onOpenCompareRuns?: () => void
   onClearMessages?: () => void
   onConfigChange: <K extends keyof PlaygroundConfig>(
     key: K,
@@ -130,6 +132,7 @@ export function PlaygroundInputTools({
   onDictateTranscript,
   compareModels,
   onCompareModelsChange,
+  onOpenCompareRuns,
   onClearMessages,
   onConfigChange,
   onParameterEnabledChange,
@@ -247,6 +250,27 @@ export function PlaygroundInputTools({
           models={models}
           onCompareModelsChange={onCompareModelsChange}
         />
+
+        {onOpenCompareRuns ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <PromptInputButton
+                  aria-label={t('Compare runs')}
+                  className='text-muted-foreground hover:text-foreground hover:bg-muted/70 font-medium'
+                  disabled={disabled}
+                  onClick={onOpenCompareRuns}
+                  variant='ghost'
+                >
+                  <Table2Icon size={16} />
+                </PromptInputButton>
+              }
+            />
+            <TooltipContent>
+              <p>{t('Run selected models against many prompts')}</p>
+            </TooltipContent>
+          </Tooltip>
+        ) : null}
 
         <PlaygroundParameterPanel
           config={config}

@@ -112,6 +112,13 @@ function PlaygroundUsageSummary(props: { userId: number | null }) {
       bytes: true,
     },
     {
+      key: 'comparison-runs',
+      label: t('Compare runs'),
+      metric: usage.comparisonRuns,
+      counts: true,
+      bytes: true,
+    },
+    {
       key: 'knowledge-bases',
       label: t('Knowledge bases'),
       metric: usage.knowledgeBases,

@@ -277,9 +277,6 @@ export const PLAYGROUND_COMPARISON_MESSAGES = {
   QUOTA_EXCEEDED:
     'The account ran out of quota; the remaining cells were canceled.',
   NO_CHOICE: 'The model returned no completion choice.',
-  RUN_FAILED: 'The comparison run stopped before every cell finished.',
-  RETRY_FAILED: 'The cell could not be retried.',
-  BASELINE_FAILED: 'The baseline model could not be saved.',
   SETTLE_FAILED:
     'The run budget could not be settled. The unspent cap is released automatically after it expires.',
   PROMPTS_EMPTY: 'Enter at least one prompt.',
@@ -288,6 +285,12 @@ export const PLAYGROUND_COMPARISON_MESSAGES = {
   PROMPT_TOO_LARGE:
     'A prompt is longer than the size limit. Shorten it before running.',
   MODELS_LIMIT: 'Select between {{min}} and {{max}} models.',
+  UNAVAILABLE:
+    'Some cells have no configured price; they still run and are charged when they finish.',
+  APPROXIMATE:
+    'The table prices each prompt with the chat pre-charge; the final cost is settled per reply.',
+  BELOW_ESTIMATE:
+    'The cap is below the estimate; the run may stop before the last cell.',
 } as const
 // Stable relay/budget codes that mean every later cell would fail too, so the
 // run stops after the current requests instead of spending on doomed calls.
