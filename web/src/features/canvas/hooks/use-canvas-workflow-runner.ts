@@ -51,6 +51,7 @@ import {
   canvasWorkflowResultKind,
   canvasWorkflowRetryRecord,
   canvasWorkflowRetrySource,
+  canvasWorkflowSelectionScope,
   isCanvasWorkflowResult,
   isCanvasWorkflowStep,
   orderCanvasWorkflow,
@@ -85,6 +86,16 @@ type CanvasWorkflowStepOutcome = 'succeeded' | 'failed' | 'canceled'
 /** A planned run: the estimate request payload of the steps about to start. */
 export interface CanvasWorkflowRunPlan {
   steps: CanvasWorkflowEstimateStepInput[]
+  /** Whether the plan executes the whole board or the selected subgraph. */
+  scope: 'workflow' | 'selection'
+}
+
+/** A resolved plan: the graph and step order one execution walks. */
+interface CanvasWorkflowPlannedRun {
+  nodes: CanvasFlowNode[]
+  edges: CanvasFlowEdge[]
+  steps: string[]
+  startIndex: number
 }
 
 /** The budget a run bills inside; every step request carries its run id. */
@@ -455,12 +466,13 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
    * instead of silently dropping the user's input.
    */
   const readStepImages = useCallback(
-    async (node: CanvasFlowNode, signal: AbortSignal): Promise<string[]> => {
-      const sources = resolveCanvasWorkflowImageSources(
-        node,
-        nodesRef.current,
-        edgesRef.current
-      )
+    async (
+      node: CanvasFlowNode,
+      nodes: CanvasFlowNode[],
+      edges: CanvasFlowEdge[],
+      signal: AbortSignal
+    ): Promise<string[]> => {
+      const sources = resolveCanvasWorkflowImageSources(node, nodes, edges)
       if (sources.length === 0) return []
       return readCanvasWorkflowImages(
         sources.slice(0, CANVAS_WORKFLOW_IMAGE_INPUT_MAX_COUNT),
@@ -475,12 +487,14 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
       node: CanvasFlowNode,
       input: string,
       group: string,
+      nodes: CanvasFlowNode[],
+      edges: CanvasFlowEdge[],
       generation: number,
       signal: AbortSignal
     ): Promise<CanvasWorkflowStepOutcome> => {
       const model = node.data.workflow?.model?.trim() ?? ''
       try {
-        const images = await readStepImages(node, signal)
+        const images = await readStepImages(node, nodes, edges, signal)
         const content: string | ContentPart[] =
           images.length === 0
             ? input
@@ -531,6 +545,8 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
       node: CanvasFlowNode,
       input: string,
       group: string,
+      nodes: CanvasFlowNode[],
+      edges: CanvasFlowEdge[],
       adoptTaskId: string | null,
       generation: number,
       signal: AbortSignal
@@ -538,7 +554,7 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
       const config = resolveCanvasWorkflowGeneration(node)
       const model = node.data.workflow?.model?.trim() ?? ''
       try {
-        const images = await readStepImages(node, signal)
+        const images = await readStepImages(node, nodes, edges, signal)
         let taskId = adoptTaskId
         if (!taskId && config.generation !== 'video') {
           const outcome = await submitImageGeneration(
@@ -720,11 +736,21 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
               : null
           const outcome =
             node.data.kind === 'model'
-              ? await runModelStep(node, input, group, generation, signal)
+              ? await runModelStep(
+                  node,
+                  input,
+                  group,
+                  runNodes,
+                  runEdges,
+                  generation,
+                  signal
+                )
               : await runTaskStep(
                   node,
                   input,
                   group,
+                  runNodes,
+                  runEdges,
                   adoptTaskId,
                   generation,
                   signal
@@ -756,59 +782,84 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
    * Validates the board exactly like a run and resolves the steps to execute.
    * A null answer means the run was refused and `message` says why.
    */
-  const planRun = useCallback((fromNodeId?: string) => {
+  const planRun = useCallback(
+    (fromNodeId?: string): CanvasWorkflowPlannedRun | null => {
+      const nodes = nodesRef.current
+      const edges = edgesRef.current
+      if (!groupRef.current.trim()) {
+        setMessage(CANVAS_WORKFLOW_ERRORS.GROUP_REQUIRED)
+        return null
+      }
+      const validation = validateCanvasWorkflow(nodes, edges)
+      if (validation) {
+        setMessage(validation)
+        return null
+      }
+      const order = orderCanvasWorkflow(nodes, edges)
+      if ('error' in order) {
+        setMessage(order.error)
+        return null
+      }
+      let startIndex = 0
+      if (fromNodeId) {
+        const index = order.steps.indexOf(fromNodeId)
+        if (index >= 0) startIndex = index
+      }
+      return { nodes, edges, steps: order.steps, startIndex }
+    },
+    []
+  )
+
+  /**
+   * Plans a run of the selected subgraph only. The scope keeps every selected
+   * node, the descendants of a selected group box and all upstream ancestors,
+   * so a chosen step still resolves its inputs; validation and pricing run
+   * against that same scope. A selection without any runnable step is refused
+   * with its own message instead of the whole-board one.
+   */
+  const planSelection = useCallback((): CanvasWorkflowPlannedRun | null => {
     const nodes = nodesRef.current
     const edges = edgesRef.current
     if (!groupRef.current.trim()) {
       setMessage(CANVAS_WORKFLOW_ERRORS.GROUP_REQUIRED)
       return null
     }
-    const validation = validateCanvasWorkflow(nodes, edges)
-    if (validation) {
-      setMessage(validation)
+    const selected = nodes.filter((node) => node.selected === true)
+    if (selected.length === 0) {
+      setMessage(CANVAS_WORKFLOW_MESSAGES.SELECTION_EMPTY)
       return null
     }
-    const order = orderCanvasWorkflow(nodes, edges)
+    const scope = canvasWorkflowSelectionScope(
+      nodes,
+      edges,
+      selected.map((node) => node.id)
+    )
+    const validation = validateCanvasWorkflow(scope.nodes, scope.edges)
+    if (validation) {
+      setMessage(
+        validation === CANVAS_WORKFLOW_ERRORS.NO_STEPS
+          ? CANVAS_WORKFLOW_MESSAGES.SELECTION_NO_STEPS
+          : validation
+      )
+      return null
+    }
+    const order = orderCanvasWorkflow(scope.nodes, scope.edges)
     if ('error' in order) {
       setMessage(order.error)
       return null
     }
-    let startIndex = 0
-    if (fromNodeId) {
-      const index = order.steps.indexOf(fromNodeId)
-      if (index >= 0) startIndex = index
+    return {
+      nodes: scope.nodes,
+      edges: scope.edges,
+      steps: order.steps,
+      startIndex: 0,
     }
-    return { nodes, edges, steps: order.steps, startIndex }
   }, [])
 
-  /**
-   * The price-estimate payload of the run a click would start. The board is
-   * validated first, so the estimate is only offered when the same click would
-   * actually run; the workspace asks the server to price it and shows the
-   * total before anything is sent.
-   */
-  const estimateRun = useCallback(
-    (fromNodeId?: string): CanvasWorkflowRunPlan | null => {
-      const plan = planRun(fromNodeId)
-      if (!plan) return null
-      setMessage(null)
-      return {
-        steps: canvasWorkflowEstimateSteps(
-          plan.steps.slice(plan.startIndex),
-          plan.nodes,
-          plan.edges,
-          groupRef.current
-        ),
-      }
-    },
-    [planRun]
-  )
-
-  const start = useCallback(
-    (fromNodeId?: string, budget?: CanvasWorkflowRunBudgetRef) => {
+  /** Starts one resolved plan, charging it inside `budget` when given. */
+  const startPlannedRun = useCallback(
+    (plan: CanvasWorkflowPlannedRun, budget?: CanvasWorkflowRunBudgetRef) => {
       if (phaseRef.current === 'running') return
-      const plan = planRun(fromNodeId)
-      if (!plan) return
       outputsRef.current = new Map()
       budgetRef.current = budget?.runId ?? null
       const generation = runIdRef.current + 1
@@ -826,7 +877,71 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
         controller.signal
       )
     },
-    [executeSteps, planRun]
+    [executeSteps]
+  )
+
+  /**
+   * The price-estimate payload of the run a click would start. The board is
+   * validated first, so the estimate is only offered when the same click would
+   * actually run; the workspace asks the server to price it and shows the
+   * total before anything is sent.
+   */
+  const estimateRun = useCallback(
+    (fromNodeId?: string): CanvasWorkflowRunPlan | null => {
+      const plan = planRun(fromNodeId)
+      if (!plan) return null
+      setMessage(null)
+      return {
+        scope: 'workflow',
+        steps: canvasWorkflowEstimateSteps(
+          plan.steps.slice(plan.startIndex),
+          plan.nodes,
+          plan.edges,
+          groupRef.current
+        ),
+      }
+    },
+    [planRun]
+  )
+
+  /**
+   * The priced estimate of the selected subgraph. Reuses the same budget
+   * dialog as a full run; only the executed scope differs.
+   */
+  const estimateSelection = useCallback((): CanvasWorkflowRunPlan | null => {
+    const plan = planSelection()
+    if (!plan) return null
+    setMessage(null)
+    return {
+      scope: 'selection',
+      steps: canvasWorkflowEstimateSteps(
+        plan.steps,
+        plan.nodes,
+        plan.edges,
+        groupRef.current
+      ),
+    }
+  }, [planSelection])
+
+  const start = useCallback(
+    (fromNodeId?: string, budget?: CanvasWorkflowRunBudgetRef) => {
+      if (phaseRef.current === 'running') return
+      const plan = planRun(fromNodeId)
+      if (!plan) return
+      startPlannedRun(plan, budget)
+    },
+    [planRun, startPlannedRun]
+  )
+
+  /** Runs the planned selection scope, billed inside `budget` when given. */
+  const startSelection = useCallback(
+    (budget?: CanvasWorkflowRunBudgetRef) => {
+      if (phaseRef.current === 'running') return
+      const plan = planSelection()
+      if (!plan) return
+      startPlannedRun(plan, budget)
+    },
+    [planSelection, startPlannedRun]
   )
 
   /**
@@ -965,6 +1080,9 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
     /** The priced step payload of a run a click would start. */
     estimate: estimateRun,
     run: start,
+    /** The priced step payload of the selected subgraph run. */
+    estimateSelection,
+    runSelection: startSelection,
     retry,
     cancel,
     clearMessage,

@@ -18,6 +18,21 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type { Edge, Node } from '@xyflow/react'
 
+/**
+ * A stable color marker of one canvas node. The stored value is only this key;
+ * the palette and its classes are presentation details of the client, so an
+ * older board never persists a theme-dependent class name.
+ */
+export type CanvasNodeColor =
+  | 'red'
+  | 'orange'
+  | 'amber'
+  | 'green'
+  | 'teal'
+  | 'blue'
+  | 'violet'
+  | 'pink'
+
 export type CanvasNodeKind =
   | 'text'
   | 'note'
@@ -138,6 +153,11 @@ export type CanvasNodeData = {
   snapshot?: CanvasMessageSnapshot
   ref?: CanvasNodeRef
   label?: string
+  // Optional organization aids. Both live in the opaque node `data` the server
+  // stores, so they round-trip through save, export and import without a schema
+  // change; the editor normalizes them on read and on every edit.
+  color?: CanvasNodeColor
+  tags?: string[]
   // Declared media type of an `attachment` node. Older boards were image-only
   // and carry no value, which keeps rendering as an image.
   mediaType?: string

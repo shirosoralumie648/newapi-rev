@@ -22,6 +22,7 @@ import { CANVAS_MAX_NODES, CANVAS_NODE_DATA_MAX_BYTES } from '../../constants'
 import type {
   CanvasFlowEdge,
   CanvasFlowNode,
+  CanvasNodeData,
   CanvasServerProject,
 } from '../../types'
 import {
@@ -275,4 +276,40 @@ test('a group round-trips through the server contract in parent-first order', ()
     edges: [],
   })
   expect(dangling.nodes[0].parentId).toBeUndefined()
+})
+
+test('normalizes node color and tags when a document is read back', () => {
+  const document = toServerDocument(
+    [
+      {
+        id: 'n1',
+        type: 'prompt',
+        position: { x: 0, y: 0 },
+        data: {
+          kind: 'prompt',
+          text: 'hello',
+          color: 'blue',
+          tags: [' hero ', 'hero', 'x'.repeat(25)],
+        },
+      },
+      {
+        id: 'n2',
+        type: 'note',
+        position: { x: 0, y: 0 },
+        data: {
+          kind: 'note',
+          text: 'plain',
+          color: 'chartreuse' as CanvasNodeData['color'],
+          tags: [],
+        },
+      },
+    ],
+    []
+  )
+
+  const restored = fromServerDocument(document)
+  expect(restored.nodes[0].data.color).toBe('blue')
+  expect(restored.nodes[0].data.tags).toEqual(['hero'])
+  expect(restored.nodes[1].data.color).toBeUndefined()
+  expect(restored.nodes[1].data.tags).toBeUndefined()
 })

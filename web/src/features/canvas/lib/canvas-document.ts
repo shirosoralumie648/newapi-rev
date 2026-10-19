@@ -35,6 +35,10 @@ import type {
   CanvasServerProject,
   CanvasViewport,
 } from '../types'
+import {
+  normalizeCanvasNodeColor,
+  normalizeCanvasNodeTags,
+} from './canvas-organization'
 
 /**
  * Stable translation keys for canvas problems the UI shows directly. The
@@ -242,6 +246,21 @@ export function fromServerDocument(document: CanvasServerDocument): {
   const known = new Set(document.nodes.map((node) => node.id))
   const nodes = document.nodes.map((node) => {
     const data = { kind: node.type, ...node.data } as CanvasNodeData
+    // Organization fields are display aids stored inside the opaque data
+    // object. Normalize them on read so a hand-edited export cannot introduce
+    // an unknown palette key or an unbounded tag list.
+    const color = normalizeCanvasNodeColor(data.color)
+    if (color) {
+      data.color = color
+    } else {
+      delete data.color
+    }
+    const tags = normalizeCanvasNodeTags(data.tags)
+    if (tags.length > 0) {
+      data.tags = tags
+    } else {
+      delete data.tags
+    }
     const parentId =
       typeof data.parentId === 'string' && known.has(data.parentId)
         ? data.parentId

@@ -8544,6 +8544,26 @@
     "You": "あなた",
     "Attachment content is not available in shared conversations.": "共有された会話では添付ファイルの内容を利用できません。",
     "Share link expiration must be between 0 and 365 days.": "共有リンクの有効期限は 0～365 日の範囲で指定してください。",
-    "Shared conversation not found.": "共有された会話が見つかりません。"
+    "Shared conversation not found.": "共有された会話が見つかりません。",
+    "Red": "赤",
+    "Orange": "オレンジ",
+    "Amber": "アンバー",
+    "Green": "緑",
+    "Teal": "ティール",
+    "Blue": "青",
+    "Violet": "バイオレット",
+    "Pink": "ピンク",
+    "No color": "色なし",
+    "Node color": "ノードの色",
+    "Node tags": "ノードのタグ",
+    "Search nodes": "ノードを検索",
+    "Search nodes...": "ノードを検索...",
+    "Search this canvas by node name, content or tag.": "ノード名・内容・タグでこのキャンバスを検索します。",
+    "Node type": "ノードの種類",
+    "All types": "すべての種類",
+    "No matching nodes.": "一致するノードはありません。",
+    "Run selected": "選択項目を実行",
+    "Select at least one node to run.": "実行するノードを 1 つ以上選択してください。",
+    "The selection contains no workflow step to run.": "選択内容に実行できるワークフローステップがありません。"
   }
 }

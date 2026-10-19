@@ -41,6 +41,7 @@ import {
   canvasWorkflowResultKind,
   canvasWorkflowRetryRecord,
   canvasWorkflowRetrySource,
+  canvasWorkflowSelectionScope,
   hasCanvasWorkflowInput,
   insertCanvasWorkflowMention,
   orderCanvasWorkflow,
@@ -535,4 +536,53 @@ test('records the attempt on a result node for a one-click retry', () => {
   expect(
     canvasWorkflowRetrySource(flowNode('r2', 'task-result', { workflow: {} }))
   ).toBeNull()
+})
+
+test('selection scope keeps selected steps, their ancestors and internal edges', () => {
+  const nodes = [
+    flowNode('p1', 'prompt', { text: 'one' }),
+    modelNode('m1', 'gpt-4o'),
+    flowNode('p2', 'prompt', { text: 'two' }),
+    modelNode('m2', 'gpt-4o'),
+    flowNode('n1', 'note', { text: 'unrelated' }),
+  ]
+  const edges = [flowEdge('p1', 'm1'), flowEdge('p2', 'm2')]
+
+  const scope = canvasWorkflowSelectionScope(nodes, edges, ['m1'])
+
+  expect(scope.nodes.map((node) => node.id).sort()).toEqual(['m1', 'p1'])
+  expect(scope.edges.map((edge) => edge.id)).toEqual(['p1-m1'])
+  expect(orderCanvasWorkflow(scope.nodes, scope.edges)).toEqual({
+    steps: ['m1'],
+  })
+  expect(validateCanvasWorkflow(scope.nodes, scope.edges)).toBeNull()
+})
+
+test('selection scope expands a selected group into its descendants', () => {
+  const nodes = [
+    flowNode('g1', 'group', {}),
+    flowNode('c1', 'prompt', { text: 'inside', parentId: 'g1' }),
+    flowNode('m1', 'model', {
+      parentId: 'g1',
+      workflow: { model: 'gpt-4o' },
+    }),
+    modelNode('m2', 'gpt-4o-mini'),
+  ]
+  const edges = [flowEdge('c1', 'm1'), flowEdge('m1', 'm2')]
+
+  const scope = canvasWorkflowSelectionScope(nodes, edges, ['g1'])
+
+  expect(scope.nodes.map((node) => node.id).sort()).toEqual(['c1', 'g1', 'm1'])
+  expect(scope.edges.map((edge) => edge.id)).toEqual(['c1-m1'])
+})
+
+test('selection scope ignores ids that are not on the board', () => {
+  const scope = canvasWorkflowSelectionScope(
+    [flowNode('n1', 'note', { text: 'only' })],
+    [],
+    ['missing']
+  )
+
+  expect(scope.nodes).toEqual([])
+  expect(scope.edges).toEqual([])
 })

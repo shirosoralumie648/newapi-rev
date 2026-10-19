@@ -8544,6 +8544,26 @@
     "You": "Вы",
     "Attachment content is not available in shared conversations.": "Содержимое вложений недоступно в общих диалогах.",
     "Share link expiration must be between 0 and 365 days.": "Срок действия ссылки для общего доступа должен быть от 0 до 365 дней.",
-    "Shared conversation not found.": "Общий диалог не найден."
+    "Shared conversation not found.": "Общий диалог не найден.",
+    "Red": "Красный",
+    "Orange": "Оранжевый",
+    "Amber": "Янтарный",
+    "Green": "Зелёный",
+    "Teal": "Бирюзовый",
+    "Blue": "Синий",
+    "Violet": "Фиолетовый",
+    "Pink": "Розовый",
+    "No color": "Без цвета",
+    "Node color": "Цвет узла",
+    "Node tags": "Теги узла",
+    "Search nodes": "Поиск узлов",
+    "Search nodes...": "Поиск узлов...",
+    "Search this canvas by node name, content or tag.": "Ищите на этом холсте по имени, содержимому или тегу узла.",
+    "Node type": "Тип узла",
+    "All types": "Все типы",
+    "No matching nodes.": "Нет подходящих узлов.",
+    "Run selected": "Запустить выбранное",
+    "Select at least one node to run.": "Выберите хотя бы один узел для запуска.",
+    "The selection contains no workflow step to run.": "В выбранном фрагменте нет шагов рабочего процесса для запуска."
   }
 }

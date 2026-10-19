@@ -8544,6 +8544,26 @@
     "You": "Bạn",
     "Attachment content is not available in shared conversations.": "Nội dung tệp đính kèm không có trong cuộc trò chuyện được chia sẻ.",
     "Share link expiration must be between 0 and 365 days.": "Thời hạn liên kết chia sẻ phải từ 0 đến 365 ngày.",
-    "Shared conversation not found.": "Không tìm thấy cuộc trò chuyện được chia sẻ."
+    "Shared conversation not found.": "Không tìm thấy cuộc trò chuyện được chia sẻ.",
+    "Red": "Đỏ",
+    "Orange": "Cam",
+    "Amber": "Hổ phách",
+    "Green": "Xanh lá",
+    "Teal": "Xanh mòng két",
+    "Blue": "Xanh dương",
+    "Violet": "Tím",
+    "Pink": "Hồng",
+    "No color": "Không màu",
+    "Node color": "Màu nút",
+    "Node tags": "Thẻ của nút",
+    "Search nodes": "Tìm nút",
+    "Search nodes...": "Tìm nút...",
+    "Search this canvas by node name, content or tag.": "Tìm trên canvas này theo tên, nội dung hoặc thẻ của nút.",
+    "Node type": "Loại nút",
+    "All types": "Tất cả loại",
+    "No matching nodes.": "Không có nút phù hợp.",
+    "Run selected": "Chạy mục đã chọn",
+    "Select at least one node to run.": "Chọn ít nhất một nút để chạy.",
+    "The selection contains no workflow step to run.": "Phần đã chọn không có bước quy trình nào để chạy."
   }
 }

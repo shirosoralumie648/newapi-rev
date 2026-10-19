@@ -23,10 +23,12 @@ import {
   Download,
   FileText,
   FolderOpen,
+  ListChecks,
   Pencil,
   Play,
   Plus,
   Redo2,
+  Search,
   Sparkles,
   Square,
   Undo2,
@@ -69,6 +71,8 @@ interface CanvasToolbarProps {
   canDistribute: boolean
   /** Whether exporting the selected nodes is possible. */
   canExportSelection: boolean
+  /** Whether the selected subgraph can be run now. */
+  canRunSelection: boolean
   exportingPng: boolean
   runPhase: CanvasWorkflowRunPhase
   /** Which inspector view is open; `details` means none of the switches. */
@@ -95,7 +99,9 @@ interface CanvasToolbarProps {
   onExportSelectionArchive: () => void
   onToggleInspectorView: (view: CanvasToolbarInspectorView) => void
   onRunWorkflow: () => void
+  onRunSelection: () => void
   onCancelRun: () => void
+  onSearchNodes: () => void
 }
 
 export function CanvasToolbar(props: CanvasToolbarProps) {
@@ -346,16 +352,39 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
           {t('Cancel run')}
         </Button>
       ) : (
-        <Button
-          disabled={props.disabled}
-          onClick={props.onRunWorkflow}
-          size='sm'
-          type='button'
-        >
-          <Play aria-hidden='true' />
-          {t('Run workflow')}
-        </Button>
+        <>
+          <Button
+            disabled={props.disabled || !props.canRunSelection}
+            onClick={props.onRunSelection}
+            size='sm'
+            type='button'
+            variant='outline'
+          >
+            <ListChecks aria-hidden='true' />
+            {t('Run selected')}
+          </Button>
+          <Button
+            disabled={props.disabled}
+            onClick={props.onRunWorkflow}
+            size='sm'
+            type='button'
+          >
+            <Play aria-hidden='true' />
+            {t('Run workflow')}
+          </Button>
+        </>
       )}
+
+      <Button
+        aria-label={t('Search nodes')}
+        disabled={props.disabled}
+        onClick={props.onSearchNodes}
+        size='icon-sm'
+        type='button'
+        variant='outline'
+      >
+        <Search aria-hidden='true' />
+      </Button>
     </div>
   )
 }

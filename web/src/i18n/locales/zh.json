@@ -8544,6 +8544,26 @@
     "You": "你",
     "Attachment content is not available in shared conversations.": "分享对话中不提供附件内容。",
     "Share link expiration must be between 0 and 365 days.": "分享链接有效期必须介于 0 到 365 天之间。",
-    "Shared conversation not found.": "未找到分享的对话。"
+    "Shared conversation not found.": "未找到分享的对话。",
+    "Red": "红",
+    "Orange": "橙",
+    "Amber": "琥珀",
+    "Green": "绿",
+    "Teal": "青绿",
+    "Blue": "蓝",
+    "Violet": "紫罗兰",
+    "Pink": "粉红",
+    "No color": "无颜色",
+    "Node color": "节点颜色",
+    "Node tags": "节点标签",
+    "Search nodes": "搜索节点",
+    "Search nodes...": "搜索节点...",
+    "Search this canvas by node name, content or tag.": "按节点名称、内容或标签搜索此画布。",
+    "Node type": "节点类型",
+    "All types": "所有类型",
+    "No matching nodes.": "没有匹配的节点。",
+    "Run selected": "运行选中项",
+    "Select at least one node to run.": "请至少选择一个要运行的节点。",
+    "The selection contains no workflow step to run.": "所选内容不包含可运行的工作流步骤。"
   }
 }
