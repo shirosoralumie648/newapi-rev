@@ -239,6 +239,24 @@ describe('CanvasKnowledgeBaseSheet', () => {
     )
   })
 
+  test('marks a ready document as needing rebuild after the base model changes', async () => {
+    bases = [base]
+    documents = [
+      {
+        ...document,
+        status: 'ready',
+        errorMessage: '',
+        embeddingModel: 'text-embedding-3-large',
+        embeddingDims: 2,
+        chunkCount: 2,
+      },
+    ]
+    renderSheet()
+
+    expect(await screen.findByText('handbook.txt')).toBeVisible()
+    expect(screen.getByText('Needs rebuild')).toBeVisible()
+  })
+
   test('deleting a knowledge base requires confirmation', async () => {
     bases = [base]
     const user = userEvent.setup()
