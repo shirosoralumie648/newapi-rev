@@ -133,7 +133,7 @@ test('opens a replayable usage log as a Playground draft without sending it', as
   ])
   await playground.waitForLoadState()
 
-  const composer = playground.getByPlaceholder('What would you like to know?')
+  const composer = playground.getByPlaceholder('Ask anything')
   await expect(composer).toHaveValue('reproduce this request')
   await expect(
     playground.getByRole('combobox').filter({ hasText: 'gpt-4o' }).first()
