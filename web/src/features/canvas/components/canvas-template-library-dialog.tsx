@@ -62,6 +62,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import {
   copyCanvasTemplateFromMarket,
   createCanvasTemplate,
+  createGlobalCanvasTemplate,
   deleteCanvasTemplate,
   deleteGlobalCanvasTemplate,
   exportCanvasTemplate,
@@ -181,16 +182,22 @@ export function CanvasTemplateLibraryDialog(
       const templateName = name.trim()
       if (!templateName) return
       setSaving(true)
+      const global = tab === 'global'
       try {
         await props.onFlush()
-        const result = await createCanvasTemplate({
+        const input = {
           canvasId: props.canvasId,
           name: templateName,
           description: description.trim() || undefined,
           category: category.trim() || undefined,
           inlineAssets,
-        })
-        toast.success(t('Template saved.'))
+        }
+        const result = global
+          ? await createGlobalCanvasTemplate(input)
+          : await createCanvasTemplate(input)
+        toast.success(
+          global ? t('Global template saved.') : t('Template saved.')
+        )
         if (result.resourcesMissing > 0) {
           toast.warning(
             t('Some attachment references could not be saved in the template.')
@@ -202,7 +209,7 @@ export function CanvasTemplateLibraryDialog(
             })
           )
         }
-        setTab('mine')
+        setTab(global ? 'global' : 'mine')
         setRefresh((value) => value + 1)
       } catch (saveError) {
         reportError(saveError)
@@ -210,7 +217,7 @@ export function CanvasTemplateLibraryDialog(
         setSaving(false)
       }
     },
-    [category, description, inlineAssets, name, props, reportError, t]
+    [category, description, inlineAssets, name, props, reportError, t, tab]
   )
 
   const handleApply = useCallback(
@@ -361,6 +368,71 @@ export function CanvasTemplateLibraryDialog(
       : tab === 'market'
         ? t('Official templates are ready to use on any canvas.')
         : t('Global templates are shared with every account.')
+  const saveTitle =
+    tab === 'global'
+      ? t('Save current canvas as a global template')
+      : t('Save current canvas as a template')
+  const saveLabel =
+    tab === 'global' ? t('Save as global template') : t('Save as template')
+  const saveForm = (
+    <form
+      className='grid gap-3 rounded-lg border p-3'
+      onSubmit={(event) => void handleSave(event)}
+    >
+      <div className='text-sm font-medium'>{saveTitle}</div>
+      <Input
+        aria-label={t('Template name')}
+        maxLength={100}
+        onChange={(event) => setName(event.target.value)}
+        placeholder={t('Template name')}
+        required
+        value={name}
+      />
+      <Textarea
+        aria-label={t('Template description')}
+        maxLength={2000}
+        onChange={(event) => setDescription(event.target.value)}
+        placeholder={t('Template description (optional)')}
+        value={description}
+      />
+      <div className='flex flex-wrap items-center gap-3'>
+        <Input
+          aria-label={t('Template category')}
+          className='w-48'
+          maxLength={32}
+          onChange={(event) => setCategory(event.target.value)}
+          placeholder={t('e.g. translation')}
+          value={category}
+        />
+        <label className='flex items-center gap-2 text-sm'>
+          <Switch
+            checked={inlineAssets}
+            onCheckedChange={setInlineAssets}
+            size='sm'
+          />
+          {t('Include attachment files')}
+        </label>
+      </div>
+      <p className='text-muted-foreground text-xs'>
+        {inlineAssets
+          ? t(
+              'The template stores a copy of its attachment files. Applying it uploads those files into the target canvas.'
+            )
+          : t(
+              'Only the chain structure is saved. Attachment references and their files are not included.'
+            )}
+      </p>
+      <div>
+        <Button
+          disabled={saving || props.disabled || !name.trim()}
+          size='sm'
+          type='submit'
+        >
+          {saving ? t('Saving...') : saveLabel}
+        </Button>
+      </div>
+    </form>
+  )
 
   let listBody: ReactNode
   if (loading) {
@@ -591,65 +663,7 @@ export function CanvasTemplateLibraryDialog(
           </div>
 
           <TabsContent className='grid gap-3' value='mine'>
-            <form
-              className='grid gap-3 rounded-lg border p-3'
-              onSubmit={(event) => void handleSave(event)}
-            >
-              <div className='text-sm font-medium'>
-                {t('Save current canvas as a template')}
-              </div>
-              <Input
-                aria-label={t('Template name')}
-                maxLength={100}
-                onChange={(event) => setName(event.target.value)}
-                placeholder={t('Template name')}
-                required
-                value={name}
-              />
-              <Textarea
-                aria-label={t('Template description')}
-                maxLength={2000}
-                onChange={(event) => setDescription(event.target.value)}
-                placeholder={t('Template description (optional)')}
-                value={description}
-              />
-              <div className='flex flex-wrap items-center gap-3'>
-                <Input
-                  aria-label={t('Template category')}
-                  className='w-48'
-                  maxLength={32}
-                  onChange={(event) => setCategory(event.target.value)}
-                  placeholder={t('e.g. translation')}
-                  value={category}
-                />
-                <label className='flex items-center gap-2 text-sm'>
-                  <Switch
-                    checked={inlineAssets}
-                    onCheckedChange={setInlineAssets}
-                    size='sm'
-                  />
-                  {t('Include attachment files')}
-                </label>
-              </div>
-              <p className='text-muted-foreground text-xs'>
-                {inlineAssets
-                  ? t(
-                      'The template stores a copy of its attachment files. Applying it uploads those files into the target canvas.'
-                    )
-                  : t(
-                      'Only the chain structure is saved. Attachment references and their files are not included.'
-                    )}
-              </p>
-              <div>
-                <Button
-                  disabled={saving || props.disabled || !name.trim()}
-                  size='sm'
-                  type='submit'
-                >
-                  {saving ? t('Saving...') : t('Save as template')}
-                </Button>
-              </div>
-            </form>
+            {saveForm}
             {listBody}
           </TabsContent>
           <TabsContent className='grid gap-3' value='market'>
@@ -657,6 +671,7 @@ export function CanvasTemplateLibraryDialog(
           </TabsContent>
           {isAdmin ? (
             <TabsContent className='grid gap-3' value='global'>
+              {saveForm}
               {listBody}
             </TabsContent>
           ) : null}

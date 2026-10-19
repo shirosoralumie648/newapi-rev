@@ -2644,6 +2644,7 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodDelete, "/api/playground/presets/global/missing"},
 		{http.MethodGet, "/api/playground/presets/global/missing/export"},
 		{http.MethodGet, "/api/playground/canvas-templates/global"},
+		{http.MethodPost, "/api/playground/canvas-templates/global"},
 		{http.MethodPost, "/api/playground/canvas-templates/global/import"},
 		{http.MethodGet, "/api/playground/canvas-templates/global/missing"},
 		{http.MethodPatch, "/api/playground/canvas-templates/global/missing"},

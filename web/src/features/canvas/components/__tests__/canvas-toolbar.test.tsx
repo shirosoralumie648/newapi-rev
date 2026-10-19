@@ -116,6 +116,15 @@ test('opens the node search panel from the toolbar', async () => {
   expect(props.onSearchNodes).toHaveBeenCalledTimes(1)
 })
 
+test('opens the template library from the toolbar', async () => {
+  const user = userEvent.setup()
+  const props = toolbarProps()
+  render(<CanvasToolbar {...props} />)
+
+  await user.click(screen.getByRole('button', { name: 'Templates' }))
+  expect(props.onOpenTemplates).toHaveBeenCalledTimes(1)
+})
+
 test('disables edit actions that do not apply to the selection', async () => {
   const user = userEvent.setup()
   const props = toolbarProps()
