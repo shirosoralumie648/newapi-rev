@@ -26,6 +26,8 @@ export const PLAYGROUND_QUOTA_FIELD_KEYS = [
   'system_prompt_max_bytes',
   'snippet_user_max_count',
   'snippet_content_max_bytes',
+  'snippet_version_max_count',
+  'snippet_version_user_max_count',
   'memory_user_max_count',
   'memory_content_max_bytes',
   'message_max_count',
@@ -155,6 +157,16 @@ export const PLAYGROUND_QUOTA_FIELDS: readonly PlaygroundQuotaField[] = [
     group: 'snippets',
     labelKey: 'Prompt snippet size limit',
     bytes: true,
+  },
+  {
+    key: 'snippet_version_max_count',
+    group: 'snippets',
+    labelKey: 'Prompt snippet versions per template',
+  },
+  {
+    key: 'snippet_version_user_max_count',
+    group: 'snippets',
+    labelKey: 'Prompt snippet versions per user',
   },
   {
     key: 'memory_user_max_count',

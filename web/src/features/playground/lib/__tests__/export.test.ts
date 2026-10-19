@@ -23,6 +23,7 @@ import { api } from '@/lib/api'
 import {
   exportPlaygroundPresetFile,
   exportPlaygroundSessionFile,
+  exportPlaygroundSnippetFile,
 } from '../export'
 
 type Download = { filename: string; blob: Blob }
@@ -113,6 +114,34 @@ test('downloads a preset as the JSON document the import endpoint accepts', asyn
   )
   expect(downloads).toHaveLength(1)
   expect(downloads[0].filename).toBe('Reviewer.json')
+  expect(downloads[0].blob.type).toBe('application/json; charset=utf-8')
+  expect(await readDownload(downloads[0])).toBe(content)
+})
+
+test('downloads a prompt snippet with its portable version history', async () => {
+  const content =
+    '{"format":"new-api-playground-prompt-template","schema_version":1,"template":{"name":"Checklist"}}'
+  const get = vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        format: 'json',
+        filename: 'Checklist.json',
+        content_type: 'application/json; charset=utf-8',
+        content,
+      },
+    },
+  })
+  const downloads = captureDownloads()
+
+  await exportPlaygroundSnippetFile('pgs_reviewer')
+
+  expect(get).toHaveBeenCalledWith(
+    '/api/playground/snippets/pgs_reviewer/export',
+    expect.anything()
+  )
+  expect(downloads).toHaveLength(1)
+  expect(downloads[0].filename).toBe('Checklist.json')
   expect(downloads[0].blob.type).toBe('application/json; charset=utf-8')
   expect(await readDownload(downloads[0])).toBe(content)
 })

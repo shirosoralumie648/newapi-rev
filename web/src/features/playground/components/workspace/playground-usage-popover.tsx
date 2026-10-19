@@ -70,6 +70,20 @@ function PlaygroundUsageSummary(props: { userId: number | null }) {
       bytes: false,
     },
     {
+      key: 'snippets',
+      label: t('Prompt snippets'),
+      metric: usage.snippets,
+      counts: true,
+      bytes: false,
+    },
+    {
+      key: 'snippet-versions',
+      label: t('Prompt snippet versions'),
+      metric: usage.snippetVersions,
+      counts: true,
+      bytes: false,
+    },
+    {
       key: 'memories',
       label: t('Memories'),
       metric: usage.memories,

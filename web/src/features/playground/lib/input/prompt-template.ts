@@ -102,17 +102,26 @@ export function parsePromptTemplateVariables(
 /**
  * Fill every placeholder of a template body. A non-blank value wins, an empty
  * value falls back to the declared default, and an unresolved placeholder is
- * left verbatim so the owner can still see and edit it.
+ * left verbatim so the owner can still see and edit it. When one name occurs
+ * with and without a default, the merged default from
+ * `parsePromptTemplateVariables` applies to every occurrence so the fill panel
+ * and the rendered text cannot disagree.
  */
 export function renderPromptTemplate(
   content: string,
   values: Record<string, string>
 ): string {
+  const defaults = new Map<string, string>()
+  for (const variable of parsePromptTemplateVariables(content)) {
+    if (variable.hasDefault) defaults.set(variable.name, variable.defaultValue)
+  }
   return content.replace(PLACEHOLDER_PATTERN, (placeholder, raw: string) => {
     const parsed = parsePlaceholder(raw)
     if (!parsed) return placeholder
     const provided = values[parsed.name]
     if (typeof provided === 'string' && provided.trim() !== '') return provided
+    const merged = defaults.get(parsed.name)
+    if (merged !== undefined) return merged
     if (parsed.hasDefault) return parsed.defaultValue
     return placeholder
   })
