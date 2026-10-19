@@ -33,6 +33,7 @@ import {
   normalizeContextSettings,
   normalizeContextSummary,
 } from './lib/context/playground-context'
+import { normalizeDeveloperOptions } from './lib/developer/developer-options'
 import { normalizeSessionTags } from './lib/session-organization'
 import {
   messagesSchema,
@@ -233,6 +234,12 @@ const serverSessionSchema = z.object({
   knowledge_base_ids: z.array(z.string()).optional(),
   context: serverContextSettingsSchema.optional(),
   context_summary: serverContextSummarySchema.nullable().optional(),
+  /**
+   * Request-side developer settings the server stored for the conversation.
+   * The value is an object in the OpenAI wire shape; a legacy row reads back
+   * as an empty object, and the mapper turns it into the disabled defaults.
+   */
+  developer_options: z.unknown().optional(),
   pinned: z.boolean().optional(),
   archived: z.boolean().optional(),
   pinned_at: z.number().int().nonnegative().optional(),
@@ -255,6 +262,12 @@ export interface PlaygroundSessionInput {
   knowledge_base_ids?: string[]
   context?: PlaygroundContextSettings
   context_summary?: PlaygroundContextSummary | null
+  /**
+   * Complete request-side developer settings replacement in the OpenAI wire
+   * shape. An explicit null clears the stored value; omitting the field keeps
+   * it, matching the server contract.
+   */
+  developer_options?: Record<string, unknown> | null
   pinned?: boolean
   archived?: boolean
   tags?: string[]
@@ -462,6 +475,7 @@ function mapServerSession(value: unknown): PlaygroundServerSession {
     contextSummary: normalizeContextSummary(
       mapServerContextSummary(session.context_summary)
     ),
+    developerOptions: normalizeDeveloperOptions(session.developer_options),
     pinned: archived ? false : (session.pinned ?? (session.pinned_at ?? 0) > 0),
     archived,
     tags: normalizeSessionTags(session.tags),
