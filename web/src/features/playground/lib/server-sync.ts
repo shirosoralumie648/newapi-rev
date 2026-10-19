@@ -86,6 +86,7 @@ export function playgroundSnapshot(session: PlaygroundSession): string {
     systemPrompt: session.systemPrompt,
     openingMessage: session.openingMessage,
     suggestedQuestions: session.suggestedQuestions,
+    knowledgeBaseIds: session.knowledgeBaseIds,
     context: session.context,
     contextSummary: session.contextSummary,
     pinned: session.pinned,
@@ -141,6 +142,7 @@ export async function hydratePlaygroundWorkspace(
       systemPrompt: session.systemPrompt,
       openingMessage: session.openingMessage,
       suggestedQuestions: session.suggestedQuestions,
+      knowledgeBaseIds: session.knowledgeBaseIds,
       context: session.context,
       contextSummary: session.contextSummary,
       pinned: session.pinned,
@@ -194,6 +196,7 @@ export async function savePlaygroundSession(
         system_prompt: draft.systemPrompt,
         opening_message: draft.openingMessage,
         suggested_questions: draft.suggestedQuestions,
+        knowledge_base_ids: draft.knowledgeBaseIds,
         context: draft.context,
         context_summary: draft.contextSummary,
         pinned: draft.pinned,
@@ -232,6 +235,8 @@ export async function savePlaygroundSession(
       created.openingMessage !== draft.openingMessage ||
       JSON.stringify(created.suggestedQuestions) !==
         JSON.stringify(draft.suggestedQuestions) ||
+      JSON.stringify(created.knowledgeBaseIds) !==
+        JSON.stringify(draft.knowledgeBaseIds) ||
       JSON.stringify(created.context) !== JSON.stringify(draft.context) ||
       JSON.stringify(created.contextSummary) !==
         JSON.stringify(draft.contextSummary) ||
@@ -256,6 +261,7 @@ export async function savePlaygroundSession(
       system_prompt: draft.systemPrompt,
       opening_message: draft.openingMessage,
       suggested_questions: draft.suggestedQuestions,
+      knowledge_base_ids: draft.knowledgeBaseIds,
       context: draft.context,
       context_summary: draft.contextSummary,
       pinned: draft.pinned,

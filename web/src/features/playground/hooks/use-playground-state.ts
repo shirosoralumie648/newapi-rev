@@ -23,6 +23,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import {
   DEFAULT_CONFIG,
   DEFAULT_CONTEXT_SETTINGS,
+  DEFAULT_DEVELOPER_OPTIONS,
   DEFAULT_PARAMETER_ENABLED,
 } from '../constants'
 import { normalizeSessionTags } from '../lib/session-organization'
@@ -48,6 +49,7 @@ import type {
   PlaygroundConfig,
   PlaygroundContextSettings,
   PlaygroundContextSummary,
+  PlaygroundDeveloperOptions,
   PlaygroundSession,
   PlaygroundSessionOrganization,
 } from '../types'
@@ -381,6 +383,41 @@ export function usePlaygroundState() {
     [updateSession]
   )
 
+  const updateKnowledgeBaseIds = useCallback(
+    (knowledgeBaseIds: string[]) => {
+      const currentActiveSessionId = latestActiveSessionIdRef.current
+      if (!currentActiveSessionId) return
+
+      updateSession(currentActiveSessionId, (session) => ({
+        ...session,
+        knowledgeBaseIds: [...knowledgeBaseIds],
+      }))
+    },
+    [updateSession]
+  )
+
+  // The stored developer settings replace the previous object as a whole, so
+  // the value is copied one level deeper than the others: the tools list and
+  // every function object stay independent of the caller's object.
+  const updateDeveloperOptions = useCallback(
+    (options: PlaygroundDeveloperOptions) => {
+      const currentActiveSessionId = latestActiveSessionIdRef.current
+      if (!currentActiveSessionId) return
+
+      updateSession(currentActiveSessionId, (session) => ({
+        ...session,
+        developerOptions: {
+          ...options,
+          tools: options.tools.map((tool) => ({
+            ...tool,
+            function: { ...tool.function },
+          })),
+        },
+      }))
+    },
+    [updateSession]
+  )
+
   const updateMessages = useCallback<MessageUpdate>(
     (updater, sessionId = latestActiveSessionIdRef.current) => {
       if (!sessionId) return
@@ -432,6 +469,7 @@ export function usePlaygroundState() {
       systemPrompt?: string
       openingMessage?: string
       suggestedQuestions?: string[]
+      knowledgeBaseIds?: string[]
     }) => {
       const currentSession = latestSessionsRef.current.find(
         (session) => session.id === latestActiveSessionIdRef.current
@@ -450,7 +488,8 @@ export function usePlaygroundState() {
         DEFAULT_CONTEXT_SETTINGS,
         null,
         overrides?.openingMessage ?? '',
-        overrides?.suggestedQuestions ?? []
+        overrides?.suggestedQuestions ?? [],
+        overrides?.knowledgeBaseIds ?? []
       )
       const nextSessions = [
         { ...nextSession, syncPending: true },
@@ -585,6 +624,8 @@ export function usePlaygroundState() {
     suggestedQuestions: activeSession?.suggestedQuestions ?? [],
     context: activeSession?.context ?? DEFAULT_CONTEXT_SETTINGS,
     contextSummary: activeSession?.contextSummary ?? null,
+    developerOptions:
+      activeSession?.developerOptions ?? DEFAULT_DEVELOPER_OPTIONS,
     messages: activeSession?.messages ?? [],
     isLoadingMessages: !isHydrated,
     models,
@@ -599,6 +640,8 @@ export function usePlaygroundState() {
     updateSystemPrompt,
     updateContextSettings,
     updateContextSummary,
+    updateKnowledgeBaseIds,
+    updateDeveloperOptions,
     applySessionSettings,
     updateMessages,
     clearMessages,

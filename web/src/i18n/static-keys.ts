@@ -133,6 +133,13 @@ export const STATIC_I18N_KEYS = [
 
   'Authentication required.',
   'Invalid Playground canvas archive.',
+  'Canvas template not found.',
+  'Invalid canvas template.',
+  'Canvas template limit exceeded.',
+  'Invalid canvas template archive.',
+  'Stored canvas template asset is invalid.',
+  'This template has no nodes.',
+  'The canvas cannot fit this template.',
   'Invalid Playground configuration.',
   'Invalid Playground message.',
   'Invalid Playground pagination.',
@@ -1062,6 +1069,9 @@ export const STATIC_I18N_KEYS = [
   'Edges per canvas',
   'Node data size limit',
   'Canvas storage per user',
+  'Canvas templates per user',
+  'Canvas template size limit',
+  'Canvas template storage per user',
   'Canvas saves per history snapshot',
   'Canvas snapshot interval in minutes',
   'History entries per canvas',
@@ -1319,10 +1329,32 @@ export const STATIC_I18N_KEYS = [
   'Unable to load or save Playground knowledge bases.',
   'Playground knowledge object store wrote an unexpected size.',
   'Knowledge indexing failed in the browser.',
+  // Playground knowledge retrieval (LB-08): these server and client messages
+  // are returned as English keys after an embedding/search failure rather than
+  // appearing as t('...') literals.
+  'A conversation can bind at most three knowledge bases.',
+  'Invalid Playground knowledge base binding.',
+  'You do not have access to this group.',
+  'The embedding provider returned no usable vector.',
+  'The embedding request failed.',
   // Canvas PNG export problem messages render through t(error.message) from
   // CANVAS_PNG_EXPORT_MESSAGES, so the literal scan cannot see them.
   'The canvas has no nodes to export.',
   'Select at least one node to export.',
   'The PNG image could not be created.',
   'The PNG image could not be saved to the asset library.',
+  // Canvas node organization and selection runs (CV-13): the palette labels
+  // render through t(key) from CANVAS_NODE_COLOR_LABELS and the two selection
+  // messages come from CANVAS_WORKFLOW_MESSAGES, so the literal scan cannot
+  // see them.
+  'Red',
+  'Orange',
+  'Amber',
+  'Green',
+  'Teal',
+  'Blue',
+  'Violet',
+  'Pink',
+  'Select at least one node to run.',
+  'The selection contains no workflow step to run.',
 ] as const

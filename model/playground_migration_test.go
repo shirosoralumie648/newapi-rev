@@ -270,7 +270,7 @@ func TestPlaygroundPresetSchemaMigration(t *testing.T) {
 			for range 2 {
 				require.NoError(t, db.AutoMigrate(&PlaygroundSession{}))
 			}
-			for _, column := range []string{"opening_message", "suggested_questions", "pinned_at", "archived_at", "tags"} {
+			for _, column := range []string{"opening_message", "suggested_questions", "knowledge_base_ids", "pinned_at", "archived_at", "tags"} {
 				assert.True(t, db.Migrator().HasColumn(&PlaygroundSession{}, column), column)
 			}
 			var session PlaygroundSession
@@ -278,6 +278,7 @@ func TestPlaygroundPresetSchemaMigration(t *testing.T) {
 			assert.Equal(t, "Legacy conversation", session.Title)
 			assert.Empty(t, session.OpeningMessage)
 			assert.Empty(t, session.SuggestedQuestions)
+			assert.Empty(t, session.KnowledgeBaseIDs)
 			assert.Zero(t, session.PinnedAt)
 			assert.Zero(t, session.ArchivedAt)
 			assert.Empty(t, session.Tags)
@@ -300,7 +301,17 @@ func TestPlaygroundShareCanvasColumnMigration(t *testing.T) {
 			q := func(name string) string { return quote + name + quote }
 			table := db.NamingStrategy.TableName("PlaygroundSessionShare")
 			legacyColumns := []string{"id", "session_id", "user_id", "token_hash", "expires_at", "revoked_at", "created_at"}
-			legacyTypes := []string{"bigint PRIMARY KEY", "varchar(128) NOT NULL", "bigint NOT NULL", "varchar(64) NOT NULL", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL"}
+			// The pre-canvas model already declared an auto-incrementing int64
+			// primary key, so reproduce the table AutoMigrate created then: a
+			// plain PRIMARY KEY column cannot accept rows without an explicit id.
+			legacyIDType := "integer PRIMARY KEY AUTOINCREMENT"
+			switch dialect {
+			case "mysql":
+				legacyIDType = "bigint AUTO_INCREMENT PRIMARY KEY"
+			case "postgres":
+				legacyIDType = "bigserial PRIMARY KEY"
+			}
+			legacyTypes := []string{legacyIDType, "varchar(128) NOT NULL", "bigint NOT NULL", "varchar(64) NOT NULL", "bigint NOT NULL", "bigint NOT NULL", "bigint NOT NULL"}
 			definitions := make([]string, len(legacyColumns))
 			quoted := make([]string, len(legacyColumns))
 			for index, name := range legacyColumns {

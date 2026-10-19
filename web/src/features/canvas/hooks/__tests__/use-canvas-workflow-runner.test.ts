@@ -37,7 +37,10 @@ import type {
   CanvasNodeWorkflowState,
 } from '../../types'
 import type { CanvasNodeDataUpdate } from '../use-canvas-editor'
-import { useCanvasWorkflowRunner } from '../use-canvas-workflow-runner'
+import {
+  useCanvasWorkflowRunner,
+  type CanvasWorkflowRunPlan,
+} from '../use-canvas-workflow-runner'
 
 beforeEach(() => {
   clearPlaygroundAttachmentCache()
@@ -1306,4 +1309,76 @@ test('stops the run at a budget cap refusal and leaves later steps untouched', a
       expect.anything()
     )
   )
+})
+
+test('a selection run executes and prices only the selected subgraph', async () => {
+  const post = vi.spyOn(api, 'post').mockImplementation(async (url) => {
+    if (url === '/pg/chat/completions') {
+      return {
+        data: {
+          choices: [{ message: { role: 'assistant', content: 'answer' } }],
+        },
+      }
+    }
+    throw new Error(`Unexpected POST ${url}`)
+  })
+  const selectedModel = graphNode('m1', 'model', {
+    workflow: { model: 'gpt-4o' },
+  })
+  selectedModel.selected = true
+  const hook = renderHook(() =>
+    useRunnerHarness(
+      [
+        graphNode('p1', 'prompt', { text: 'first' }),
+        selectedModel,
+        graphNode('p2', 'prompt', { text: 'second' }),
+        graphNode('m2', 'model', { workflow: { model: 'gpt-4o-mini' } }),
+      ],
+      [
+        { id: 'e1', source: 'p1', target: 'm1' },
+        { id: 'e2', source: 'p2', target: 'm2' },
+      ]
+    )
+  )
+
+  let plan: CanvasWorkflowRunPlan | null = null
+  act(() => {
+    plan = hook.result.current.runner.estimateSelection()
+  })
+  const selectedPlan = plan as CanvasWorkflowRunPlan | null
+  expect(selectedPlan?.scope).toBe('selection')
+  expect(selectedPlan?.steps.map((step) => step.nodeId)).toEqual(['m1'])
+
+  act(() => hook.result.current.runner.runSelection())
+  await waitFor(() => expect(hook.result.current.runner.phase).toBe('idle'))
+
+  expect(post).toHaveBeenCalledTimes(1)
+  expect(post).toHaveBeenCalledWith(
+    '/pg/chat/completions',
+    expect.objectContaining({ model: 'gpt-4o' }),
+    expect.anything()
+  )
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 'm2')?.data.workflow
+  ).toBeUndefined()
+})
+
+test('refuses a selection without any workflow step with its own message', () => {
+  const post = vi.spyOn(api, 'post')
+  const onlyNote = graphNode('n1', 'note', { text: 'only' })
+  onlyNote.selected = true
+  const hook = renderHook(() => useRunnerHarness([onlyNote], []))
+
+  let plan: CanvasWorkflowRunPlan | null = null
+  act(() => {
+    plan = hook.result.current.runner.estimateSelection()
+  })
+  expect(plan).toBeNull()
+  expect(hook.result.current.runner.message).toBe(
+    CANVAS_WORKFLOW_MESSAGES.SELECTION_NO_STEPS
+  )
+
+  act(() => hook.result.current.runner.runSelection())
+  expect(hook.result.current.runner.phase).toBe('idle')
+  expect(post).not.toHaveBeenCalled()
 })

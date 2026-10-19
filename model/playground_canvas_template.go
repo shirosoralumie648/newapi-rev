@@ -100,14 +100,20 @@ type PlaygroundCanvasTemplate struct {
 // attachment contract (filename, media type, size and SHA-256) so an export can
 // be verified before it is imported again.
 type PlaygroundCanvasTemplateAsset struct {
-	ID          string   `json:"id" gorm:"size:32;primaryKey"`
-	TemplateID  string   `json:"template_id" gorm:"size:32;not null;index"`
-	Filename    string   `json:"filename" gorm:"size:255;not null"`
-	MediaType   string   `json:"media_type" gorm:"size:128;not null"`
-	ByteSize    int64    `json:"byte_size" gorm:"not null"`
-	ContentHash string   `json:"content_hash" gorm:"size:64;not null"`
-	Data        LongText `json:"-" gorm:"not null"`
-	CreatedAt   int64    `json:"created_at" gorm:"not null"`
+	ID         string `json:"id" gorm:"size:32;primaryKey"`
+	TemplateID string `json:"template_id" gorm:"size:32;not null;index"`
+	// SourceAttachmentID is the attachment id the saved document still points
+	// at. Applying the template resolves this key to the id of the attachment
+	// the apply path uploads into the target canvas; the id may belong to a
+	// different account (an imported or market template), so it is never used
+	// as an ownership claim on its own.
+	SourceAttachmentID string   `json:"source_attachment_id" gorm:"size:128;not null;default:''"`
+	Filename           string   `json:"filename" gorm:"size:255;not null"`
+	MediaType          string   `json:"media_type" gorm:"size:128;not null"`
+	ByteSize           int64    `json:"byte_size" gorm:"not null"`
+	ContentHash        string   `json:"content_hash" gorm:"size:64;not null"`
+	Data               LongText `json:"-" gorm:"not null"`
+	CreatedAt          int64    `json:"created_at" gorm:"not null"`
 }
 
 // PlaygroundCanvasTemplateSummary is the list/detail metadata of a template.
@@ -193,6 +199,7 @@ func CreateGlobalPlaygroundCanvasTemplate(template *PlaygroundCanvasTemplate, as
 		return ErrPlaygroundCanvasTemplateLimit
 	}
 	template.Visibility = PlaygroundCanvasTemplateVisibilityGlobal
+	template.SystemKey = ""
 	template.DeletedAt = 0
 	return DB.Transaction(func(tx *gorm.DB) error {
 		var count int64
@@ -288,6 +295,23 @@ func GetGlobalPlaygroundCanvasTemplate(id string) (*PlaygroundCanvasTemplate, er
 	return &template, nil
 }
 
+// GetPlaygroundCanvasTemplateForReader resolves one template a signed-in
+// account may read: its own private row or any global market row. Foreign
+// private ids resolve to the same not-found error as missing ids.
+func GetPlaygroundCanvasTemplateForReader(userID int, id string) (*PlaygroundCanvasTemplate, error) {
+	if userID <= 0 || id == "" {
+		return nil, ErrPlaygroundCanvasTemplateNotFound
+	}
+	template, err := GetPlaygroundCanvasTemplate(userID, id)
+	if err == nil {
+		return template, nil
+	}
+	if !errors.Is(err, ErrPlaygroundCanvasTemplateNotFound) {
+		return nil, err
+	}
+	return GetGlobalPlaygroundCanvasTemplate(id)
+}
+
 // ListPlaygroundCanvasTemplates returns the owner's private templates, newest
 // first, together with the stored total. Global templates have no owner and
 // never appear in an account list.
@@ -302,6 +326,39 @@ func ListPlaygroundCanvasTemplates(userID int, maxCount int) ([]PlaygroundCanvas
 // first.
 func ListGlobalPlaygroundCanvasTemplates(maxCount int) ([]PlaygroundCanvasTemplate, int64, error) {
 	return listPlaygroundCanvasTemplates(DB.Where("visibility = ? AND deleted_at = 0", PlaygroundCanvasTemplateVisibilityGlobal), maxCount)
+}
+
+// CopyGlobalPlaygroundCanvasTemplate stores an independent private copy of one
+// market template for the account. The copy goes through the ordinary
+// quota-checked create path, so a full account cannot grow through the market.
+// Asset source ids are preserved because the copied document still points at
+// them until an apply remaps them.
+func CopyGlobalPlaygroundCanvasTemplate(userID int, id string, policy playground_setting.PlaygroundQuotaPolicy) (*PlaygroundCanvasTemplate, error) {
+	template, err := GetGlobalPlaygroundCanvasTemplate(id)
+	if err != nil {
+		return nil, err
+	}
+	assets, err := ListPlaygroundCanvasTemplateAssets(template.ID)
+	if err != nil {
+		return nil, err
+	}
+	copied := &PlaygroundCanvasTemplate{
+		Name: template.Name, Description: template.Description, Category: template.Category,
+		InlineAssets: template.InlineAssets, Document: template.Document,
+		DocumentBytes: template.DocumentBytes, NodeCount: template.NodeCount, EdgeCount: template.EdgeCount,
+	}
+	copiedAssets := make([]PlaygroundCanvasTemplateAsset, 0, len(assets))
+	for index := range assets {
+		asset := assets[index]
+		asset.ID = ""
+		asset.TemplateID = ""
+		asset.CreatedAt = 0
+		copiedAssets = append(copiedAssets, asset)
+	}
+	if err := CreatePlaygroundCanvasTemplate(userID, copied, copiedAssets, policy); err != nil {
+		return nil, err
+	}
+	return copied, nil
 }
 
 func listPlaygroundCanvasTemplates(query *gorm.DB, maxCount int) ([]PlaygroundCanvasTemplate, int64, error) {
@@ -336,7 +393,7 @@ func UpdatePlaygroundCanvasTemplate(userID int, id string, updates map[string]an
 	}
 	var template PlaygroundCanvasTemplate
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		owned := tx.Where("id = ? AND user_id = ? AND deleted_at = 0 AND (visibility IS NULL OR visibility <> ?)", id, userID, PlaygroundCanvasTemplateVisibilityGlobal)
+		owned := tx.Model(&PlaygroundCanvasTemplate{}).Where("id = ? AND user_id = ? AND deleted_at = 0 AND (visibility IS NULL OR visibility <> ?)", id, userID, PlaygroundCanvasTemplateVisibilityGlobal)
 		if err := lockForUpdate(tx).Where("id = ? AND user_id = ? AND deleted_at = 0 AND (visibility IS NULL OR visibility <> ?)", id, userID, PlaygroundCanvasTemplateVisibilityGlobal).First(&template).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrPlaygroundCanvasTemplateNotFound

@@ -28,6 +28,9 @@ import type {
   CanvasProjectSummary,
   CanvasServerProject,
   CanvasSnapshotSummary,
+  CanvasTemplateAsset,
+  CanvasTemplateDetail,
+  CanvasTemplateSummary,
 } from './types'
 
 const CANVAS_ENDPOINT = '/api/playground/canvases'
@@ -483,4 +486,346 @@ export async function settleCanvasWorkflowRunBudget(
   )
   requireServerSuccess(response.data)
   return mapWorkflowRun(workflowRunSchema.parse(response.data.data))
+}
+
+const CANVAS_TEMPLATE_ENDPOINT = '/api/playground/canvas-templates'
+
+const canvasTemplateSummarySchema = z.object({
+  id: z.string().min(1),
+  name: z.string(),
+  description: z.string(),
+  category: z.string(),
+  visibility: z.enum(['private', 'global']),
+  inline_assets: z.boolean(),
+  node_count: z.number().int().nonnegative(),
+  edge_count: z.number().int().nonnegative(),
+  document_bytes: z.number().int().nonnegative(),
+  asset_count: z.number().int().nonnegative(),
+  asset_bytes: z.number().int().nonnegative(),
+  created_at: z.number().int().nonnegative(),
+  updated_at: z.number().int().nonnegative(),
+})
+
+const canvasTemplateAssetSchema = z.object({
+  id: z.string().min(1),
+  source_attachment_id: z.string(),
+  filename: z.string(),
+  media_type: z.string(),
+  byte_size: z.number().int().nonnegative(),
+  content_hash: z.string(),
+})
+
+const canvasTemplateDetailSchema = canvasTemplateSummarySchema.extend({
+  document: canvasDocumentSchema,
+  assets: z.array(canvasTemplateAssetSchema),
+})
+
+const canvasTemplateWriteSchema = z.object({
+  template: canvasTemplateSummarySchema,
+  assets_inlined: z.number().int().nonnegative(),
+  resources_missing: z.number().int().nonnegative().optional(),
+  references_dropped: z.number().int().nonnegative(),
+})
+
+function mapCanvasTemplateSummary(
+  value: z.output<typeof canvasTemplateSummarySchema>
+): CanvasTemplateSummary {
+  return {
+    id: value.id,
+    name: value.name,
+    description: value.description,
+    category: value.category,
+    visibility: value.visibility,
+    inlineAssets: value.inline_assets,
+    nodeCount: value.node_count,
+    edgeCount: value.edge_count,
+    documentBytes: value.document_bytes,
+    assetCount: value.asset_count,
+    assetBytes: value.asset_bytes,
+    createdAt: value.created_at * 1000,
+    updatedAt: value.updated_at * 1000,
+  }
+}
+
+function mapCanvasTemplateAsset(
+  value: z.output<typeof canvasTemplateAssetSchema>
+): CanvasTemplateAsset {
+  return {
+    id: value.id,
+    sourceAttachmentId: value.source_attachment_id,
+    filename: value.filename,
+    mediaType: value.media_type,
+    byteSize: value.byte_size,
+    contentHash: value.content_hash,
+  }
+}
+
+function mapCanvasTemplateDetail(
+  value: z.output<typeof canvasTemplateDetailSchema>
+): CanvasTemplateDetail {
+  return {
+    ...mapCanvasTemplateSummary(value),
+    document: value.document,
+    assets: value.assets.map(mapCanvasTemplateAsset),
+  }
+}
+
+function mapCanvasTemplateList(value: unknown): CanvasTemplateSummary[] {
+  const data = z
+    .object({ items: z.array(canvasTemplateSummarySchema) })
+    .parse(value)
+  return data.items.map(mapCanvasTemplateSummary)
+}
+
+export interface CanvasTemplateInput {
+  canvasId: string
+  name: string
+  description?: string
+  category?: string
+  inlineAssets: boolean
+}
+
+export interface CanvasTemplateWriteResult {
+  template: CanvasTemplateSummary
+  assetsInlined: number
+  resourcesMissing: number
+  referencesDropped: number
+}
+
+function mapCanvasTemplateWrite(value: unknown): CanvasTemplateWriteResult {
+  const data = canvasTemplateWriteSchema.parse(value)
+  return {
+    template: mapCanvasTemplateSummary(data.template),
+    assetsInlined: data.assets_inlined,
+    resourcesMissing: data.resources_missing ?? 0,
+    referencesDropped: data.references_dropped,
+  }
+}
+
+export async function listCanvasTemplates(
+  signal?: AbortSignal
+): Promise<CanvasTemplateSummary[]> {
+  const response = await api.get(CANVAS_TEMPLATE_ENDPOINT, { signal })
+  requireServerSuccess(response.data)
+  return mapCanvasTemplateList(response.data.data)
+}
+
+export async function listCanvasTemplateMarket(
+  signal?: AbortSignal
+): Promise<CanvasTemplateSummary[]> {
+  const response = await api.get(`${CANVAS_TEMPLATE_ENDPOINT}/market`, {
+    signal,
+  })
+  requireServerSuccess(response.data)
+  return mapCanvasTemplateList(response.data.data)
+}
+
+export async function listGlobalCanvasTemplates(
+  signal?: AbortSignal
+): Promise<CanvasTemplateSummary[]> {
+  const response = await api.get(`${CANVAS_TEMPLATE_ENDPOINT}/global`, {
+    signal,
+  })
+  requireServerSuccess(response.data)
+  return mapCanvasTemplateList(response.data.data)
+}
+
+export async function getCanvasTemplate(
+  templateId: string,
+  signal?: AbortSignal
+): Promise<CanvasTemplateDetail> {
+  const response = await api.get(
+    `${CANVAS_TEMPLATE_ENDPOINT}/${encodeURIComponent(templateId)}`,
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  return mapCanvasTemplateDetail(
+    canvasTemplateDetailSchema.parse(response.data.data)
+  )
+}
+
+async function createCanvasTemplateAt(
+  endpoint: string,
+  input: CanvasTemplateInput,
+  signal?: AbortSignal
+): Promise<CanvasTemplateWriteResult> {
+  const response = await api.post(
+    endpoint,
+    {
+      canvas_id: input.canvasId,
+      name: input.name,
+      description: input.description,
+      category: input.category,
+      inline_assets: input.inlineAssets,
+    },
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  return mapCanvasTemplateWrite(response.data.data)
+}
+
+export function createCanvasTemplate(
+  input: CanvasTemplateInput,
+  signal?: AbortSignal
+): Promise<CanvasTemplateWriteResult> {
+  return createCanvasTemplateAt(CANVAS_TEMPLATE_ENDPOINT, input, signal)
+}
+
+/** Stores the administrator's current canvas as a shared market template. */
+export function createGlobalCanvasTemplate(
+  input: CanvasTemplateInput,
+  signal?: AbortSignal
+): Promise<CanvasTemplateWriteResult> {
+  return createCanvasTemplateAt(
+    `${CANVAS_TEMPLATE_ENDPOINT}/global`,
+    input,
+    signal
+  )
+}
+
+export interface CanvasTemplateUpdateInput {
+  name?: string
+  description?: string
+  category?: string
+}
+
+function canvasTemplateUpdateBody(input: CanvasTemplateUpdateInput) {
+  return {
+    name: input.name,
+    description: input.description,
+    category: input.category,
+  }
+}
+
+export async function updateCanvasTemplate(
+  templateId: string,
+  input: CanvasTemplateUpdateInput,
+  signal?: AbortSignal
+): Promise<CanvasTemplateSummary> {
+  const response = await api.patch(
+    `${CANVAS_TEMPLATE_ENDPOINT}/${encodeURIComponent(templateId)}`,
+    canvasTemplateUpdateBody(input),
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  return mapCanvasTemplateSummary(
+    canvasTemplateSummarySchema.parse(response.data.data)
+  )
+}
+
+export async function updateGlobalCanvasTemplate(
+  templateId: string,
+  input: CanvasTemplateUpdateInput,
+  signal?: AbortSignal
+): Promise<CanvasTemplateSummary> {
+  const response = await api.patch(
+    `${CANVAS_TEMPLATE_ENDPOINT}/global/${encodeURIComponent(templateId)}`,
+    canvasTemplateUpdateBody(input),
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  return mapCanvasTemplateSummary(
+    canvasTemplateSummarySchema.parse(response.data.data)
+  )
+}
+
+export async function deleteCanvasTemplate(
+  templateId: string,
+  signal?: AbortSignal
+): Promise<void> {
+  const response = await api.delete(
+    `${CANVAS_TEMPLATE_ENDPOINT}/${encodeURIComponent(templateId)}`,
+    { signal }
+  )
+  requireServerSuccess(response.data)
+}
+
+export async function deleteGlobalCanvasTemplate(
+  templateId: string,
+  signal?: AbortSignal
+): Promise<void> {
+  const response = await api.delete(
+    `${CANVAS_TEMPLATE_ENDPOINT}/global/${encodeURIComponent(templateId)}`,
+    { signal }
+  )
+  requireServerSuccess(response.data)
+}
+
+export async function copyCanvasTemplateFromMarket(
+  templateId: string,
+  signal?: AbortSignal
+): Promise<CanvasTemplateSummary> {
+  const response = await api.post(
+    `${CANVAS_TEMPLATE_ENDPOINT}/market/${encodeURIComponent(templateId)}/copy`,
+    undefined,
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  return mapCanvasTemplateSummary(
+    canvasTemplateSummarySchema.parse(response.data.data)
+  )
+}
+
+export async function importCanvasTemplate(
+  file: File,
+  global = false,
+  signal?: AbortSignal
+): Promise<CanvasTemplateWriteResult> {
+  const form = new FormData()
+  form.append('file', file)
+  const response = await api.post(
+    `${CANVAS_TEMPLATE_ENDPOINT}${global ? '/global' : ''}/import`,
+    form,
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  return mapCanvasTemplateWrite(response.data.data)
+}
+
+export interface CanvasTemplateDownload {
+  blob: Blob
+  filename: string
+}
+
+export async function exportCanvasTemplate(
+  templateId: string,
+  signal?: AbortSignal
+): Promise<CanvasTemplateDownload> {
+  let response: AxiosResponse<Blob>
+  try {
+    response = await api.get<Blob>(
+      `${CANVAS_TEMPLATE_ENDPOINT}/${encodeURIComponent(templateId)}/export`,
+      { responseType: 'blob', signal }
+    )
+  } catch (error) {
+    const failed = (error as { response?: { data?: unknown } }).response
+    if (failed && failed.data instanceof Blob) {
+      try {
+        failed.data = JSON.parse(await failed.data.text())
+      } catch {
+        /* not a JSON error payload; report the original failure */
+      }
+    }
+    throw error
+  }
+  return {
+    blob: response.data,
+    filename: canvasArchiveFilename(
+      response.headers['content-disposition'],
+      'canvas-template.zip'
+    ),
+  }
+}
+
+/** Reads one inline asset's bytes for re-uploading on apply. */
+export async function getCanvasTemplateAssetBlob(
+  templateId: string,
+  assetId: string,
+  signal?: AbortSignal
+): Promise<Blob> {
+  const response = await api.get<Blob>(
+    `${CANVAS_TEMPLATE_ENDPOINT}/${encodeURIComponent(templateId)}/assets/${encodeURIComponent(assetId)}/content`,
+    { responseType: 'blob', signal }
+  )
+  return response.data
 }

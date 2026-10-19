@@ -36,6 +36,7 @@ import {
   PLAYGROUND_DOCUMENT_MAX_BYTES,
 } from '../../constants'
 import { usePlaygroundComposerMemory } from '../../hooks'
+import type { KnowledgeBase } from '../../knowledge-api'
 import type { PlaygroundContextPlan } from '../../lib'
 import type {
   ModelOption,
@@ -45,6 +46,7 @@ import type {
   PlaygroundContextSettings,
   PlaygroundContextSummary,
 } from '../../types'
+import type { PlaygroundKnowledgeDiagnostics } from './playground-context-panel'
 import { PlaygroundInputControls } from './playground-input-controls'
 import { PlaygroundInputTools } from './playground-input-tools'
 
@@ -70,6 +72,10 @@ interface PlaygroundInputProps {
   compareModels: string[]
   onCompareModelsChange: (models: string[]) => void
   hasMessages?: boolean
+  /** Whether the last send was captured and can be previewed. */
+  hasCapturedRequest?: boolean
+  /** Opens the request viewer of the last captured payload. */
+  onOpenRequestViewer?: () => void
   onConfigChange: <K extends keyof PlaygroundConfig>(
     key: K,
     value: PlaygroundConfig[K]
@@ -89,6 +95,14 @@ interface PlaygroundInputProps {
   onContextSettingsChange: (settings: PlaygroundContextSettings) => void
   onRemoveContextSummary: () => void
   onSummarizeContext: () => void
+  /** Knowledge bases the account may bind to the active conversation. */
+  knowledgeBases?: KnowledgeBase[]
+  /** Bases bound to the active conversation; at most three. */
+  knowledgeBaseIds?: string[]
+  onKnowledgeBaseIdsChange?: (knowledgeBaseIds: string[]) => void
+  /** Last retrieval result: ready documents the merge skipped as stale. */
+  knowledgeDiagnostics?: PlaygroundKnowledgeDiagnostics | null
+  knowledgeLoading?: boolean
   /** Effective auto read-aloud state of the active conversation. */
   autoReadEnabled: boolean
   /** Account default applied to conversations without an override. */
@@ -129,6 +143,8 @@ export function PlaygroundInput({
   compareModels,
   onCompareModelsChange,
   hasMessages = false,
+  hasCapturedRequest = false,
+  onOpenRequestViewer,
   onConfigChange,
   onClearMessages,
   onParameterEnabledChange,
@@ -142,6 +158,11 @@ export function PlaygroundInput({
   onContextSettingsChange,
   onRemoveContextSummary,
   onSummarizeContext,
+  knowledgeBases,
+  knowledgeBaseIds,
+  onKnowledgeBaseIdsChange,
+  knowledgeDiagnostics,
+  knowledgeLoading,
   autoReadEnabled,
   autoReadDefaultEnabled,
   autoReadHasOverride,
@@ -237,8 +258,13 @@ export function PlaygroundInput({
                 contextSettings={contextSettings}
                 contextSummary={contextSummary}
                 disabled={disabled}
+                hasCapturedRequest={hasCapturedRequest}
                 hasMessages={hasMessages}
                 isSummarizing={isSummarizing}
+                knowledgeBaseIds={knowledgeBaseIds}
+                knowledgeBases={knowledgeBases}
+                knowledgeDiagnostics={knowledgeDiagnostics}
+                knowledgeLoading={knowledgeLoading}
                 models={models}
                 onAutoReadChange={onAutoReadChange}
                 onAutoReadDefaultChange={onAutoReadDefaultChange}
@@ -253,6 +279,8 @@ export function PlaygroundInput({
                 onContextSettingsChange={onContextSettingsChange}
                 onDictateTranscript={appendText}
                 onInsertText={appendText}
+                onKnowledgeBaseIdsChange={onKnowledgeBaseIdsChange}
+                onOpenRequestViewer={onOpenRequestViewer}
                 onParameterEnabledChange={onParameterEnabledChange}
                 onRemoveContextSummary={onRemoveContextSummary}
                 onSummarizeContext={onSummarizeContext}

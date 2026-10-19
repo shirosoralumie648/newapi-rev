@@ -41,6 +41,10 @@ type PlaygroundResourceUsage struct {
 	Artifacts       PlaygroundUsageMetric `json:"artifacts"`
 	Canvas          PlaygroundUsageMetric `json:"canvas"`
 	CanvasSnapshots PlaygroundUsageMetric `json:"canvas_snapshots"`
+	// CanvasTemplates is the private template library: document bytes plus the
+	// raw inline asset bytes. Global market templates are platform content and
+	// never appear in an account's counters.
+	CanvasTemplates PlaygroundUsageMetric `json:"canvas_templates"`
 	// Knowledge bases, their documents and their embedding chunks are separate
 	// metrics because the three limits are independent. The chunk metric also
 	// carries the knowledge byte budget (source files, extracted text and
@@ -88,6 +92,10 @@ func PlaygroundUsageForUser(userID int) (*PlaygroundResourceUsage, error) {
 			Limit:      int64(policy.CanvasSnapshotUserMaxCount),
 			LimitBytes: policy.CanvasSnapshotUserMaxBytes,
 		},
+		CanvasTemplates: PlaygroundUsageMetric{
+			Limit:      int64(policy.CanvasTemplateUserMaxCount),
+			LimitBytes: policy.CanvasTemplateUserMaxBytes,
+		},
 		KnowledgeBases: PlaygroundUsageMetric{
 			Limit: int64(policy.KnowledgeBaseUserMaxCount),
 		},
@@ -121,6 +129,8 @@ func PlaygroundUsageForUser(userID int) (*PlaygroundResourceUsage, error) {
 	usage.Canvas.UsedBytes = counters.CanvasBytes
 	usage.CanvasSnapshots.Used = counters.CanvasSnapshotCount
 	usage.CanvasSnapshots.UsedBytes = counters.CanvasSnapshotBytes
+	usage.CanvasTemplates.Used = counters.CanvasTemplateCount
+	usage.CanvasTemplates.UsedBytes = counters.CanvasTemplateBytes
 	usage.KnowledgeBases.Used = counters.KnowledgeBaseCount
 	usage.KnowledgeBaseDocuments.Used = counters.KnowledgeBaseDocumentCount
 	usage.KnowledgeBaseChunks.Used = counters.KnowledgeBaseChunkCount

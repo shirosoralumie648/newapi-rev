@@ -410,6 +410,80 @@ function substituteCanvasWorkflowMentions(
 type CanvasWorkflowOrder = { steps: string[] } | { error: string }
 
 /**
+ * The subgraph a selection run executes: every selected node, the descendants
+ * of selected group boxes, and all ancestors a chosen step still depends on.
+ * Edges stay only when both endpoints are inside, so input and reference-image
+ * resolution can never read a node outside the run. A cyclic import is bounded
+ * by the included set, so the traversal always terminates.
+ */
+export function canvasWorkflowSelectionScope(
+  nodes: CanvasFlowNode[],
+  edges: CanvasFlowEdge[],
+  selectedIds: Iterable<string>
+): { nodes: CanvasFlowNode[]; edges: CanvasFlowEdge[] } {
+  const byID = new Map(nodes.map((node) => [node.id, node]))
+  const included = new Set<string>()
+  const selected: string[] = []
+  for (const id of selectedIds) {
+    if (!byID.has(id) || included.has(id)) continue
+    included.add(id)
+    selected.push(id)
+  }
+
+  const childrenByParent = new Map<string, string[]>()
+  for (const node of nodes) {
+    const parentId = node.data.parentId
+    if (!parentId || !byID.has(parentId)) continue
+    const children = childrenByParent.get(parentId)
+    if (children) {
+      children.push(node.id)
+    } else {
+      childrenByParent.set(parentId, [node.id])
+    }
+  }
+  const pendingGroups = selected.filter(
+    (id) => byID.get(id)?.data.kind === 'group'
+  )
+  while (pendingGroups.length > 0) {
+    const groupId = pendingGroups.pop() as string
+    for (const childId of childrenByParent.get(groupId) ?? []) {
+      if (included.has(childId)) continue
+      included.add(childId)
+      if (byID.get(childId)?.data.kind === 'group') {
+        pendingGroups.push(childId)
+      }
+    }
+  }
+
+  const incoming = new Map<string, string[]>()
+  for (const edge of edges) {
+    if (!byID.has(edge.source) || !byID.has(edge.target)) continue
+    const sources = incoming.get(edge.target)
+    if (sources) {
+      sources.push(edge.source)
+    } else {
+      incoming.set(edge.target, [edge.source])
+    }
+  }
+  const pendingAncestors = [...included]
+  while (pendingAncestors.length > 0) {
+    const id = pendingAncestors.pop() as string
+    for (const sourceId of incoming.get(id) ?? []) {
+      if (included.has(sourceId)) continue
+      included.add(sourceId)
+      pendingAncestors.push(sourceId)
+    }
+  }
+
+  return {
+    nodes: nodes.filter((node) => included.has(node.id)),
+    edges: edges.filter(
+      (edge) => included.has(edge.source) && included.has(edge.target)
+    ),
+  }
+}
+
+/**
  * Steps of a canvas in dependency order. A cyclic graph has no order, so the
  * callers refuse to run it instead of executing an arbitrary prefix.
  */

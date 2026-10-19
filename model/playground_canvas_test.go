@@ -1151,7 +1151,7 @@ func TestPlaygroundCanvasShares(t *testing.T) {
 					map[string]any{
 						"id": "n-artifact", "type": "artifact", "position": map[string]any{"x": 50, "y": 60},
 						"data": map[string]any{
-							"kind": "artifact", "label": "chart.png", "media_type": "image/png",
+							"kind": "artifact", "label": "chart.png", "mediaType": "image/png",
 							"ref": map[string]any{
 								"sessionId": secretSessionID, "attachmentId": "pgf_secret_attachment",
 								"artifactId": "pga_secret_artifact", "taskId": "task_secret_identifier",
@@ -1272,7 +1272,8 @@ func TestPlaygroundCanvasShares(t *testing.T) {
 			assert.NotContains(t, messageData, "ref")
 			artifactData := nodeByID("n-artifact")["data"].(map[string]any)
 			assert.Equal(t, "chart.png", artifactData["label"])
-			assert.Equal(t, "image/png", artifactData["media_type"])
+			assert.Equal(t, "image/png", artifactData["mediaType"])
+			assert.NotContains(t, artifactData, "media_type")
 			modelWorkflow := nodeByID("n-model")["data"].(map[string]any)["workflow"].(map[string]any)
 			assert.Equal(t, "failed", modelWorkflow["status"])
 			assert.Equal(t, "image", modelWorkflow["generation"])
@@ -1298,7 +1299,7 @@ func TestPlaygroundCanvasShares(t *testing.T) {
 				`"model"`, `"size"`, `"quality"`, `"group"`, `"sourceNodeId"`, `"content_url"`,
 				`"token"`, `"user_id"`,
 			} {
-				assert.NotContains(t, read.Body.String(), forbiddenKey)
+				assert.NotContains(t, read.Body.String(), forbiddenKey+":")
 			}
 
 			// Rotation, expiry and revocation use the identical non-enumerable
@@ -1617,4 +1618,381 @@ func TestPlaygroundCanvasArchiveDegradedRestore(t *testing.T) {
 	foreignData := canvasEnvelope(t, foreignImport.Body.Bytes())
 	assert.EqualValues(t, 0, foreignData["resources_imported"])
 	assert.EqualValues(t, 1, foreignData["references_dropped"])
+}
+
+func canvasTemplateMembers(t *testing.T, archive []byte) (map[string]any, map[string][]byte) {
+	t.Helper()
+	reader, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
+	require.NoError(t, err)
+	var manifest map[string]any
+	members := make(map[string][]byte)
+	for _, member := range reader.File {
+		opened, err := member.Open()
+		require.NoError(t, err)
+		data, err := io.ReadAll(opened)
+		require.NoError(t, err)
+		require.NoError(t, opened.Close())
+		if member.Name == "template.json" {
+			require.NoError(t, common.Unmarshal(data, &manifest))
+			continue
+		}
+		members[member.Name] = data
+	}
+	require.NotNil(t, manifest)
+	return manifest, members
+}
+
+func playgroundImportCanvasTemplate(t *testing.T, user int, path string, archive []byte, handler gin.HandlerFunc) *httptest.ResponseRecorder {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "template.zip")
+	require.NoError(t, err)
+	_, err = part.Write(archive)
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Set("id", user)
+	c.Request = httptest.NewRequest(http.MethodPost, path, &body)
+	c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+	handler(c)
+	return recorder
+}
+
+// Canvas templates preserve the chain structure without leaking live resource
+// references: a structure template drops every ref, an inline template
+// snapshots the referenced bytes and keeps only the attachment id, and the
+// official seeds are created once. The market mirrors the preset visibility
+// contract, and a template archive round-trips through a zip on every
+// supported database.
+func TestPlaygroundCanvasTemplateLibrary(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+
+			// Official seeds are global, ownerless and idempotent. The seed run
+			// is repeated to prove the SystemKey lookup does not duplicate rows.
+			require.NoError(t, model.SeedPlaygroundCanvasTemplates(db))
+			require.NoError(t, model.SeedPlaygroundCanvasTemplates(db))
+			var seeded int64
+			require.NoError(t, db.Model(&model.PlaygroundCanvasTemplate{}).Where("visibility = ? AND deleted_at = 0", model.PlaygroundCanvasTemplateVisibilityGlobal).Count(&seeded).Error)
+			assert.EqualValues(t, 4, seeded)
+			var translation model.PlaygroundCanvasTemplate
+			require.NoError(t, db.Where("id = ?", "pgct_official_translation").First(&translation).Error)
+			assert.Zero(t, translation.UserID)
+			assert.False(t, translation.InlineAssets)
+			assert.False(t, strings.Contains(string(translation.Document), `"ref"`))
+			assert.Contains(t, string(translation.Document), `"translate-model"`)
+
+			// Build a canvas with one attachment and one workflow step whose
+			// last run must not travel into the template.
+			canvasID := createCanvasProject(t, 7, "canvas-template")["id"].(string)
+			png := playgroundPNGFixture(80)
+			attachmentID := playgroundUploadCanvasAttachment(t, 7, canvasID, "template-1", "image/png", png)["id"].(string)
+			document := canvasDocument([]any{
+				canvasNode("p1", "prompt", 0, 0),
+				canvasRefNode("a1", "attachment", map[string]any{"sessionId": canvasID, "attachmentId": attachmentID}),
+				map[string]any{
+					"id": "m1", "type": "model", "position": map[string]any{"x": 360, "y": 0},
+					"data": map[string]any{
+						"kind": "model", "label": "Generate", "preferred": true,
+						"snapshot": map[string]any{"sessionId": "leaked-session", "text": "leaked preview"},
+						"workflow": map[string]any{
+							"model": "test-model", "size": "1024x1024", "imageCount": float64(1),
+							"status": "succeeded", "output": "leaked output", "inputText": "leaked input",
+							"resultImageCount": float64(1), "error": "leaked error", "attempts": float64(2),
+							"lastSeed": float64(1234), "preferredResultNodeId": "m1-result-1",
+						},
+					},
+				},
+			}, []any{
+				map[string]any{"id": "e1", "source": "p1", "target": "m1"},
+			})
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodPatch, "/api/playground/canvases/"+canvasID, map[string]any{
+				"revision": 0, "document": document,
+			}, controller.UpdatePlaygroundCanvasProject).Code)
+
+			type templateWriteResponse struct {
+				Template struct {
+					ID           string `json:"id"`
+					Name         string `json:"name"`
+					Visibility   string `json:"visibility"`
+					InlineAssets bool   `json:"inline_assets"`
+					AssetCount   int    `json:"asset_count"`
+					AssetBytes   int64  `json:"asset_bytes"`
+					Document     string `json:"document"`
+				} `json:"template"`
+				AssetsInlined     int `json:"assets_inlined"`
+				ReferencesDropped int `json:"references_dropped"`
+			}
+			create := func(body map[string]any) templateWriteResponse {
+				t.Helper()
+				response := playgroundRequest(t, 7, http.MethodPost, "/api/playground/canvas-templates", body, controller.CreatePlaygroundCanvasTemplate)
+				require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+				var envelope struct {
+					Success bool                  `json:"success"`
+					Data    templateWriteResponse `json:"data"`
+				}
+				require.NoError(t, common.Unmarshal(response.Body.Bytes(), &envelope))
+				require.True(t, envelope.Success, response.Body.String())
+				return envelope.Data
+			}
+
+			inline := create(map[string]any{
+				"canvas_id": canvasID, "name": "  Inline chain  ", "description": "Carries its image.",
+				"category": "comparison", "inline_assets": true,
+			})
+			require.True(t, strings.HasPrefix(inline.Template.ID, "pgct_"), inline.Template.ID)
+			assert.Equal(t, "Inline chain", inline.Template.Name)
+			assert.Equal(t, model.PlaygroundCanvasTemplateVisibilityPrivate, inline.Template.Visibility)
+			assert.True(t, inline.Template.InlineAssets)
+			assert.Equal(t, 1, inline.AssetsInlined)
+			assert.Equal(t, 0, inline.ReferencesDropped)
+
+			var stored model.PlaygroundCanvasTemplate
+			require.NoError(t, db.Where("id = ?", inline.Template.ID).First(&stored).Error)
+			assert.Equal(t, 7, stored.UserID)
+			assert.EqualValues(t, len(stored.Document), stored.DocumentBytes)
+			var storedDocument map[string]any
+			require.NoError(t, common.UnmarshalJsonStr(string(stored.Document), &storedDocument))
+			nodes := storedDocument["nodes"].([]any)
+			require.Len(t, nodes, 3)
+			attachmentNode := nodes[1].(map[string]any)["data"].(map[string]any)
+			assert.Equal(t, map[string]any{"attachmentId": attachmentID}, attachmentNode["ref"], "only the attachment claim survives")
+			modelData := nodes[2].(map[string]any)["data"].(map[string]any)
+			workflow := modelData["workflow"].(map[string]any)
+			assert.Equal(t, "test-model", workflow["model"])
+			assert.Equal(t, "1024x1024", workflow["size"])
+			for _, key := range []string{
+				"status", "output", "inputText", "resultImageCount", "error", "attempts",
+				"lastSeed", "preferredResultNodeId",
+			} {
+				_, present := workflow[key]
+				assert.False(t, present, key)
+			}
+			for _, key := range []string{"preferred", "snapshot", "sourceDeleted"} {
+				_, present := modelData[key]
+				assert.False(t, present, key)
+			}
+			assets := make([]model.PlaygroundCanvasTemplateAsset, 0)
+			require.NoError(t, db.Where("template_id = ?", stored.ID).Find(&assets).Error)
+			require.Len(t, assets, 1)
+			assert.Equal(t, attachmentID, assets[0].SourceAttachmentID)
+			assert.Equal(t, "image/png", assets[0].MediaType)
+			assert.EqualValues(t, len(png), assets[0].ByteSize)
+			bytes, err := base64.StdEncoding.DecodeString(string(assets[0].Data))
+			require.NoError(t, err)
+			assert.Equal(t, png, bytes)
+			inlineSize := int64(len(stored.Document)) + int64(len(png))
+
+			// A structure-only template drops the ref and charges no asset
+			// bytes; the node keeps its prompt and workflow configuration.
+			structure := create(map[string]any{
+				"canvas_id": canvasID, "name": "Structure chain", "inline_assets": false,
+			})
+			assert.False(t, structure.Template.InlineAssets)
+			assert.Zero(t, structure.Template.AssetCount)
+			assert.Equal(t, 1, structure.ReferencesDropped)
+			var structureRow model.PlaygroundCanvasTemplate
+			require.NoError(t, db.Where("id = ?", structure.Template.ID).First(&structureRow).Error)
+			assert.False(t, strings.Contains(string(structureRow.Document), `"attachmentId"`))
+			assert.Contains(t, string(structureRow.Document), `"test-model"`)
+
+			// An administrator can save their own canvas directly as a global
+			// market template. The row is ownerless, keeps no system key and
+			// consumes no account quota; a foreign canvas stays unreadable.
+			adminCanvasID := createCanvasProject(t, 9, "admin-global-template")["id"].(string)
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 9, http.MethodPatch, "/api/playground/canvases/"+adminCanvasID, map[string]any{
+				"revision": 0, "document": document,
+			}, controller.UpdatePlaygroundCanvasProject).Code)
+			globalResponse := playgroundRequest(t, 9, http.MethodPost, "/api/playground/canvas-templates/global", map[string]any{
+				"canvas_id": adminCanvasID, "name": "Admin chain", "category": "translation", "inline_assets": false,
+			}, controller.CreateGlobalPlaygroundCanvasTemplate)
+			require.Equal(t, http.StatusOK, globalResponse.Code, globalResponse.Body.String())
+			var globalEnvelope struct {
+				Data templateWriteResponse `json:"data"`
+			}
+			require.NoError(t, common.Unmarshal(globalResponse.Body.Bytes(), &globalEnvelope))
+			assert.Equal(t, "Admin chain", globalEnvelope.Data.Template.Name)
+			assert.Equal(t, model.PlaygroundCanvasTemplateVisibilityGlobal, globalEnvelope.Data.Template.Visibility)
+			var globalRow model.PlaygroundCanvasTemplate
+			require.NoError(t, db.Where("id = ?", globalEnvelope.Data.Template.ID).First(&globalRow).Error)
+			assert.Zero(t, globalRow.UserID)
+			assert.Empty(t, globalRow.SystemKey)
+			assert.NotContains(t, string(globalRow.Document), `"snapshot"`)
+			assert.NotContains(t, string(globalRow.Document), `"lastSeed"`)
+			var adminUsage model.PlaygroundUserUsage
+			require.NoError(t, db.Where("user_id = ?", 9).First(&adminUsage).Error)
+			assert.Zero(t, adminUsage.CanvasTemplateCount)
+			assert.Zero(t, adminUsage.CanvasTemplateBytes)
+			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 8, http.MethodPost, "/api/playground/canvas-templates/global", map[string]any{
+				"canvas_id": adminCanvasID, "name": "Stolen chain", "inline_assets": false,
+			}, controller.CreateGlobalPlaygroundCanvasTemplate).Code)
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 9, http.MethodDelete, "/api/playground/canvas-templates/global/"+globalEnvelope.Data.Template.ID, nil, controller.DeleteGlobalPlaygroundCanvasTemplate).Code)
+
+			var usage model.PlaygroundUserUsage
+			require.NoError(t, db.Where("user_id = ?", 7).First(&usage).Error)
+			assert.EqualValues(t, 2, usage.CanvasTemplateCount)
+			assert.EqualValues(t, inlineSize+structureRow.DocumentBytes, usage.CanvasTemplateBytes)
+
+			// Owner listing, foreign isolation and detail read contract.
+			listed := playgroundRequest(t, 7, http.MethodGet, "/api/playground/canvas-templates", nil, controller.ListPlaygroundCanvasTemplates)
+			require.Equal(t, http.StatusOK, listed.Code, listed.Body.String())
+			assert.Contains(t, listed.Body.String(), `"total":2`)
+			assert.Contains(t, listed.Body.String(), `"limit":`+fmt.Sprint(playground_setting.GetPlaygroundQuotaPolicy("default").CanvasTemplateUserMaxCount))
+			foreign := playgroundRequest(t, 8, http.MethodGet, "/api/playground/canvas-templates", nil, controller.ListPlaygroundCanvasTemplates)
+			assert.Contains(t, foreign.Body.String(), `"total":0`)
+			for name, response := range map[string]*httptest.ResponseRecorder{
+				"read":   playgroundRequest(t, 8, http.MethodGet, "/api/playground/canvas-templates/"+inline.Template.ID, nil, controller.GetPlaygroundCanvasTemplate),
+				"update": playgroundRequest(t, 8, http.MethodPatch, "/api/playground/canvas-templates/"+inline.Template.ID, map[string]any{"name": "Hijacked"}, controller.UpdatePlaygroundCanvasTemplate),
+				"delete": playgroundRequest(t, 8, http.MethodDelete, "/api/playground/canvas-templates/"+inline.Template.ID, nil, controller.DeletePlaygroundCanvasTemplate),
+			} {
+				assert.Equal(t, http.StatusNotFound, response.Code, name+": "+response.Body.String())
+			}
+
+			// A global official template is readable by every account, while
+			// the private mutation routes stay owner-scoped.
+			official := playgroundRequest(t, 8, http.MethodGet, "/api/playground/canvas-templates/pgct_official_translation", nil, controller.GetPlaygroundCanvasTemplate)
+			require.Equal(t, http.StatusOK, official.Code, official.Body.String())
+			assert.Contains(t, official.Body.String(), `"visibility":"global"`)
+			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 8, http.MethodPatch, "/api/playground/canvas-templates/pgct_official_translation", map[string]any{"name": "Hijacked"}, controller.UpdatePlaygroundCanvasTemplate).Code)
+
+			// Inline bytes are served through the template asset route.
+			detail := playgroundRequest(t, 7, http.MethodGet, "/api/playground/canvas-templates/"+inline.Template.ID, nil, controller.GetPlaygroundCanvasTemplate)
+			require.Equal(t, http.StatusOK, detail.Code, detail.Body.String())
+			var detailEnvelope struct {
+				Data struct {
+					Assets []struct {
+						ID string `json:"id"`
+					} `json:"assets"`
+				} `json:"data"`
+			}
+			require.NoError(t, common.Unmarshal(detail.Body.Bytes(), &detailEnvelope))
+			require.Len(t, detailEnvelope.Data.Assets, 1)
+			assetID := detailEnvelope.Data.Assets[0].ID
+			content := playgroundRequest(t, 7, http.MethodGet, "/api/playground/canvas-templates/"+inline.Template.ID+"/assets/"+assetID+"/content", nil, controller.GetPlaygroundCanvasTemplateAssetContent)
+			require.Equal(t, http.StatusOK, content.Code, content.Body.String())
+			assert.Equal(t, png, content.Body.Bytes())
+			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 8, http.MethodGet, "/api/playground/canvas-templates/"+inline.Template.ID+"/assets/"+assetID+"/content", nil, controller.GetPlaygroundCanvasTemplateAssetContent).Code)
+
+			// The market copy is an independent private row that consumes the
+			// caller's budget and keeps the source document.
+			copiedResponse := playgroundRequest(t, 8, http.MethodPost, "/api/playground/canvas-templates/market/pgct_official_translation/copy", nil, controller.CopyPlaygroundCanvasTemplateFromMarket)
+			require.Equal(t, http.StatusOK, copiedResponse.Code, copiedResponse.Body.String())
+			var copiedEnvelope struct {
+				Data struct {
+					ID           string `json:"id"`
+					Visibility   string `json:"visibility"`
+					InlineAssets bool   `json:"inline_assets"`
+					Name         string `json:"name"`
+				} `json:"data"`
+			}
+			require.NoError(t, common.Unmarshal(copiedResponse.Body.Bytes(), &copiedEnvelope))
+			assert.NotEqual(t, "pgct_official_translation", copiedEnvelope.Data.ID)
+			assert.Equal(t, model.PlaygroundCanvasTemplateVisibilityPrivate, copiedEnvelope.Data.Visibility)
+			assert.Equal(t, "Translation chain", copiedEnvelope.Data.Name)
+			var copiedRow model.PlaygroundCanvasTemplate
+			require.NoError(t, db.Where("id = ?", copiedEnvelope.Data.ID).First(&copiedRow).Error)
+			assert.Equal(t, 8, copiedRow.UserID)
+
+			// Updating display fields never promotes a private template.
+			updated := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/canvas-templates/"+structure.Template.ID, map[string]any{
+				"name": "Structure chain v2", "description": "Updated.", "category": "summary", "visibility": "global",
+			}, controller.UpdatePlaygroundCanvasTemplate)
+			require.Equal(t, http.StatusOK, updated.Code, updated.Body.String())
+			assert.Contains(t, updated.Body.String(), `"name":"Structure chain v2"`)
+			assert.Contains(t, updated.Body.String(), `"visibility":"private"`)
+			var updatedRow model.PlaygroundCanvasTemplate
+			require.NoError(t, db.Where("id = ?", structure.Template.ID).First(&updatedRow).Error)
+			assert.Equal(t, model.PlaygroundCanvasTemplateVisibilityPrivate, updatedRow.Visibility)
+
+			// Export the inline template as a zip; another account imports it
+			// with its asset bytes and a rewritten source mapping.
+			exported := playgroundRequest(t, 7, http.MethodGet, "/api/playground/canvas-templates/"+inline.Template.ID+"/export", nil, controller.ExportPlaygroundCanvasTemplate)
+			require.Equal(t, http.StatusOK, exported.Code, exported.Body.String())
+			assert.Contains(t, exported.Header().Get("Content-Disposition"), "Inline chain.zip")
+			assert.Equal(t, "private, no-store", exported.Header().Get("Cache-Control"))
+			manifest, members := canvasTemplateMembers(t, exported.Body.Bytes())
+			assert.Equal(t, "new-api-canvas-template", manifest["format"])
+			assert.Equal(t, "Inline chain", manifest["name"])
+			resourcesList := manifest["resources"].([]any)
+			require.Len(t, resourcesList, 1)
+			resource := resourcesList[0].(map[string]any)
+			assert.Equal(t, attachmentID, resource["attachment_id"])
+			assert.Equal(t, png, members[resource["entry"].(string)])
+
+			imported := playgroundImportCanvasTemplate(t, 9, "/api/playground/canvas-templates/import", exported.Body.Bytes(), controller.ImportPlaygroundCanvasTemplate)
+			require.Equal(t, http.StatusOK, imported.Code, imported.Body.String())
+			var importedEnvelope struct {
+				Data struct {
+					Template struct {
+						ID           string `json:"id"`
+						InlineAssets bool   `json:"inline_assets"`
+						AssetCount   int    `json:"asset_count"`
+					} `json:"template"`
+					AssetsInlined     int `json:"assets_inlined"`
+					ReferencesDropped int `json:"references_dropped"`
+				} `json:"data"`
+			}
+			require.NoError(t, common.Unmarshal(imported.Body.Bytes(), &importedEnvelope))
+			assert.True(t, importedEnvelope.Data.Template.InlineAssets)
+			assert.Equal(t, 1, importedEnvelope.Data.Template.AssetCount)
+			assert.Equal(t, 1, importedEnvelope.Data.AssetsInlined)
+			assert.Zero(t, importedEnvelope.Data.ReferencesDropped)
+			var importedRow model.PlaygroundCanvasTemplate
+			require.NoError(t, db.Where("id = ?", importedEnvelope.Data.Template.ID).First(&importedRow).Error)
+			assert.Equal(t, 9, importedRow.UserID)
+			assert.Contains(t, string(importedRow.Document), attachmentID)
+			var importedAssets []model.PlaygroundCanvasTemplateAsset
+			require.NoError(t, db.Where("template_id = ?", importedRow.ID).Find(&importedAssets).Error)
+			require.Len(t, importedAssets, 1)
+			assert.Equal(t, attachmentID, importedAssets[0].SourceAttachmentID)
+			importedBytes, err := base64.StdEncoding.DecodeString(string(importedAssets[0].Data))
+			require.NoError(t, err)
+			assert.Equal(t, png, importedBytes)
+
+			// A structure-only archive imports with no resources.
+			structureArchive := playgroundRequest(t, 7, http.MethodGet, "/api/playground/canvas-templates/"+structure.Template.ID+"/export", nil, controller.ExportPlaygroundCanvasTemplate).Body.Bytes()
+			structureManifest, structureMembers := canvasTemplateMembers(t, structureArchive)
+			assert.Equal(t, false, structureManifest["inline_assets"])
+			assert.Empty(t, structureMembers)
+			structureImport := playgroundImportCanvasTemplate(t, 9, "/api/playground/canvas-templates/import", structureArchive, controller.ImportPlaygroundCanvasTemplate)
+			require.Equal(t, http.StatusOK, structureImport.Code, structureImport.Body.String())
+			assert.Contains(t, structureImport.Body.String(), `"assets_inlined":0`)
+
+			// A malformed archive is rejected before any row is written.
+			assert.Equal(t, http.StatusBadRequest, playgroundImportCanvasTemplate(t, 9, "/api/playground/canvas-templates/import", []byte("not a zip"), controller.ImportPlaygroundCanvasTemplate).Code)
+
+			// The private budget is shared by create and market copy.
+			usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+				policy.CanvasTemplateUserMaxCount = 2
+			})
+			overflow := playgroundRequest(t, 7, http.MethodPost, "/api/playground/canvas-templates", map[string]any{
+				"canvas_id": canvasID, "name": "One too many", "inline_assets": false,
+			}, controller.CreatePlaygroundCanvasTemplate)
+			assert.Equal(t, http.StatusUnprocessableEntity, overflow.Code, overflow.Body.String())
+			assert.Contains(t, overflow.Body.String(), "PLAYGROUND_CANVAS_TEMPLATE_LIMIT_EXCEEDED")
+			assert.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodDelete, "/api/playground/canvas-templates/"+structure.Template.ID, nil, controller.DeletePlaygroundCanvasTemplate).Code)
+			require.NoError(t, db.Where("user_id = ?", 7).First(&usage).Error)
+			assert.EqualValues(t, 1, usage.CanvasTemplateCount)
+			assert.EqualValues(t, inlineSize, usage.CanvasTemplateBytes)
+			createdAfterDelete := playgroundRequest(t, 7, http.MethodPost, "/api/playground/canvas-templates", map[string]any{
+				"canvas_id": canvasID, "name": "Replacement", "inline_assets": false,
+			}, controller.CreatePlaygroundCanvasTemplate)
+			assert.Equal(t, http.StatusOK, createdAfterDelete.Code, createdAfterDelete.Body.String())
+
+			// A deleted official template is not resurrected by the next seed,
+			// and the administrator can update the remaining global rows.
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 9, http.MethodPatch, "/api/playground/canvas-templates/global/pgct_official_summary", map[string]any{
+				"name": "Official summary v2",
+			}, controller.UpdateGlobalPlaygroundCanvasTemplate).Code)
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 9, http.MethodDelete, "/api/playground/canvas-templates/global/pgct_official_translation", nil, controller.DeleteGlobalPlaygroundCanvasTemplate).Code)
+			require.NoError(t, model.SeedPlaygroundCanvasTemplates(db))
+			market := playgroundRequest(t, 8, http.MethodGet, "/api/playground/canvas-templates/market", nil, controller.ListPlaygroundCanvasTemplateMarket)
+			assert.Contains(t, market.Body.String(), `"total":3`)
+			assert.NotContains(t, market.Body.String(), "pgct_official_translation")
+			assert.Contains(t, market.Body.String(), "Official summary v2")
+		})
+	}
 }

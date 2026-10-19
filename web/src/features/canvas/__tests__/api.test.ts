@@ -20,7 +20,11 @@ import { afterEach, expect, test, vi } from 'vitest'
 
 import { api } from '@/lib/api'
 
-import { exportCanvasArchive, importCanvasArchive } from '../api'
+import {
+  createGlobalCanvasTemplate,
+  exportCanvasArchive,
+  importCanvasArchive,
+} from '../api'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -161,4 +165,61 @@ test('an import the server rejects surfaces its message instead of a project', a
   await expect(
     importCanvasArchive(new File(['nope'], 'nope.zip'))
   ).rejects.toThrow('Invalid Playground canvas archive.')
+})
+
+test('saving a global template posts to the administrator endpoint and maps the row', async () => {
+  const post = vi.spyOn(api, 'post').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        template: {
+          id: 'pgct_global',
+          name: 'Shared chain',
+          description: '',
+          category: 'translation',
+          visibility: 'global',
+          inline_assets: true,
+          node_count: 3,
+          edge_count: 2,
+          document_bytes: 512,
+          asset_count: 1,
+          asset_bytes: 2048,
+          created_at: 10,
+          updated_at: 20,
+        },
+        assets_inlined: 1,
+        resources_missing: 2,
+        references_dropped: 1,
+      },
+    },
+  })
+
+  const result = await createGlobalCanvasTemplate({
+    canvasId: 'pgc_1',
+    name: 'Shared chain',
+    inlineAssets: true,
+  })
+
+  expect(post).toHaveBeenCalledTimes(1)
+  expect(post.mock.calls[0][0]).toBe('/api/playground/canvas-templates/global')
+  expect(post.mock.calls[0][1]).toEqual({
+    canvas_id: 'pgc_1',
+    name: 'Shared chain',
+    description: undefined,
+    category: undefined,
+    inline_assets: true,
+  })
+  expect(result).toEqual({
+    template: expect.objectContaining({
+      id: 'pgct_global',
+      visibility: 'global',
+      inlineAssets: true,
+      assetCount: 1,
+      createdAt: 10000,
+      updatedAt: 20000,
+    }),
+    assetsInlined: 1,
+    resourcesMissing: 2,
+    referencesDropped: 1,
+  })
 })

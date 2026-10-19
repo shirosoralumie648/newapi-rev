@@ -263,3 +263,38 @@ test('renders a group as a dashed box without handles', () => {
   expect(screen.getByText('Scene')).toBeInTheDocument()
   expect(container.querySelector('.react-flow__handle')).toBeNull()
 })
+
+test('shows the color marker and tags of a node', () => {
+  renderNode({
+    kind: 'prompt',
+    text: 'hero',
+    color: 'teal',
+    tags: ['draft', 'scene'],
+  })
+
+  expect(screen.getByRole('img', { name: 'Teal' })).toBeInTheDocument()
+  expect(screen.getByText('draft')).toBeInTheDocument()
+  expect(screen.getByText('scene')).toBeInTheDocument()
+})
+
+test('shows the color marker and tags of a group box', () => {
+  const client = new QueryClient()
+  render(
+    <QueryClientProvider client={client}>
+      <ReactFlowProvider>
+        <CanvasGroupNodeView
+          {...nodeProps({
+            kind: 'group',
+            text: 'Act one',
+            color: 'violet',
+            tags: ['act-1'],
+          })}
+        />
+      </ReactFlowProvider>
+    </QueryClientProvider>
+  )
+
+  expect(screen.getByText('Act one')).toBeInTheDocument()
+  expect(screen.getByRole('img', { name: 'Violet' })).toBeInTheDocument()
+  expect(screen.getByText('act-1')).toBeInTheDocument()
+})

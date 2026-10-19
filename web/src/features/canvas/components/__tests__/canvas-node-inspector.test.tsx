@@ -692,3 +692,70 @@ test('hides the image tools for a node that carries no image', () => {
 
   expect(screen.queryByText('Image tools')).toBeNull()
 })
+
+test('sets and clears the node color under one history merge key', async () => {
+  const user = userEvent.setup()
+  const onUpdateData = vi.fn()
+  render(
+    <CanvasNodeInspector
+      node={makeNode({ kind: 'text', text: 'note', color: 'blue' })}
+      onDelete={vi.fn()}
+      onUpdateData={onUpdateData}
+    />
+  )
+
+  expect(screen.getByRole('button', { name: 'Blue' })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  )
+
+  await user.click(screen.getByRole('button', { name: 'Red' }))
+  expect(onUpdateData).toHaveBeenLastCalledWith(
+    'n1',
+    { color: 'red' },
+    { mergeKey: 'color:n1' }
+  )
+
+  await user.click(screen.getByRole('button', { name: 'No color' }))
+  expect(onUpdateData).toHaveBeenLastCalledWith(
+    'n1',
+    { color: undefined },
+    { mergeKey: 'color:n1' }
+  )
+})
+
+test('adds and removes node tags through the bounded tag input', async () => {
+  const user = userEvent.setup()
+  const onUpdateData = vi.fn()
+  const { rerender } = render(
+    <CanvasNodeInspector
+      node={makeNode({ kind: 'text', text: 'note', tags: ['draft'] })}
+      onDelete={vi.fn()}
+      onUpdateData={onUpdateData}
+    />
+  )
+
+  await user.type(
+    screen.getByRole('textbox', { name: 'Add a tag...' }),
+    'scene{Enter}'
+  )
+  expect(onUpdateData).toHaveBeenLastCalledWith(
+    'n1',
+    { tags: ['draft', 'scene'] },
+    { mergeKey: 'tags:n1' }
+  )
+
+  rerender(
+    <CanvasNodeInspector
+      node={makeNode({ kind: 'text', text: 'note', tags: ['draft', 'scene'] })}
+      onDelete={vi.fn()}
+      onUpdateData={onUpdateData}
+    />
+  )
+  await user.click(screen.getAllByRole('button', { name: 'Remove tag' })[0])
+  expect(onUpdateData).toHaveBeenLastCalledWith(
+    'n1',
+    { tags: ['scene'] },
+    { mergeKey: 'tags:n1' }
+  )
+})

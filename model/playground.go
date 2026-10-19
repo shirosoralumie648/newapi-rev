@@ -44,6 +44,10 @@ var (
 	// ErrPlaygroundContextSummaryLimit is raised when a client tries to persist
 	// a compression node bigger than the stored contract allows.
 	ErrPlaygroundContextSummaryLimit = errors.New("Playground context summary limit exceeded.")
+	// ErrPlaygroundDeveloperOptionsLimit is raised when a client tries to
+	// persist request-side developer settings beyond the stored contract: too
+	// many tools, a single JSON Schema over its budget, or an oversized total.
+	ErrPlaygroundDeveloperOptionsLimit = errors.New("Playground developer options limit exceeded.")
 	// ErrPlaygroundSessionArchived is raised when a client tries to pin a
 	// conversation that is already archived. Compressing both states into one
 	// row would make the client groups ambiguous, so the request is rejected.
@@ -118,6 +122,14 @@ type PlaygroundSession struct {
 	// replaces the oldest messages of the conversation in a request. An empty
 	// value means the conversation sends its stored history uncompressed.
 	ContextSummary string `json:"-" gorm:"type:text"`
+	// DeveloperOptions holds the conversation's request-side developer
+	// settings — the enabled switch, the `type: "function"` tool definitions
+	// and the response format (JSON Schema) the client injects into every
+	// request — in the OpenAI wire shape. The gateway only validates and
+	// stores the value; it never executes a tool. The column stays nullable
+	// so an existing installation can add it on every dialect; a NULL value
+	// reads back as an empty object and the client applies its defaults.
+	DeveloperOptions string `json:"-" gorm:"type:text"`
 	// OpeningMessage is the display-only greeting a conversation created from a
 	// preset starts with. It is shown above the first prompt and never becomes a
 	// model message, so it does not affect the request or its billing.
@@ -126,6 +138,10 @@ type PlaygroundSession struct {
 	// of strings. They are display-only prompts the user may send; the column
 	// stays nullable so an existing installation can add it on every dialect.
 	SuggestedQuestions string `json:"-" gorm:"type:text"`
+	// KnowledgeBaseIDs stores the conversation's bound knowledge bases as a
+	// JSON array of ids. Retrieval happens per send, so changing a base's
+	// documents affects the next turn without rewriting the conversation.
+	KnowledgeBaseIDs string `json:"-" gorm:"type:text"`
 	// PinnedAt is the timestamp the conversation was pinned, or 0 when it is
 	// not pinned. A pinned conversation stays in the pinned section of the
 	// client list; the server never reorders the list by it.

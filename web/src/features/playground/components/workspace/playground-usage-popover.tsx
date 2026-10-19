@@ -105,6 +105,13 @@ function PlaygroundUsageSummary(props: { userId: number | null }) {
       bytes: true,
     },
     {
+      key: 'canvas-templates',
+      label: t('Canvas templates'),
+      metric: usage.canvasTemplates,
+      counts: true,
+      bytes: true,
+    },
+    {
       key: 'knowledge-bases',
       label: t('Knowledge bases'),
       metric: usage.knowledgeBases,

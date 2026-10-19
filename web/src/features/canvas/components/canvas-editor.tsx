@@ -56,6 +56,7 @@ import {
   type CanvasAddedNode,
 } from '../hooks/use-canvas-editor'
 import { useCanvasImageTools } from '../hooks/use-canvas-image-tools'
+import { useCanvasTemplateActions } from '../hooks/use-canvas-template-actions'
 import { useCanvasWorkflowOptions } from '../hooks/use-canvas-workflow-options'
 import { useCanvasWorkflowRunner } from '../hooks/use-canvas-workflow-runner'
 import type {
@@ -83,6 +84,7 @@ import {
   type CanvasGenerationPrefill,
   type CanvasSourceTarget,
 } from '../lib/canvas-navigation'
+import { isCanvasNodeSearchShortcut } from '../lib/canvas-organization'
 import {
   buildArtifactCanvasSeeds,
   buildAttachmentCanvasSeeds,
@@ -110,8 +112,10 @@ import { CanvasImageToolsDialog } from './canvas-image-tools-dialog'
 import { CanvasInspectorViewToggle } from './canvas-inspector-view-toggle'
 import { CanvasFlowNodeView, CanvasGroupNodeView } from './canvas-node'
 import { CanvasNodeInspector } from './canvas-node-inspector'
+import { CanvasNodeSearch } from './canvas-node-search'
 import { CanvasPngExportDialog } from './canvas-png-export-dialog'
 import { CanvasRunBudgetDialog } from './canvas-run-budget-dialog'
+import { CanvasTemplateLibraryDialog } from './canvas-template-library-dialog'
 import { CanvasToolbar } from './canvas-toolbar'
 import type { CanvasToolbarInspectorView } from './canvas-toolbar'
 import { CanvasViewportControls } from './canvas-viewport-controls'
@@ -164,6 +168,8 @@ interface CanvasEditorProps {
   onOpenSource?: (target: CanvasSourceTarget) => void
   /** Opens a conversation the artifact browser or library points back at. */
   onOpenConversation?: (sessionId: string) => void
+  /** Switches the workspace to a canvas created from a template. */
+  onOpenProject: (projectId: string) => void
 }
 
 /** Saves one generated canvas file through a transient object URL. */
@@ -202,6 +208,14 @@ export function CanvasEditor(props: CanvasEditorProps) {
     onRejectedConnection: (messageKey) => toast.error(t(messageKey)),
   })
 
+  const templateActions = useCanvasTemplateActions({
+    projectId: props.project.id,
+    nodes: editor.nodes,
+    addGraph: editor.addGraph,
+    selectNode: editor.selectNode,
+    onOpenProject: props.onOpenProject,
+  })
+
   const workflow = useCanvasWorkflowRunner({
     nodes: editor.nodes,
     edges: editor.edges,
@@ -213,6 +227,25 @@ export function CanvasEditor(props: CanvasEditorProps) {
   // The validated run the run-budget dialog is confirming; the dialog opens
   // only when the same click would also start a run.
   const [runPlan, setRunPlan] = useState<CanvasWorkflowRunPlan | null>(null)
+  const [templatesOpen, setTemplatesOpen] = useState(false)
+
+  // The in-canvas node search panel. Cmd/Ctrl+P is the keyboard entry, the
+  // toolbar button is the discoverable one; both open the same panel.
+  const [nodeSearchOpen, setNodeSearchOpen] = useState(false)
+  const handleNodeSearchOpenChange = useCallback((open: boolean) => {
+    setNodeSearchOpen(open)
+  }, [])
+  const disabled = props.disabled
+  useEffect(() => {
+    if (disabled) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!isCanvasNodeSearchShortcut(event)) return
+      event.preventDefault()
+      setNodeSearchOpen(true)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [disabled])
 
   const [inspectorView, setInspectorView] =
     useState<CanvasInspectorView>('details')
@@ -742,6 +775,9 @@ export function CanvasEditor(props: CanvasEditorProps) {
                     canGroup={editor.canGroup}
                     canPaste={editor.hasClipboard}
                     canRedo={editor.canRedo}
+                    canRunSelection={
+                      editor.selectedCount > 0 && workflow.phase !== 'running'
+                    }
                     canSelectAll={editor.nodes.length > 0}
                     canUngroup={editor.canUngroup}
                     canUndo={editor.canUndo}
@@ -773,12 +809,17 @@ export function CanvasEditor(props: CanvasEditorProps) {
                       void handleExportPng('selection')
                     }
                     onGroupChange={workflowOptions.setGroup}
+                    onOpenTemplates={() => setTemplatesOpen(true)}
                     onGroupSelection={() => void editor.groupSelection()}
                     onImportArchiveFile={(file) => props.onImportArchive(file)}
                     onImportFile={handleImportFile}
                     onPaste={handlePaste}
                     onRedo={editor.redo}
                     onRunWorkflow={() => setRunPlan(workflow.estimate())}
+                    onRunSelection={() =>
+                      setRunPlan(workflow.estimateSelection())
+                    }
+                    onSearchNodes={() => setNodeSearchOpen(true)}
                     onSelectAll={editor.selectAll}
                     onToggleInspectorView={handleToggleInspectorView}
                     onUndo={editor.undo}
@@ -794,6 +835,12 @@ export function CanvasEditor(props: CanvasEditorProps) {
                 <MiniMap className='bg-card!' pannable zoomable />
               </Canvas>
             </CanvasDropZone>
+            <CanvasNodeSearch
+              nodes={editor.nodes}
+              onOpenChange={handleNodeSearchOpenChange}
+              onSelectNode={editor.selectNode}
+              open={nodeSearchOpen}
+            />
           </ReactFlowProvider>
         }
         panelDefaultSize='30'
@@ -832,13 +879,30 @@ export function CanvasEditor(props: CanvasEditorProps) {
         saving={pngSaving}
       />
 
+      <CanvasTemplateLibraryDialog
+        canvasId={props.project.id}
+        canvasTitle={props.project.title}
+        disabled={props.disabled}
+        onApplyToCurrent={templateActions.applyToCurrent}
+        onCreateFromTemplate={templateActions.createFromTemplate}
+        onFlush={props.onBeforeExportArchive ?? (async () => undefined)}
+        onOpenChange={setTemplatesOpen}
+        open={templatesOpen}
+      />
+
       <CanvasRunBudgetDialog
         group={workflowOptions.group}
         onOpenChange={(open) => {
           if (!open) setRunPlan(null)
         }}
         onRun={(budget?: CanvasWorkflowRunBudgetRef) => {
+          const scope = runPlan?.scope
           setRunPlan(null)
+          if (!scope) return
+          if (scope === 'selection') {
+            workflow.runSelection(budget)
+            return
+          }
           workflow.run(undefined, budget)
         }}
         open={runPlan !== null}

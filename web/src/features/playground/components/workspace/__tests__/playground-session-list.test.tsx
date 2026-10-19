@@ -47,6 +47,7 @@ const makeSession = (
   systemPrompt: '',
   openingMessage: '',
   suggestedQuestions: [],
+  knowledgeBaseIds: [],
   context: { ...DEFAULT_CONTEXT_SETTINGS },
   contextSummary: null,
   pinned: false,

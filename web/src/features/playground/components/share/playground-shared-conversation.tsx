@@ -16,22 +16,92 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Paperclip, Share2, Wrench } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { Link2Off, Paperclip, Share2, Wrench } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { EmptyState } from '@/components/empty-state'
+import { ErrorState } from '@/components/error-state'
+import { LoadingState } from '@/components/loading-state'
 import { Badge } from '@/components/ui/badge'
+import {
+  getServerErrorMessage,
+  getServerErrorMessageKey,
+  getServerErrorStatus,
+} from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
+import { getSharedPlaygroundConversation } from '../../share-api'
 import type {
   MessageToolCallStatus,
-  PlaygroundSharedConversation,
+  PlaygroundSharedConversation as PlaygroundSharedConversationData,
   PlaygroundSharedMessage,
 } from '../../types'
 
+interface PlaygroundSharedConversationProps {
+  /** Plaintext token taken from the public route. */
+  token: string
+}
+
+/**
+ * Anonymous read-only page of one shared conversation. The server already
+ * stripped private fields; the query only accepts the sanitized payload.
+ */
+export function PlaygroundSharedConversation(
+  props: PlaygroundSharedConversationProps
+) {
+  const { t } = useTranslation()
+  const conversation = useQuery({
+    queryKey: ['playground-shared-conversation', props.token],
+    queryFn: ({ signal }) =>
+      getSharedPlaygroundConversation(props.token, signal),
+    meta: { errorToast: false },
+    retry: false,
+  })
+
+  if (conversation.isPending) {
+    return (
+      <main className='bg-background text-foreground flex min-h-svh items-center justify-center px-4'>
+        <LoadingState message={t('Loading shared conversation...')} />
+      </main>
+    )
+  }
+
+  if (conversation.isError) {
+    const notFound =
+      getServerErrorStatus(conversation.error) === 404 ||
+      getServerErrorMessageKey(conversation.error) ===
+        'Shared conversation not found.'
+    return (
+      <main className='bg-background text-foreground flex min-h-svh items-center justify-center px-4'>
+        <ErrorState
+          className='w-full max-w-xl'
+          description={
+            notFound
+              ? t('This link may have been revoked or has expired.')
+              : getServerErrorMessage(
+                  conversation.error,
+                  t('Please try again later.')
+                )
+          }
+          icon={notFound ? Link2Off : undefined}
+          onRetry={notFound ? undefined : () => void conversation.refetch()}
+          title={
+            notFound
+              ? t('Shared conversation not found')
+              : t('Unable to load the shared conversation')
+          }
+        />
+      </main>
+    )
+  }
+
+  return <PlaygroundSharedConversationView conversation={conversation.data} />
+}
+
 interface PlaygroundSharedConversationViewProps {
   /** Sanitized conversation payload returned by the public endpoint. */
-  conversation: PlaygroundSharedConversation
+  conversation: PlaygroundSharedConversationData
 }
 
 /**

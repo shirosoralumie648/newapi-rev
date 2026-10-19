@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -42,8 +43,8 @@ import (
 // collection of documents; every document keeps its original bytes in the
 // shared object store, the text extracted by the CH-05 reader, and the embedding
 // chunks the browser computes through the ordinary /pg/embeddings relay. The
-// server never calls an embedding provider itself: indexing is a client-driven
-// pipeline whose inputs and outputs are validated and stored here, with the
+// server calls that same relay for a search query (LB-08), then ranks the stored
+// vectors here; indexing inputs and outputs are validated and stored with the
 // same group, channel and billing rules as every other Playground request.
 
 const (
@@ -322,6 +323,26 @@ func GetPlaygroundKnowledgeBase(userID int, knowledgeBaseID string) (*Playground
 		return nil, err
 	}
 	return &base, nil
+}
+
+// ValidatePlaygroundKnowledgeBaseIDs checks that every id in one conversation
+// binding belongs to the caller. The handler has already bounded the list
+// length and removed duplicates; this is the ownership gate that stops a
+// session from referencing another account's chunks.
+func ValidatePlaygroundKnowledgeBaseIDs(userID int, knowledgeBaseIDs []string) error {
+	if len(knowledgeBaseIDs) == 0 {
+		return nil
+	}
+	var count int64
+	if err := DB.Model(&PlaygroundKnowledgeBase{}).
+		Where("user_id = ? AND id IN ?", userID, knowledgeBaseIDs).
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if int(count) != len(knowledgeBaseIDs) {
+		return ErrPlaygroundKnowledgeBaseNotFound
+	}
+	return nil
 }
 
 // GetPlaygroundKnowledgeBaseView resolves one base together with its counts.
@@ -988,4 +1009,246 @@ func deletePlaygroundKnowledgeObject(store objectstore.Store, objectKey string) 
 	if err := store.Delete(ctx, objectKey); err != nil && !errors.Is(err, objectstore.ErrObjectNotFound) {
 		common.SysError(common.LogText("failed to delete Playground knowledge object %s: %s", objectKey, err.Error()))
 	}
+}
+
+// PlaygroundKnowledgeSearchDefaultTopK is the per-base hit count the browser
+// requests before merging several bound bases. The server accepts a larger
+// value up to PlaygroundKnowledgeSearchMaxTopK for clients that need it.
+const (
+	PlaygroundKnowledgeSearchDefaultTopK = 6
+	PlaygroundKnowledgeSearchMaxTopK     = 12
+
+	// playgroundKnowledgeSearchCharBudget bounds the source text one query
+	// returns. Citation numbering and the prompt budget are computed from this
+	// payload, so an oversized document can never crowd out the conversation.
+	playgroundKnowledgeSearchCharBudget = 12_000
+	// playgroundKnowledgeSearchPageSize keeps one chunk scan bounded while the
+	// candidate set is only the top-k hits.
+	playgroundKnowledgeSearchPageSize = 200
+)
+
+// PlaygroundKnowledgeSearchHit is one ranked chunk returned to the client.
+type PlaygroundKnowledgeSearchHit struct {
+	KnowledgeBaseID   string  `json:"knowledge_base_id"`
+	KnowledgeBaseName string  `json:"knowledge_base_name"`
+	DocumentID        string  `json:"document_id"`
+	Filename          string  `json:"filename"`
+	ChunkID           string  `json:"chunk_id"`
+	ChunkIndex        int     `json:"chunk_index"`
+	Score             float64 `json:"score"`
+	Text              string  `json:"text"`
+	Truncated         bool    `json:"truncated"`
+}
+
+// PlaygroundKnowledgeStaleDocument reports one ready document whose stored
+// chunks were produced by another model or vector size. Retrieval skips it so
+// incomparable vectors never enter the prompt; the manager offers reindexing.
+type PlaygroundKnowledgeStaleDocument struct {
+	ID             string `json:"id"`
+	Filename       string `json:"filename"`
+	EmbeddingModel string `json:"embedding_model"`
+}
+
+// PlaygroundKnowledgeSearchResult is the owner-scoped result of one query.
+type PlaygroundKnowledgeSearchResult struct {
+	KnowledgeBase PlaygroundKnowledgeBase            `json:"knowledge_base"`
+	Hits          []PlaygroundKnowledgeSearchHit     `json:"hits"`
+	Stale         []PlaygroundKnowledgeStaleDocument `json:"stale_documents"`
+}
+
+// SearchPlaygroundKnowledgeBase ranks the ready chunks of one base against a
+// query vector. It scans chunks in id order, skips stale model/dimension pairs,
+// keeps the top-k cosine hits, and trims source text to the shared character
+// budget. The result is deterministic for a fixed database state.
+func SearchPlaygroundKnowledgeBase(base *PlaygroundKnowledgeBase, queryEmbedding []byte, dims, topK int) (*PlaygroundKnowledgeSearchResult, error) {
+	if base == nil || base.UserID <= 0 || base.ID == "" {
+		return nil, ErrPlaygroundKnowledgeBaseNotFound
+	}
+	if !ValidatePlaygroundKnowledgeEmbedding(queryEmbedding, dims) {
+		return nil, ErrPlaygroundKnowledgeEmbedding
+	}
+	if topK <= 0 {
+		topK = PlaygroundKnowledgeSearchDefaultTopK
+	}
+	if topK > PlaygroundKnowledgeSearchMaxTopK {
+		topK = PlaygroundKnowledgeSearchMaxTopK
+	}
+
+	result := &PlaygroundKnowledgeSearchResult{
+		KnowledgeBase: *base,
+		Hits:          []PlaygroundKnowledgeSearchHit{},
+		Stale:         []PlaygroundKnowledgeStaleDocument{},
+	}
+	var documents []PlaygroundKnowledgeDocument
+	if err := DB.Select("id", "filename", "status", "embedding_model", "embedding_dims").
+		Where("user_id = ? AND knowledge_base_id = ?", base.UserID, base.ID).
+		Find(&documents).Error; err != nil {
+		return nil, err
+	}
+	documentByID := make(map[string]PlaygroundKnowledgeDocument, len(documents))
+	staleIDs := make(map[string]bool)
+	for _, document := range documents {
+		documentByID[document.ID] = document
+		if document.Status != PlaygroundKnowledgeDocumentStatusReady {
+			continue
+		}
+		if document.EmbeddingModel != base.EmbeddingModel || document.EmbeddingDims != dims {
+			if !staleIDs[document.ID] {
+				staleIDs[document.ID] = true
+				result.Stale = append(result.Stale, PlaygroundKnowledgeStaleDocument{
+					ID: document.ID, Filename: document.Filename, EmbeddingModel: document.EmbeddingModel,
+				})
+			}
+		}
+	}
+	sort.Slice(result.Stale, func(i, j int) bool {
+		if result.Stale[i].Filename != result.Stale[j].Filename {
+			return result.Stale[i].Filename < result.Stale[j].Filename
+		}
+		return result.Stale[i].ID < result.Stale[j].ID
+	})
+
+	query := playgroundKnowledgeVector(queryEmbedding, dims)
+	queryNorm := playgroundKnowledgeVectorNorm(query)
+	lastID := ""
+	for {
+		var chunks []PlaygroundKnowledgeChunk
+		queryBuilder := DB.
+			Select("id", "document_id", "chunk_index", "text", "embedding_model", "embedding_dims", "embedding").
+			Where("user_id = ? AND knowledge_base_id = ?", base.UserID, base.ID)
+		if lastID != "" {
+			queryBuilder = queryBuilder.Where("id > ?", lastID)
+		}
+		if err := queryBuilder.Order("id ASC").Limit(playgroundKnowledgeSearchPageSize).Find(&chunks).Error; err != nil {
+			return nil, err
+		}
+		if len(chunks) == 0 {
+			break
+		}
+		lastID = chunks[len(chunks)-1].ID
+		for index := range chunks {
+			chunk := &chunks[index]
+			document, ok := documentByID[chunk.DocumentID]
+			if !ok || document.Status != PlaygroundKnowledgeDocumentStatusReady || staleIDs[chunk.DocumentID] {
+				continue
+			}
+			if chunk.EmbeddingModel != base.EmbeddingModel || chunk.EmbeddingDims != dims ||
+				!ValidatePlaygroundKnowledgeEmbedding(chunk.Embedding, dims) {
+				if !staleIDs[chunk.DocumentID] {
+					staleIDs[chunk.DocumentID] = true
+					result.Stale = append(result.Stale, PlaygroundKnowledgeStaleDocument{
+						ID: document.ID, Filename: document.Filename, EmbeddingModel: chunk.EmbeddingModel,
+					})
+				}
+				continue
+			}
+			vector := playgroundKnowledgeVector(chunk.Embedding, dims)
+			score := playgroundKnowledgeCosine(query, queryNorm, vector)
+			if math.IsNaN(score) || math.IsInf(score, 0) {
+				continue
+			}
+			result.Hits = append(result.Hits, PlaygroundKnowledgeSearchHit{
+				KnowledgeBaseID: base.ID, KnowledgeBaseName: base.Name,
+				DocumentID: document.ID, Filename: document.Filename,
+				ChunkID: chunk.ID, ChunkIndex: chunk.ChunkIndex,
+				Score: score, Text: string(chunk.Text),
+			})
+			sort.SliceStable(result.Hits, func(i, j int) bool {
+				return playgroundKnowledgeHitLess(result.Hits[i], result.Hits[j])
+			})
+			if len(result.Hits) > topK {
+				result.Hits = result.Hits[:topK]
+			}
+		}
+		if len(chunks) < playgroundKnowledgeSearchPageSize {
+			break
+		}
+	}
+	if len(staleIDs) > 0 && len(result.Stale) != len(staleIDs) {
+		seen := make(map[string]bool, len(result.Stale))
+		for _, document := range result.Stale {
+			seen[document.ID] = true
+		}
+		for documentID := range staleIDs {
+			if seen[documentID] {
+				continue
+			}
+			document, ok := documentByID[documentID]
+			if !ok {
+				continue
+			}
+			result.Stale = append(result.Stale, PlaygroundKnowledgeStaleDocument{
+				ID: document.ID, Filename: document.Filename, EmbeddingModel: document.EmbeddingModel,
+			})
+		}
+		sort.Slice(result.Stale, func(i, j int) bool {
+			if result.Stale[i].Filename != result.Stale[j].Filename {
+				return result.Stale[i].Filename < result.Stale[j].Filename
+			}
+			return result.Stale[i].ID < result.Stale[j].ID
+		})
+	}
+
+	budget := playgroundKnowledgeSearchCharBudget
+	trimmed := make([]PlaygroundKnowledgeSearchHit, 0, len(result.Hits))
+	for _, hit := range result.Hits {
+		if budget <= 0 {
+			break
+		}
+		runes := []rune(hit.Text)
+		if len(runes) > budget {
+			hit.Text = string(runes[:budget])
+			hit.Truncated = true
+			runes = runes[:budget]
+		}
+		budget -= len(runes)
+		trimmed = append(trimmed, hit)
+	}
+	result.Hits = trimmed
+	return result, nil
+}
+
+func playgroundKnowledgeHitLess(left, right PlaygroundKnowledgeSearchHit) bool {
+	if left.Score != right.Score {
+		return left.Score > right.Score
+	}
+	if left.Filename != right.Filename {
+		return left.Filename < right.Filename
+	}
+	if left.ChunkIndex != right.ChunkIndex {
+		return left.ChunkIndex < right.ChunkIndex
+	}
+	return left.ChunkID < right.ChunkID
+}
+
+func playgroundKnowledgeVector(embedding []byte, dims int) []float32 {
+	vector := make([]float32, dims)
+	for index := range dims {
+		vector[index] = math.Float32frombits(binary.LittleEndian.Uint32(embedding[index*4:]))
+	}
+	return vector
+}
+
+func playgroundKnowledgeVectorNorm(vector []float32) float64 {
+	var sum float64
+	for _, value := range vector {
+		sum += float64(value) * float64(value)
+	}
+	return math.Sqrt(sum)
+}
+
+func playgroundKnowledgeCosine(left []float32, leftNorm float64, right []float32) float64 {
+	if leftNorm == 0 || len(left) != len(right) {
+		return 0
+	}
+	var dot, rightSum float64
+	for index := range left {
+		dot += float64(left[index]) * float64(right[index])
+		rightSum += float64(right[index]) * float64(right[index])
+	}
+	rightNorm := math.Sqrt(rightSum)
+	if rightNorm == 0 {
+		return 0
+	}
+	return dot / (leftNorm * rightNorm)
 }

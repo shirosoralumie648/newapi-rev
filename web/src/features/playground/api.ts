@@ -186,6 +186,7 @@ const serverSessionSchema = z.object({
   system_prompt: z.string().optional(),
   opening_message: z.string().optional(),
   suggested_questions: z.array(z.string()).optional(),
+  knowledge_base_ids: z.array(z.string()).optional(),
   context: serverContextSettingsSchema.optional(),
   context_summary: serverContextSummarySchema.nullable().optional(),
   pinned: z.boolean().optional(),
@@ -207,6 +208,7 @@ export interface PlaygroundSessionInput {
   system_prompt?: string
   opening_message?: string
   suggested_questions?: string[]
+  knowledge_base_ids?: string[]
   context?: PlaygroundContextSettings
   context_summary?: PlaygroundContextSummary | null
   pinned?: boolean
@@ -406,6 +408,7 @@ function mapServerSession(value: unknown): PlaygroundServerSession {
     systemPrompt: session.system_prompt ?? '',
     openingMessage: session.opening_message ?? '',
     suggestedQuestions: session.suggested_questions ?? [],
+    knowledgeBaseIds: session.knowledge_base_ids ?? [],
     context: normalizeContextSettings({
       historyLimit: session.context?.history_limit,
       tokenBudget: session.context?.token_budget,
@@ -962,6 +965,7 @@ const playgroundUsageSchema = z.object({
   artifacts: playgroundUsageMetricSchema,
   canvas: playgroundUsageMetricSchema,
   canvas_snapshots: playgroundUsageMetricSchema,
+  canvas_templates: playgroundUsageMetricSchema,
   knowledge_bases: playgroundUsageMetricSchema,
   kb_documents: playgroundUsageMetricSchema,
   kb_chunks: playgroundUsageMetricSchema,
@@ -993,6 +997,7 @@ export interface PlaygroundResourceUsage {
   artifacts: PlaygroundUsageMetric
   canvas: PlaygroundUsageMetric
   canvasSnapshots: PlaygroundUsageMetric
+  canvasTemplates: PlaygroundUsageMetric
   knowledgeBases: PlaygroundUsageMetric
   knowledgeBaseDocuments: PlaygroundUsageMetric
   knowledgeBaseChunks: PlaygroundUsageMetric
@@ -1063,6 +1068,7 @@ export async function getPlaygroundUsage(
     artifacts: toMetric(metrics.artifacts),
     canvas: toMetric(metrics.canvas),
     canvasSnapshots: toMetric(metrics.canvas_snapshots),
+    canvasTemplates: toMetric(metrics.canvas_templates),
     knowledgeBases: toMetric(metrics.knowledge_bases),
     knowledgeBaseDocuments: toMetric(metrics.kb_documents),
     knowledgeBaseChunks: toMetric(metrics.kb_chunks),
