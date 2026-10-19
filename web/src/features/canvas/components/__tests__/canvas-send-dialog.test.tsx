@@ -38,6 +38,7 @@ vi.mock('../../api', () => ({
 const summary = {
   id: 'c1',
   title: 'Board A',
+  mode: 'infinite' as const,
   nodeCount: 2,
   edgeCount: 0,
   documentBytes: 10,

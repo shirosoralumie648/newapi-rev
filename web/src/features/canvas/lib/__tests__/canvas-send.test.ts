@@ -39,6 +39,7 @@ vi.mock('../../api', () => ({
 const baseProject: CanvasServerProject = {
   id: 'c1',
   title: 'Board',
+  mode: 'infinite',
   nodeCount: 1,
   edgeCount: 0,
   documentBytes: 32,

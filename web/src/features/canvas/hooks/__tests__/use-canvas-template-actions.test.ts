@@ -207,6 +207,7 @@ test('creates a new canvas, saves the remapped document and opens it', async () 
   const project = {
     id: 'canvas-new',
     title: 'Chain',
+    mode: 'infinite',
     nodeCount: 0,
     edgeCount: 0,
     documentBytes: 2,
