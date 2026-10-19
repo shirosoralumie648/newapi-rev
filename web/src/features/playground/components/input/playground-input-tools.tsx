@@ -33,7 +33,6 @@ import {
 } from '@/components/ui/tooltip'
 
 import type { KnowledgeBase } from '../../knowledge-api'
-import { getSearchActionNotice } from '../../lib'
 import type { PlaygroundContextPlan } from '../../lib'
 import type {
   ModelOption,

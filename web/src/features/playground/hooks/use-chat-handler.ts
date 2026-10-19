@@ -821,6 +821,7 @@ export function useChatHandler({
     sendChat,
     continueChat,
     stopGeneration,
+    capturedRequest,
     isGenerating: isStreaming || isRequesting,
   }
 }
