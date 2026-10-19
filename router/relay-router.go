@@ -102,6 +102,14 @@ func SetRelayRouter(router *gin.Engine) {
 			middleware.Distribute(),
 			controller.PlaygroundVideoTask,
 		)
+		// Embeddings are synchronous and bill like a direct /v1/embeddings call.
+		// The knowledge indexer computes its vectors here, so the group header
+		// and ordinary channel selection apply unchanged.
+		playgroundMediaRouter.POST("/embeddings",
+			middleware.PlaygroundRelayBridge("/v1/embeddings"),
+			middleware.Distribute(),
+			controller.PlaygroundEmbeddings,
+		)
 		playgroundMediaRouter.POST("/audio/speech",
 			middleware.PlaygroundRelayBridge("/v1/audio/speech"),
 			middleware.Distribute(),

@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useNavigate } from '@tanstack/react-router'
-import { History, Menu, PanelLeft } from 'lucide-react'
+import { BookOpen, History, Menu, PanelLeft } from 'lucide-react'
 import { useCallback, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -38,6 +38,7 @@ import { getServerMessage } from '@/lib/server-error-message'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { CanvasEditor } from './components/canvas-editor'
+import { CanvasKnowledgeBaseSheet } from './components/canvas-knowledge-base-sheet'
 import { CanvasProjectList } from './components/canvas-project-list'
 import { CanvasSnapshotHistory } from './components/canvas-snapshot-history'
 import { CANVAS_DEFAULT_TITLE } from './constants'
@@ -81,6 +82,7 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
   const controller = useCanvasProject(userId, props.initialProjectId)
   const [listOpen, setListOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [knowledgeOpen, setKnowledgeOpen] = useState(false)
   const [epoch, setEpoch] = useState(0)
 
   const reportError = useCallback(
@@ -294,6 +296,15 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
             <span className='truncate text-sm font-medium'>{displayTitle}</span>
           </div>
           <div className='flex shrink-0 items-center gap-1'>
+            <Button
+              aria-label={t('Knowledge bases')}
+              onClick={() => setKnowledgeOpen(true)}
+              size='icon-sm'
+              type='button'
+              variant='ghost'
+            >
+              <BookOpen aria-hidden='true' />
+            </Button>
             {project && (
               <Button
                 aria-label={t('Canvas history')}
@@ -346,6 +357,11 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
           projectId={project.id}
         />
       )}
+      <CanvasKnowledgeBaseSheet
+        onOpenChange={setKnowledgeOpen}
+        open={knowledgeOpen}
+        userId={userId}
+      />
     </div>
   )
 }
