@@ -64,6 +64,9 @@ const localDraft: PlaygroundSession = {
   suggestedQuestions: [],
   context: { ...DEFAULT_CONTEXT_SETTINGS },
   contextSummary: null,
+  pinned: false,
+  archived: false,
+  tags: [],
   messages: [{ ...message, versions: [{ id: 'v', content: 'Local history' }] }],
 }
 
@@ -112,6 +115,31 @@ function mockServer() {
     },
   }))
 }
+
+test('organizing a conversation normalizes tags and archiving clears the pin', async () => {
+  const hook = renderHook(() => usePlaygroundState())
+  await waitFor(() => expect(hook.result.current.sessions).toHaveLength(1))
+  const sessionId = hook.result.current.sessions[0].id
+
+  act(() =>
+    hook.result.current.organizeSession(sessionId, {
+      pinned: true,
+      tags: [' Work ', 'ideas', 'Work'],
+    })
+  )
+  expect(hook.result.current.sessions[0]).toMatchObject({
+    pinned: true,
+    archived: false,
+    tags: ['Work', 'ideas'],
+  })
+
+  act(() => hook.result.current.organizeSession(sessionId, { archived: true }))
+  expect(hook.result.current.sessions[0]).toMatchObject({
+    pinned: false,
+    archived: true,
+    tags: ['Work', 'ideas'],
+  })
+})
 
 test('existing server history replaces clean browser history while retaining a migration backup', async () => {
   saveSessionsState({ activeSessionId: localDraft.id, sessions: [localDraft] })
@@ -236,6 +264,69 @@ test('generation coalesces edits and saves only after the response settles', asy
       },
     ],
     deletes: [],
+  })
+  const metadataCall = patch.mock.calls.find(
+    ([url]) => !String(url).endsWith('/messages')
+  )
+  expect(metadataCall?.[1]).toMatchObject({
+    pinned: false,
+    archived: false,
+    tags: [],
+  })
+})
+
+test('organization edits are saved through the metadata update contract', async () => {
+  mockServer()
+  let revision = 0
+  const patch = vi.spyOn(api, 'patch').mockImplementation(async (url) => {
+    if (String(url).endsWith('/messages')) {
+      return {
+        data: { success: true, data: { revision: 1, upserted: [] } },
+      }
+    }
+    revision += 1
+    return { data: { success: true, data: { ...remote, revision } } }
+  })
+  const hook = mount()
+  await waitFor(() =>
+    expect(hook.result.current.local.activeSessionId).toBe(remote.id)
+  )
+
+  act(() =>
+    hook.result.current.local.organizeSession(remote.id, {
+      pinned: true,
+      tags: [' work ', 'work', 'ideas'],
+    })
+  )
+  await waitFor(() =>
+    expect(hook.result.current.local.sessions[0].syncPending).toBe(false)
+  )
+  const metadataCalls = patch.mock.calls.filter(
+    ([url]) => !String(url).endsWith('/messages')
+  )
+  expect(metadataCalls[0][1]).toMatchObject({
+    revision: 0,
+    pinned: true,
+    archived: false,
+    tags: ['work', 'ideas'],
+  })
+
+  act(() =>
+    hook.result.current.local.organizeSession(remote.id, { archived: true })
+  )
+  await waitFor(() =>
+    expect(
+      patch.mock.calls.filter(([url]) => !String(url).endsWith('/messages'))
+    ).toHaveLength(2)
+  )
+  const secondCall = patch.mock.calls.filter(
+    ([url]) => !String(url).endsWith('/messages')
+  )[1]
+  expect(secondCall[1]).toMatchObject({
+    revision: 1,
+    pinned: false,
+    archived: true,
+    tags: ['work', 'ideas'],
   })
 })
 

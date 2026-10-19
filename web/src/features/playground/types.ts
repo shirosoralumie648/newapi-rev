@@ -210,6 +210,16 @@ export interface PlaygroundContextSummary {
   usage?: MessageUsage
 }
 
+/**
+ * A partial organization change for one conversation. An omitted switch keeps
+ * its stored value; `tags` replaces the complete list when present.
+ */
+export interface PlaygroundSessionOrganization {
+  pinned?: boolean
+  archived?: boolean
+  tags?: string[]
+}
+
 export interface PlaygroundSession {
   id: string
   title: string
@@ -230,6 +240,12 @@ export interface PlaygroundSession {
   context: PlaygroundContextSettings
   /** Persisted compression node, or null when the full history is sent. */
   contextSummary: PlaygroundContextSummary | null
+  /** Conversation stays in the pinned section of the client-side list. */
+  pinned: boolean
+  /** Archived conversations collapse into their own client-side section. */
+  archived: boolean
+  /** Client-side labels stored as a bounded JSON array on the server. */
+  tags: string[]
   messages: Message[]
   server?: { id: string; revision: number; messageRevision: number }
   syncPending?: boolean
@@ -300,6 +316,17 @@ export interface PlaygroundMemoryExtractionSettings {
 }
 
 /**
+ * Composer-level quote of an earlier message: the key the quote points at plus
+ * the text snapshot shown in the quote bar. The stored message contract has no
+ * quote field, so the snapshot travels with the next request only and is
+ * discarded once that send starts.
+ */
+export interface PlaygroundPendingQuote {
+  messageKey: string
+  text: string
+}
+
+/**
  * Deep-link target for the Playground route. `session` is the canonical server
  * session id a canvas node points back to; `artifact` selects a saved artifact
  * inside that session.
@@ -326,6 +353,43 @@ export interface PlaygroundServerSession extends Omit<
 
 /** File format of a conversation export rendered by the host. */
 export type PlaygroundExportFormat = 'markdown' | 'json'
+
+/** One public, revocable read-only link to a conversation. */
+export interface PlaygroundSessionShare {
+  token: string
+  /** Root-relative page path; the browser combines it with its origin. */
+  urlPath: string
+  expiresAt: number
+  createdAt: number
+}
+
+/** One attachment placeholder in a public share; bytes are never exposed. */
+export interface PlaygroundSharedAttachment {
+  filename?: string
+  mediaType?: string
+}
+
+/** The only tool-call information a public share exposes. */
+export interface PlaygroundSharedToolCall {
+  name: string
+  status: MessageToolCallStatus
+}
+
+/** One text-first message of a public share. */
+export interface PlaygroundSharedMessage {
+  key: string
+  from: 'user' | 'assistant'
+  content: string
+  toolCalls: PlaygroundSharedToolCall[]
+  attachments: PlaygroundSharedAttachment[]
+}
+
+/** The anonymous read contract of `/api/playground/shared/:token`. */
+export interface PlaygroundSharedConversation {
+  title: string
+  openingMessage: string
+  messages: PlaygroundSharedMessage[]
+}
 
 /** One conversation export file: body, media type and suggested filename. */
 export interface PlaygroundSessionExport {

@@ -39,8 +39,10 @@ import { PlaygroundArtifactSourceSheet } from './components/artifact/playground-
 import { PlaygroundChat } from './components/chat/playground-chat'
 import { PlaygroundContextStatus } from './components/input/playground-context-status'
 import { PlaygroundInput } from './components/input/playground-input'
+import { PlaygroundQuoteBar } from './components/input/playground-quote-bar'
 import { PlaygroundSpeechDialog } from './components/message/playground-speech-dialog'
 import { PlaygroundMemoryPanel } from './components/workspace/playground-memory-panel'
+import { PlaygroundMessageSearch } from './components/workspace/playground-message-search'
 import { PlaygroundPresetPanel } from './components/workspace/playground-preset-panel'
 import { PlaygroundSessionUsage } from './components/workspace/playground-session-usage'
 import { PlaygroundTrashPanel } from './components/workspace/playground-trash-panel'
@@ -51,6 +53,8 @@ import {
 } from './components/workspace/playground-workspace'
 import {
   DEFAULT_SESSION_TITLE,
+  MESSAGE_ACTION_LABELS,
+  PLAYGROUND_FORK_ERRORS,
   PLAYGROUND_IMPORT_ERRORS,
   PLAYGROUND_IMPORT_MAX_FILE_BYTES,
   PLAYGROUND_PARALLEL_MIN_MODELS,
@@ -77,6 +81,8 @@ import type { CapturedArtifactSource } from './hooks/use-playground-artifacts'
 import {
   appendParallelMessagePair,
   collectMessageRequestIds,
+  createPendingQuote,
+  forkPlaygroundSession,
   formatMemoryBlock,
   getCurrentVersion,
   getMessageContent,
@@ -97,7 +103,9 @@ import type {
   MessageAttachment,
   MessageSearchSnapshot,
   PlaygroundMemoryExtractionSettings,
+  PlaygroundPendingQuote,
   PlaygroundRouteTarget,
+  PlaygroundSessionOrganization,
 } from './types'
 
 export function Playground(props: {
@@ -140,6 +148,15 @@ function PlaygroundContent(props: {
   const [presetsOpen, setPresetsOpen] = useState(false)
   const [trashOpen, setTrashOpen] = useState(false)
   const [memoryOpen, setMemoryOpen] = useState(false)
+  // Composer-level quote of an earlier message; it is consumed by the next
+  // send and never stored with the conversation.
+  const [pendingQuote, setPendingQuote] =
+    useState<PlaygroundPendingQuote | null>(null)
+  // Message a cross-session search or a deep link asked the reader to see.
+  const [highlightedMessageKey, setHighlightedMessageKey] = useState<
+    string | null
+  >(null)
+  const [messageSearchOpen, setMessageSearchOpen] = useState(false)
   const appliedSessionRef = useRef<string | null>(null)
   const [compareModels, setCompareModels] = useState<string[]>([])
   const local = usePlaygroundState()
@@ -169,6 +186,7 @@ function PlaygroundContent(props: {
     activeSessionId,
     createSession,
     renameSession,
+    organizeSession,
     switchSession,
   } = local
 
@@ -371,15 +389,18 @@ function PlaygroundContent(props: {
 
   // The composer sends an ordinary reply unless the compare selection holds a
   // comparison; with one, the same turn goes to every selected model as its
-  // own request and lands as a comparison group.
+  // own request and lands as a comparison group. The pending quote is consumed
+  // by this send and cleared so it never rides along with a later turn.
   const submitTurn = useCallback(
     (
       text: string,
       attachments?: MessageAttachment[],
       search?: MessageSearchSnapshot
     ) => {
+      const quote = pendingQuote
+      if (quote) setPendingQuote(null)
       if (compareModels.length < PLAYGROUND_PARALLEL_MIN_MODELS) {
-        handleSendMessage(text, attachments, search)
+        handleSendMessage(text, attachments, search, quote)
         return
       }
       const nextMessages = appendParallelMessagePair(
@@ -391,9 +412,15 @@ function PlaygroundContent(props: {
         search
       )
       updateMessages(nextMessages)
-      sendParallelChat(nextMessages)
+      sendParallelChat(nextMessages, quote)
     },
-    [compareModels, handleSendMessage, sendParallelChat, updateMessages]
+    [
+      compareModels,
+      handleSendMessage,
+      pendingQuote,
+      sendParallelChat,
+      updateMessages,
+    ]
   )
 
   const handleInputSubmit = useCallback(
@@ -488,6 +515,8 @@ function PlaygroundContent(props: {
         handleEditOpenChange(false)
         setArtifactSource(null)
         setSpeechSource(null)
+        setPendingQuote(null)
+        setHighlightedMessageKey(null)
         sync.adoptImportedSession(result.session)
         toast.success(t('Conversation imported'))
         if (result.unavailableAttachments > 0) {
@@ -531,6 +560,8 @@ function PlaygroundContent(props: {
       handleEditOpenChange(false)
       setArtifactSource(null)
       setSpeechSource(null)
+      setPendingQuote(null)
+      setHighlightedMessageKey(null)
       createSession()
     })
   }, [
@@ -548,6 +579,8 @@ function PlaygroundContent(props: {
         stopBeforeSessionChange()
         handleEditOpenChange(false)
         setArtifactSource(null)
+        setPendingQuote(null)
+        setHighlightedMessageKey(null)
         createSession(sessionSettingsFromPreset(preset))
         // The new conversation starts behind the inspector; on mobile the panel
         // is a sheet, so reveal the chat instead of leaving it covered.
@@ -579,6 +612,11 @@ function PlaygroundContent(props: {
         stopBeforeSessionChange()
         handleEditOpenChange(false)
         setArtifactSource(null)
+        // The composer quote and the highlight belong to the conversation the
+        // user is leaving; the search flow re-sets the highlight right after
+        // this switch in the same update.
+        setPendingQuote(null)
+        setHighlightedMessageKey(null)
         switchSession(sessionId)
       })
     },
@@ -590,6 +628,14 @@ function PlaygroundContent(props: {
       switchSession,
       handleWorkspaceTransition,
     ]
+  )
+
+  const handleOrganizeSession = useCallback(
+    (sessionId: string, organization: PlaygroundSessionOrganization) => {
+      if (sync.isLoading) return
+      organizeSession(sessionId, organization)
+    },
+    [organizeSession, sync.isLoading]
   )
 
   const handleDeleteSession = useCallback(
@@ -604,6 +650,8 @@ function PlaygroundContent(props: {
           handleEditOpenChange(false)
           setArtifactSource(null)
           setSpeechSource(null)
+          setPendingQuote(null)
+          setHighlightedMessageKey(null)
         }
         deleteSession(sessionId)
         if (trashed) toast.success(t('Conversation moved to the trash'))
@@ -625,6 +673,82 @@ function PlaygroundContent(props: {
     handleEditOpenChange(false)
     clearMessages()
   }
+
+  // Quoting only arms the composer: the snapshot is shown in the quote bar and
+  // travels with the next request. A message without visible text cannot be
+  // quoted.
+  const handleQuoteMessage = useCallback(
+    (message: Message) => {
+      const quote = createPendingQuote(message)
+      if (!quote) {
+        toast.warning(t(MESSAGE_ACTION_LABELS.NO_CONTENT))
+        return
+      }
+      setPendingQuote(quote)
+    },
+    [t]
+  )
+
+  // Forking rebuilds every message up to the chosen one as a new conversation
+  // through the ordinary create/upload chain (so quotas apply and a refusal
+  // leaves the source untouched), then adopts the copy.
+  const performForkMessage = useCallback(
+    async (message: Message) => {
+      const session = activeSession
+      if (!session) return
+      try {
+        const bound = await sync.ensureServerSession(session.id)
+        if (!bound.server) {
+          throw new Error(PLAYGROUND_FORK_ERRORS.FAILED)
+        }
+        const result = await forkPlaygroundSession({
+          sourceSession: bound,
+          messageKey: message.key,
+          title: t('Fork of {{title}}', { title: session.title }),
+        })
+        stopBeforeSessionChange()
+        handleEditOpenChange(false)
+        setArtifactSource(null)
+        setSpeechSource(null)
+        setPendingQuote(null)
+        setHighlightedMessageKey(null)
+        sync.adoptImportedSession(result.session)
+        toast.success(t('Conversation forked'))
+        if (result.unavailableAttachments > 0) {
+          toast.info(
+            t(
+              '{{count}} attachments could not be restored and were kept as placeholders.',
+              { count: result.unavailableAttachments }
+            )
+          )
+        }
+      } catch (error) {
+        handleServerError(error, t(PLAYGROUND_FORK_ERRORS.FAILED))
+      }
+    },
+    [activeSession, handleEditOpenChange, stopBeforeSessionChange, sync, t]
+  )
+
+  const handleForkMessage = useCallback(
+    (message: Message) => {
+      if (sync.isLoading) return
+      handleWorkspaceTransition(() => performForkMessage(message))
+    },
+    [handleWorkspaceTransition, performForkMessage, sync.isLoading]
+  )
+
+  // A search hit switches to its conversation (which clears the previous
+  // highlight) and marks the message the chat then scrolls into view.
+  const handleSelectSearchHit = useCallback(
+    (sessionId: string, messageKey: string) => {
+      if (sessionId !== activeSessionId) {
+        if (sync.isLoading) return
+        handleSwitchSession(sessionId)
+      }
+      setHighlightedMessageKey(messageKey)
+    },
+    [activeSessionId, handleSwitchSession, sync.isLoading]
+  )
 
   // Undo the compression node. The stored messages were never removed, so the
   // next request simply carries the full history again.
@@ -932,6 +1056,14 @@ function PlaygroundContent(props: {
     })
   }, [props.onOpenCanvas, requestedArtifact, requestedSession])
 
+  // An old /playground?session=...&message=... link names the exact message it
+  // points at; the chat renders and highlights it once hydration is complete.
+  const requestedMessage = props.target?.message
+  useEffect(() => {
+    if (!requestedMessage || sync.isLoading) return
+    setHighlightedMessageKey(requestedMessage)
+  }, [requestedMessage, sync.isLoading])
+
   const updateLoadedConfig = useCallback<typeof updateConfig>(
     (key, value) => {
       if (!sync.isLoading) updateConfig(key, value)
@@ -958,8 +1090,10 @@ function PlaygroundContent(props: {
         onCreate={handleCreateSession}
         onDelete={handleDeleteSession}
         onImportFile={handleImportConversation}
+        onOpenMessageSearch={() => setMessageSearchOpen(true)}
         onOpenPresets={handleOpenPresets}
         onOpenTrash={handleOpenTrash}
+        onOrganize={handleOrganizeSession}
         onRename={renameSession}
         disabled={sync.isLoading}
         onSwitch={handleSwitchSession}
@@ -1053,6 +1187,9 @@ function PlaygroundContent(props: {
               isLoadingMessages={isLoadingMessages || sync.isLoading}
               onRegenerateMessage={handleRegenerateMessage}
               onContinueMessage={handleContinueMessage}
+              onQuoteMessage={handleQuoteMessage}
+              onForkMessage={handleForkMessage}
+              highlightedMessageKey={highlightedMessageKey}
               onReadAloud={activeSession ? handleReadAloud : undefined}
               onEditMessage={handleEditMessage}
               onDeleteMessage={handleDeleteMessage}
@@ -1090,6 +1227,13 @@ function PlaygroundContent(props: {
           </div>
 
           <div className='mx-auto w-full max-w-4xl'>
+            {pendingQuote ? (
+              <PlaygroundQuoteBar
+                className='mb-1'
+                onRemove={() => setPendingQuote(null)}
+                quote={pendingQuote}
+              />
+            ) : null}
             {pendingToolCalls && (
               <p
                 role='status'
@@ -1197,6 +1341,13 @@ function PlaygroundContent(props: {
         }}
         onSent={handleCanvasSent}
         seeds={canvasSendSeeds ?? []}
+      />
+      <PlaygroundMessageSearch
+        isHydrating={sync.isLoading}
+        onOpenChange={setMessageSearchOpen}
+        onSelect={handleSelectSearchHit}
+        open={messageSearchOpen}
+        sessions={sessions}
       />
     </>
   )

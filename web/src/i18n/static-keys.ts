@@ -27,6 +27,10 @@ export const STATIC_I18N_KEYS = [
   'Playground request ID was already used for a different operation.',
   'Unable to load or save Playground artifacts.',
   'Playground artifact or conversation not found.',
+  // Public Playground share links (LB-05): the API returns these messages from
+  // Go, so the literal scan cannot see them.
+  'Share link expiration must be between 0 and 365 days.',
+  'Shared conversation not found.',
   // Playground attachment server messages and client upload feedback.
   'Invalid Playground attachment.',
   'Playground attachment not found.',
@@ -136,6 +140,8 @@ export const STATIC_I18N_KEYS = [
   'Playground conversation name must contain 1 to 200 characters.',
   'Playground conversation not found.',
   'Playground conversation limit exceeded.',
+  'Invalid Playground conversation tags.',
+  'Cannot pin an archived Playground conversation.',
   'Playground message limit exceeded.',
   'Playground request is too large.',
   'Playground changed on another device. Reload before saving.',
@@ -1196,6 +1202,11 @@ export const STATIC_I18N_KEYS = [
   'Microphone access failed.',
   'Transcription failed',
   'No speech was detected.',
+  // Message-level actions (LB-04) render from MESSAGE_ACTION_LABELS and
+  // PLAYGROUND_FORK_ERRORS, so the literal scan cannot see them.
+  'Quote',
+  'Fork from here',
+  'Unable to fork the conversation.',
   // Referral anti-abuse (RF-06) mark levels, review states, review reasons and
   // the settings action label render through t(labelKey) from the referral
   // label maps in features/wallet/lib/referral.ts and

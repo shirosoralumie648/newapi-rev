@@ -32,6 +32,11 @@ import {
   sendChatCompletion,
   updatePlaygroundSession,
 } from '../api'
+import {
+  createPlaygroundSessionShare,
+  getSharedPlaygroundConversation,
+  revokePlaygroundSessionShare,
+} from '../share-api'
 import type { Message } from '../types'
 
 const wireSession = {
@@ -50,7 +55,20 @@ afterEach(() => vi.restoreAllMocks())
 
 test('server session responses map timestamps and settings into workspace state', async () => {
   vi.spyOn(api, 'get').mockResolvedValue({
-    data: { success: true, data: { items: [wireSession], total: 1 } },
+    data: {
+      success: true,
+      data: {
+        items: [
+          {
+            ...wireSession,
+            pinned: true,
+            pinned_at: 30,
+            tags: [' Work ', 'Work', 'ideas'],
+          },
+        ],
+        total: 1,
+      },
+    },
   })
   const sessions = await getPlaygroundSessions()
   expect(sessions[0]).toMatchObject({
@@ -59,6 +77,9 @@ test('server session responses map timestamps and settings into workspace state'
     createdAt: 10000,
     updatedAt: 20000,
     parameterEnabled: { temperature: false },
+    pinned: true,
+    archived: false,
+    tags: ['Work', 'ideas'],
     revision: 1,
     messageRevision: 2,
   })
@@ -129,6 +150,9 @@ test('session updates serialize context fields into the wire shape and clear the
   })
   await updatePlaygroundSession('pgs_one', {
     revision: 1,
+    pinned: true,
+    archived: false,
+    tags: ['work'],
     context: {
       historyLimit: 9,
       tokenBudget: 1000,
@@ -145,6 +169,9 @@ test('session updates serialize context fields into the wire shape and clear the
     },
   })
   expect(patch.mock.calls[0][1]).toMatchObject({
+    pinned: true,
+    archived: false,
+    tags: ['work'],
     context: {
       history_limit: 9,
       token_budget: 1000,
@@ -503,4 +530,105 @@ test('restoring a conversation posts to the restore route and maps the refreshed
     revision: 1,
     messageRevision: 2,
   })
+})
+
+test('creating a share link sends the selected expiry and converts timestamps', async () => {
+  const post = vi.spyOn(api, 'post').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        token: 'share-token',
+        url_path: '/share/share-token',
+        expires_at: 300,
+        created_at: 100,
+      },
+    },
+  })
+
+  const share = await createPlaygroundSessionShare('pgs_one', 7)
+
+  expect(post).toHaveBeenCalledTimes(1)
+  expect(post.mock.calls[0][0]).toBe('/api/playground/sessions/pgs_one/share')
+  expect(post.mock.calls[0][1]).toEqual({ expires_in_days: 7 })
+  expect(share).toEqual({
+    token: 'share-token',
+    urlPath: '/share/share-token',
+    expiresAt: 300000,
+    createdAt: 100000,
+  })
+})
+
+test('revoking a share link deletes every active link of the conversation', async () => {
+  const remove = vi.spyOn(api, 'delete').mockResolvedValue({
+    data: { success: true, data: { revoked: true } },
+  })
+
+  await revokePlaygroundSessionShare('pgs_one')
+
+  expect(remove).toHaveBeenCalledTimes(1)
+  expect(remove.mock.calls[0][0]).toBe('/api/playground/sessions/pgs_one/share')
+})
+
+test('the public share read maps only the sanitized snapshot', async () => {
+  const get = vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        title: 'Public conversation',
+        opening_message: 'Welcome',
+        messages: [
+          {
+            key: 'm1',
+            from: 'user',
+            content: 'Hello',
+            attachments: [{ filename: 'diagram.png', media_type: 'image/png' }],
+          },
+          {
+            key: 'm2',
+            from: 'assistant',
+            content: 'Answer',
+            tool_calls: [{ name: 'lookup', status: 'completed' }],
+          },
+        ],
+      },
+    },
+  })
+
+  const conversation = await getSharedPlaygroundConversation('share-token')
+
+  expect(get.mock.calls[0][0]).toBe('/api/playground/shared/share-token')
+  expect(conversation).toEqual({
+    title: 'Public conversation',
+    openingMessage: 'Welcome',
+    messages: [
+      {
+        key: 'm1',
+        from: 'user',
+        content: 'Hello',
+        toolCalls: [],
+        attachments: [{ filename: 'diagram.png', mediaType: 'image/png' }],
+      },
+      {
+        key: 'm2',
+        from: 'assistant',
+        content: 'Answer',
+        toolCalls: [{ name: 'lookup', status: 'completed' }],
+        attachments: [],
+      },
+    ],
+  })
+})
+
+test('a failed public share read surfaces the server message', async () => {
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: false,
+      code: 'PLAYGROUND_SHARE_NOT_FOUND',
+      message: 'Shared conversation not found.',
+    },
+  })
+
+  await expect(getSharedPlaygroundConversation('share-token')).rejects.toThrow(
+    'Shared conversation not found.'
+  )
 })

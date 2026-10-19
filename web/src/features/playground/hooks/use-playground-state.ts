@@ -25,6 +25,7 @@ import {
   DEFAULT_CONTEXT_SETTINGS,
   DEFAULT_PARAMETER_ENABLED,
 } from '../constants'
+import { normalizeSessionTags } from '../lib/session-organization'
 import {
   applyMessageStateUpdate,
   type MessageStateUpdater,
@@ -48,6 +49,7 @@ import type {
   PlaygroundContextSettings,
   PlaygroundContextSummary,
   PlaygroundSession,
+  PlaygroundSessionOrganization,
 } from '../types'
 
 const SESSION_SAVE_DEBOUNCE_MS = 500
@@ -491,6 +493,32 @@ export function usePlaygroundState() {
     [updateSession]
   )
 
+  /**
+   * Applies pin, archive and tag changes to one conversation, not necessarily
+   * the active one. Archiving always clears the pin so the client groups stay
+   * unambiguous; tags are normalized before they reach local storage.
+   */
+  const organizeSession = useCallback(
+    (sessionId: string, organization: PlaygroundSessionOrganization) => {
+      updateSession(sessionId, (session) => {
+        const archived = organization.archived ?? session.archived
+        const pinned = archived
+          ? false
+          : (organization.pinned ?? session.pinned)
+        return {
+          ...session,
+          pinned,
+          archived,
+          tags:
+            organization.tags === undefined
+              ? session.tags
+              : normalizeSessionTags(organization.tags),
+        }
+      })
+    },
+    [updateSession]
+  )
+
   const deleteSession = useCallback(
     (sessionId: string) => {
       const remaining = latestSessionsRef.current.filter(
@@ -581,6 +609,7 @@ export function usePlaygroundState() {
     createSession,
     addSession,
     renameSession,
+    organizeSession,
     deleteSession,
     switchSession,
   }

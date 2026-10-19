@@ -30,7 +30,9 @@ import {
   DEFAULT_CONFIG,
   DEFAULT_PARAMETER_ENABLED,
   PLAYGROUND_ATTACHMENT_MAX_COUNT,
+  PLAYGROUND_FORK_ERRORS,
   PLAYGROUND_IMPORTED_ATTACHMENT_UNAVAILABLE,
+  PLAYGROUND_SESSION_TITLE_MAX_LENGTH,
 } from '../constants'
 import type {
   Message,
@@ -461,29 +463,26 @@ function attachmentReference(
   }
 }
 
-interface ImportedAttachmentSource {
+interface RecreatedAttachmentSource {
   id: string
   mediaType: string
   filename: string
   byteSize?: number
 }
 
-/**
- * Rebuild one exported conversation on the server: create the session through
- * the ordinary create route, re-upload every attachment the importing account
- * can still read through the owner-scoped content route (same-account import),
- * then write every message through the ordinary message chain. Attachments of
- * another account are unreachable by design and keep a text placeholder, and a
- * failed write removes the freshly created session instead of leaving a
- * half-imported copy.
- */
-export async function importPlaygroundSessionDocument(
-  document: PlaygroundImportDocument,
-  signal?: AbortSignal
-): Promise<PlaygroundImportResult> {
-  const sources = new Map<string, ImportedAttachmentSource>()
+/** Attachment references one rebuilt conversation has to recreate. */
+interface AttachmentRecreations {
+  sources: Map<string, RecreatedAttachmentSource>
+  /** Attachment ids that are cached read-aloud audio of a version. */
+  speechIds: Set<string>
+}
+
+function collectAttachmentRecreations(
+  messages: Message[]
+): AttachmentRecreations {
+  const sources = new Map<string, RecreatedAttachmentSource>()
   const speechIds = new Set<string>()
-  for (const message of document.messages) {
+  for (const message of messages) {
     for (const version of message.versions) {
       for (const attachment of version.attachments ?? []) {
         if (!sources.has(attachment.id)) {
@@ -508,27 +507,160 @@ export async function importPlaygroundSessionDocument(
       }
     }
   }
+  return { sources, speechIds }
+}
 
+/**
+ * Resolve the bytes of every referenced attachment through the owner-scoped
+ * content route of the source conversation. A reference whose bytes are gone
+ * or belong to another account is simply absent from the result and degrades
+ * to a placeholder later instead of failing the rebuild.
+ */
+async function downloadAttachmentBlobs(
+  sourceSessionId: string,
+  sources: Map<string, RecreatedAttachmentSource>,
+  signal?: AbortSignal
+): Promise<Map<string, Blob>> {
   const blobs = new Map<string, Blob>()
   const pendingSources = [...sources.values()]
-  // Bounded batches keep a large export from opening hundreds of content
+  // Bounded batches keep a large conversation from opening hundreds of content
   // requests at once while still resolving independent files in parallel.
   for (let index = 0; index < pendingSources.length; index += 6) {
     await Promise.all(
       pendingSources.slice(index, index + 6).map(async (source) => {
         try {
           const blob = await getPlaygroundAttachmentContent(
-            playgroundAttachmentContentUrl(document.sourceSessionId, source.id),
+            playgroundAttachmentContentUrl(sourceSessionId, source.id),
             signal
           )
           blobs.set(source.id, blob)
         } catch {
           // The bytes are gone or belong to another account; the reference
-          // degrades to a placeholder below instead of failing the import.
+          // degrades to a placeholder below instead of failing the rebuild.
         }
       })
     )
   }
+  return blobs
+}
+
+/**
+ * Upload the downloaded bytes into the rebuilt conversation. Cached read-aloud
+ * audio re-uploads through the same speech path the workspace uses, so the
+ * version keeps a playable reference; every failure propagates so the caller
+ * can discard the half-rebuilt conversation.
+ */
+async function uploadRecreatedAttachments(options: {
+  targetSessionId: string
+  blobs: Map<string, Blob>
+  sources: Map<string, RecreatedAttachmentSource>
+  speechIds: Set<string>
+  signal?: AbortSignal
+}): Promise<Map<string, MessageAttachment>> {
+  const uploaded = new Map<string, MessageAttachment>()
+  for (const [id, blob] of options.blobs) {
+    const source = options.sources.get(id)
+    if (!source) continue
+    if (options.speechIds.has(id)) {
+      uploaded.set(
+        id,
+        await uploadPlaygroundSpeechAttachment(options.targetSessionId, blob)
+      )
+      continue
+    }
+    // A stored filename is display text; the upload needs a bare file name.
+    const filename =
+      source.filename.split(/[\\/]/).pop()?.trim() || 'attachment'
+    const file = new File([blob], filename, {
+      type: source.mediaType || blob.type || 'application/octet-stream',
+    })
+    const attachment = await uploadPlaygroundAttachmentDirect(
+      { sessionId: options.targetSessionId },
+      file,
+      options.signal
+    )
+    uploaded.set(
+      id,
+      attachmentReference(options.targetSessionId, {
+        id: attachment.id,
+        mediaType: attachment.mediaType,
+        filename: attachment.filename,
+        byteSize: attachment.byteSize,
+      })
+    )
+    await blobToDataUrl(blob)
+      .then((dataUrl) => primePlaygroundAttachment(attachment.id, dataUrl))
+      .catch(() => undefined)
+  }
+  return uploaded
+}
+
+/**
+ * Point every message version at its re-uploaded attachment. A reference the
+ * rebuild could not recreate is replaced by a fixed text placeholder in the
+ * version content, so the copy never claims bytes it does not own.
+ */
+function applyRecreatedAttachments(
+  messages: Message[],
+  uploaded: Map<string, MessageAttachment>
+): { messages: Message[]; unavailableAttachments: number } {
+  let unavailableAttachments = 0
+  const rebuilt = messages.map((message) => {
+    const versions = message.versions.map((version) => {
+      const unavailable = (version.attachments ?? []).filter(
+        (attachment) => !uploaded.has(attachment.id)
+      )
+      unavailableAttachments += unavailable.length
+      const attachments = (version.attachments ?? [])
+        .map((attachment) => uploaded.get(attachment.id))
+        .filter(
+          (attachment): attachment is MessageAttachment =>
+            attachment !== undefined
+        )
+      const speech = version.speech
+        ? uploaded.get(version.speech.id)
+        : undefined
+      const content = [version.content.trimEnd()]
+        .concat(unavailable.map(attachmentPlaceholder))
+        .filter((part) => part.trim() !== '')
+        .join('\n\n')
+      const normalized: MessageVersion = { ...version, content }
+      if (attachments.length > 0) {
+        normalized.attachments = attachments
+      } else {
+        delete normalized.attachments
+      }
+      if (speech) {
+        normalized.speech = speech
+      } else {
+        delete normalized.speech
+      }
+      return normalized
+    })
+    return { ...message, versions }
+  })
+  return { messages: rebuilt, unavailableAttachments }
+}
+
+/**
+ * Rebuild one exported conversation on the server: create the session through
+ * the ordinary create route, re-upload every attachment the importing account
+ * can still read through the owner-scoped content route (same-account import),
+ * then write every message through the ordinary message chain. Attachments of
+ * another account are unreachable by design and keep a text placeholder, and a
+ * failed write removes the freshly created session instead of leaving a
+ * half-imported copy.
+ */
+export async function importPlaygroundSessionDocument(
+  document: PlaygroundImportDocument,
+  signal?: AbortSignal
+): Promise<PlaygroundImportResult> {
+  const { sources, speechIds } = collectAttachmentRecreations(document.messages)
+  const blobs = await downloadAttachmentBlobs(
+    document.sourceSessionId,
+    sources,
+    signal
+  )
 
   const localId = nanoid()
   const created = await createPlaygroundSession(
@@ -546,80 +678,18 @@ export async function importPlaygroundSessionDocument(
     signal
   )
 
-  let unavailableAttachments = 0
   try {
-    const uploaded = new Map<string, MessageAttachment>()
-    for (const [id, blob] of blobs) {
-      const source = sources.get(id)
-      if (!source) continue
-      if (speechIds.has(id)) {
-        // Cached read-aloud audio re-uploads through the same speech path the
-        // workspace uses, so the version keeps a playable reference.
-        uploaded.set(
-          id,
-          await uploadPlaygroundSpeechAttachment(created.id, blob)
-        )
-        continue
-      }
-      // A stored filename is display text; the upload needs a bare file name.
-      const filename =
-        source.filename.split(/[\\/]/).pop()?.trim() || 'attachment'
-      const file = new File([blob], filename, {
-        type: source.mediaType || blob.type || 'application/octet-stream',
-      })
-      const attachment = await uploadPlaygroundAttachmentDirect(
-        { sessionId: created.id },
-        file,
-        signal
-      )
-      uploaded.set(
-        id,
-        attachmentReference(created.id, {
-          id: attachment.id,
-          mediaType: attachment.mediaType,
-          filename: attachment.filename,
-          byteSize: attachment.byteSize,
-        })
-      )
-      await blobToDataUrl(blob)
-        .then((dataUrl) => primePlaygroundAttachment(attachment.id, dataUrl))
-        .catch(() => undefined)
-    }
-
-    const messages = document.messages.map((message) => {
-      const versions = message.versions.map((version) => {
-        const unavailable = (version.attachments ?? []).filter(
-          (attachment) => !uploaded.has(attachment.id)
-        )
-        unavailableAttachments += unavailable.length
-        const attachments = (version.attachments ?? [])
-          .map((attachment) => uploaded.get(attachment.id))
-          .filter(
-            (attachment): attachment is MessageAttachment =>
-              attachment !== undefined
-          )
-        const speech = version.speech
-          ? uploaded.get(version.speech.id)
-          : undefined
-        const content = [version.content.trimEnd()]
-          .concat(unavailable.map(attachmentPlaceholder))
-          .filter((part) => part.trim() !== '')
-          .join('\n\n')
-        const normalized: MessageVersion = { ...version, content }
-        if (attachments.length > 0) {
-          normalized.attachments = attachments
-        } else {
-          delete normalized.attachments
-        }
-        if (speech) {
-          normalized.speech = speech
-        } else {
-          delete normalized.speech
-        }
-        return normalized
-      })
-      return { ...message, versions }
+    const uploaded = await uploadRecreatedAttachments({
+      targetSessionId: created.id,
+      blobs,
+      sources,
+      speechIds,
+      signal,
     })
+    const { messages, unavailableAttachments } = applyRecreatedAttachments(
+      document.messages,
+      uploaded
+    )
 
     const revision =
       messages.length > 0
@@ -646,6 +716,128 @@ export async function importPlaygroundSessionDocument(
         suggestedQuestions: document.suggestedQuestions,
         context: document.context,
         contextSummary: document.contextSummary,
+        pinned: created.pinned,
+        archived: created.archived,
+        tags: [...created.tags],
+        messages,
+        server: {
+          id: created.id,
+          revision: created.revision,
+          messageRevision: revision,
+        },
+        syncPending: false,
+      },
+    }
+  } catch (error) {
+    await deletePlaygroundSession(created.id).catch(() => undefined)
+    throw error
+  }
+}
+
+export interface PlaygroundForkResult {
+  session: PlaygroundSession
+  /** Attachments whose bytes were not reachable and got a text placeholder. */
+  unavailableAttachments: number
+}
+
+/**
+ * Fork one conversation at a message: every message up to and including that
+ * key is copied into a new conversation through the ordinary create and upload
+ * chain, so the server applies the same message limits and attachment quotas as
+ * a manual conversation and a refusal leaves the source untouched. The copy
+ * starts from the stored history, so the source's compression node is not
+ * carried over, and the source's consume-log ids stay with the source because
+ * the forked conversation never made those billed requests.
+ */
+export async function forkPlaygroundSession(options: {
+  sourceSession: PlaygroundSession
+  messageKey: string
+  title: string
+  signal?: AbortSignal
+}): Promise<PlaygroundForkResult> {
+  const sourceServerId = options.sourceSession.server?.id
+  const forkIndex = options.sourceSession.messages.findIndex(
+    (message) => message.key === options.messageKey
+  )
+  if (!sourceServerId || forkIndex === -1) {
+    throw new Error(PLAYGROUND_FORK_ERRORS.FAILED)
+  }
+  const copiedMessages = options.sourceSession.messages
+    .slice(0, forkIndex + 1)
+    .map((message) => ({
+      ...message,
+      versions: message.versions.map((version) => {
+        const copy = { ...version }
+        delete copy.requestId
+        delete copy.usage
+        return copy
+      }),
+    }))
+
+  const { sources, speechIds } = collectAttachmentRecreations(copiedMessages)
+  const blobs = await downloadAttachmentBlobs(
+    sourceServerId,
+    sources,
+    options.signal
+  )
+
+  const localId = nanoid()
+  const created = await createPlaygroundSession(
+    {
+      client_id: localId,
+      // The server stores at most 200 runes per title, so the fork title is cut
+      // to that bound by code point instead of possibly splitting a surrogate.
+      title: [...options.title]
+        .slice(0, PLAYGROUND_SESSION_TITLE_MAX_LENGTH)
+        .join(''),
+      config: options.sourceSession.config,
+      parameter_enabled: options.sourceSession.parameterEnabled,
+      system_prompt: options.sourceSession.systemPrompt,
+      opening_message: options.sourceSession.openingMessage,
+      suggested_questions: options.sourceSession.suggestedQuestions,
+      context: options.sourceSession.context,
+      context_summary: null,
+    },
+    options.signal
+  )
+
+  try {
+    const uploaded = await uploadRecreatedAttachments({
+      targetSessionId: created.id,
+      blobs,
+      sources,
+      speechIds,
+      signal: options.signal,
+    })
+    const { messages, unavailableAttachments } = applyRecreatedAttachments(
+      copiedMessages,
+      uploaded
+    )
+    const revision = await applyPlaygroundMessagesDelta(
+      created.id,
+      { upserts: messages, deletes: [] },
+      created.messageRevision,
+      options.signal
+    )
+
+    const now = Date.now()
+    return {
+      unavailableAttachments,
+      session: {
+        id: localId,
+        title: created.title,
+        createdAt: now,
+        updatedAt: now,
+        config: options.sourceSession.config,
+        parameterEnabled: options.sourceSession.parameterEnabled,
+        systemPrompt: options.sourceSession.systemPrompt,
+        openingMessage: options.sourceSession.openingMessage,
+        suggestedQuestions: [...options.sourceSession.suggestedQuestions],
+        context: options.sourceSession.context,
+        contextSummary: null,
+        pinned: created.pinned,
+        archived: created.archived,
+        tags: [...created.tags],
         messages,
         server: {
           id: created.id,
