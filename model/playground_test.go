@@ -348,6 +348,107 @@ func TestPlaygroundRejectsInvalidSnapshotsWithoutReplacingHistory(t *testing.T) 
 	}
 }
 
+// Web-search snapshots are part of the user turn: the normalized query and
+// hits are stored verbatim so a reload or replay rebuilds the same prompt and
+// citations. The gateway bounds every field and keeps the snapshot on user
+// messages only; an invalid snapshot leaves the stored history untouched.
+func TestPlaygroundMessageSearchSnapshots(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			playgroundTestDB(t, dialect)
+			session := createPlayground(t, 7, "web-search")
+			path := "/api/playground/sessions/" + session["id"].(string) + "/messages"
+			result := map[string]any{
+				"title":   "Go releases",
+				"url":     "https://go.dev/blog",
+				"snippet": "The latest Go release notes.",
+			}
+			accepted := map[string]any{"revision": 0, "messages": []any{map[string]any{
+				"client_key": "user-search",
+				"payload": map[string]any{
+					"key": "user-search", "from": "user",
+					"search": map[string]any{
+						"query":    "latest go release",
+						"provider": "tavily",
+						"results":  []any{result},
+					},
+					"versions": []any{map[string]any{"id": "u1", "content": "What changed?"}},
+				},
+			}}}
+			response := playgroundRequest(t, 7, http.MethodPut, path, accepted, controller.ReplacePlaygroundMessages)
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			messages, revision, err := model.ListPlaygroundMessages(7, session["id"].(string))
+			require.NoError(t, err)
+			require.EqualValues(t, 1, revision)
+			require.Len(t, messages, 1)
+			var stored struct {
+				Search struct {
+					Query    string `json:"query"`
+					Provider string `json:"provider"`
+					Results  []struct {
+						Title   string `json:"title"`
+						URL     string `json:"url"`
+						Snippet string `json:"snippet"`
+					} `json:"results"`
+				} `json:"search"`
+			}
+			require.NoError(t, common.UnmarshalJsonStr(string(messages[0].Payload), &stored))
+			assert.Equal(t, "latest go release", stored.Search.Query)
+			assert.Equal(t, "tavily", stored.Search.Provider)
+			require.Len(t, stored.Search.Results, 1)
+			assert.Equal(t, "Go releases", stored.Search.Results[0].Title)
+			assert.Equal(t, "https://go.dev/blog", stored.Search.Results[0].URL)
+			assert.Equal(t, "The latest Go release notes.", stored.Search.Results[0].Snippet)
+
+			tooManyResults := make([]any, 7)
+			for index := range tooManyResults {
+				tooManyResults[index] = map[string]any{
+					"title": fmt.Sprintf("Result %d", index), "url": "https://example.com", "snippet": "text",
+				}
+			}
+			largeResults := make([]any, 6)
+			for index := range largeResults {
+				largeResults[index] = map[string]any{
+					"title": strings.Repeat("t", 300), "url": "https://example.com/" + strings.Repeat("u", 3000), "snippet": strings.Repeat("s", 1200),
+				}
+			}
+			rejects := []struct {
+				name   string
+				from   string
+				search map[string]any
+			}{
+				{"snapshot on an assistant message", "assistant", map[string]any{"query": "q", "results": []any{}}},
+				{"blank query", "user", map[string]any{"query": " ", "results": []any{}}},
+				{"oversized provider", "user", map[string]any{"query": "q", "provider": strings.Repeat("p", 33), "results": []any{}}},
+				{"excess result count", "user", map[string]any{"query": "q", "results": tooManyResults}},
+				{"non-http result URL", "user", map[string]any{"query": "q", "results": []any{map[string]any{"title": "t", "url": "ftp://example.com", "snippet": "s"}}}},
+				{"result URL with credentials", "user", map[string]any{"query": "q", "results": []any{map[string]any{"title": "t", "url": "https://user:pass@example.com", "snippet": "s"}}}},
+				{"oversized title", "user", map[string]any{"query": "q", "results": []any{map[string]any{"title": strings.Repeat("t", 301), "url": "https://example.com", "snippet": "s"}}}},
+				{"oversized snippet", "user", map[string]any{"query": "q", "results": []any{map[string]any{"title": "t", "url": "https://example.com", "snippet": strings.Repeat("s", 1201)}}}},
+				{"oversized result list", "user", map[string]any{"query": "q", "results": largeResults}},
+			}
+			for _, test := range rejects {
+				t.Run(test.name, func(t *testing.T) {
+					body := map[string]any{"revision": 1, "messages": []any{map[string]any{
+						"client_key": "user-search",
+						"payload": map[string]any{
+							"key": "user-search", "from": test.from, "search": test.search,
+							"versions": []any{map[string]any{"id": "u1", "content": "What changed?"}},
+						},
+					}}}
+					rejected := playgroundRequest(t, 7, http.MethodPut, path, body, controller.ReplacePlaygroundMessages)
+					assert.Equal(t, http.StatusBadRequest, rejected.Code, rejected.Body.String())
+					messages, revision, err := model.ListPlaygroundMessages(7, session["id"].(string))
+					require.NoError(t, err)
+					require.EqualValues(t, 1, revision)
+					require.Len(t, messages, 1)
+					assert.Contains(t, string(messages[0].Payload), "latest go release")
+				})
+			}
+		})
+	}
+}
+
 // Tool call snapshots keep the requested call and the user-provided result
 // verbatim. The gateway only bounds the state: calls on non-assistant messages,
 // excess counts, duplicate or missing identities, oversized payloads and
