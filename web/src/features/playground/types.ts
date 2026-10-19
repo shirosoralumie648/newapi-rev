@@ -121,6 +121,23 @@ export interface PlaygroundMessageCost {
   createdAt: number
   /** Server-side phase breakdown of the request, when the entry recorded one. */
   timing?: RequestTimingBreakdown
+  /** Cached prompt tokens the settlement billed, when the entry reported it. */
+  cacheTokens?: number
+  /** Cache-read ratio the settlement applied to cached input tokens. */
+  cacheRatio?: number
+  /** Model ratio the settlement applied; one unit is 2 USD per 1M tokens. */
+  modelRatio?: number
+  /** Group multiplier the settlement applied to this request. */
+  groupRatio?: number
+  /**
+   * Channel label the server allows this viewer to see. A regular user only
+   * receives a masked number; administrators also receive the id and name.
+   */
+  channelKey?: string
+  /** Complete channel id. Only the administrator projection carries it. */
+  channelId?: number
+  /** Complete channel name. Only the administrator projection carries it. */
+  channelName?: string
 }
 
 /** How a compare run sends its cells: one at a time or a bounded batch. */
