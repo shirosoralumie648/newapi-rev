@@ -887,7 +887,7 @@ func TestPlaygroundArenaVotes(t *testing.T) {
 			// still work, while every stored reply text hides them.
 			assert.Equal(t, "gpt-4o", *storedAnonymous.Versions[0].Model)
 			assert.Equal(t, "gpt-4", *storedAnonymous.Versions[1].Model)
-			assert.Contains(t, storedAnonymous.Versions[0].Content, "Model B")
+			assert.Contains(t, storedAnonymous.Versions[0].Content, "Model A")
 			assert.NotContains(t, strings.ToLower(storedAnonymous.Versions[0].Content), "gpt-4o")
 			assert.Contains(t, storedAnonymous.Versions[1].Content, "Model B")
 			assert.Contains(t, storedAnonymous.Versions[1].Content, "Model A")
