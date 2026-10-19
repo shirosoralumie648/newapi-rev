@@ -180,7 +180,7 @@ Playground
 ### Phase 7：跨设备、协作和分享 — 延期/另行设计
 
 - [ ] 跨设备恢复会话、附件、Artifact 和画布；
-- [ ] 设计分享链接、只读权限、编辑权限和撤销机制；
+- [ ] 设计分享链接、只读权限、编辑权限和撤销机制；（只读分享链接的轻量版已排入 14.2 LB-05，编辑权限与协作仍顺延本项）；
 - [ ] 设计协作冲突和版本合并；
 - [ ] 设计资源导出、删除、保留期和隐私审计（CH-04 已落地导出、删除与保留期：会话可导出 Markdown/JSON，会话与画布移入回收站后可在保留期内恢复、到期由后台清扫清除；跨设备/协作语境下的隐私审计仍待 Phase 7 专项设计）；
 - [ ] 完成安全评审和三数据库验证后再实施。
@@ -775,6 +775,112 @@ Step 进度：
 
 **后续实现清单（下一个 Step 若启动）**：`common/database.go` 增加 `SetPlaygroundDatabaseType`/`UsingPlaygroundDatabase`；model 层新增 `PLAYGROUND_DB` 与 `playgroundDB()` 路由；`InitPlaygroundDB`/`migratePlaygroundDB` 与位置标记守卫；`model/playground*.go` 全部查询改句柄、策略解析移出事务；跨库 saga 顺序按 13.4 固化并补幂等测试；归档表/任务/还原路径按 13.7 实现；CI 三库矩阵覆盖迁移、复制、守卫与归档往返。
 
+## 14. Lobe 对齐能力包（2026-10-19 调研）
+
+> 来源：2026-10-19 对 main @ `f1dff7b96` 游乐场的全量功能盘点与 `lobehub/lobehub` 官方 README/文档的能力对照。结论：会话/分支/多模态任务/画布等基础骨架已经完整，与 LobeChat 的差距集中在联网搜索、工具/插件执行、RAG 知识库、助手市场、记忆、会话整理与分享。用户 2026-10-19 确认补齐：体验补齐包、跨会话记忆、RAG 知识库、工具执行 + MCP、预设市场 + 官方预设。本节所列 Step 遵守第 2/5 节边界；参考 LobeChat 仅限交互与数据边界，不复制其代码、品牌或插件生态。
+
+### 14.1 后端计算边界约束（2026-10-19 用户确认）
+
+后端尽量减少本地计算，保持「Relay 转 API + 存储 + 极轻 IO/检索胶水」定位：
+
+1. **LLM/embedding 类智能一律经 `/v1|/pg` Relay 完成并正常计费**（摘要、自动命名、记忆抽取、查询向量化），后端不做进程内推理；
+2. **分块等确定性文本处理尽量在前端**完成（JS 分块器），后端只做尺寸/字数校验与持久化；
+3. **向量检索只做平凡数学**：embedding 以定长数值数组存 DB（BLOB/JSON），后端查询时做余弦点积取 top-k（纯 CPU 简单运算），不引入向量引擎/索引后台；
+4. **外部工具是 API 适配器**（搜索 provider HTTP 调用、MCP JSON-RPC 代理），工具执行循环由前端驱动——前端拿到工具结果后经 `/pg/chat/completions` 继续下一轮，后端不编排多轮会话；
+5. **不做**：代码运行沙箱、内嵌进程（stdio MCP）、浏览器外 UI 自动化等重计算/重 IO 组件。
+
+### 14.2 新增 Step（LB = Lobe 对齐包）
+
+| ID | 标题 | 依赖 | 优先级 |
+| --- | --- | --- | --- |
+| LB-01 | 联网搜索增强：可配 provider（Tavily/SearXNG/Brave/Bing 等，API IO 不本地计算），结果注入 payload 与引用标注，替换 Globe 占位按钮；**按次计费**（固定单价经钱包结算，上游自带搜索的模型原生可用、沿用上游 usage 计费） | 无 | P0 |
+| LB-02 | 会话整理：置顶 + 归档 + **标签**（字段、PATCH 契约、列表过滤与侧栏分组） | 无 | P0 |
+| LB-03 | 会话自动命名：首轮回复完成后前端经既有 `/pg/chat/completions` 用小模型起名并 PATCH 标题（全局开关 + 每会话可关） | 无（纯前端 + 既有 Relay） | P0 |
+| LB-04 | 消息级操作：引用回复、跨会话消息搜索、从某条消息分叉新会话 | 无（纯前端，复用既有 create/上传链路） | P0 |
+| LB-05 | 只读分享链接：带 token 的公开只读页 + 撤销（Phase 7 分享项的轻量落地） | 无 | P0 |
+| LB-06 | 跨会话记忆：结构化 user memory（存储 + CRUD + 编辑 UI），抽取调用经 `/pg` relay 计费，会话注入 memory 块 | CH-01 | P1 |
+| LB-07 | 知识库基础：KB/文档/chunk 表 + `/pg/embeddings` Relay 桥（嵌入走自家渠道计费）+ 前端分块器 | ST-04, CH-05 | P1 |
+| LB-08 | 知识库检索注入：查询向量化 + 后端余弦 top-k + 引用标注渲染 | LB-07 | P1 |
+| LB-09 | 工具执行端：前端 tool loop 自动回填（搜索复用 LB-01 端点、时间纯前端、KB 检索复用 LB-08 端点），不再手工粘贴结果；保留未知工具的手工兜底 | 无后端新增（软依赖 LB-01/LB-08） | P1 |
+| LB-10 | MCP 客户端代理：streamable HTTP 的工具列表/调用经网关 JSON-RPC 代理，映射进 LB-09 工具循环 | LB-09 | P1 |
+| LB-11 | 预设市场：官方/全局预设（管理员维护）+ 开场白与建议问题 + JSON 导入导出 | CH-01 | P1 |
+| LB-12 | 对话体验小项包（纯前端）：继续生成、回复自动朗读、新会话默认配置、会话导入（export JSON 反向导回） | 无（互不依赖，可拆散穿插） | P0 |
+| LB-13 | 新用户引导：欢迎卡 + 空态功能入口增强 + 无可用模型提示 + 高亮步进 tour（引入 driver.js） | LB-01..LB-12、LB-14、CV-06..CV-09（引导覆盖完整功能集） | P1 |
+| LB-14 | 对话/创作分层：Playground 顶栏撤出全部创作域入口（生成/画布/制品/素材库归画布域），对话只保留消息流、composer、消息动作桥接与账号用量入口 | 无（纯前端重构） | P0 |
+
+- 记录为遗留、本包不含：SEC-02 承诺但未交付的 Mermaid 预览（归 SEC-02 收尾）；代码运行执行（与 14.1 冲突，不做）；多 agent 自主编排、多人实时协作（Phase 7 延期语境下另行设计）；**话题（Topic）二级结构与消息点赞/点踩（2026-10-19 用户确认不做）**；音/视频输入理解进模型 payload 维持 P2 遗留。
+- 每个 Step 完成后在本节表格行后注明进展，并在第 8 节变更记录追加一行。若要纳入编排器自动调度，需把 LB-* 追加到 `steps.json`（范围与完成标准以本节 14.3 为准）。
+- **建议实施顺序**：批次一（P0）= **LB-14（信息架构定盘，先于批次一其余项优化）** → LB-02 → LB-01 → LB-04 → LB-03 → LB-05（LB-01..05 互不依赖，可任意穿插/并行），**LB-12 四小项可拆散穿插于批次一任意空档**；批次二（P1）= LB-07 → LB-08 → LB-09 → LB-10 为串行链（知识库先行、MCP 收尾）；LB-06、LB-11 相互独立，可与批次二并行；**LB-13 引导收尾于全部 LB Step（含 LB-14）之后**。LB-03/LB-04/LB-09/LB-12/LB-14 几乎零后端改动，适合与任何后端 Step 并行排期。
+
+### 14.3 各 Step 范围与完成标准
+
+所有 Step 共同遵守：涉及数据库 schema 的改动跑 SQLite/MySQL 8/MySQL 5.7/PostgreSQL 三库矩阵并加入 CI real-database job；前端文案接入七语言并过 `i18n:sync`；typecheck/lint/测试不回退；UI 可见行为补组件测试，路由级改动补真实 router 鉴权矩阵（401/PAT 403）。
+
+- **LB-01 联网搜索**——管理端系统设置新增搜索 provider 配置（URL + API Key 服务端保管，绝不前端保存；首批 Tavily / SearXNG 自托管 / Brave，可扩展）；后端新增 `POST /api/playground/search`（`UserAuth`，调用 provider API 属纯 IO；结果规范化为 `{title,url,snippet}` 列表、总字节数上限）；前端输入区 Globe 按钮由占位改为「将随本轮联网检索」开关；命中结果作为可选块注入 payload（`[1](url) snippet` 编号列表）并在助手回复后以引用标注渲染，检索块作为该消息的元数据快照持久化（可重放）。**计费（2026-10-19 用户确认按次计费）**：playground_setting 新增「Web search unit price」固定单价（全局默认 + 用户组覆盖，金额换算走 `common/quota_math.go`）；每次 provider 调用成功才结算一次（数量恒为 1 不受用户控制，无需有界乘数校验），结算复用 BL-03 工作流的钱包 hold/settle 链路（先 hold 单价、失败自动退款），存账走 wallet_ledger 并复用现有消费日志字段；provider 调用失败不产生扣费；仍保留每用户每分钟限次防刷。**上游自带搜索的模型（如 OpenAI web_search 系、Perplexity 类渠道）零改动原生可用**：费用随上游 usage 正常计费，网关不重复计价，也不为其做透传 UI（列为后续扩展）。
+- **LB-02 置顶/归档/标签**——`playground_sessions` 新增 `pinned_at`/`archived_at`（`not null;default:0`，AutoMigrate 直加列，legacy 行读回 0）与 `tags`（TEXT 存 JSON 字符串数组；PATCH `tags` 为整组替换，写入校验：≤10 个、每个去空格后 ≤24 字符、去重）；PATCH 契约加显式 `pinned`/`archived` 布尔（缺省=保持原值；`archived=true` 同事务清置顶；对已归档会话置顶返回 400 稳定错误）；响应与列表返回三项；服务端列表不排除归档（仍 `updated_at DESC` 分页），**分组、标签过滤与排序全部在前端**：主列表 = 置顶区 + 一般区，归档折叠为底部「Archived」区（可打开、可归档还原），列表上方为一排标签筛选 chips（含「全部/未打标」）；会话条目菜单新增置顶/归档/标签操作与 Pin 图标；本地 storage schema 加可选字段（损坏降级为空态）、`playgroundSnapshot` 与服务端元数据 PATCH 契约带入三态；跨设备以服务端为准。回收站与归档/标签互不干扰（回收站保留期语义不变）。
+- **LB-03 自动命名**——全局设置 + 会话级开关；首轮（或后续轮次）回复完成后，前端经既有 `/pg/chat/completions`（非流式、走摘要模型的调用约定）生成 ≤50 字标题，PATCH 走既有标题链路；失败静默保留旧标题；不新增后端代码。
+- **LB-04 消息级操作**——引用回复：消息操作新增「引用」，payload 首位插入 quote 块（被引消息 key + 文本快照 ≤ 配额上限），渲染层显示引用条；跨会话消息搜索：前端对已水合 workspace 全量文本搜索（`hydratePlaygroundWorkspace` 已把每个远端会话的全部消息拉进本地，无后端；水合进行中只搜已就绪部分并在结果页标示），结果跳转会话并高亮；分叉：新会话 + 逐条复制消息 payload + 经既有上传链路重建附件（新会话分区、配额校验，超限拒绝并提示），源会话保持不动；三项均无后端新增。
+- **LB-05 分享链接**——主库新增 `playground_session_shares`（owner 归属、明文 token 为随机 128-bit 但库中只存其 SHA-256（按哈希等值索引查找，不存明文）、可撤销、可选过期时间）；`POST/DELETE /api/playground/sessions/:id/share`（owner 校验、撤销幂等）与匿名 `GET /api/playground/shared/:token`（`CriticalRateLimit`、不可枚举 404——撤销与不存在同响应）；前端 `/share/:token` 公开只读路由（安全渲染链路、暗色适配、只显示文本与工具调用摘要，**附件只显示占位不代理内容**）与会话菜单「Share」入口；导出/隐私审计设计与 CH-04 一致。
+- **LB-06 跨会话记忆**——主库新增 `playground_memories`（owner、内容、分类、来源会话可空、enabled、时间戳）+ owner CRUD 与读写配额字段（`memory_user_max_count` 等，全局默认 + 用户组覆盖，计入资源用量视图）；前端 Inspector 新记忆视图（增删改、开关、来源跳转）；注入：payload 在 system prompt 之后插入 memory 块（计入 CH-02 token 预算）；抽取开关默认关，开启后前端在回复完成后经 `/pg/chat/completions`（记忆专用模型字段，默认跟随摘要模型）产出候选增改，diff 后 POST 存储；记忆只来自用户本人数据。
+- **LB-07 知识库基础**——新增 `playground_knowledge_bases` / `playground_kb_documents`（复用附件对象存储与 CH-05 文本抽取）/ `playground_kb_chunks`（`chunk_index`、text、`embedding` 二进制、`dims`、`embedding_model`）三表 + 配额字段（KB 数、文档数、chunk 数、字节，全局 + 组覆盖，计入用量视图与可选存储计费）；新增 `/pg/embeddings` Relay 桥（`PlaygroundRelayBridge` 改写 `/v1/embeddings`，分组/渠道/计费沿用管线，嵌入调用正常计费）；前端分块器（确定性、≈1 KiB + 重叠、上限与配额核对）；文档上传 → 抽取 → 分块 → 嵌入 → 入库全链路 E2E 可用，失败可重嵌入文档级重跑。**UI 归属（按 LB-14 分层）**：KB 管理（建库、上传文档、重建索引、存储用量）归画布域侧栏（与素材库同类）；对话侧仅在上下文/参数面板绑定 KB（见 LB-08）。
+- **LB-08 检索注入**——`POST /api/playground/knowledge-bases/:kbId/search`：查询文本 → `/pg/embeddings`（正常计费）→ 后端对 chunk 余弦点积取 top-k（`top_k ≤ 12` + 字符预算，纯 CPU）；会话可绑定多个 KB（≤3），发送前检索并入 payload 编号块 +  `[n]` 引用标注渲染；检索内容进 CH-02 规划器预算；维度不匹配/模型变更的 chunk 拒绝参与检索并在 UI 标示「需要重建」。**对话侧 UI 按 LB-14 分层**：绑定入口在会话的上下文/参数面板（检索是纯对话输入增强，不属于创作域）。
+- **LB-09 工具执行端**——P6-02 的 toolCalls 快照契约不变；开关开启后前端对声明可执行的调用（web_search → LB-01 端点、get_time → 前端生成、kb_search → LB-08 端点）自动执行并回填结果，全部答复或到轮次上限（默认 5，可配）后「继续生成」；结果写入沿用 `tool_call_result_max_bytes` 校验；未知工具保持手工兜底；执行态在消息流可见（替代手工粘贴）。
+- **LB-10 MCP 代理**——管理端系统设置维护全局 MCP 服务器清单（streamable HTTP URL + 可选 Header 令牌，服务端保管）；后端 `GET /api/playground/mcp/servers`（工具列表，带缓存与超时）与 `POST /api/playground/mcp/:serverId/call`（JSON-RPC 代理，SSRF 复用对象存储防护、单次大小/时长上限）；工具映射为 `mcp__<server>__<tool>` 后接入 LB-09 循环；功能全局默认关闭（14.4 决策点）。
+- **LB-12 对话体验小项包（纯前端，四小项互不依赖）**——①**继续生成**：助手消息因 `finish_reason=length` 或流式中止而截断时，消息操作区出现「继续生成」：把截断回复保持入上下文再发起一轮 `/pg/chat/completions`（优先 assistant prefill 语义的请求形态，兼容渠道回退为追加一条 user 继续指令），生成结果以**新版本**追加（复用消息分支机制，截断版本不丢）；②**回复自动朗读**：会话级开关（账号默认与会话覆盖），流式完成后自动调用既有 `/pg/audio/speech` 管道朗读，沿用现有并发守卫与迟到请求屏蔽，不阻塞新输入；③**新会话默认配置**：账号级记住「新会话起点」——本账号最近使用的模型/参数/系统提示词（客户端存储），若 LB-11 落地则默认预设优先；④**会话导入**：解析既有 export JSON 反向重建会话（逐条消息经既有 create/上传链路，数量与字节走同配额校验；**同账号**导入时附件内容经受控内容接口重新上传重建，**跨账号**导入附件以占位标注不可用）。
+- **LB-13 新用户引导（P1 收尾，LB-01..LB-12 全部落地后）**——①**欢迎卡**：首次进入 Playground 显示可关闭的概览卡（桌面 Dialog / 移动 Sheet），按账号记 localStorage「已读」标记，右上角 Help 按钮提供「重看引导」重放入口；②**空态功能入口增强**：现有 starter prompts 空态旁增加功能入口卡（参数面板/预设/生成任务等当时已存在的能力），仅新手阶段（未完成引导）显示；③**无可用模型提示**：检测本分组无可用模型时在欢迎卡与空态展示指引（复用现有模型列表查询，不新增后端）；④**高亮步进 tour**：引入 `driver.js`（`bun add`，轻量无 UI 框架耦合），步进点锚定到稳定 `data-tour-*` 选择器（面板增删时同步维护），覆盖会话列表、模型选择、参数面板、联网搜索与 composer、记忆与预设入口（对话侧），以及画布编辑器内的生成面板、制品浏览器、素材库与画布工具（创作侧，LB-14 分层后的最终布局）；步进内容全部 i18n 七语言，Esc 可随时退出、关闭后不再自动弹出；移动端提供精简步序或仅欢迎卡。测试：首次/已读/重放三类显示逻辑、移动端 Sheet、焦点管理与 Esc 关闭 a11y、tour 选择器在关键面板存在性的静态测试。
+- **LB-14 对话/创作分层（2026-10-19 用户确认：创作域全部归画布，聊天不承载创作工具）**——①**Playground 对话顶栏撤出全部四个常驻入口按钮**（`Generate`/`Canvases`/`Artifacts`/`Library`，含 inspectorView 机关与 `artifactsDisabled` 分支），顶栏只保留账号用量入口、移动端会话抽屉与同步状态徽标；②**生成媒体完全迁入画布编辑器**：提交表单 + 任务列表成为 `CanvasWorkspace` 内置面板（generation/task API 复用不动，任务仍用户级归属）；对话内发起生成的唯一路径是消息动作「用这段生成图片/视频」→ 跳 `/playground/canvas` 并预填提示词/参考图（新 task 节点或表单预填），运行与钱包结算都在画布侧完成；③**制品浏览器迁入画布**：版本管理/Sandbox 预览/导出 UI 移到画布编辑器侧（画布已有 artifact 节点与来源深链），对话内消息流保留内联内容渲染与轻量预览卡（操作 = 打开画布查看），消息动作「发送到画布」是双向桥接；④**素材库迁入画布**（素材/存储管理视图），对话 composer 附件弹层增加「我的素材」页签保留素材进对话的轻路径；⑤**全局导航**给画布一个独立入口（全局侧栏不属于对话界面），playground→canvas 既有路由 `/playground/canvas` 与深链不变。测试：workspace 布局与 inspector 相关组件测试改写、消息动作跳转测试、composer 素材页签测试、E2E 适配新入口；i18n 七语言。LB-14 落地后 LB-13 引导的 tour 步序按最终布局编写。
+- **LB-11 预设市场**——`playground_presets` 新增 `visibility`（private/global）与开场白、建议问题字段；管理端维护全局预设（复用用户端编辑面板），`GET /api/playground/presets/market` 列出全局预设，「复制为我的预设」入库；JSON 导入/导出沿用 preset 既有校验；以预设新建会话时支持注入开场白与建议问题。
+
+### 14.4 决策（2026-10-19 用户确认）
+
+1. **LB-02 包含标签/文件夹**：标签一并纳入本期（`tags` 整组替换 + 前端筛选 chips）；文件夹不进本包。
+2. **LB-01 搜索计费**：按次计费——固定单价（管理端配置、全局默认 + 用户组覆盖）经钱包 hold/settle 结算，成功才扣费、失败退款；每分钟限次仍保留兜底。上游自带搜索的模型原生可用、随上游 usage 计费，网关不重复计价。
+3. **LB-05 分享附件**：匿名访客**不代理附件内容**（只显示占位）。
+4. **LB-06 记忆抽取默认关闭**，入口显眼；开启后每轮抽取一次（经 Relay 计费，成本随主模型）。
+5. **LB-10 MCP 配置归属**：管理员维护全局连接清单、用户可开关启用；用户级私有凭据管理不进第一版。
+6. **LB-13 引导形态**：欢迎卡 + 空态入口增强 + 无模型提示 + **高亮步进 tour（引入 driver.js）**（2026-10-19 用户确认，放弃纯轻量方案）；优先级 **P1 收尾**——引导内容覆盖 LB 完整功能集。
+7. **LB-14 对话/创作分层**：创作域四个入口（生成媒体/画布/制品/素材库）**全部撤出对话、归画布域**（2026-10-19 用户确认）；对话保留消息流内联渲染、composer（含素材页签）、消息动作桥接、侧栏与用量入口；生成面板与制品浏览器整体迁入画布编辑器；全局导航给画布独立入口。
+
+## 15. 画布创作域补齐（2026-10-19 调研）
+> 来源：2026-10-19 对 `web/src/features/canvas/` 源码的现状核实（13 种节点 kind、连线 onConnect、裁剪/放大/遮罩重绘工具、工作流编排+预算、快照/zip 导入导出均为既有能力），对照 ComfyUI / Krea / Miro 类创作画布同级的缺失差距分析。用户 2026-10-19 确认：画布功能严重不足需补齐，且**需要单独的图片/视频工作台**。遵守 14.1 后端计算边界约束与 14.3 共同验收要求；继续沿用 CV 编号（已有 CV-01..05）。
+
+### 15.1 差距总表（核实结论）
+
+- 编辑器手感：**内容级撤销缺失**（仅结构变化入栈）、无对齐/吸附/等距分布、无连线完善交互（拖端口建线/连线删除/替换重连）、无选区与整画布 PNG 导出、键盘手感不完整。
+- 生成域：无 seed 固定/继承/随机、无 batch 多张选优、无尺寸档位与渠道能力揭示、无多参考图连线、无扩图/背景移除/风格参考。
+- 结构缺口：无专门图片/视频工作台（LB-14 后全部创作汇入无限画布，临时用户被迫节点图思维）。
+- 流程复用：无画布模板（常用链一键铺点、画布存为模板）。
+- 组织：无节点颜色标注/标签、无画布内节点搜索、无批量跑选中子图。
+- 分享：无画布只读分享（与 LB-05 会话分享不对称）。
+
+### 15.2 新增 Step
+
+| ID | 标题 | 依赖 | 优先级 |
+| --- | --- | --- | --- |
+| CV-06 | 编辑器手感整包：内容级撤销/重做、对齐吸附等距分布、连线交互完善、键盘（方向键微移/Delete 删线等）、fit/zoom 控件、选区与整画布导出 PNG | 无（前端） | P0 |
+| CV-07 | 生成参数与变体：seed 固定/继承/随机、batch 多张出图逐结果选优、尺寸档位、渠道能力揭示（参数面板按所选模型/渠道显隐有效参数）、多参考图连线 | 小（参数沿用既有有界字段校验，seed 非计费乘数） | P0 |
+| CV-08 | 创作工具扩展：扩图 outpaint、背景移除、风格参考——入口按渠道能力显隐，先落地有渠道支持的 | 中（新 relay 工具路由/渠道适配按需） | P0 |
+| CV-09 | 图片工作台：项目模式落地 + 单图聚焦编辑器（大预览/工具栏/参数侧栏/版本变体条/钉回画布） | CV-07、CV-08 | P0 |
+| CV-10 | 视频工作台：播放器 + 参数侧栏 + 版本条 + 抽帧（前端取帧进图片工作台反哺 i2v）+ 队列/取消 | CV-09（复用项目模式） | P1 |
+| CV-11 | 画布模板：画布存为模板（结构级，含是否内联素材选项）+ 模板库（个人/全局，对齐 LB-11 模式）+ 常用链模板一键铺点（翻译/总结/风格平行对比） | 无 | P1 |
+| CV-12 | 画布只读分享：对齐 LB-05 token 机制（share 表复用/扩展、匿名只读渲染页、撤销） | LB-05 | P1 |
+| CV-13 | 组织与查找：节点颜色标注/标签、画布内节点搜索（Cmd+P 面板）、批量跑选中子图 | 无 | P1 |
+
+- 批次一（P0）= CV-06 → CV-07 → CV-08 → CV-09（工作台收敛 P0 批次，吃尽 CV-07/08 成果）。
+- 批次二（P1）= CV-10、CV-11、CV-12、CV-13 相互独立可并行；LB-13 引导的画布部分步序在 CV-09/10 之后编写。
+- 记录为遗留、本包不含：项目多页/tabs 与 Figma 级自动布局（另行设计）；多人实时协作（Phase 7 延期不变）；视频时间轴/关键帧编辑（依赖上游剪辑能力，超出网关定位，另行设计）。
+
+### 15.3 各 Step 范围与完成标准
+
+- **CV-06 编辑器手感整包**——内容级撤销：扩展 `canvas-edit` 历史栈覆盖节点文本/参数/位置变更（与快照节奏解耦，按键级合并防抖），与既有快捷键共存；对齐/吸附：多选拖移时的对齐线与边距吸附、等距分布命令；连线交互：Handle 端口拖线即建、连线悬停 × 删除、拖到另一端口替换重连；键盘：方向键微移 + Shift 大步、Delete 删除选中边、空格拖移核对既有；导出：选区（含组）导出 PNG（离屏渲染，产物可存素材库/下载）与整画布导出 PNG；fit/zoom 控件与 100% 复位；全量过 workspace 同一验收（组件测试 + E2E 键盘/拖移，i18n 七语言）。
+- **CV-07 生成参数与变体**——task 节点参数面板新增 seed 输入（留空=随机、显式=固定；「继承上次结果」快捷）；batch 出图（沿用有界 batch 字段，一次任务产出多 task-result 节点呈纵向展开并支持**整体选优**：标 preferred 结果供下游连线）；尺寸档位（image/video 各自档位常量已有，参数面板展示并允许自定义，越界 400）；**渠道能力揭示**：参数只读部分按所选模型/渠道注记（复用渠道元数据/模型信息查询，前端禁用不可用参数并给一句原因）；多参考图：≤上限多张附件/probe 节点连线引用（超出稳定错误）。计费全走既有 task 路径（n/batch 已有界校验），seed 不参与计费。
+- **CV-08 创作工具扩展**——扩图（outpaint）：选择目标画幅并把原图贴入空白区，经 images 编辑接口生成（按渠道能力显隐）；背景移除：走支持该能力的渠道专用接口（渠道能力元数据判定，无则隐藏）；风格参考：以风格图为约束的生成参数（渠道支持时开放）；三者共用「按渠道能力显隐」的统一 UI 规则，不可用原因 tooltip；产物进素材库并支持一键画布节点化。
+- **CV-09 图片工作台**——`playground_canvases` 新增 `mode` 列（infinite/image/video，默认 infinite，AutoMigrate 三库加列验证 + legacy 读回默认）；建项入口按模式选择；图片工作台为单图聚焦布局：大预览 + 工具栏（裁剪/放大/遮罩重绘/CV-08 工具）+ 参数侧栏（CV-07 全量参数含 seed/batch/尺寸）+ **版本/变体条**（同一血线 task 历史，来源于 task-result 节点的重试参数记录，点击切换主图）+ 「钉回画布」（在工作区把当前血线落成 image/task-result 节点 affixed 到无限画布）+ 参考图快速挂载；同一计费/预算/配额链路不变。
+- **CV-10 视频工作台**——同 `mode` 体系：播放器（受控内容流）+ 参数侧栏（时长/尺寸档位/模型）+ 版本条 + 抽帧：前端 `<video>` seek 后离屏截帧并经既有上传链路落为附件，可直接送图片工作台或画布 image 节点（反哺 i2v / 视频改图链）；队列视图（进行中任务 + 进度 + 取消退款沿用既有）。
+- **CV-11 画布模板**——把当前画布存为模板（结构级：节点/边/参数，二选一是否内联素材），模板库个人 + 全局（管理员维护，对齐 LB-11 的 visibility 机制）；常用链模板（翻译/总结/多风格平行对比/图生视频链）以官方模板预置；模板一键铺到当前画布或新建画布；导入导出沿用 zip 归档。
+- **CV-12 画布只读分享**——绘 share 机制与 LB-05 对齐：token 哈希存储、匿名只读渲染页（画布文档只读视图 + 节点结果预览，不代理素材）、撤销/过期、CriticalRateLimit 与不可枚举 404；入口在画布菜单。
+- **CV-13 组织与查找**——节点颜色标注/标签（本地展示 + 文档序列化，导出/导入兼容）；Cmd+P 节点搜索面板（本画布内按类型/名称/内容过滤，键盘直达）；批处理：多选节点作为子图一键按拓扑序运行（预算核算沿用 BL-03）。
+
 ## 8. 变更记录
 
 | 日期 | 变更 |
@@ -867,3 +973,5 @@ Step 进度：
 | 2026-10-18 | ST-06：删除 outbox 与对象存储对账（CI-only，本地未运行测试）——新增主库表 `object_delete_outbox`（`object_key_hash` SHA-256 唯一列，规避 MySQL 对长键建唯一索引的字节上限；origin/attempts/next_attempt_at/last_error），所有删除拥有对象字节的数据库行的路径（附件、上传预留、Artifact 版本、画布文档与快照、会话/画布清除、任务产物行）在同一写事务内经 `enqueuePlaygroundObjectDeletes` 入队（`OnConflict{DoNothing}` 按哈希去重、并发重放安全，来源 attachment/upload/artifact/canvas/canvas_snapshot/task_result），提交后 `drainPlaygroundObjectDeletes` 立即删对象并清行，失败的保留（`last_error` 截断 200 字符、不影响已提交请求）；系统任务 `playground_object_outbox`（15 分钟、每轮 200，仅 pending 时调度）按 60s 起指数退避、上限 6h 重试，成功或 `ErrObjectNotFound` 清行，upload 来源同时 abort multipart。对账：新增 `objectstore.ObjectLister`（local `fs.WalkDir`、S3 `ListObjectsV2Paginator`，还原逻辑键）与 `ReconcilePlaygroundObjects`，把 `pg` 前缀下对象与六张拥有对象的表（附件/上传预留/Artifact 版本/画布文档/画布快照/任务产物）及 outbox 待删键比对，每周系统任务 `playground_object_reconcile` 先生成 dry-run 报告（owned/pending/宽限/孤儿计数与字节、样本 20 与截断标记，记入系统任务）再只清理超过 24h 宽限的孤儿、每轮最多 200 条，失败留下轮，不支持列举的后端返回 `ErrPlaygroundObjectReconcileUnsupported` 不误删；计数器每日对账沿用 DB-02 已交付的 `playground_usage_reconcile`，未重复实现。测试：`model/playground_object_outbox_test.go` 的 `TestPlaygroundObjectDeleteOutboxMatrix`、`TestPlaygroundObjectReconcileMatrix`（SQLite/MySQL/PostgreSQL 三库矩阵）与 `TestPlaygroundSessionPurgeQueuesObjectDeletes`，扩展 `service/objectstore/local_test.go` 与 `service/objectstore/s3_test.go`（fake 端点补 ListObjectsV2 分页），两个矩阵测试加入 CI real-database job 过滤清单；`common/log_text.zh-CN.json` 补 3 条；无前端/i18n 变更；无新依赖。 |
 | 2026-10-18 | BL-02：存储计量计费（CI-only，本地未运行测试）——`setting/playground_setting` 新增可选开关 `storage_billing`（默认关闭；月单价 0.015 USD/GB、免费额度 1 GB 且按用户组覆盖、`apply_group_ratio` 默认 false 与前端默认一致、宽限期 7 天、出站 `unmetered`/`metered` 与每日字节/请求上限，非法值回退并记日志）：每小时系统任务 `playground_storage_sample` 把附件/Artifact/画布文档/画布快照/保留任务结果的占用折叠为当日峰值（新表 `playground_storage_ledger`，`(user_id,date)` 唯一、状态 pending/settled/grace、行锁防并发结算），每小时 `playground_storage_settle`（每批 200）把 `max(峰值−免费额度,0)/GiB × 单价/30` 的 GB-day（metered 加出站 GB）经 `common.QuotaFromDecimalChecked` 饱和换算后从统一钱包扣款并写 `wallet_ledger`（`kind=storage_daily`、引用 `user:date`、幂等重放不二次扣费、消费日志 model `playground_storage`）；余额不足部分记为钱包欠款并保持只读（WL-06 语义，充值自动恢复，绝不删除数据）。出站在服务任何字节前按每日字节/请求上限拒绝（429 `PLAYGROUND_EGRESS_LIMIT_EXCEEDED`）。接口：用户 `GET /api/playground/storage/billing`，管理端 `GET /api/user/playground/storage/ledger`、`/ledger/export`（UTF-8 BOM CSV）与只读 `/reconcile`；前端新增系统设置存储计费分区、存储账本对话框与用量弹层当日状态；56 键七语言（missingCount=0、extrasCount=0，基线 untranslated zh 3/ja 4/ru 5），`static-keys.ts` 登记 Pending/Grace，`log_text.zh-CN.json` 补 13 条；测试 `TestPlaygroundStorageBillingSettlement`/`TestPlaygroundStorageBillingEgressLimits`（SQLite/MySQL/PostgreSQL 矩阵）与前端对话框/分区/弹层测试，CI 真实数据库过滤清单已含 `TestPlaygroundStorageBilling`；无新依赖。 |
 | 2026-10-18 | RF-08：按用户组比例与推荐官档位（可选）（借鉴 QuantumNous/new-api#5856、#6539 的思路自行实现，未移植其代码；仅单层、无多级/团队计酬；CI-only，本地未运行测试）——比例解析链为「单人覆盖 → 推荐官档位 → 用户组覆盖 → 全局默认」（`ResolveCommissionRatePercent`），`referral_commissions` 新增 `rate_source` 记录每笔佣金来源；新增 `referral_agents` 表与可选 `agent_tiers` 档位目录（≤50 档、比例 0–100、id 唯一，`ValidateReferralOption` 校验，未知/删除档位自动回退）；管理员接口 `GET /api/user/referral/agents`、`PUT/DELETE /api/user/:id/referral-agent`（`AdminAuth` + `CriticalRateLimit` + 访问令牌规则，审计 `user.referral_agent`/`user.referral_agent_clear`）与只读 `GET /api/user/self/referral-agent`（自述资料把风控三态清零并重算可支付总额，不泄漏决策）；专属页 `/referral` 展示自身档位/比例来源/邀请明细，管理员可编辑档位与标记，钱包页新增入口；测试 `TestReferralCommissionAgentTiers`（SQLite/MySQL/PostgreSQL 真库矩阵）、`TestReferralCommissionOptionValidation` 扩展、`TestReferralAgentAdminEndpoints`（CI 在 MySQL/PostgreSQL 运行）与前端 `referral-agent.test.ts`/`referral-agent-tiers-card.test.tsx`/`referral-agents-card.test.tsx`/`referral-program.test.tsx`；补 42 个新键的七语言翻译（`i18n:sync` missingCount=0、extrasCount=0，untranslatedCount 保持 zh 3/ja 4/ru 5）并登记 4 个动态键；无新依赖。 |
+| 2026-10-19 | 计划：新增第 14 节「Lobe 对齐能力包」——游乐场全量盘点（main @ `f1dff7b96`）对照 lobehub/lobehub 官方 README 的差距分析；用户确认补齐方向（体验补齐包/记忆/RAG/工具执行+MCP/预设市场）并确认**后端计算边界约束**（LLM/embedding 一律经 Relay 计费、分块在前端、向量检索只做余弦点积、外部工具为 API 适配器且 tool loop 由前端驱动、不做代码运行沙箱与内嵌进程）；新增 LB-01..LB-11 十一个 Step（联网搜索、置顶/归档/标签、自动命名、消息级操作、只读分享、记忆、知识库×2、工具执行端、MCP 代理、预设市场），细化 14.3 各 Step 范围与完成标准（自动命名/消息级操作/工具循环为纯前端零后端新增）与建议实施顺序；14.4 五项决策当日确认：LB-02 纳入标签、LB-01 搜索按次计费（固定单价经钱包 hold/settle，上游自带搜索随上游 usage 计费）、LB-05 分享附件只显示占位、LB-06 记忆抽取默认关、LB-10 MCP 管理员全局清单；同日追加 **LB-12** 对话体验小项包（继续生成/回复自动朗读/新会话默认配置/会话导入，纯前端，放 P0 批次），并确认不做话题二级结构与消息点赞/点踩；同日追加 **LB-13** 新用户引导 Step（欢迎卡+空态入口+无模型提示+driver.js 步进 tour，优先级 P1 收尾，2026-10-19 用户确认）与 **LB-14** 对话/创作分层 Step（创作域四入口全部撤出对话归画布：生成媒体迁画布编辑器、制品浏览器迁画布、素材库迁画布、顶栏清空只留用量入口，纯前端，2026-10-19 用户确认，LB-13 依赖其定盘布局）；Phase 7 分享项标注 LB-05 轻量落地；本日仅规划未实施。 |
+| 2026-10-19 | 计划：新增第 15 节「画布创作域补齐」——对 `web/src/features/canvas/` 源码核实（13 种节点、连线/工具/工作流既有，内容级撤销/对齐吸附/导出 PNG/seed/batch/渠道能力揭示/模板/组织查找全部缺失）并对照 ComfyUI/Krea/Miro 同级差距；新增 CV-06..CV-13 八个 Step（编辑器手感、生成参数与变体、渠道条件工具、**图片工作台（P0，项目模式 mode 列复用单文档，zero 新表）**、视频工作台（P1，前端抽帧进 i2v）、画布模板、画布只读分享、组织与查找）；用户确认画布需要单独的图片/视频工作台且功能严重不足需补齐；批次一 P0 = CV-06→07→08→09，批次二 P1 = 10/11/12/13 并行；LB-13 画布部分步序待 CV-09/10 后编写；本日仅规划未实施。 |
