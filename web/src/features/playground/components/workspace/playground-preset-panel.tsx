@@ -134,7 +134,7 @@ function PresetAvatar(props: { avatar: string; name: string }) {
 interface PresetCardProps {
   preset: AssistantPreset
   scope: PresetTab
-  disabled: boolean
+  disabled?: boolean
   onStart: () => void
   onApply: () => void
   onCopy?: () => void
