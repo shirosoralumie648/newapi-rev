@@ -148,9 +148,10 @@ func lockPlaygroundStorageLedgerTx(tx *gorm.DB, userID int, date string) (*Playg
 // PlaygroundStorageBillableFootprint reports the stored bytes the metered
 // storage bill weighs for one account: every stored attachment byte (database
 // backed legacy rows included), artifact version bytes, canvas document bytes,
-// canvas snapshot bytes and the retained async-task results. ObjectBytes is
-// deliberately not added: it is a subset of AttachmentBytes and would double
-// count object-store attachments.
+// canvas snapshot bytes, knowledge base bytes and the retained async-task
+// results. ObjectBytes is deliberately not added: it is a subset of
+// AttachmentBytes and KnowledgeBaseBytes and would double count their
+// object-store rows.
 func PlaygroundStorageBillableFootprint(userID int) (int64, error) {
 	if userID <= 0 {
 		return 0, nil
@@ -164,7 +165,7 @@ func PlaygroundStorageBillableFootprint(userID int) (int64, error) {
 		return 0, err
 	}
 	total := int64(0)
-	for _, part := range []int64{counters.AttachmentBytes, counters.ArtifactBytes, counters.CanvasBytes, counters.CanvasSnapshotBytes, taskBytes} {
+	for _, part := range []int64{counters.AttachmentBytes, counters.ArtifactBytes, counters.CanvasBytes, counters.CanvasSnapshotBytes, counters.KnowledgeBaseBytes, taskBytes} {
 		next, err := addWalletQuotaChecked(total, part, "playground storage footprint")
 		if err != nil {
 			return 0, err

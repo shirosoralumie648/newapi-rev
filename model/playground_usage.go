@@ -36,12 +36,20 @@ type PlaygroundUsageMetric struct {
 type PlaygroundResourceUsage struct {
 	Group           string                `json:"group"`
 	Sessions        PlaygroundUsageMetric `json:"sessions"`
+	Memories        PlaygroundUsageMetric `json:"memories"`
 	Attachments     PlaygroundUsageMetric `json:"attachments"`
 	Artifacts       PlaygroundUsageMetric `json:"artifacts"`
 	Canvas          PlaygroundUsageMetric `json:"canvas"`
 	CanvasSnapshots PlaygroundUsageMetric `json:"canvas_snapshots"`
-	Storage         PlaygroundUsageMetric `json:"storage"`
-	Tasks           PlaygroundUsageMetric `json:"tasks"`
+	// Knowledge bases, their documents and their embedding chunks are separate
+	// metrics because the three limits are independent. The chunk metric also
+	// carries the knowledge byte budget (source files, extracted text and
+	// chunk text plus vectors).
+	KnowledgeBases         PlaygroundUsageMetric `json:"knowledge_bases"`
+	KnowledgeBaseDocuments PlaygroundUsageMetric `json:"kb_documents"`
+	KnowledgeBaseChunks    PlaygroundUsageMetric `json:"kb_chunks"`
+	Storage                PlaygroundUsageMetric `json:"storage"`
+	Tasks                  PlaygroundUsageMetric `json:"tasks"`
 }
 
 // PlaygroundUsageForUser reports the caller's Playground storage against the
@@ -61,6 +69,9 @@ func PlaygroundUsageForUser(userID int) (*PlaygroundResourceUsage, error) {
 		Sessions: PlaygroundUsageMetric{
 			Limit: int64(policy.SessionMaxCount),
 		},
+		Memories: PlaygroundUsageMetric{
+			Limit: int64(policy.MemoryUserMaxCount),
+		},
 		Attachments: PlaygroundUsageMetric{
 			Limit:      int64(policy.AttachmentUserMaxCount),
 			LimitBytes: policy.AttachmentUserMaxBytes,
@@ -77,6 +88,16 @@ func PlaygroundUsageForUser(userID int) (*PlaygroundResourceUsage, error) {
 			Limit:      int64(policy.CanvasSnapshotUserMaxCount),
 			LimitBytes: policy.CanvasSnapshotUserMaxBytes,
 		},
+		KnowledgeBases: PlaygroundUsageMetric{
+			Limit: int64(policy.KnowledgeBaseUserMaxCount),
+		},
+		KnowledgeBaseDocuments: PlaygroundUsageMetric{
+			Limit: int64(policy.KnowledgeBaseDocumentUserMaxCount),
+		},
+		KnowledgeBaseChunks: PlaygroundUsageMetric{
+			Limit:      int64(policy.KnowledgeBaseChunkUserMaxCount),
+			LimitBytes: policy.KnowledgeBaseUserMaxBytes,
+		},
 		Storage: PlaygroundUsageMetric{
 			LimitBytes: policy.ObjectUserMaxBytes,
 		},
@@ -91,6 +112,7 @@ func PlaygroundUsageForUser(userID int) (*PlaygroundResourceUsage, error) {
 		return nil, err
 	}
 	usage.Sessions.Used = counters.Sessions
+	usage.Memories.Used = counters.Memories
 	usage.Attachments.Used = counters.AttachmentCount
 	usage.Attachments.UsedBytes = counters.AttachmentBytes
 	usage.Artifacts.Used = counters.ArtifactCount
@@ -99,6 +121,10 @@ func PlaygroundUsageForUser(userID int) (*PlaygroundResourceUsage, error) {
 	usage.Canvas.UsedBytes = counters.CanvasBytes
 	usage.CanvasSnapshots.Used = counters.CanvasSnapshotCount
 	usage.CanvasSnapshots.UsedBytes = counters.CanvasSnapshotBytes
+	usage.KnowledgeBases.Used = counters.KnowledgeBaseCount
+	usage.KnowledgeBaseDocuments.Used = counters.KnowledgeBaseDocumentCount
+	usage.KnowledgeBaseChunks.Used = counters.KnowledgeBaseChunkCount
+	usage.KnowledgeBaseChunks.UsedBytes = counters.KnowledgeBaseBytes
 	// Storage counts the bytes that live in the object store, the same figure
 	// the upload path checks against ObjectUserMaxBytes.
 	usage.Storage.UsedBytes = counters.ObjectBytes

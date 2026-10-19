@@ -84,6 +84,8 @@ export function playgroundSnapshot(session: PlaygroundSession): string {
     config: session.config,
     parameterEnabled: session.parameterEnabled,
     systemPrompt: session.systemPrompt,
+    openingMessage: session.openingMessage,
+    suggestedQuestions: session.suggestedQuestions,
     context: session.context,
     contextSummary: session.contextSummary,
     messages: normalizeMessagesForStorage(session.messages),
@@ -134,6 +136,8 @@ export async function hydratePlaygroundWorkspace(
       config: session.config,
       parameterEnabled: session.parameterEnabled,
       systemPrompt: session.systemPrompt,
+      openingMessage: session.openingMessage,
+      suggestedQuestions: session.suggestedQuestions,
       context: session.context,
       contextSummary: session.contextSummary,
       messages,
@@ -182,6 +186,8 @@ export async function savePlaygroundSession(
         config: draft.config,
         parameter_enabled: draft.parameterEnabled,
         system_prompt: draft.systemPrompt,
+        opening_message: draft.openingMessage,
+        suggested_questions: draft.suggestedQuestions,
         context: draft.context,
         context_summary: draft.contextSummary,
         messages,
@@ -214,6 +220,9 @@ export async function savePlaygroundSession(
       JSON.stringify(created.parameterEnabled) !==
         JSON.stringify(draft.parameterEnabled) ||
       created.systemPrompt !== draft.systemPrompt ||
+      created.openingMessage !== draft.openingMessage ||
+      JSON.stringify(created.suggestedQuestions) !==
+        JSON.stringify(draft.suggestedQuestions) ||
       JSON.stringify(created.context) !== JSON.stringify(draft.context) ||
       JSON.stringify(created.contextSummary) !==
         JSON.stringify(draft.contextSummary)
@@ -233,6 +242,8 @@ export async function savePlaygroundSession(
       config: draft.config,
       parameter_enabled: draft.parameterEnabled,
       system_prompt: draft.systemPrompt,
+      opening_message: draft.openingMessage,
+      suggested_questions: draft.suggestedQuestions,
       context: draft.context,
       context_summary: draft.contextSummary,
       revision: draft.server.revision,

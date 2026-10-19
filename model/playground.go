@@ -106,6 +106,14 @@ type PlaygroundSession struct {
 	// replaces the oldest messages of the conversation in a request. An empty
 	// value means the conversation sends its stored history uncompressed.
 	ContextSummary string `json:"-" gorm:"type:text"`
+	// OpeningMessage is the display-only greeting a conversation created from a
+	// preset starts with. It is shown above the first prompt and never becomes a
+	// model message, so it does not affect the request or its billing.
+	OpeningMessage LongText `json:"-"`
+	// SuggestedQuestions stores the preset's starter questions as a JSON array
+	// of strings. They are display-only prompts the user may send; the column
+	// stays nullable so an existing installation can add it on every dialect.
+	SuggestedQuestions string `json:"-" gorm:"type:text"`
 	// DeletedAt is the trash tombstone: 0 means the conversation is active, and
 	// a positive value is the timestamp it was soft-deleted. A trashed
 	// conversation keeps its messages, attachments and artifacts — and its
@@ -401,6 +409,13 @@ func purgePlaygroundSessionTx(tx *gorm.DB, userID int, session *PlaygroundSessio
 		return nil, err
 	}
 	if err := tx.Where("session_id = ? AND user_id = ?", session.ID, userID).Delete(&PlaygroundMessage{}).Error; err != nil {
+		return nil, err
+	}
+	// Memories outlive the conversation they were extracted from, but a purged
+	// conversation can no longer be opened as their source. Keep the note and
+	// drop only the dangling pointer.
+	if err := tx.Model(&PlaygroundMemory{}).Where("user_id = ? AND source_session_id = ?", userID, session.ID).
+		Update("source_session_id", nil).Error; err != nil {
 		return nil, err
 	}
 	if err := tx.Where("id = ? AND user_id = ?", session.ID, userID).Delete(&PlaygroundSession{}).Error; err != nil {

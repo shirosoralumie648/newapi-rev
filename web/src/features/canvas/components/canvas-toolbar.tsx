@@ -21,10 +21,13 @@ import {
   AlignVerticalSpaceAround,
   Bot,
   Download,
+  FileText,
+  FolderOpen,
   Pencil,
   Play,
   Plus,
   Redo2,
+  Sparkles,
   Square,
   Undo2,
   Upload,
@@ -45,7 +48,14 @@ import type { GroupOption } from '@/features/playground/types'
 
 import { CANVAS_NODE_KINDS, CANVAS_NODE_KIND_LABELS } from '../constants'
 import type { CanvasWorkflowRunPhase } from '../hooks/use-canvas-workflow-runner'
-import type { CanvasNodeKind } from '../types'
+import type { CanvasInspectorView, CanvasNodeKind } from '../types'
+
+/** Inspector views the toolbar can open; the creator owns the whole domain. */
+export type CanvasToolbarInspectorView =
+  | 'assistant'
+  | 'generate'
+  | 'library'
+  | 'artifacts'
 
 interface CanvasToolbarProps {
   disabled?: boolean
@@ -61,8 +71,8 @@ interface CanvasToolbarProps {
   canExportSelection: boolean
   exportingPng: boolean
   runPhase: CanvasWorkflowRunPhase
-  /** Whether the inspector shows the assistant instead of node details. */
-  assistantOpen: boolean
+  /** Which inspector view is open; `details` means none of the switches. */
+  inspectorView: CanvasInspectorView
   group: string
   groups: GroupOption[]
   onGroupChange: (group: string) => void
@@ -83,7 +93,7 @@ interface CanvasToolbarProps {
   onExportSelectionPng: () => void
   onExportArchive: () => void
   onExportSelectionArchive: () => void
-  onToggleAssistant: () => void
+  onToggleInspectorView: (view: CanvasToolbarInspectorView) => void
   onRunWorkflow: () => void
   onCancelRun: () => void
 }
@@ -93,6 +103,16 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const archiveInputRef = useRef<HTMLInputElement>(null)
   const running = props.runPhase === 'running'
+  const inspectorSwitches: Array<{
+    view: CanvasToolbarInspectorView
+    label: string
+    icon: typeof Bot
+  }> = [
+    { view: 'generate', label: t('Generate'), icon: Sparkles },
+    { view: 'library', label: t('Library'), icon: FolderOpen },
+    { view: 'artifacts', label: t('Artifacts'), icon: FileText },
+    { view: 'assistant', label: t('Assistant'), icon: Bot },
+  ]
 
   return (
     <div className='flex flex-wrap items-center gap-1'>
@@ -189,17 +209,24 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <Button
-        aria-pressed={props.assistantOpen}
-        disabled={props.disabled}
-        onClick={props.onToggleAssistant}
-        size='sm'
-        type='button'
-        variant={props.assistantOpen ? 'secondary' : 'outline'}
-      >
-        <Bot aria-hidden='true' />
-        {t('Assistant')}
-      </Button>
+      {inspectorSwitches.map((entry) => {
+        const Icon = entry.icon
+        const active = props.inspectorView === entry.view
+        return (
+          <Button
+            aria-pressed={active}
+            disabled={props.disabled}
+            key={entry.view}
+            onClick={() => props.onToggleInspectorView(entry.view)}
+            size='sm'
+            type='button'
+            variant={active ? 'secondary' : 'outline'}
+          >
+            <Icon aria-hidden='true' />
+            {entry.label}
+          </Button>
+        )
+      })}
 
       <input
         accept='application/json,.json'

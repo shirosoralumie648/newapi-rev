@@ -33,7 +33,7 @@ import type { TaskArtifact, TaskLog } from '@/features/usage-logs/types'
 import en from '@/i18n/locales/en.json'
 import { api } from '@/lib/api'
 
-import { PlaygroundGenerationPanel } from '../playground-generation-panel'
+import { CanvasGenerationPanel } from '../canvas-generation-panel'
 
 Object.defineProperty(HTMLElement.prototype, 'getAnimations', {
   configurable: true,
@@ -84,7 +84,7 @@ function renderPanel(onSendToCanvas = vi.fn()) {
   render(
     <I18nextProvider i18n={testI18n}>
       <QueryClientProvider client={client}>
-        <PlaygroundGenerationPanel
+        <CanvasGenerationPanel
           active
           group='default'
           models={[{ label: 'gpt-image-1', value: 'gpt-image-1' }]}

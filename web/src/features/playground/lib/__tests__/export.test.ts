@@ -20,7 +20,10 @@ import { afterEach, expect, test, vi } from 'vitest'
 
 import { api } from '@/lib/api'
 
-import { exportPlaygroundSessionFile } from '../export'
+import {
+  exportPlaygroundPresetFile,
+  exportPlaygroundSessionFile,
+} from '../export'
 
 type Download = { filename: string; blob: Blob }
 
@@ -84,4 +87,32 @@ test('downloads the served export under the filename the server suggested', asyn
   expect(vi.mocked(URL.revokeObjectURL)).toHaveBeenCalledWith(
     'blob:playground-export'
   )
+})
+
+test('downloads a preset as the JSON document the import endpoint accepts', async () => {
+  const content =
+    '{"format":"new-api-playground-preset","version":1,"preset":{"name":"Reviewer"}}'
+  const get = vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        format: 'json',
+        filename: 'Reviewer.json',
+        content_type: 'application/json; charset=utf-8',
+        content,
+      },
+    },
+  })
+  const downloads = captureDownloads()
+
+  await exportPlaygroundPresetFile('pgp_reviewer', 'global')
+
+  expect(get).toHaveBeenCalledWith(
+    '/api/playground/presets/global/pgp_reviewer/export',
+    expect.anything()
+  )
+  expect(downloads).toHaveLength(1)
+  expect(downloads[0].filename).toBe('Reviewer.json')
+  expect(downloads[0].blob.type).toBe('application/json; charset=utf-8')
+  expect(await readDownload(downloads[0])).toBe(content)
 })

@@ -36,6 +36,7 @@ import {
   assertPlaygroundOwner,
   hydratePlaygroundWorkspace,
   playgroundSnapshot,
+  playgroundSyncedSnapshot,
   savePlaygroundSession,
 } from '../lib/server-sync'
 import type { PlaygroundSyncedMessages } from '../lib/server-sync'
@@ -375,6 +376,25 @@ export function usePlaygroundServer(
     },
     [mutateAsync]
   )
+  // A conversation rebuilt by the import flow already exists on the server:
+  // adopt it into the workspace and remember its stored message snapshot so
+  // the next autosave does not re-upload every imported message.
+  const adoptImportedSession = useCallback(
+    (session: PlaygroundSession) => {
+      if (session.server) {
+        syncedMessages.current.set(
+          session.server.id,
+          playgroundSyncedSnapshot(session.messages)
+        )
+      }
+      local.addSession(session)
+      void queryClient.invalidateQueries({
+        queryKey: playgroundQueryKeys.list(owner),
+        refetchType: 'none',
+      })
+    },
+    [local, owner, queryClient]
+  )
   // Attachment uploads need the canonical server session, so a send that
   // carries files creates the conversation first when it is still local-only.
   const ensureServerSession = useCallback(
@@ -401,6 +421,7 @@ export function usePlaygroundServer(
     retry,
     conflict,
     saveAsNew,
+    adoptImportedSession,
     deleteSession,
     restoreSession,
     ensureServerSession,

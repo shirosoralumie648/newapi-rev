@@ -132,9 +132,16 @@ type PlaygroundQuotaPolicy struct {
 	// stored attachments, so they have no account-level byte budget.
 	SnippetUserMaxCount    int   `json:"snippet_user_max_count"`
 	SnippetContentMaxBytes int64 `json:"snippet_content_max_bytes"`
-	MessageMaxCount        int   `json:"message_max_count"`
-	MessageMaxVersions     int   `json:"message_max_versions"`
-	MessageMaxBytes        int64 `json:"message_max_bytes"`
+	// MemoryUserMaxCount and MemoryContentMaxBytes bound the account's durable
+	// cross-session notes: how many memories it may store and how many bytes one
+	// memory's text may occupy. Memories are derived from the owner's own
+	// conversations and only add context to a normal /pg request, so they have
+	// no account-level byte budget.
+	MemoryUserMaxCount    int   `json:"memory_user_max_count"`
+	MemoryContentMaxBytes int64 `json:"memory_content_max_bytes"`
+	MessageMaxCount       int   `json:"message_max_count"`
+	MessageMaxVersions    int   `json:"message_max_versions"`
+	MessageMaxBytes       int64 `json:"message_max_bytes"`
 	// ParallelCompareMaxModels bounds one parallel-comparison message group:
 	// how many models a single send may fan out to. Each comparison request is
 	// an ordinary /pg call whose own rate limit, channel and billing apply, so
@@ -185,6 +192,20 @@ type PlaygroundQuotaPolicy struct {
 	CanvasSnapshotPerCanvasMaxCount int   `json:"canvas_snapshot_per_canvas_max_count"`
 	CanvasSnapshotUserMaxCount      int   `json:"canvas_snapshot_user_max_count"`
 	CanvasSnapshotUserMaxBytes      int64 `json:"canvas_snapshot_user_max_bytes"`
+	// Knowledge base budgets (LB-07). Bases, their documents and their
+	// embedding chunks have independent count limits; the byte budget weighs
+	// the source files, the extracted text and the stored chunk text plus
+	// vectors. ChunkTextMaxBytes bounds one chunk, ChunkMaxCount bounds one
+	// document and EmbeddingMaxDims bounds one vector, so a single document or
+	// vector can never make the index unbounded.
+	KnowledgeBaseUserMaxCount         int   `json:"knowledge_base_user_max_count"`
+	KnowledgeBaseDocumentUserMaxCount int   `json:"knowledge_base_document_user_max_count"`
+	KnowledgeBaseDocumentMaxCount     int   `json:"knowledge_base_document_max_count"`
+	KnowledgeBaseChunkUserMaxCount    int   `json:"knowledge_base_chunk_user_max_count"`
+	KnowledgeBaseChunkMaxCount        int   `json:"knowledge_base_chunk_max_count"`
+	KnowledgeBaseChunkTextMaxBytes    int64 `json:"knowledge_base_chunk_text_max_bytes"`
+	KnowledgeBaseEmbeddingMaxDims     int   `json:"knowledge_base_embedding_max_dims"`
+	KnowledgeBaseUserMaxBytes         int64 `json:"knowledge_base_user_max_bytes"`
 	// ObjectUserMaxBytes caps the bytes the account keeps in the object store
 	// (conversation and canvas attachments today, generated results once they
 	// are persisted there). It is the account-level storage entitlement a
@@ -322,6 +343,8 @@ func builtinPlaygroundQuotaPolicy() PlaygroundQuotaPolicy {
 		SystemPromptMaxBytes:      16 << 10,
 		SnippetUserMaxCount:       100,
 		SnippetContentMaxBytes:    8 << 10,
+		MemoryUserMaxCount:        100,
+		MemoryContentMaxBytes:     4 << 10,
 		MessageMaxCount:           100,
 		MessageMaxVersions:        100,
 		MessageMaxBytes:           1 << 20,
@@ -375,6 +398,20 @@ func builtinPlaygroundQuotaPolicy() PlaygroundQuotaPolicy {
 		CanvasSnapshotPerCanvasMaxCount: 10,
 		CanvasSnapshotUserMaxCount:      200,
 		CanvasSnapshotUserMaxBytes:      64 << 20,
+		// Knowledge bases reuse the 16 MiB document ceiling and the 256 KiB
+		// text extraction budget above. A base holds up to 50 documents, one
+		// document up to 500 chunks of at most 4 KiB text, and an account up
+		// to 20 bases / 200 documents / 10000 chunks / 128 MiB of source,
+		// extracted text and vectors. Embedding models with up to 4096
+		// dimensions fit (text-embedding-3-large uses 3072).
+		KnowledgeBaseUserMaxCount:         20,
+		KnowledgeBaseDocumentUserMaxCount: 200,
+		KnowledgeBaseDocumentMaxCount:     50,
+		KnowledgeBaseChunkUserMaxCount:    10000,
+		KnowledgeBaseChunkMaxCount:        500,
+		KnowledgeBaseChunkTextMaxBytes:    4 << 10,
+		KnowledgeBaseEmbeddingMaxDims:     4096,
+		KnowledgeBaseUserMaxBytes:         128 << 20,
 		// The account-level object-store budget starts at the ceiling the
 		// existing attachment and generated-result budgets already imply
 		// (64 MiB each), so enabling it never rejects a write the previous
@@ -455,6 +492,12 @@ func applyPlaygroundQuotaOverrides(policy *PlaygroundQuotaPolicy, override *Play
 	}
 	if override.SnippetContentMaxBytes > 0 {
 		policy.SnippetContentMaxBytes = override.SnippetContentMaxBytes
+	}
+	if override.MemoryUserMaxCount > 0 {
+		policy.MemoryUserMaxCount = override.MemoryUserMaxCount
+	}
+	if override.MemoryContentMaxBytes > 0 {
+		policy.MemoryContentMaxBytes = override.MemoryContentMaxBytes
 	}
 	if override.MessageMaxCount > 0 {
 		policy.MessageMaxCount = override.MessageMaxCount
@@ -560,6 +603,30 @@ func applyPlaygroundQuotaOverrides(policy *PlaygroundQuotaPolicy, override *Play
 	}
 	if override.CanvasSnapshotUserMaxBytes > 0 {
 		policy.CanvasSnapshotUserMaxBytes = override.CanvasSnapshotUserMaxBytes
+	}
+	if override.KnowledgeBaseUserMaxCount > 0 {
+		policy.KnowledgeBaseUserMaxCount = override.KnowledgeBaseUserMaxCount
+	}
+	if override.KnowledgeBaseDocumentUserMaxCount > 0 {
+		policy.KnowledgeBaseDocumentUserMaxCount = override.KnowledgeBaseDocumentUserMaxCount
+	}
+	if override.KnowledgeBaseDocumentMaxCount > 0 {
+		policy.KnowledgeBaseDocumentMaxCount = override.KnowledgeBaseDocumentMaxCount
+	}
+	if override.KnowledgeBaseChunkUserMaxCount > 0 {
+		policy.KnowledgeBaseChunkUserMaxCount = override.KnowledgeBaseChunkUserMaxCount
+	}
+	if override.KnowledgeBaseChunkMaxCount > 0 {
+		policy.KnowledgeBaseChunkMaxCount = override.KnowledgeBaseChunkMaxCount
+	}
+	if override.KnowledgeBaseChunkTextMaxBytes > 0 {
+		policy.KnowledgeBaseChunkTextMaxBytes = override.KnowledgeBaseChunkTextMaxBytes
+	}
+	if override.KnowledgeBaseEmbeddingMaxDims > 0 {
+		policy.KnowledgeBaseEmbeddingMaxDims = override.KnowledgeBaseEmbeddingMaxDims
+	}
+	if override.KnowledgeBaseUserMaxBytes > 0 {
+		policy.KnowledgeBaseUserMaxBytes = override.KnowledgeBaseUserMaxBytes
 	}
 	if override.ObjectUserMaxBytes > 0 {
 		policy.ObjectUserMaxBytes = override.ObjectUserMaxBytes

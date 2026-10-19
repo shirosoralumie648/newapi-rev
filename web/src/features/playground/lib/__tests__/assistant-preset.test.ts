@@ -48,6 +48,9 @@ function preset(overrides: Partial<AssistantPreset> = {}): AssistantPreset {
     },
     parameterEnabled: { ...DEFAULT_PARAMETER_ENABLED, max_tokens: true },
     systemPrompt: 'Review code carefully.',
+    visibility: 'private',
+    openingMessage: 'Welcome to the review.',
+    suggestedQuestions: ['Explain the diff', 'Find bugs'],
     createdAt: 1,
     updatedAt: 1,
     ...overrides,
@@ -107,6 +110,11 @@ describe('assistant preset settings', () => {
       max_tokens: true,
     })
     expect(settings.systemPrompt).toBe('Review code carefully.')
+    expect(settings.openingMessage).toBe('Welcome to the review.')
+    expect(settings.suggestedQuestions).toEqual([
+      'Explain the diff',
+      'Find bugs',
+    ])
   })
 
   test('a preset without a model keeps the conversation model', () => {
@@ -126,6 +134,8 @@ describe('assistant preset settings', () => {
       config: { ...DEFAULT_CONFIG, group: 'vip', stream: false, model: 'm' },
       parameterEnabled: DEFAULT_PARAMETER_ENABLED,
       systemPrompt: 'Review code carefully.',
+      openingMessage: 'Welcome to the review.',
+      suggestedQuestions: ['Explain the diff'],
     })
 
     expect(input.name).toBe('Reviewer')
@@ -135,6 +145,8 @@ describe('assistant preset settings', () => {
     expect(input.config.model).toBe('m')
     expect(input.parameter_enabled).toEqual(DEFAULT_PARAMETER_ENABLED)
     expect(input.system_prompt).toBe('Review code carefully.')
+    expect(input.opening_message).toBe('Welcome to the review.')
+    expect(input.suggested_questions).toEqual(['Explain the diff'])
   })
 })
 
@@ -166,6 +178,8 @@ describe('reasoning effort copy and payload', () => {
         reasoning_effort: true,
       },
       systemPrompt: '',
+      openingMessage: '',
+      suggestedQuestions: [],
     })
 
     expect(input.config.reasoning_effort).toBe('minimal')

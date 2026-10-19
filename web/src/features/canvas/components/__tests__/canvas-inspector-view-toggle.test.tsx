@@ -38,3 +38,19 @@ test('marks the current view and reports the view the user picks', async () => {
   expect(onViewChange).toHaveBeenCalledTimes(1)
   expect(onViewChange).toHaveBeenCalledWith('assistant')
 })
+
+test('offers the creation-domain panels the canvas owns', async () => {
+  const user = userEvent.setup()
+  const onViewChange = vi.fn()
+  render(
+    <CanvasInspectorViewToggle onViewChange={onViewChange} view='details' />
+  )
+
+  for (const name of ['Generate', 'Library', 'Artifacts']) {
+    await user.click(screen.getByRole('button', { name }))
+  }
+
+  expect(onViewChange).toHaveBeenNthCalledWith(1, 'generate')
+  expect(onViewChange).toHaveBeenNthCalledWith(2, 'library')
+  expect(onViewChange).toHaveBeenNthCalledWith(3, 'artifacts')
+})

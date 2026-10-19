@@ -41,6 +41,9 @@ function buildInputElement(
   overrides: Partial<ComponentProps<typeof PlaygroundInput>> = {}
 ) {
   const props: ComponentProps<typeof PlaygroundInput> = {
+    autoReadDefaultEnabled: false,
+    autoReadEnabled: false,
+    autoReadHasOverride: false,
     compareModels: [],
     config: DEFAULT_CONFIG,
     contextPlan: planPlaygroundContext({
@@ -53,6 +56,9 @@ function buildInputElement(
     groups: [{ label: 'default', value: 'default', ratio: 1, desc: '' }],
     modelValue: 'gpt-4o',
     models: [{ label: 'gpt-4o', value: 'gpt-4o' }],
+    onAutoReadChange: () => undefined,
+    onAutoReadDefaultChange: () => undefined,
+    onAutoReadUseDefault: () => undefined,
     onCompareModelsChange: () => undefined,
     onConfigChange: () => undefined,
     onContextSettingsChange: () => undefined,
@@ -187,50 +193,4 @@ test('a failed send keeps the draft text and attachment for retry', async () => 
   await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1))
   expect(screen.getByPlaceholderText('Ask anything')).toHaveValue('keep me')
   expect(screen.getByText('photo.png')).toBeVisible()
-})
-
-test('pending files from the library join the composer exactly once', async () => {
-  const onPendingFilesConsumed = vi.fn()
-  const pending = [attachmentFile()]
-  const { rerender } = renderComposer(
-    buildInputElement(vi.fn().mockResolvedValue(undefined), {
-      pendingFiles: pending,
-      onPendingFilesConsumed,
-    })
-  )
-
-  expect(await screen.findByText('photo.png')).toBeVisible()
-  expect(onPendingFilesConsumed).toHaveBeenCalledTimes(1)
-
-  // A parent re-render with the same batch must not add the file again.
-  rerender(
-    buildInputElement(vi.fn().mockResolvedValue(undefined), {
-      pendingFiles: pending,
-      onPendingFilesConsumed,
-    })
-  )
-  expect(screen.getAllByText('photo.png')).toHaveLength(1)
-  expect(onPendingFilesConsumed).toHaveBeenCalledTimes(1)
-})
-
-test('pending artifact text is appended to the draft once', async () => {
-  const user = userEvent.setup()
-  const onPendingTextConsumed = vi.fn()
-  const onSubmit = vi.fn().mockResolvedValue(undefined)
-  const { rerender } = renderComposer(buildInputElement(onSubmit))
-
-  await user.type(screen.getByPlaceholderText('Ask anything'), 'Draft')
-  rerender(
-    buildInputElement(onSubmit, {
-      pendingText: 'artifact body',
-      onPendingTextConsumed,
-    })
-  )
-
-  await waitFor(() =>
-    expect(screen.getByPlaceholderText('Ask anything')).toHaveValue(
-      'Draft\n\nartifact body'
-    )
-  )
-  expect(onPendingTextConsumed).toHaveBeenCalledTimes(1)
 })

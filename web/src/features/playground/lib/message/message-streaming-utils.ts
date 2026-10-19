@@ -20,6 +20,7 @@ import { t } from 'i18next'
 
 import { ERROR_MESSAGES, MESSAGE_ROLES, MESSAGE_STATUS } from '../../constants'
 import type { ChatCompletionResponse, Message } from '../../types'
+import { setCurrentVersionFinishReason } from './message-continuation-utils'
 import { parseThinkTags } from './message-reasoning-utils'
 import {
   completeAssistantTiming,
@@ -190,9 +191,12 @@ export function applyChatCompletionChoice(
   message: Message,
   choice: ChatCompletionChoice
 ): Message {
-  const finalized = finalizeMessage(
-    updateCurrentVersionContent(message, choice.message?.content || ''),
-    choice.message?.reasoning_content ?? choice.message?.reasoning
+  const finalized = setCurrentVersionFinishReason(
+    finalizeMessage(
+      updateCurrentVersionContent(message, choice.message?.content || ''),
+      choice.message?.reasoning_content ?? choice.message?.reasoning
+    ),
+    choice.finish_reason
   )
 
   return completeAssistantTiming({

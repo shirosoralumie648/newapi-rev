@@ -53,6 +53,9 @@ function renderTools(
     <QueryClientProvider client={client}>
       <PromptInputProvider>
         <PlaygroundInputTools
+          autoReadDefaultEnabled={false}
+          autoReadEnabled={false}
+          autoReadHasOverride={false}
           config={config}
           contextPlan={planPlaygroundContext({
             messages: [],
@@ -65,6 +68,9 @@ function renderTools(
           compareModels={[]}
           onCompareModelsChange={() => undefined}
           onClearMessages={onClearMessages}
+          onAutoReadChange={() => undefined}
+          onAutoReadDefaultChange={() => undefined}
+          onAutoReadUseDefault={() => undefined}
           onConfigChange={() => undefined}
           onContextSettingsChange={() => undefined}
           onDictateTranscript={onDictateTranscript}

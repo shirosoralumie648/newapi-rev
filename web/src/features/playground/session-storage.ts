@@ -64,7 +64,9 @@ function createSession(
   parameterEnabled: ParameterEnabled = DEFAULT_PARAMETER_ENABLED,
   systemPrompt = '',
   context: PlaygroundContextSettings = DEFAULT_CONTEXT_SETTINGS,
-  contextSummary: PlaygroundContextSummary | null = null
+  contextSummary: PlaygroundContextSummary | null = null,
+  openingMessage = '',
+  suggestedQuestions: string[] = []
 ): PlaygroundSession {
   const now = Date.now()
   return {
@@ -75,6 +77,8 @@ function createSession(
     config: { ...config },
     parameterEnabled: { ...parameterEnabled },
     systemPrompt,
+    openingMessage,
+    suggestedQuestions: [...suggestedQuestions],
     context: { ...context },
     contextSummary,
     messages: [],
@@ -97,6 +101,8 @@ function normalizeSession(value: unknown): PlaygroundSession | null {
     ...parsed.data,
     title: parsed.data.title.trim(),
     systemPrompt: parsed.data.systemPrompt ?? '',
+    openingMessage: parsed.data.openingMessage ?? '',
+    suggestedQuestions: parsed.data.suggestedQuestions ?? [],
     context: normalizeContextSettings(parsed.data.context),
     contextSummary: normalizeContextSummary(parsed.data.contextSummary),
     messages: normalizeMessagesForStorage(parsed.data.messages),
@@ -181,6 +187,13 @@ function migrateStoredSession(value: unknown): PlaygroundSession | null {
     parameterEnabled: parameterEnabled.data,
     systemPrompt:
       typeof source.systemPrompt === 'string' ? source.systemPrompt : undefined,
+    openingMessage:
+      typeof source.openingMessage === 'string'
+        ? source.openingMessage
+        : undefined,
+    suggestedQuestions: Array.isArray(source.suggestedQuestions)
+      ? source.suggestedQuestions
+      : undefined,
     context: source.context,
     contextSummary: source.contextSummary,
     messages: messages.data,
@@ -234,9 +247,23 @@ export function loadSessionsState(
     parameterEnabled: ParameterEnabled
     messages: Message[]
   },
-  userId: number | null = getCurrentUserId()
+  userId: number | null = getCurrentUserId(),
+  /**
+   * Account-level new-conversation defaults. They only seed the initial
+   * conversation when this browser has never stored one for the account;
+   * stored conversations always win.
+   */
+  newSessionDefaults?: {
+    config: PlaygroundConfig
+    parameterEnabled: ParameterEnabled
+    systemPrompt: string
+  } | null
 ): PlaygroundSessionsState {
-  const migratedSession = createSession(legacy.config, legacy.parameterEnabled)
+  const migratedSession = createSession(
+    newSessionDefaults?.config ?? legacy.config,
+    newSessionDefaults?.parameterEnabled ?? legacy.parameterEnabled,
+    newSessionDefaults?.systemPrompt ?? ''
+  )
   migratedSession.messages = normalizeMessagesForStorage(legacy.messages)
   const fallbackState: PlaygroundSessionsState = {
     activeSessionId: migratedSession.id,
@@ -349,13 +376,17 @@ export function createEmptySession(
   parameterEnabled: ParameterEnabled,
   systemPrompt = '',
   context: PlaygroundContextSettings = DEFAULT_CONTEXT_SETTINGS,
-  contextSummary: PlaygroundContextSummary | null = null
+  contextSummary: PlaygroundContextSummary | null = null,
+  openingMessage = '',
+  suggestedQuestions: string[] = []
 ): PlaygroundSession {
   return createSession(
     config,
     parameterEnabled,
     systemPrompt,
     context,
-    contextSummary
+    contextSummary,
+    openingMessage,
+    suggestedQuestions
   )
 }

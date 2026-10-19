@@ -81,6 +81,8 @@ interface CanvasNodeInspectorProps {
   onDelete: (id: string) => void
   onRetry?: (nodeId: string) => void
   onOpenSource?: (target: CanvasSourceTarget) => void
+  /** Opens an artifact in the canvas artifact browser. */
+  onOpenArtifact?: (target: CanvasSourceTarget) => void
   /** Opens one browser-side image tool on an image-carrying node. */
   onOpenImageTools?: (node: CanvasFlowNode, tool: CanvasImageToolKind) => void
 }
@@ -254,7 +256,9 @@ export function CanvasNodeInspector(props: CanvasNodeInspectorProps) {
             {sourceTarget.artifactId ? (
               <Button
                 disabled={props.disabled}
-                onClick={() => props.onOpenSource?.(sourceTarget)}
+                onClick={() =>
+                  (props.onOpenArtifact ?? props.onOpenSource)?.(sourceTarget)
+                }
                 size='sm'
                 type='button'
                 variant='outline'

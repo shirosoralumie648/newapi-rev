@@ -47,6 +47,8 @@ interface UseParallelChatOptions {
   parameterEnabled: ParameterEnabled
   /** Conversation-level instruction injected as the first request message. */
   systemPrompt: string
+  /** Enabled cross-session memory block injected after the system prompt. */
+  memoryBlock?: string
   /** Context limits and summary model applied when the payloads are built. */
   contextSettings: PlaygroundContextSettings
   /** Messages of the active conversation; retries reuse the stored prefix. */
@@ -150,7 +152,8 @@ export function useParallelChat(options: UseParallelChatOptions) {
             { ...latest.config, model: entry.model, stream: false },
             latest.parameterEnabled,
             latest.systemPrompt,
-            { settings: latest.contextSettings, summary: contextSummary }
+            { settings: latest.contextSettings, summary: contextSummary },
+            latest.memoryBlock
           )
 
           let requestId: string | undefined

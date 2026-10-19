@@ -48,17 +48,18 @@ export interface ChatCompletionPayloadContext {
 
 /**
  * Build API request payload from messages and config. A conversation-level
- * system prompt is injected as the first `system` message; an empty or
- * whitespace-only prompt adds nothing. With context management enabled the
- * request carries only the messages the plan keeps, prefixed by the
- * compression node when one applies.
+ * system prompt is injected as the first `system` message and the owner's
+ * cross-session memory block right after it; an empty or whitespace-only value
+ * adds nothing. With context management enabled the request carries only the
+ * messages the plan keeps, prefixed by the compression node when one applies.
  */
 export function buildChatCompletionPayload(
   messages: Message[],
   config: PlaygroundConfig,
   parameterEnabled: ParameterEnabled,
   systemPrompt = '',
-  context?: ChatCompletionPayloadContext
+  context?: ChatCompletionPayloadContext,
+  memoryBlock = ''
 ): ChatCompletionRequest {
   // Filter and format valid messages; the plan applies the limits and the
   // compression node, the plain path sends the history unchanged.
@@ -68,6 +69,7 @@ export function buildChatCompletionPayload(
         settings: context.settings,
         summary: context.summary,
         systemPrompt,
+        memoryBlock,
         model: config.model,
       })
     : null
@@ -76,9 +78,12 @@ export function buildChatCompletionPayload(
     : messages.filter(isValidMessage).flatMap(formatMessageForRequest)
 
   const prompt = systemPrompt.trim()
-  const baseMessages: ChatCompletionMessage[] = prompt
-    ? [{ role: 'system', content: prompt }, ...processedMessages]
-    : processedMessages
+  const memory = memoryBlock.trim()
+  const baseMessages: ChatCompletionMessage[] = [
+    ...(prompt ? [{ role: 'system' as const, content: prompt }] : []),
+    ...(memory ? [{ role: 'system' as const, content: memory }] : []),
+    ...processedMessages,
+  ]
   // Stored messages stay untouched: the policy only changes this request, so a
   // base64 payload produced by an image model or an image a text-only model
   // cannot accept is replaced without deleting anything from the conversation.

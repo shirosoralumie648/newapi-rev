@@ -86,6 +86,13 @@ export interface MessageVersion {
   requestId?: string
   /** Token usage the relay reported when this version finished generating. */
   usage?: MessageUsage
+  /**
+   * Why the generation of this version ended, as the provider reported it
+   * (`length` when the output hit the token cap, `interrupted` when the user
+   * stopped it). The value only labels the stored version so a truncated reply
+   * can offer "continue generation"; it never feeds billing.
+   */
+  finishReason?: string
 }
 
 /**
@@ -189,6 +196,13 @@ export interface PlaygroundSession {
   parameterEnabled: ParameterEnabled
   /** Conversation-level instruction injected as the first `system` message. */
   systemPrompt: string
+  /**
+   * Display-only greeting from the preset that started this conversation. It is
+   * shown on the empty state and never sent to the model.
+   */
+  openingMessage: string
+  /** Starter questions shown on the empty state; never sent to the model. */
+  suggestedQuestions: string[]
   /** Context limits, auto-summary flag and summary model of the conversation. */
   context: PlaygroundContextSettings
   /** Persisted compression node, or null when the full history is sent. */
@@ -197,6 +211,8 @@ export interface PlaygroundSession {
   server?: { id: string; revision: number; messageRevision: number }
   syncPending?: boolean
 }
+
+export type PlaygroundPresetVisibility = 'private' | 'global'
 
 /**
  * A reusable assistant definition owned by the account: a name and avatar, the
@@ -211,6 +227,12 @@ export interface AssistantPreset {
   config: PlaygroundConfig
   parameterEnabled: ParameterEnabled
   systemPrompt: string
+  /** Private presets belong to one account; global presets come from the market. */
+  visibility: PlaygroundPresetVisibility
+  /** Display-only greeting copied into a new conversation. */
+  openingMessage: string
+  /** Starter questions copied into a new conversation and shown before its first message. */
+  suggestedQuestions: string[]
   createdAt: number
   updatedAt: number
 }
@@ -226,6 +248,32 @@ export interface PromptSnippet {
   content: string
   createdAt: number
   updatedAt: number
+}
+
+/**
+ * A durable cross-session note owned by the account. Memories are derived from
+ * the owner's own conversations (or written by hand), optionally point back at
+ * the source conversation, and are injected as one system message into the
+ * next request only while enabled.
+ */
+export interface PlaygroundMemory {
+  id: string
+  content: string
+  category: string
+  sourceSessionId: string | null
+  enabled: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+/**
+ * Browser-owned extraction preference of one account. It is off by default so
+ * no conversation is sent to the extraction model until the owner opts in;
+ * the model is empty while the setting follows the context summary model.
+ */
+export interface PlaygroundMemoryExtractionSettings {
+  enabled: boolean
+  model: string
 }
 
 /**
@@ -259,6 +307,14 @@ export type PlaygroundExportFormat = 'markdown' | 'json'
 /** One conversation export file: body, media type and suggested filename. */
 export interface PlaygroundSessionExport {
   format: PlaygroundExportFormat
+  filename: string
+  contentType: string
+  content: string
+}
+
+/** One preset export file: the JSON import document and its download metadata. */
+export interface PlaygroundPresetExport {
+  format: 'json'
   filename: string
   contentType: string
   content: string

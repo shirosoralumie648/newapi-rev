@@ -1,28 +1,17 @@
-/*
-Copyright (C) 2023-2026 QuantumNous
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as
-published by the Free Software Foundation, either version 3 of the
-License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program. If not, see <https://www.gnu.org/licenses/>.
-
-For commercial licensing, please contact support@quantumnous.com
-*/
-import { MESSAGE_ROLES, MESSAGE_STATUS } from '../../constants'
+import {
+  CONTINUE_GENERATION_INSTRUCTION,
+  MESSAGE_ROLES,
+  MESSAGE_STATUS,
+} from '../../constants'
 import type { Message, MessageAttachment } from '../../types'
+import { isMessageTruncated } from './message-continuation-utils'
 import {
   appendMessageVersion,
   createLoadingAssistantMessage,
   createUserMessage,
   getMessageContent,
+  hasMessageContent,
+  updateCurrentVersionContent,
 } from './message-utils'
 import { isParallelMessage } from './parallel-compare-utils'
 
@@ -111,6 +100,62 @@ export function createToolContinuationMessages(
   startedAt: number = Date.now()
 ): Message[] {
   return [...messages, createLoadingAssistantMessage(startedAt)]
+}
+
+/**
+ * One continuation plan of a truncated reply: the state keeps the truncated
+ * version as a branch and appends an empty version the stream fills, while the
+ * request carries the truncated reply as the last assistant turn (assistant
+ * prefill semantics). `fallbackMessages` appends one user instruction for
+ * channels that reject an assistant prefill.
+ */
+export interface PlaygroundContinuationPlan {
+  stateMessages: Message[]
+  prefillMessages: Message[]
+  fallbackMessages: Message[]
+  /** The truncated text the continuation branch starts from. */
+  prefix: string
+}
+
+/**
+ * Continue a truncated assistant reply. Only the last message can continue:
+ * the reply must be an assistant message that was cut short, and the
+ * continuation itself is appended as a new version so the truncated text is
+ * never lost.
+ */
+export function createContinuationMessages(
+  messages: Message[],
+  messageKey: string
+): PlaygroundContinuationPlan | null {
+  const last = messages.at(-1)
+  if (
+    !last ||
+    last.key !== messageKey ||
+    last.from !== MESSAGE_ROLES.ASSISTANT ||
+    last.status === MESSAGE_STATUS.LOADING ||
+    last.status === MESSAGE_STATUS.STREAMING ||
+    !hasMessageContent(last) ||
+    !isMessageTruncated(last)
+  ) {
+    return null
+  }
+
+  // The new branch starts with the truncated text and the stream appends the
+  // continuation to it, so switching branches shows the complete answer while
+  // the truncated version stays available untouched.
+  const prefix = getMessageContent(last)
+  return {
+    stateMessages: [
+      ...messages.slice(0, -1),
+      updateCurrentVersionContent(startAssistantReply(last), prefix),
+    ],
+    prefillMessages: messages,
+    fallbackMessages: [
+      ...messages,
+      createUserMessage(CONTINUE_GENERATION_INSTRUCTION),
+    ],
+    prefix,
+  }
 }
 
 export function createRegeneratedMessages(

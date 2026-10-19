@@ -38,7 +38,11 @@ func setupPlaygroundToken(c *gin.Context, group string) error {
 	return middleware.SetupContextForToken(c, tempToken)
 }
 
-func Playground(c *gin.Context) {
+// playgroundRelay runs one authenticated workspace request through the
+// canonical relay pipeline with the requested format. The browser never holds
+// an API key: the synthetic in-memory token makes group resolution, channel
+// selection, limits and billing identical to a direct API call.
+func playgroundRelay(c *gin.Context, relayFormat types.RelayFormat) {
 	var newAPIError *types.NewAPIError
 
 	defer func() {
@@ -55,7 +59,7 @@ func Playground(c *gin.Context) {
 		return
 	}
 
-	relayInfo, err := relaycommon.GenRelayInfo(c, types.RelayFormatOpenAI, nil, nil)
+	relayInfo, err := relaycommon.GenRelayInfo(c, relayFormat, nil, nil)
 	if err != nil {
 		newAPIError = types.NewError(err, types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 		return
@@ -66,5 +70,16 @@ func Playground(c *gin.Context) {
 		return
 	}
 
-	Relay(c, types.RelayFormatOpenAI)
+	Relay(c, relayFormat)
+}
+
+func Playground(c *gin.Context) {
+	playgroundRelay(c, types.RelayFormatOpenAI)
+}
+
+// PlaygroundEmbeddings serves the workspace knowledge indexer through the
+// canonical /v1/embeddings pipeline. The route stays behind UserAuth, so the
+// request is billed, grouped and channel-selected exactly like a direct call.
+func PlaygroundEmbeddings(c *gin.Context) {
+	playgroundRelay(c, types.RelayFormatEmbedding)
 }

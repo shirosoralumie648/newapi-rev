@@ -35,12 +35,13 @@ import (
 // object; the retry worker uses it to release the bytes the same way the
 // request path would have (an upload key also aborts its multipart parts).
 const (
-	playgroundObjectOriginAttachment = "attachment"
-	playgroundObjectOriginUpload     = "upload"
-	playgroundObjectOriginArtifact   = "artifact"
-	playgroundObjectOriginCanvas     = "canvas"
-	playgroundObjectOriginSnapshot   = "canvas_snapshot"
-	playgroundObjectOriginTaskResult = "task_result"
+	playgroundObjectOriginAttachment        = "attachment"
+	playgroundObjectOriginUpload            = "upload"
+	playgroundObjectOriginArtifact          = "artifact"
+	playgroundObjectOriginCanvas            = "canvas"
+	playgroundObjectOriginSnapshot          = "canvas_snapshot"
+	playgroundObjectOriginTaskResult        = "task_result"
+	playgroundObjectOriginKnowledgeDocument = "kb_document"
 )
 
 const (
