@@ -545,12 +545,16 @@ export interface PlaygroundPendingQuote {
 /**
  * Deep-link target for the Playground route. `session` is the canonical server
  * session id a canvas node points back to; `artifact` selects a saved artifact
- * inside that session.
+ * inside that session. `replay` names the usage log a replay link reopens, and
+ * `replayUser` carries the log owner when an administrator replays another
+ * account's log.
  */
 export interface PlaygroundRouteTarget {
   session?: string
   message?: string
   artifact?: string
+  replay?: string
+  replayUser?: string
 }
 
 export interface PlaygroundSessionsState {

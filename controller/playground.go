@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -74,6 +75,14 @@ func playgroundRelay(c *gin.Context, relayFormat types.RelayFormat) {
 }
 
 func Playground(c *gin.Context) {
+	// The optional replay capture tees the response and stores a desensitized
+	// summary after the relay returned. With PLAYGROUND_LOG_CAPTURE off (the
+	// default) nothing is buffered or stored.
+	capture := service.BeginPlaygroundLogCapture(c)
+	if capture != nil {
+		capture.TeeResponse(c)
+		defer capture.Finish(c)
+	}
 	playgroundRelay(c, types.RelayFormatOpenAI)
 }
 

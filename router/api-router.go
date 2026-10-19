@@ -96,6 +96,8 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.GET("/settings", controller.GetPlaygroundSettings)
 			playgroundRoute.POST("/search", middleware.SearchRateLimit(), controller.PlaygroundWebSearch)
 			playgroundRoute.GET("/message-costs", controller.GetPlaygroundMessageCosts)
+			playgroundRoute.GET("/logs/:logRef/replay", controller.GetPlaygroundLogReplay)
+			playgroundRoute.DELETE("/logs/:logRef/capture", controller.DeletePlaygroundLogCapture)
 			playgroundRoute.GET("/trash", controller.ListPlaygroundTrash)
 			playgroundRoute.GET("/assets", controller.ListPlaygroundAssets)
 			playgroundRoute.POST("/tasks/:taskId/cancel", controller.PlaygroundTaskCancel)

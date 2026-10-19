@@ -34,6 +34,14 @@ export {
 // Response model diagnostics
 export { isResponseModelMismatch } from './response-model'
 
+// Playground log replay deep links
+export {
+  buildPlaygroundReplayHref,
+  buildPlaygroundReplayLink,
+  isPlaygroundReplayableLog,
+} from './replay'
+export type { PlaygroundReplayLink } from './replay'
+
 // Filter utilities
 export { buildSearchParams, getLogCategoryLabel } from './filter'
 

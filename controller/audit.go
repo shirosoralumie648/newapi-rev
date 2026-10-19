@@ -53,6 +53,9 @@ var auditContentTemplates = map[string]string{
 	"user.passkey_delete":          "Deleted a passkey",
 	"user.reset_passkey":           "Reset the user passkey",
 	"option.update":                "Updated system setting ${key}",
+	// An administrator opened the retained Playground request content of
+	// another account (PG2-08); the read itself is the audited event.
+	"playground.log_replay_view": "Viewed retained Playground request content of user ${target_user_id} (request ${request_id})",
 
 	"option.passkey_domains":           "Updated Passkey domains: removed ${domains}; affected ${known}; unknown ${unknown}",
 	"option.passkey_domains_confirmed": "Confirmed removal of Passkey domains: ${domains}; affected ${known}; unknown ${unknown}",
