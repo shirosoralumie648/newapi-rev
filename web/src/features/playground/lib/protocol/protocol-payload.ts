@@ -308,6 +308,24 @@ function responsesTools(tools: ChatCompletionTool[]): ResponsesTool[] {
   }))
 }
 
+// Chat payload fields the protocol conversion does not carry. The list lives
+// next to the conversion so forwarding a field and leaving it reported cannot
+// drift apart.
+const PLAYGROUND_PROTOCOL_UNSUPPORTED_FIELDS: Record<
+  PlaygroundProtocol,
+  ReadonlyArray<keyof ChatCompletionRequest>
+> = {
+  chat: [],
+  responses: ['frequency_penalty', 'presence_penalty', 'seed'],
+  messages: [
+    'frequency_penalty',
+    'presence_penalty',
+    'seed',
+    'reasoning_effort',
+    'response_format',
+  ],
+}
+
 /**
  * Converts the assembled chat payload into the selected protocol's wire body.
  * Chat returns the payload unchanged. The conversion keeps every field the
@@ -382,4 +400,19 @@ export function buildPlaygroundProtocolRequest(
     endpoint: API_ENDPOINTS.MESSAGES,
     body: body as unknown as Record<string, unknown>,
   }
+}
+
+/**
+ * Names of the assembled payload fields the selected protocol drops. The
+ * composer and the request viewer report them, so a parameter the target
+ * protocol does not accept is visible before and after the send instead of
+ * silently missing from the wire body.
+ */
+export function playgroundProtocolUnsupportedFields(
+  payload: ChatCompletionRequest,
+  protocol: PlaygroundProtocol
+): string[] {
+  return PLAYGROUND_PROTOCOL_UNSUPPORTED_FIELDS[protocol].filter(
+    (field) => payload[field] !== undefined
+  )
 }

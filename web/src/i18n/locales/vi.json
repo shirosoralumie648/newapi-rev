@@ -4974,6 +4974,7 @@
     "Not provided by this source": "Nguồn này không cung cấp",
     "Not recorded": "Chưa ghi nhận",
     "Not registered": "Chưa đăng ký",
+    "Not sent with this protocol: {{fields}}": "Không được gửi với giao thức này: {{fields}}",
     "Not set": "Chưa đặt",
     "Not Set": "Chưa đặt",
     "Not set yet": "Chưa thiết lập",

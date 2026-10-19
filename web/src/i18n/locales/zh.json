@@ -4974,6 +4974,7 @@
     "Not provided by this source": "该源未提供",
     "Not recorded": "未记录",
     "Not registered": "未注册",
+    "Not sent with this protocol: {{fields}}": "此协议不会发送：{{fields}}",
     "Not set": "未设置",
     "Not Set": "未设置",
     "Not set yet": "尚未设置",
