@@ -975,6 +975,40 @@ Step 进度：
 
 所有参考项目只借鉴公开的产品设计与交互，不移植、不改写其源代码；涉及第三方库时按现有依赖策略评估许可证。
 
+## 17. 上游 issue 精选吸收包与模型知识库（2026-10-19 调研）
+
+> 来源：对 QuantumNous/new-api 2026-05→10 月 open issue 的**按创建日期从近到远**扫描（约 1200 条标题层 + 高赞正文深读）。结论：高赞存量需求 fork 已覆盖或由上游关闭解决（详见 17.4）；以下为按时间扫描出的真 gap。所有 #N 均为上游 issue 号，实施前需复核其当前状态。
+
+### 17.1 吸收 Step（GI-* 与 MS-01）
+
+| ID | 标题 | 覆盖上游 issue | 量级 |
+| --- | --- | --- | --- |
+| GI-01 | 限流/额度维度矩阵：TPM 补「用户分组/模型/全局」维度；按用户/分组的自然日请求上限（RPD）与每日 token 上限；用户级并发控制；multi-key 渠道的 key 级并发；渠道单日 token 预算（保护上游免费额度） | #7408 #6458 #5252 #6196 #6679 #2489 | 中 |
+| GI-02 | 重试与渠道自愈：relay 重试加退避/jitter 并尊重上游 Retry-After；上游 429 携带重置时间时临时封禁渠道并到期自动解封；自动禁用渠道的冷却自动恢复（半开试探）；渠道亲和失败后的重试选路优化（跨请求重置优先级、排除失败渠道） | #5049 #7660 #5420 #6021 #7784 | 中 |
+| GI-03 | 安全策略包：root 强制全体用户 2FA 开关；API key 最长有效期强制；反复无效 key 自动封禁来源 IP（与 CriticalRateLimit 协同）；OIDC RP-Initiated Logout 支持；上游「余额不足」类错误对终端用户脱敏；日志可选记录来源 IP/UA/底层客户端标识（默认关，含 AI 客户端指纹识别） | #7263 #7262 #7890 #5156 #6306 #7620 #5277 | 小~中 |
+| GI-04 | 响应携带实耗成本：usage 返回本次请求实际消耗额度（x_quota 或扩展字段）；playground/控制台按消息展示实际成本 | #6397 #7054 | 小 |
+| GI-05 | 订阅增强：到期自动用钱包余额续费（可关）；日/周/月多周期限制并存；套餐按分组可见/可订阅；订阅可用余额支付可配置 | #7850 #4978 #5706 #3388 #5249 | 中 |
+| GI-06 | 看板缓存与聚合增强：缓存 token（cache read/creation）进用量看板与模型调用分析；按 API key 聚合统计；时间范围预设扩展 | #5069 #7759 #4963 #4971 #7484 #6880 | 小~中 |
+| MS-01 | 模型知识库：独立策展数据仓库（别名映射/质量与速度档位/擅长标签/一句话点评/数据日期）+ 网关每日拉取（URL 可配置、可关停、可单模型覆盖，覆盖项存现有 option 配置不建新表）+ 模型广场徽标与详情展示、标签筛选排序 | 新提案（用户 2026-10-19） | 中 |
+
+- MS-01 数据仓库独立成仓（已建：https://github.com/shirosoralumie648/newapi-model-kb ，首版 2026-10-19 已收录 52 个模型、19 个开源权重，数据以 AA Intelligence Index v4.3.2 快照为锚）；质量/速度/价格为**档位**而非精确分数（降低错报风险），擅长标签用语言中立枚举键由前端 i18n 翻译，点评存 zh/en 双语其余语言回退 en；分发自 GitHub raw / jsDelivr，站点侧**无需注册外部 API key**；数据许可 CC BY 4.0（LICENSE，含 AA attribution 要求）。
+- 合规边界：AA 等外部数据仅作**参考展示**，不参与计费、不影响路由；具体价格一律以站点自身 pricing 为准，外部数据只给档位与出处（含 attribution 与「数据截至」日期）；若上游数据方条款收紧，降级为链接引用 + 自整理档位。
+- 与 PG2-02（模型元数据/发送前估算，playground 侧）互补不冲突：MS-01 管 console 模型广场展示侧。
+- 执行顺序建议：GI-03、GI-04（小步先收）→ GI-01 → GI-02 → GI-05 → GI-06；MS-01 的数据仓库可与 GI 并行推进（仓库侧无网关依赖）。
+
+### 17.2 P2 大特性 backlog（本包不做，另行设计）
+
+- #6572 New-API 作为 OAuth2/OIDC IdP（供第三方平台登录）；#7312 组织/团队（共享额度/成员角色/资源隔离）；#6508 主库日志表自动分区/清理（可借 DB-04 分区设计）；#6535 OpenAI/Gemini Batch API 支持；#2299 `/v1/files` + `/v1/vector_stores`（与 LB-04 向量基建协同，待 LB-04 落地后评估）；#7667 智能模型路由决策层；#7308 桌面端一次性授权码登录接力（fork 有 Electron 壳，优先级可提前）；#4982 自定义主题系统。
+
+### 17.3 fork 排查项（上游报告的性能问题，fork 同款代码待核实）
+
+- #7394 tiered_expr 预消费将整个请求体读入内存；#5480 流式中继为统计 token 而将完整响应文本缓冲进内存。均属 relay 热路径内存占用，核实属实则记入优化 Step。
+
+### 17.4 结论修正与已覆盖确认
+
+- **撤回**此前（按 👍 排序轮次）对 #5209（Responses→ChatCompletions 降级）的吸收建议：上游 2026-05~07 已 closed 一批协议转换 issue（#4754 Responses→OpenAI 兼容、#6162 Responses→Anthropic、#5514 OpenAI→Claude 兼容、#5392 多协议渠道 👍8），fork 随上游合并即得。
+- 确认已覆盖、无需采纳：#1730（channel_admission 并发/RPM/TPM/排队预留）、#2845（订阅兑换码 `SubscriptionSourceRedemption`）、#4896（affinity KeySource `request_header`）、#4882（token `PeriodQuota`）、#6722（`status_code_ranges.go` 可配置重试区间）、#7799（PG2「渠道可见粒度」决策 + RF-08 分组定价）、#5599（请求体留存 = PG2-08 已规划）。
+
 ## 8. 变更记录
 
 | 日期 | 变更 |
@@ -1069,4 +1103,6 @@ Step 进度：
 | 2026-10-18 | RF-08：按用户组比例与推荐官档位（可选）（借鉴 QuantumNous/new-api#5856、#6539 的思路自行实现，未移植其代码；仅单层、无多级/团队计酬；CI-only，本地未运行测试）——比例解析链为「单人覆盖 → 推荐官档位 → 用户组覆盖 → 全局默认」（`ResolveCommissionRatePercent`），`referral_commissions` 新增 `rate_source` 记录每笔佣金来源；新增 `referral_agents` 表与可选 `agent_tiers` 档位目录（≤50 档、比例 0–100、id 唯一，`ValidateReferralOption` 校验，未知/删除档位自动回退）；管理员接口 `GET /api/user/referral/agents`、`PUT/DELETE /api/user/:id/referral-agent`（`AdminAuth` + `CriticalRateLimit` + 访问令牌规则，审计 `user.referral_agent`/`user.referral_agent_clear`）与只读 `GET /api/user/self/referral-agent`（自述资料把风控三态清零并重算可支付总额，不泄漏决策）；专属页 `/referral` 展示自身档位/比例来源/邀请明细，管理员可编辑档位与标记，钱包页新增入口；测试 `TestReferralCommissionAgentTiers`（SQLite/MySQL/PostgreSQL 真库矩阵）、`TestReferralCommissionOptionValidation` 扩展、`TestReferralAgentAdminEndpoints`（CI 在 MySQL/PostgreSQL 运行）与前端 `referral-agent.test.ts`/`referral-agent-tiers-card.test.tsx`/`referral-agents-card.test.tsx`/`referral-program.test.tsx`；补 42 个新键的七语言翻译（`i18n:sync` missingCount=0、extrasCount=0，untranslatedCount 保持 zh 3/ja 4/ru 5）并登记 4 个动态键；无新依赖。 |
 | 2026-10-19 | 计划：新增第 14 节「Lobe 对齐能力包」——游乐场全量盘点（main @ `f1dff7b96`）对照 lobehub/lobehub 官方 README 的差距分析；用户确认补齐方向（体验补齐包/记忆/RAG/工具执行+MCP/预设市场）并确认**后端计算边界约束**（LLM/embedding 一律经 Relay 计费、分块在前端、向量检索只做余弦点积、外部工具为 API 适配器且 tool loop 由前端驱动、不做代码运行沙箱与内嵌进程）；新增 LB-01..LB-11 十一个 Step（联网搜索、置顶/归档/标签、自动命名、消息级操作、只读分享、记忆、知识库×2、工具执行端、MCP 代理、预设市场），细化 14.3 各 Step 范围与完成标准（自动命名/消息级操作/工具循环为纯前端零后端新增）与建议实施顺序；14.4 五项决策当日确认：LB-02 纳入标签、LB-01 搜索按次计费（固定单价经钱包 hold/settle，上游自带搜索随上游 usage 计费）、LB-05 分享附件只显示占位、LB-06 记忆抽取默认关、LB-10 MCP 管理员全局清单；同日追加 **LB-12** 对话体验小项包（继续生成/回复自动朗读/新会话默认配置/会话导入，纯前端，放 P0 批次），并确认不做话题二级结构与消息点赞/点踩；同日追加 **LB-13** 新用户引导 Step（欢迎卡+空态入口+无模型提示+driver.js 步进 tour，优先级 P1 收尾，2026-10-19 用户确认）与 **LB-14** 对话/创作分层 Step（创作域四入口全部撤出对话归画布：生成媒体迁画布编辑器、制品浏览器迁画布、素材库迁画布、顶栏清空只留用量入口，纯前端，2026-10-19 用户确认，LB-13 依赖其定盘布局）；Phase 7 分享项标注 LB-05 轻量落地；本日仅规划未实施。 |
 | 2026-10-19 | 新增第 16 节「Playground 第二轮」（编排器侧计划，原文编号第 14 节，合并时顺延）：PG2-01…PG2-18 共 18 步纳入计划，并固化日志请求体留存、批量/对比成本、渠道可见粒度、费用口径 4 项决策。 |
+| 2026-10-19 | 计划：新增第 17 节——上游 issue 按日期从近到远扫描（2026-05→10 月约 1200 条标题层 + 高赞深读）精选 GI-01..GI-06 六个吸收包与 MS-01 模型知识库（独立策展数据仓库 + 网关每日拉取 + 模型广场徽标展示，外部数据仅参考不碰计费/路由）；列 P2 backlog（IdP/团队/日志分区/Batch API/files+vector stores/智能路由/桌面授权码/主题）与 fork 排查项（tiered_expr 全量读 body、流式全缓冲）；修正撤回 #5209 吸收建议（上游已做协议转换矩阵）。 |
+| 2026-10-19 | 落地：MS-01 数据仓库建成并推送 https://github.com/shirosoralumie648/newapi-model-kb ——models.json（52 模型/19 开源权重，AA Intelligence Index v4.3.2 2026-10 快照锚定）、schema.json、README（档位划线与维护流程）、LICENSE（CC BY 4.0 + AA attribution）、scripts/fetch-aa-draft.py（AA 免费档半自动草稿）；第 17 节同步回填仓库地址。 |
 | 2026-10-19 | 计划：新增第 15 节「画布创作域补齐」——对 `web/src/features/canvas/` 源码核实（13 种节点、连线/工具/工作流既有，内容级撤销/对齐吸附/导出 PNG/seed/batch/渠道能力揭示/模板/组织查找全部缺失）并对照 ComfyUI/Krea/Miro 同级差距；新增 CV-06..CV-13 八个 Step（编辑器手感、生成参数与变体、渠道条件工具、**图片工作台（P0，项目模式 mode 列复用单文档，zero 新表）**、视频工作台（P1，前端抽帧进 i2v）、画布模板、画布只读分享、组织与查找）；用户确认画布需要单独的图片/视频工作台且功能严重不足需补齐；批次一 P0 = CV-06→07→08→09，批次二 P1 = 10/11/12/13 并行；LB-13 画布部分步序待 CV-09/10 后编写；本日仅规划未实施。 |
