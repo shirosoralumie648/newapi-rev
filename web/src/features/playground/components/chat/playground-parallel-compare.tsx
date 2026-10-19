@@ -47,6 +47,10 @@ import { MessageToolCalls } from '../message/message-tool-calls'
 interface PlaygroundParallelCompareProps {
   /** Settled cost rows of the compared requests, by request id. */
   costs?: ReadonlyMap<string, PlaygroundMessageCost>
+  /** Calls being answered by the automatic tool loop right now. */
+  executingToolCallKeys?: ReadonlySet<string>
+  /** Calls the automatic tool loop answered during this mount. */
+  autoFilledToolCallKeys?: ReadonlySet<string>
   isGenerating?: boolean
   isLastMessage?: boolean
   /** Snapshot of the user turn the compared replies answer, when it retrieved. */
@@ -67,6 +71,10 @@ interface PlaygroundParallelCompareProps {
 
 interface ParallelVersionCardProps {
   cost?: PlaygroundMessageCost
+  /** Calls being answered by the automatic tool loop right now. */
+  executingToolCallKeys?: ReadonlySet<string>
+  /** Calls the automatic tool loop answered during this mount. */
+  autoFilledToolCallKeys?: ReadonlySet<string>
   isActive: boolean
   isGenerating?: boolean
   isLastMessage?: boolean
@@ -189,6 +197,8 @@ function ParallelVersionCard(props: ParallelVersionCardProps) {
 
       <div className='px-3'>
         <MessageToolCalls
+          autoFilledToolCallKeys={props.autoFilledToolCallKeys}
+          executingToolCallKeys={props.executingToolCallKeys}
           isGenerating={props.isGenerating || !props.isActive}
           isLastMessage={props.isLastMessage === true && props.isActive}
           message={props.message}
@@ -262,11 +272,13 @@ export function PlaygroundParallelCompare(
       <div className='grid min-w-0 gap-2 md:grid-cols-2'>
         {props.message.versions.map((version, versionIndex) => (
           <ParallelVersionCard
+            autoFilledToolCallKeys={props.autoFilledToolCallKeys}
             cost={
               version.requestId
                 ? props.costs?.get(version.requestId)
                 : undefined
             }
+            executingToolCallKeys={props.executingToolCallKeys}
             isActive={versionIndex === activeIndex}
             isGenerating={props.isGenerating}
             isLastMessage={props.isLastMessage}

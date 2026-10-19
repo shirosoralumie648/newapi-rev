@@ -53,6 +53,7 @@ import { PlaygroundDictationPanel } from './playground-dictation-panel'
 import { PlaygroundParameterPanel } from './playground-parameter-panel'
 import { PlaygroundSnippetPanel } from './playground-snippet-panel'
 import { PlaygroundSystemPromptPanel } from './playground-system-prompt-panel'
+import { PlaygroundToolExecutionControl } from './playground-tool-execution-control'
 
 type PlaygroundInputToolsProps = {
   config: PlaygroundConfig
@@ -120,6 +121,12 @@ type PlaygroundInputToolsProps = {
   onAutoTitleChange: (value: boolean) => void
   onAutoTitleUseDefault: () => void
   onAutoTitleDefaultChange: (value: boolean) => void
+  /** Whether the account enabled the automatic tool loop. */
+  toolExecutionEnabled: boolean
+  /** Automatic continuation round cap of the account. */
+  toolExecutionMaxRounds: number
+  onToolExecutionEnabledChange: (value: boolean) => void
+  onToolExecutionMaxRoundsChange: (value: number) => void
 }
 
 export function PlaygroundInputTools({
@@ -167,6 +174,10 @@ export function PlaygroundInputTools({
   onAutoTitleChange,
   onAutoTitleUseDefault,
   onAutoTitleDefaultChange,
+  toolExecutionEnabled,
+  toolExecutionMaxRounds,
+  onToolExecutionEnabledChange,
+  onToolExecutionMaxRoundsChange,
 }: PlaygroundInputToolsProps) {
   const { t } = useTranslation()
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
@@ -242,6 +253,14 @@ export function PlaygroundInputTools({
           onDefaultChange={onAutoTitleDefaultChange}
           onEnabledChange={onAutoTitleChange}
           onUseDefault={onAutoTitleUseDefault}
+        />
+
+        <PlaygroundToolExecutionControl
+          disabled={disabled}
+          enabled={toolExecutionEnabled}
+          maxRounds={toolExecutionMaxRounds}
+          onEnabledChange={onToolExecutionEnabledChange}
+          onMaxRoundsChange={onToolExecutionMaxRoundsChange}
         />
 
         <PlaygroundComparePanel

@@ -96,8 +96,12 @@ function renderTools(
           onRemoveContextSummary={() => undefined}
           onSummarizeContext={() => undefined}
           onSystemPromptChange={onSystemPromptChange}
+          onToolExecutionEnabledChange={() => undefined}
+          onToolExecutionMaxRoundsChange={() => undefined}
           parameterEnabled={DEFAULT_PARAMETER_ENABLED}
           systemPrompt={systemPrompt}
+          toolExecutionEnabled={false}
+          toolExecutionMaxRounds={5}
           webSearchAvailable={webSearch?.available}
           webSearchEnabled={webSearch?.enabled}
           onWebSearchChange={webSearch?.onChange}

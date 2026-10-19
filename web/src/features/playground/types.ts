@@ -35,9 +35,10 @@ export interface MessageAttachment {
 }
 
 /**
- * Tool calls are never executed by the Playground. A pending call waits for the
- * user to paste the result obtained elsewhere (or to deny the call), and the
- * answer is only relayed to the model as a `tool` message.
+ * Tool-call lifecycle. A pending call waits for the automatic tool loop (only
+ * for the declared executable functions) or for the user to paste the result
+ * obtained elsewhere; every answered call is relayed to the model as a `tool`
+ * message, and the server never executes a tool.
  */
 export type MessageToolCallStatus = 'pending' | 'completed' | 'denied' | 'error'
 
@@ -47,7 +48,7 @@ export interface MessageToolCall {
   /** Raw JSON arguments requested by the model; kept as text, never evaluated. */
   arguments: string
   status: MessageToolCallStatus
-  /** Result the user provided manually. */
+  /** Result written by the automatic loop or provided by the user. */
   result?: string
   errorMessage?: string
   createdAt?: number
@@ -362,8 +363,9 @@ export interface PlaygroundContextSummary {
 /**
  * One function tool definition injected into a request. The shape is the
  * OpenAI wire shape the relay forwards unchanged, so the client never
- * translates it. The Playground defines tools but never executes one: a
- * requested call waits for the user to paste the result obtained elsewhere.
+ * translates it. The gateway never executes a tool: declared executable
+ * functions are answered by the browser-side tool loop or by the user, and
+ * every other requested call waits for a manual result.
  */
 export interface ChatCompletionTool {
   type: 'function'

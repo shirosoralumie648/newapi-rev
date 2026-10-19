@@ -126,6 +126,12 @@ interface PlaygroundInputProps {
   onAutoTitleChange: (value: boolean) => void
   onAutoTitleUseDefault: () => void
   onAutoTitleDefaultChange: (value: boolean) => void
+  /** Whether the account enabled the automatic tool loop. */
+  toolExecutionEnabled: boolean
+  /** Automatic continuation round cap of the account. */
+  toolExecutionMaxRounds: number
+  onToolExecutionEnabledChange: (value: boolean) => void
+  onToolExecutionMaxRoundsChange: (value: number) => void
 }
 
 export function PlaygroundInput({
@@ -181,6 +187,10 @@ export function PlaygroundInput({
   onAutoTitleChange,
   onAutoTitleUseDefault,
   onAutoTitleDefaultChange,
+  toolExecutionEnabled,
+  toolExecutionMaxRounds,
+  onToolExecutionEnabledChange,
+  onToolExecutionMaxRoundsChange,
 }: PlaygroundInputProps) {
   const { t } = useTranslation()
   const { text, updateText, appendText, handleKeyDown, rememberSubmittedText } =
@@ -289,9 +299,13 @@ export function PlaygroundInput({
                 onRemoveContextSummary={onRemoveContextSummary}
                 onSummarizeContext={onSummarizeContext}
                 onSystemPromptChange={onSystemPromptChange}
+                onToolExecutionEnabledChange={onToolExecutionEnabledChange}
+                onToolExecutionMaxRoundsChange={onToolExecutionMaxRoundsChange}
                 onWebSearchChange={onWebSearchChange}
                 parameterEnabled={parameterEnabled}
                 systemPrompt={systemPrompt}
+                toolExecutionEnabled={toolExecutionEnabled}
+                toolExecutionMaxRounds={toolExecutionMaxRounds}
                 webSearchAvailable={webSearchAvailable}
                 webSearchEnabled={webSearchEnabled}
               />

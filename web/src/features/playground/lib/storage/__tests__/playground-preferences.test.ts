@@ -28,9 +28,11 @@ import {
   loadAutoReadPreferences,
   loadAutoTitlePreferences,
   loadNewSessionDefaults,
+  loadToolExecutionPreferences,
   saveAutoReadPreferences,
   saveAutoTitlePreferences,
   saveNewSessionDefaults,
+  saveToolExecutionPreferences,
 } from '../playground-preferences'
 
 beforeEach(() => localStorage.clear())
@@ -139,5 +141,55 @@ test('malformed naming overrides are dropped instead of breaking the store', () 
   expect(loadAutoTitlePreferences(7)).toEqual({
     defaultEnabled: false,
     overrides: { keep: true },
+  })
+})
+
+test('the tool loop is off by default and the round cap stays within bounds', () => {
+  expect(loadToolExecutionPreferences(7)).toEqual({
+    enabled: false,
+    maxRounds: 5,
+  })
+
+  saveToolExecutionPreferences(7, { enabled: true, maxRounds: 99 })
+  expect(loadToolExecutionPreferences(7)).toEqual({
+    enabled: true,
+    maxRounds: 10,
+  })
+
+  saveToolExecutionPreferences(7, { enabled: true, maxRounds: 0 })
+  expect(loadToolExecutionPreferences(7)).toEqual({
+    enabled: true,
+    maxRounds: 1,
+  })
+  // Another account never sees the first account's choice.
+  expect(loadToolExecutionPreferences(8)).toEqual({
+    enabled: false,
+    maxRounds: 5,
+  })
+})
+
+test('a malformed tool loop preference degrades to the default', () => {
+  localStorage.setItem(
+    `${STORAGE_KEYS.TOOL_EXECUTION}:7`,
+    JSON.stringify({
+      version: 1,
+      data: { enabled: 'yes', maxRounds: 3 },
+    })
+  )
+  expect(loadToolExecutionPreferences(7)).toEqual({
+    enabled: false,
+    maxRounds: 5,
+  })
+
+  localStorage.setItem(
+    `${STORAGE_KEYS.TOOL_EXECUTION}:8`,
+    JSON.stringify({
+      version: 1,
+      data: { enabled: true, maxRounds: 2.5 },
+    })
+  )
+  expect(loadToolExecutionPreferences(8)).toEqual({
+    enabled: false,
+    maxRounds: 5,
   })
 })

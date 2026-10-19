@@ -62,6 +62,7 @@ import {
   PLAYGROUND_IMPORT_MAX_FILE_BYTES,
   PLAYGROUND_PARALLEL_MIN_MODELS,
   PLAYGROUND_SPEECH_ERRORS,
+  PLAYGROUND_TOOL_CALL_RESULT_DEFAULT_MAX_BYTES,
 } from './constants'
 import {
   useAutoReadAloud,
@@ -82,6 +83,7 @@ import {
   usePlaygroundSandboxSettings,
   usePlaygroundState,
   usePlaygroundServer,
+  usePlaygroundToolExecution,
 } from './hooks'
 import type { CapturedArtifactSource } from './hooks/use-playground-artifacts'
 import {
@@ -392,6 +394,24 @@ function PlaygroundContent(props: {
     continueChat,
   })
 
+  // The tool loop answers supported calls of the latest settled reply and
+  // continues through the existing continuation chain. It writes only through
+  // the snapshot contract, so the server sees ordinary completed calls.
+  const toolExecution = usePlaygroundToolExecution({
+    enabled: preferences.toolExecutionEnabled,
+    group: config.group,
+    isBusy: isGenerating || isComparing,
+    knowledgeBaseIds,
+    maxRounds: preferences.toolExecutionMaxRounds,
+    messages,
+    onContinue: handleContinueToolCalls,
+    onUpdateMessages: updateMessages,
+    resultMaxBytes:
+      serverSettings.data?.toolCallResultMaxBytes ??
+      PLAYGROUND_TOOL_CALL_RESULT_DEFAULT_MAX_BYTES,
+    sessionId: activeSessionId,
+  })
+
   const pendingToolCalls = hasPendingToolCalls(messages)
 
   // One provider call per submitted turn. The server holds the price on the
@@ -507,14 +527,28 @@ function PlaygroundContent(props: {
   )
 
   const handleStop = useCallback(() => {
+    toolExecution.cancel()
     if (isComparing) stopComparison()
     if (isGenerating) stopGeneration()
-  }, [isComparing, isGenerating, stopComparison, stopGeneration])
+  }, [
+    isComparing,
+    isGenerating,
+    stopComparison,
+    stopGeneration,
+    toolExecution.cancel,
+  ])
 
   const stopBeforeSessionChange = useCallback(() => {
+    toolExecution.cancel()
     if (isComparing) stopComparison()
     if (isGenerating) stopGeneration()
-  }, [isComparing, isGenerating, stopComparison, stopGeneration])
+  }, [
+    isComparing,
+    isGenerating,
+    stopComparison,
+    stopGeneration,
+    toolExecution.cancel,
+  ])
 
   const handleWorkspaceTransition = useCallback(
     <Result,>(action: () => Result): Result | undefined => {
@@ -1232,6 +1266,8 @@ function PlaygroundContent(props: {
               artifacts={artifactController.artifacts}
               messages={messages}
               costs={messageCosts}
+              autoFilledToolCallKeys={toolExecution.autoFilledKeys}
+              executingToolCallKeys={toolExecution.executingKeys}
               isLoadingMessages={isLoadingMessages || sync.isLoading}
               onRegenerateMessage={handleRegenerateMessage}
               onContinueMessage={handleContinueMessage}
@@ -1282,14 +1318,21 @@ function PlaygroundContent(props: {
                 quote={pendingQuote}
               />
             ) : null}
-            {pendingToolCalls && (
+            {toolExecution.isExecuting ? (
+              <p
+                role='status'
+                className='text-muted-foreground px-1 pb-1 text-xs'
+              >
+                {t('Running tool calls automatically...')}
+              </p>
+            ) : pendingToolCalls ? (
               <p
                 role='status'
                 className='text-muted-foreground px-1 pb-1 text-xs'
               >
                 {t('Answer or deny the requested tool calls to continue.')}
               </p>
-            )}
+            ) : null}
             {isRetrievingKnowledge && (
               <p
                 role='status'
@@ -1344,7 +1387,9 @@ function PlaygroundContent(props: {
               }
               groups={groups}
               groupValue={config.group}
-              isGenerating={isGenerating || isComparing}
+              isGenerating={
+                isGenerating || isComparing || toolExecution.isExecuting
+              }
               isModelLoading={isLoadingModels}
               isSummarizing={contextController.isSummarizing}
               knowledgeBaseIds={knowledgeBaseIds}
@@ -1369,8 +1414,14 @@ function PlaygroundContent(props: {
               onSummarizeContext={handleSummarizeContext}
               onSystemPromptChange={updateSystemPrompt}
               onWebSearchChange={setWebSearchEnabled}
+              onToolExecutionEnabledChange={preferences.setToolExecutionEnabled}
+              onToolExecutionMaxRoundsChange={
+                preferences.setToolExecutionMaxRounds
+              }
               parameterEnabled={parameterEnabled}
               systemPrompt={systemPrompt}
+              toolExecutionEnabled={preferences.toolExecutionEnabled}
+              toolExecutionMaxRounds={preferences.toolExecutionMaxRounds}
               webSearchAvailable={webSearchAvailable}
               webSearchEnabled={webSearchEnabled}
               hasMessages={messages.length > 0}

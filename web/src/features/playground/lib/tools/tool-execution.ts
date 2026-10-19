@@ -296,3 +296,12 @@ export function toolCallVersionKey(
 ): string {
   return `${message.key}:${version.id}`
 }
+
+/** Identifies one call of one version for transient execution state. */
+export function toolCallExecutionKey(
+  message: Message,
+  version: MessageVersion,
+  toolCallId: string
+): string {
+  return `${toolCallVersionKey(message, version)}:${toolCallId}`
+}

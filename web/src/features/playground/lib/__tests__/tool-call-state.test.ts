@@ -34,6 +34,7 @@ import {
   getToolCallResponseContent,
   hasPendingToolCalls,
   setToolCallStatus,
+  updateVersionToolCallStatus,
 } from '../message/message-tool-call-utils'
 import { normalizeMessagesForStorage } from '../storage/storage'
 import { buildChatCompletionPayload } from '../streaming/payload-builder'
@@ -217,6 +218,100 @@ describe('manual results and continuation', () => {
       status: 'loading',
       createdAt: 42,
     })
+  })
+})
+
+describe('version-scoped tool call updates', () => {
+  test('an outcome lands on the named version even when another one is active', () => {
+    const reply = assistantMessage({
+      activeVersionIndex: 1,
+      versions: [
+        { id: 'a1', content: '', toolCalls: [toolCall()] },
+        {
+          id: 'a2',
+          content: '',
+          toolCalls: [toolCall({ id: 'call_time', name: 'get_time' })],
+        },
+      ],
+    })
+
+    const updated = updateVersionToolCallStatus(
+      [userMessage(), reply],
+      'assistant-1',
+      'a1',
+      'call_weather',
+      'completed',
+      'Sunny, 21 C'
+    )
+
+    expect(updated[0].key).toBe('user-1')
+    expect(updated[1].versions[0].toolCalls?.[0]).toMatchObject({
+      status: 'completed',
+      result: 'Sunny, 21 C',
+    })
+    expect(updated[1].versions[0].toolCalls?.[0].completedAt).toBeTypeOf(
+      'number'
+    )
+    // The active version keeps its own pending call untouched.
+    expect(getMessageToolCalls(updated[1])[0]).toMatchObject({
+      id: 'call_time',
+      status: 'pending',
+    })
+  })
+
+  test('an error outcome stores the failure sentence for that version only', () => {
+    const reply = assistantMessage({
+      versions: [
+        {
+          id: 'a1',
+          content: '',
+          toolCalls: [
+            toolCall({ status: 'completed', result: 'stale result' }),
+          ],
+        },
+      ],
+    })
+
+    const updated = updateVersionToolCallStatus(
+      [reply],
+      'assistant-1',
+      'a1',
+      'call_weather',
+      'error',
+      undefined,
+      'The tool call could not be executed.'
+    )
+
+    expect(getToolCallResponseContent(getMessageToolCalls(updated[0])[0])).toBe(
+      'The tool call could not be executed.'
+    )
+    expect(getMessageToolCalls(updated[0])[0].result).toBeUndefined()
+  })
+
+  test('a message key or version id that does not match is left untouched', () => {
+    const other = userMessage()
+    const withUnknownKey = updateVersionToolCallStatus(
+      [other],
+      'assistant-1',
+      'a1',
+      'call_weather',
+      'completed',
+      'Sunny'
+    )
+    expect(withUnknownKey[0]).toBe(other)
+
+    const reply = assistantMessage({
+      versions: [{ id: 'a1', content: '', toolCalls: [toolCall()] }],
+    })
+    const withUnknownVersion = updateVersionToolCallStatus(
+      [reply],
+      'assistant-1',
+      'a2',
+      'call_weather',
+      'completed',
+      'Sunny'
+    )
+    expect(withUnknownVersion[0]).toBe(reply)
   })
 })
 

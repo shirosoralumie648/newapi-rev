@@ -107,6 +107,12 @@ describe('token estimation', () => {
       estimateMessageTokens(withImage) - estimateMessageTokens(plain)
     ).toBe(PLAYGROUND_CONTEXT_IMAGE_TOKEN_ESTIMATE)
 
+    const completedCall = {
+      id: 'c1',
+      name: 'search',
+      arguments: 'a'.repeat(400),
+      status: 'completed' as const,
+    }
     const withCall: Message = {
       key: 'm3',
       from: 'assistant',
@@ -114,18 +120,25 @@ describe('token estimation', () => {
         {
           id: 'v',
           content: '',
-          toolCalls: [
-            {
-              id: 'c1',
-              name: 'search',
-              arguments: 'a'.repeat(400),
-              status: 'completed',
-            },
-          ],
+          toolCalls: [completedCall],
         },
       ],
     }
     expect(estimateMessageTokens(withCall)).toBeGreaterThanOrEqual(100)
+
+    // An answered call also sends its result, so the result text must count.
+    const withResult: Message = {
+      ...withCall,
+      versions: [
+        {
+          ...withCall.versions[0],
+          toolCalls: [{ ...completedCall, result: 'x'.repeat(4000) }],
+        },
+      ],
+    }
+    expect(estimateMessageTokens(withResult)).toBeGreaterThanOrEqual(
+      estimateMessageTokens(withCall) + 1000
+    )
   })
 })
 
