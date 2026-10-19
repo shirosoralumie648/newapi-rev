@@ -328,7 +328,7 @@ test('the history dialog loads revisions and rolls the production pointer back',
   await user.click(screen.getByRole('button', { name: 'Version history' }))
   expect(await screen.findByText('v2')).toBeVisible()
   await user.click(
-    screen.getAllByRole('button', { name: 'Roll back to this version' })[1]
+    screen.getByRole('button', { name: 'Roll back to this version' })
   )
   await user.click(screen.getByRole('button', { name: 'Roll back' }))
 
