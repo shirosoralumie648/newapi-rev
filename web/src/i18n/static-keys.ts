@@ -62,6 +62,25 @@ export const STATIC_I18N_KEYS = [
   'Unable to cancel the task.',
   'Playground task result storage limit reached. Wait for old task results to expire.',
   'Unable to update result retention.',
+  // Playground batch generation (PG2-06): the plan builder and the capability
+  // mapper return these strings as i18n keys, so the literal scan cannot see
+  // them. Their values live in PLAYGROUND_GENERATION_BATCH_MESSAGES,
+  // PLAYGROUND_GENERATION_ADJUSTMENTS, PLAYGROUND_GENERATION_BATCH_STATUS and
+  // PLAYGROUND_GENERATION_MODE_LABELS.
+  'Single',
+  'Variations',
+  'Compare',
+  'This model cannot generate images.',
+  'This model cannot generate videos.',
+  'Select 2 to 4 models to compare.',
+  'Choose a model to generate media.',
+  'Up to {{count}} requests run at once; the account task quota still applies.',
+  'Remove the models that cannot generate this media first.',
+  'Size {{from}} is not available for {{model}}; using {{to}}.',
+  'Quality {{from}} is not available for {{model}}; it was omitted.',
+  'Duration {{from}}s is not available for {{model}}; using {{to}}s.',
+  'Skipped',
+  'The batch stopped before every request was sent.',
   // Playground wallet debt lock (WL-06): a debtor account may read and export,
   // not start new generation or uploads.
   'Your wallet has unsettled debt. Top up to restore access; reading and exporting data stays available.',
