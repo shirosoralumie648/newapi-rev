@@ -64,7 +64,7 @@ const newSessionDefaultsSchema = z.object({
 
 const autoReadPreferencesSchema = z.object({
   defaultEnabled: z.boolean(),
-  overrides: z.record(z.string(), z.boolean()),
+  overrides: z.unknown(),
 })
 
 function prefixedKey(key: string, userId: number): string {
