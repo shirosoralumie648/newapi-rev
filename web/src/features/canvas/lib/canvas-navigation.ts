@@ -27,7 +27,7 @@ import type {
 export interface CanvasRouteSearch {
   project?: string
   prompt?: string
-  generate?: string
+  generate?: CanvasWorkflowGenerationKind
   session?: string
   message?: string
   artifact?: string

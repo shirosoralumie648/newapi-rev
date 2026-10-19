@@ -25,10 +25,7 @@ import { ErrorState } from '@/components/error-state'
 import { Button } from '@/components/ui/button'
 import { restoreCanvasProject } from '@/features/canvas/api'
 import { CanvasSendDialog } from '@/features/canvas/components/canvas-send-dialog'
-import type {
-  CanvasGenerationSearch,
-  CanvasRouteSearch,
-} from '@/features/canvas/lib/canvas-navigation'
+import type { CanvasRouteSearch } from '@/features/canvas/lib/canvas-navigation'
 import {
   buildMessageCanvasSeeds,
   type CanvasSendSeed,
@@ -547,7 +544,7 @@ function PlaygroundContent(props: {
         )
         .slice(0, 4)
         .map((attachment) => attachment.id)
-      const search: CanvasGenerationSearch = {
+      const search: CanvasRouteSearch = {
         prompt: visibleContent.slice(0, 4000),
         generate: kind,
         session: canonicalSessionId,
