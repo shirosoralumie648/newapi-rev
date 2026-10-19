@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import {
+  Ban,
   Crop,
   FileText,
   Maximize2,
@@ -28,11 +29,21 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { TagInput } from '@/components/tag-input'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import type { GroupOption, ModelOption } from '@/features/playground/types'
+import { cn } from '@/lib/utils'
 
-import { CANVAS_IMAGE_TOOL_TITLES, CANVAS_NODE_KIND_LABELS } from '../constants'
+import {
+  CANVAS_IMAGE_TOOL_TITLES,
+  CANVAS_NODE_COLORS,
+  CANVAS_NODE_COLOR_DOT_CLASSES,
+  CANVAS_NODE_COLOR_LABELS,
+  CANVAS_NODE_KIND_LABELS,
+  CANVAS_NODE_TAG_MAX_COUNT,
+  CANVAS_NODE_TAG_MAX_LENGTH,
+} from '../constants'
 import type {
   CanvasNodeDataUpdate,
   CanvasNodeDataUpdateOptions,
@@ -46,13 +57,14 @@ import {
   canvasNodeSourceTarget,
   type CanvasSourceTarget,
 } from '../lib/canvas-navigation'
+import { normalizeCanvasNodeTags } from '../lib/canvas-organization'
 import {
   isCanvasWorkflowResult,
   isCanvasWorkflowStep,
   type CanvasWorkflowMention,
   type CanvasWorkflowModelCapability,
 } from '../lib/canvas-workflow'
-import type { CanvasFlowNode } from '../types'
+import type { CanvasFlowNode, CanvasNodeColor } from '../types'
 import { CanvasNodeResultFields } from './canvas-node-result-fields'
 import { CanvasNodeWorkflowFields } from './canvas-node-workflow-fields'
 
@@ -137,6 +149,19 @@ export function CanvasNodeInspector(props: CanvasNodeInspectorProps) {
     )
   }
 
+  const commitColor = (color?: CanvasNodeColor) => {
+    props.onUpdateData(node.id, { color }, { mergeKey: `color:${node.id}` })
+  }
+
+  const commitTags = (tags: string[]) => {
+    const normalized = normalizeCanvasNodeTags(tags)
+    props.onUpdateData(
+      node.id,
+      { tags: normalized.length > 0 ? normalized : undefined },
+      { mergeKey: `tags:${node.id}` }
+    )
+  }
+
   return (
     <div className='flex min-h-0 flex-1 flex-col gap-3 p-3'>
       <div className='space-y-1'>
@@ -144,6 +169,58 @@ export function CanvasNodeInspector(props: CanvasNodeInspectorProps) {
         <p className='text-muted-foreground font-mono text-xs break-all'>
           {node.id}
         </p>
+      </div>
+
+      <div className='grid gap-2'>
+        <span className='text-muted-foreground text-xs'>{t('Node color')}</span>
+        <div className='flex flex-wrap items-center gap-1.5'>
+          {CANVAS_NODE_COLORS.map((color) => (
+            <Button
+              aria-label={t(CANVAS_NODE_COLOR_LABELS[color])}
+              aria-pressed={node.data.color === color}
+              className={cn(
+                'size-7 rounded-full p-0',
+                node.data.color === color && 'ring-ring ring-2 ring-offset-1'
+              )}
+              disabled={props.disabled}
+              key={color}
+              onClick={() => commitColor(color)}
+              type='button'
+              variant='outline'
+            >
+              <span
+                aria-hidden='true'
+                className={cn(
+                  'size-4 rounded-full',
+                  CANVAS_NODE_COLOR_DOT_CLASSES[color]
+                )}
+              />
+            </Button>
+          ))}
+          <Button
+            aria-pressed={!node.data.color}
+            disabled={props.disabled}
+            onClick={() => commitColor(undefined)}
+            size='sm'
+            type='button'
+            variant='outline'
+          >
+            <Ban aria-hidden='true' />
+            {t('No color')}
+          </Button>
+        </div>
+      </div>
+
+      <div className='grid gap-1.5'>
+        <span className='text-muted-foreground text-xs'>{t('Node tags')}</span>
+        <TagInput
+          disabled={props.disabled}
+          maxTagLength={CANVAS_NODE_TAG_MAX_LENGTH}
+          maxTags={CANVAS_NODE_TAG_MAX_COUNT}
+          onChange={commitTags}
+          placeholder={t('Add a tag...')}
+          value={node.data.tags ?? []}
+        />
       </div>
 
       {node.data.sourceDeleted ? (
