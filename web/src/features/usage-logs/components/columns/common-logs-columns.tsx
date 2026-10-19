@@ -890,6 +890,8 @@ export function useCommonLogsColumns(
                 </button>
                 {replayHref && (
                   <Button
+                    nativeButton={false}
+                    role='link'
                     variant='ghost'
                     size='icon'
                     className='text-muted-foreground hover:text-foreground size-5 shrink-0'

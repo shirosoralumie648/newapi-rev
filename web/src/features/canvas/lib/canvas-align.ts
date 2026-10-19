@@ -482,7 +482,10 @@ export function canvasAlignSelection(
       target.x === undefined ? node.position.x : target.x - parentPosition.x
     const y =
       target.y === undefined ? node.position.y : target.y - parentPosition.y
-    if (Math.abs(node.position.x - x) < 0.01 && Math.abs(node.position.y - y) < 0.01) {
+    if (
+      Math.abs(node.position.x - x) < 0.01 &&
+      Math.abs(node.position.y - y) < 0.01
+    ) {
       return node
     }
     changed = true
@@ -621,13 +624,11 @@ export function canvasAutoLayout(
     .map((node) => node.id)
     .filter((id) => (indegree.get(id) ?? 0) === 0)
     .sort(orderByCross)
+  for (const id of queued) rank.set(id, 0)
   while (queued.length > 0) {
     const id = queued.shift() as string
     for (const target of outgoing.get(id) ?? []) {
-      rank.set(
-        target,
-        Math.max(rank.get(target) ?? 0, (rank.get(id) ?? 0) + 1)
-      )
+      rank.set(target, Math.max(rank.get(target) ?? 0, (rank.get(id) ?? 0) + 1))
       indegree.set(target, (indegree.get(target) ?? 1) - 1)
       if ((indegree.get(target) ?? 0) === 0) {
         queued.push(target)
@@ -657,15 +658,15 @@ export function canvasAutoLayout(
         a.node.id.localeCompare(b.node.id)
     )
   }
-  const origin = canvasUnionRect(eligible.map((node) => unitById.get(node.id)!.rect))
+  const origin = canvasUnionRect(
+    eligible.map((node) => unitById.get(node.id)!.rect)
+  )
   if (!origin) return null
   const positions = new Map<string, { x: number; y: number }>()
   if (direction === 'horizontal') {
     let x = origin.x
     for (const [, layer] of orderedLayers) {
-      const layerWidth = Math.max(
-        ...layer.map((unit) => unit.rect.width)
-      )
+      const layerWidth = Math.max(...layer.map((unit) => unit.rect.width))
       let y = origin.y
       for (const unit of layer) {
         positions.set(unit.node.id, {
@@ -679,9 +680,7 @@ export function canvasAutoLayout(
   } else {
     let y = origin.y
     for (const [, layer] of orderedLayers) {
-      const layerHeight = Math.max(
-        ...layer.map((unit) => unit.rect.height)
-      )
+      const layerHeight = Math.max(...layer.map((unit) => unit.rect.height))
       let x = origin.x
       for (const unit of layer) {
         positions.set(unit.node.id, {
@@ -719,7 +718,9 @@ export function canvasAutoLayout(
     )
     if (members.length === 0) continue
     const bounds = canvasUnionRect(
-      members.map((id) => canvasNodeRect(nextById.get(id) as CanvasFlowNode, nextById))
+      members.map((id) =>
+        canvasNodeRect(nextById.get(id) as CanvasFlowNode, nextById)
+      )
     )
     if (!bounds) continue
     const position = {
@@ -744,9 +745,7 @@ export function canvasAutoLayout(
     }
     changed = true
     const resized = { ...frame, position, width, height }
-    nextNodes = nextNodes.map((node) =>
-      node.id === frame.id ? resized : node
-    )
+    nextNodes = nextNodes.map((node) => (node.id === frame.id ? resized : node))
     nextById.set(frame.id, resized)
   }
   return changed ? nextNodes : null

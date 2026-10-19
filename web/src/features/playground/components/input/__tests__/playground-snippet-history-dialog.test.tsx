@@ -110,8 +110,8 @@ test('expanding a version shows a line diff against its predecessor', async () =
   await user.click(screen.getByText('v3'))
 
   expect(await screen.findByText('Compared with version 2')).toBeVisible()
-  expect(screen.getByText('Added')).toBeVisible()
-  expect(screen.getByText('Removed')).toBeVisible()
+  expect(screen.getByText('+ Added')).toBeVisible()
+  expect(screen.getByText('- Removed')).toBeVisible()
   expect(screen.getByText('Line two.')).toBeVisible()
   expect(screen.getByText('Line three.')).toBeVisible()
 })
