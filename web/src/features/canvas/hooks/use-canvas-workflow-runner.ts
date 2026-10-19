@@ -38,9 +38,9 @@ import { settleCanvasWorkflowRunBudget } from '../api'
 import {
   CANVAS_LINKED_NODE_OFFSET_X,
   CANVAS_WORKFLOW_GENERATION_LABELS,
-  CANVAS_WORKFLOW_IMAGE_INPUT_MAX_COUNT,
   CANVAS_WORKFLOW_MESSAGES,
   CANVAS_WORKFLOW_OUTPUT_MAX_CHARS,
+  CANVAS_WORKFLOW_RESULT_NODE_OFFSET_Y,
   CANVAS_WORKFLOW_TASK_POLL_INTERVAL_MS,
 } from '../constants'
 import {
@@ -55,6 +55,7 @@ import {
   isCanvasWorkflowResult,
   isCanvasWorkflowStep,
   orderCanvasWorkflow,
+  randomCanvasWorkflowSeed,
   resolveCanvasWorkflowGeneration,
   resolveCanvasWorkflowImageSources,
   resolveCanvasWorkflowInput,
@@ -108,6 +109,8 @@ type CanvasWorkflowAttempt = {
   inputText: string
   group: string
   inputImageCount: number
+  /** Concrete seed sent by this attempt, including a random blank seed. */
+  seed?: number
 }
 
 export interface CanvasWorkflowRunnerOptions {
@@ -228,6 +231,11 @@ function storedWorkflowAttempt(
     inputText: workflow?.inputText?.trim() ?? '',
     group: workflow?.group?.trim() || fallbackGroup,
     inputImageCount: workflow?.inputImageCount ?? 0,
+    ...(workflow?.lastSeed
+      ? { seed: workflow.lastSeed }
+      : workflow?.seed
+        ? { seed: workflow.seed }
+        : {}),
   }
 }
 
@@ -369,18 +377,23 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
   )
 
   /**
-   * Records a succeeded step on its downstream result nodes: an existing
-   * `task-result` node is filled, and a step without one gets a result node
-   * added and linked, so a finished run always leaves its prompt, model,
-   * parameters and reference on the board. Each artifact is handed to one
-   * target, and the label names the model plus what the artifact holds.
-   * Nothing here stores a URL; the bytes stay behind the controlled endpoints.
+   * Records a succeeded step on its downstream result nodes: existing nodes
+   * are filled, and missing ones are added and linked, so a settled batch
+   * always leaves one visible result node per artifact. New nodes stack
+   * vertically, and exactly one result is marked preferred for downstream
+   * steps. Nothing here stores a URL; the bytes stay behind the controlled
+   * endpoints.
    */
   const recordStepResult = useCallback(
     (
       node: CanvasFlowNode,
       attempt: CanvasWorkflowAttempt,
-      options: { suffix: string; taskId?: string; artifacts?: TaskArtifact[] }
+      options: {
+        suffix: string
+        taskId?: string
+        artifacts?: TaskArtifact[]
+        resultCount?: number
+      }
     ) => {
       const targets = canvasWorkflowOutputTargets(
         node.id,
@@ -390,12 +403,28 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
       const record = canvasWorkflowRetryRecord(node, attempt)
       const model = node.data.workflow?.model?.trim() ?? ''
       const artifacts = options.artifacts ?? []
-      const resultData = (artifact?: TaskArtifact): Partial<CanvasNodeData> => {
+      const outputCount = Math.max(
+        artifacts.length,
+        options.resultCount ?? 0,
+        1
+      )
+      const currentPreferredId =
+        node.data.workflow?.preferredResultNodeId?.trim() ?? ''
+      const currentPreferredIndex = targets.indexOf(currentPreferredId)
+      let preferredId =
+        currentPreferredIndex >= 0 && currentPreferredIndex < outputCount
+          ? currentPreferredId
+          : (targets[0] ?? '')
+      const resultData = (
+        artifact: TaskArtifact | undefined,
+        index: number
+      ): Partial<CanvasNodeData> => {
         const label = [model, artifact?.type ?? options.suffix]
           .filter(Boolean)
           .join(' · ')
+        const indexedLabel = outputCount > 1 ? `${label} #${index + 1}` : label
         return {
-          ...(label ? { label } : {}),
+          ...(indexedLabel ? { label: indexedLabel } : {}),
           ...(options.taskId
             ? {
                 ref: {
@@ -406,25 +435,45 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
             : {}),
         }
       }
-      if (targets.length === 0) {
+      for (let index = 0; index < outputCount; index++) {
+        const artifact = artifacts[index]
+        const targetId = targets[index]
+        if (targetId) {
+          patchNode(targetId, (data) => ({
+            ...resultData(artifact, index),
+            workflow: {
+              ...data.workflow,
+              ...record,
+              preferred: targetId === preferredId,
+            },
+          }))
+          continue
+        }
+        const isPreferred = preferredId === ''
         const created = addLinkedNodeRef.current(
-          canvasWorkflowResultKind(artifacts[0]?.type),
+          canvasWorkflowResultKind(artifact?.type),
           node.id,
-          { ...resultData(artifacts[0]), workflow: record },
+          {
+            ...resultData(artifact, index),
+            workflow: { ...record, preferred: isPreferred },
+          },
           {
             x: node.position.x + CANVAS_LINKED_NODE_OFFSET_X,
-            y: node.position.y,
+            y: node.position.y + index * CANVAS_WORKFLOW_RESULT_NODE_OFFSET_Y,
           }
         )
-        if (!created) setMessage(CANVAS_WORKFLOW_MESSAGES.RESULT_NODE_LIMIT)
-        return
+        if (!created) {
+          setMessage(CANVAS_WORKFLOW_MESSAGES.RESULT_NODE_LIMIT)
+          break
+        }
+        if (isPreferred) preferredId = created
       }
-      for (const [index, targetId] of targets.entries()) {
-        const artifact =
-          artifacts.length > 0 ? artifacts[index % artifacts.length] : undefined
-        patchNode(targetId, (data) => ({
-          ...resultData(artifact),
-          workflow: { ...data.workflow, ...record },
+      if (preferredId && preferredId !== currentPreferredId) {
+        patchNode(node.id, (data) => ({
+          workflow: {
+            ...data.workflow,
+            preferredResultNodeId: preferredId,
+          },
         }))
       }
     },
@@ -462,8 +511,8 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
 
   /**
    * Reads the reference images a step consumes from its connected nodes. The
-   * count is bounded before the request is built; a read failure fails the step
-   * instead of silently dropping the user's input.
+   * read path enforces the count limit and fails the step instead of silently
+   * dropping the user's input.
    */
   const readStepImages = useCallback(
     async (
@@ -474,10 +523,7 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
     ): Promise<string[]> => {
       const sources = resolveCanvasWorkflowImageSources(node, nodes, edges)
       if (sources.length === 0) return []
-      return readCanvasWorkflowImages(
-        sources.slice(0, CANVAS_WORKFLOW_IMAGE_INPUT_MAX_COUNT),
-        signal
-      )
+      return readCanvasWorkflowImages(sources, signal)
     },
     []
   )
@@ -548,6 +594,7 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
       nodes: CanvasFlowNode[],
       edges: CanvasFlowEdge[],
       adoptTaskId: string | null,
+      seed: number | undefined,
       generation: number,
       signal: AbortSignal
     ): Promise<CanvasWorkflowStepOutcome> => {
@@ -565,6 +612,7 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
               size: config.size,
               quality: config.quality,
               count: config.imageCount,
+              seed,
               images,
             },
             signal,
@@ -588,8 +636,11 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
             setResults((current) => ({ ...current, [node.id]: previews }))
             recordStepResult(
               node,
-              { inputText: input, group, inputImageCount: images.length },
-              { suffix: CANVAS_WORKFLOW_GENERATION_LABELS.image }
+              { inputText: input, group, inputImageCount: images.length, seed },
+              {
+                suffix: CANVAS_WORKFLOW_GENERATION_LABELS.image,
+                resultCount: previews.length,
+              }
             )
             markStepSucceeded(node.id, {
               inputText: input,
@@ -612,6 +663,7 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
               group,
               duration: config.duration,
               size: config.size,
+              seed,
               images,
             },
             signal,
@@ -655,6 +707,7 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
           inputText: input,
           group,
           inputImageCount: images.length,
+          seed,
         })
         return 'succeeded'
       } catch (error) {
@@ -714,18 +767,6 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
           // The step's own group override wins over the canvas group; the
           // server re-validates it against the account's usable groups.
           const group = canvasWorkflowGroup(node, groupRef.current)
-          markStepRunning(id, {
-            inputText: input,
-            group,
-            ...(node.data.workflow?.model
-              ? { model: node.data.workflow.model }
-              : {}),
-          })
-          if (!input) {
-            markStepFailed(id, CANVAS_WORKFLOW_ERRORS.INPUT_REQUIRED)
-            setMessage(CANVAS_WORKFLOW_ERRORS.INPUT_REQUIRED)
-            return
-          }
           // A task left running by an interrupted session is adopted instead of
           // submitted again, so one board never starts a duplicate task.
           const adoptTaskId =
@@ -734,6 +775,29 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
             node.data.workflow.taskId
               ? node.data.workflow.taskId
               : null
+          const explicitSeed =
+            node.data.kind === 'task'
+              ? resolveCanvasWorkflowGeneration(node).seed
+              : undefined
+          const attemptSeed =
+            node.data.kind === 'task'
+              ? adoptTaskId
+                ? (node.data.workflow?.lastSeed ?? explicitSeed)
+                : (explicitSeed ?? randomCanvasWorkflowSeed())
+              : undefined
+          markStepRunning(id, {
+            inputText: input,
+            group,
+            ...(node.data.workflow?.model
+              ? { model: node.data.workflow.model }
+              : {}),
+            ...(attemptSeed === undefined ? {} : { lastSeed: attemptSeed }),
+          })
+          if (!input) {
+            markStepFailed(id, CANVAS_WORKFLOW_ERRORS.INPUT_REQUIRED)
+            setMessage(CANVAS_WORKFLOW_ERRORS.INPUT_REQUIRED)
+            return
+          }
           const outcome =
             node.data.kind === 'model'
               ? await runModelStep(
@@ -752,6 +816,7 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
                   runNodes,
                   runEdges,
                   adoptTaskId,
+                  attemptSeed,
                   generation,
                   signal
                 )

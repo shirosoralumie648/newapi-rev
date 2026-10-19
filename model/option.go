@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/group_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/performance_setting"
+	"github.com/QuantumNous/new-api/setting/playground_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"gorm.io/gorm"
@@ -256,6 +257,9 @@ func validateOptionValue(key string, value string) error {
 	}
 	if key == operation_setting.LogMaxRangeDaysOptionKey {
 		return operation_setting.ValidateLogMaxRangeDays(value)
+	}
+	if err := playground_setting.ValidatePlaygroundOption(key, value); err != nil {
+		return err
 	}
 	if key == "MaxTokenAutoGroups" {
 		return setting.ValidateMaxTokenAutoGroups(value)

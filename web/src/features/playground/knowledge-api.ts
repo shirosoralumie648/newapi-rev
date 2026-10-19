@@ -33,6 +33,7 @@ import {
   bytesToBase64,
   encodeKnowledgeEmbedding,
 } from './lib/knowledge/embedding'
+import type { KnowledgeStaleDocument, MessageKnowledgeResult } from './types'
 
 /** How many chunks one embedding relay request carries. */
 const KNOWLEDGE_EMBEDDING_BATCH_SIZE = 32
@@ -96,6 +97,17 @@ export interface KnowledgeChunksPayload {
   chunks: KnowledgeChunkInput[]
 }
 
+export interface KnowledgeSearchInput {
+  query: string
+  topK?: number
+  group?: string
+}
+
+export interface KnowledgeSearchResult {
+  hits: MessageKnowledgeResult[]
+  staleDocuments: KnowledgeStaleDocument[]
+}
+
 const knowledgeBaseSchema = z.object({
   id: z.string().min(1),
   name: z.string(),
@@ -152,6 +164,29 @@ const embeddingResponseSchema = z.object({
       embedding: z.array(z.number()),
     })
   ),
+})
+
+const knowledgeSearchHitSchema = z.object({
+  knowledge_base_id: z.string().min(1),
+  knowledge_base_name: z.string(),
+  document_id: z.string().min(1),
+  filename: z.string(),
+  chunk_id: z.string().min(1),
+  chunk_index: z.number().int().nonnegative(),
+  score: z.number().finite(),
+  text: z.string(),
+  truncated: z.boolean().optional(),
+})
+
+const knowledgeStaleDocumentSchema = z.object({
+  id: z.string().min(1),
+  filename: z.string(),
+  embedding_model: z.string(),
+})
+
+const knowledgeSearchSchema = z.object({
+  hits: z.array(knowledgeSearchHitSchema),
+  stale_documents: z.array(knowledgeStaleDocumentSchema),
 })
 
 function mapKnowledgeBase(value: unknown): KnowledgeBase {
@@ -242,6 +277,47 @@ export async function deleteKnowledgeBase(
     { signal }
   )
   requireServerSuccess(response.data)
+}
+
+/**
+ * Embed one query through the server and rank the chunks of one base. The
+ * caller runs this once per bound base because each base owns its embedding
+ * model, then merges and numbers the returned hits.
+ */
+export async function searchKnowledgeBase(
+  knowledgeBaseId: string,
+  input: KnowledgeSearchInput,
+  signal?: AbortSignal
+): Promise<KnowledgeSearchResult> {
+  const response = await api.post(
+    `${API_ENDPOINTS.PLAYGROUND_KNOWLEDGE_BASES}/${encodeURIComponent(knowledgeBaseId)}/search`,
+    {
+      query: input.query,
+      ...(input.topK === undefined ? {} : { top_k: input.topK }),
+      ...(input.group ? { group: input.group } : {}),
+    },
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  const data = knowledgeSearchSchema.parse(response.data.data)
+  return {
+    hits: data.hits.map((hit) => ({
+      knowledgeBaseId: hit.knowledge_base_id,
+      knowledgeBaseName: hit.knowledge_base_name,
+      documentId: hit.document_id,
+      filename: hit.filename,
+      chunkId: hit.chunk_id,
+      chunkIndex: hit.chunk_index,
+      score: hit.score,
+      text: hit.text,
+      ...(hit.truncated === undefined ? {} : { truncated: hit.truncated }),
+    })),
+    staleDocuments: data.stale_documents.map((document) => ({
+      id: document.id,
+      filename: document.filename,
+      embeddingModel: document.embedding_model,
+    })),
+  }
 }
 
 export async function listKnowledgeDocuments(

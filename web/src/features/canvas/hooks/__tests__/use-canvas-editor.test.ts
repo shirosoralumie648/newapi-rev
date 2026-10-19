@@ -739,6 +739,66 @@ test('addGraph refuses a graph that does not fit the canvas budget', () => {
   expect(onChange).not.toHaveBeenCalled()
 })
 
+test('setWorkflowPreferredResult switches a batch preference in one history entry', () => {
+  const document: CanvasServerDocument = {
+    nodes: [
+      {
+        id: 't1',
+        type: 'task',
+        position: { x: 0, y: 0 },
+        data: {
+          workflow: {
+            model: 'gpt-image-1',
+            generation: 'image',
+            preferredResultNodeId: 'r1',
+          },
+        },
+      },
+      {
+        id: 'r1',
+        type: 'task-result',
+        position: { x: 240, y: 0 },
+        data: { workflow: { sourceNodeId: 't1', preferred: true } },
+      },
+      {
+        id: 'r2',
+        type: 'task-result',
+        position: { x: 240, y: 220 },
+        data: { workflow: { sourceNodeId: 't1', preferred: false } },
+      },
+    ],
+    edges: [],
+  }
+  const onChange = vi.fn()
+  const hook = renderHook(() => useCanvasEditor(document, onChange))
+
+  act(() => hook.result.current.setWorkflowPreferredResult('r2'))
+
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 't1')?.data.workflow
+      ?.preferredResultNodeId
+  ).toBe('r2')
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 'r1')?.data.workflow
+      ?.preferred
+  ).toBe(false)
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 'r2')?.data.workflow
+      ?.preferred
+  ).toBe(true)
+  expect(onChange).toHaveBeenCalledTimes(1)
+
+  act(() => hook.result.current.undo())
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 't1')?.data.workflow
+      ?.preferredResultNodeId
+  ).toBe('r1')
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 'r1')?.data.workflow
+      ?.preferred
+  ).toBe(true)
+})
+
 test('selectNode marks exactly one node and stays out of the undo history', () => {
   const onChange = vi.fn()
   const hook = renderHook(() => useCanvasEditor(LINKED_DOCUMENT, onChange))

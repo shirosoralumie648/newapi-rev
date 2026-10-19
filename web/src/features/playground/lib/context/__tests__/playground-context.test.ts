@@ -411,6 +411,35 @@ describe('context planning', () => {
     expect(plan.includedMessages.map((item) => item.key)).toEqual(['m2'])
   })
 
+  test('a searched turn replays its stored hits as untrusted numbered context', () => {
+    const searched: Message = {
+      ...message('m1', 'What changed in Go?'),
+      search: {
+        query: 'latest go release',
+        provider: 'tavily',
+        results: [
+          {
+            title: 'Go releases',
+            url: 'https://go.dev/blog',
+            snippet: 'The latest release notes.',
+          },
+        ],
+      },
+    }
+
+    const formatted = formatMessageForRequest(searched)
+    expect(formatted).toHaveLength(1)
+    expect(formatted[0].content).toContain(
+      'Web search results for "latest go release".'
+    )
+    expect(formatted[0].content).toContain(
+      '[1](https://go.dev/blog) The latest release notes.'
+    )
+    expect(estimateMessageTokens(searched)).toBeGreaterThan(
+      estimateMessageTokens(message('m1', 'What changed in Go?'))
+    )
+  })
+
   test('answered tool calls expand into tool messages while pending calls stay out', () => {
     const answered: Message = {
       key: 'a1',

@@ -104,6 +104,18 @@ export type CanvasNodeWorkflowState = {
   imageCount?: number
   /** Video duration in seconds used by a video generation step. */
   duration?: number
+  /**
+   * Fixed sampling seed. Absent keeps the step random: the runner picks a
+   * fresh seed per attempt and records it in `lastSeed` for the inherit
+   * shortcut. A seed is not a billing multiplier.
+   */
+  seed?: number
+  /** The seed the last attempt actually sent, including a random one. */
+  lastSeed?: number
+  /** Canvas-local id of the preferred result among a batch. */
+  preferredResultNodeId?: string
+  /** Set on each result node of a batch; the preferred one wins downstream. */
+  preferred?: boolean
   /** User group the step runs in; empty means the canvas group. */
   group?: string
   /** Input text resolved on the last attempt, reused by retry. */

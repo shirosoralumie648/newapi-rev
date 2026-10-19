@@ -175,6 +175,9 @@ export function CanvasFlowNodeView(props: NodeProps) {
           <span className='truncate'>{t(CANVAS_NODE_KIND_LABELS[kind])}</span>
         </NodeTitle>
         <div className='flex items-center gap-1'>
+          {workflow?.preferred ? (
+            <Badge variant='secondary'>{t('Preferred')}</Badge>
+          ) : null}
           {workflow?.status ? (
             <CanvasWorkflowStatusBadge status={workflow.status} />
           ) : null}

@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { CanvasServerDocument } from '@/features/canvas/types'
 import type { RequestTimingBreakdown } from '@/features/usage-logs/types'
 
 // Message types
@@ -144,6 +145,36 @@ export interface MessageSearchSnapshot {
   results: MessageSearchResult[]
 }
 
+/** One ranked knowledge chunk injected into a user turn. */
+export interface MessageKnowledgeResult {
+  knowledgeBaseId: string
+  knowledgeBaseName: string
+  documentId: string
+  filename: string
+  chunkId: string
+  chunkIndex: number
+  score: number
+  text: string
+  truncated?: boolean
+}
+
+/**
+ * Knowledge retrieval snapshot of one user turn. Results are ordered: the
+ * assistant cites the first hit as [1]. The snapshot is the source of truth for
+ * replay and for deriving the assistant's citation list after a reload.
+ */
+export interface MessageKnowledgeSnapshot {
+  query: string
+  results: MessageKnowledgeResult[]
+}
+
+/** One ready document that retrieval skipped because it needs reindexing. */
+export interface KnowledgeStaleDocument {
+  id: string
+  filename: string
+  embeddingModel: string
+}
+
 export interface Message {
   key: string
   from: MessageRole
@@ -162,6 +193,7 @@ export interface Message {
   durationMs?: number
   sources?: { href: string; title: string }[]
   search?: MessageSearchSnapshot
+  knowledge?: MessageKnowledgeSnapshot
   reasoning?: {
     content: string
     duration: number
@@ -236,6 +268,8 @@ export interface PlaygroundSession {
   openingMessage: string
   /** Starter questions shown on the empty state; never sent to the model. */
   suggestedQuestions: string[]
+  /** Up to three knowledge bases retrieved on every send in this conversation. */
+  knowledgeBaseIds: string[]
   /** Context limits, auto-summary flag and summary model of the conversation. */
   context: PlaygroundContextSettings
   /** Persisted compression node, or null when the full history is sent. */
@@ -384,12 +418,29 @@ export interface PlaygroundSharedMessage {
   attachments: PlaygroundSharedAttachment[]
 }
 
-/** The anonymous read contract of `/api/playground/shared/:token`. */
+/** The anonymous conversation contract of `/api/playground/shared/:token`. */
 export interface PlaygroundSharedConversation {
   title: string
   openingMessage: string
   messages: PlaygroundSharedMessage[]
 }
+
+/**
+ * The anonymous canvas contract. The document keeps layout and the previews a
+ * node shows; no reference id, provider URL, stored input/error or fetchable
+ * media URL is part of it.
+ */
+export interface PlaygroundSharedCanvas {
+  title: string
+  /** Zero when the server did not report an update time. */
+  updatedAt: number
+  document: CanvasServerDocument
+}
+
+/** One public link resolves to exactly one sanitized payload. */
+export type PlaygroundSharedTarget =
+  | { kind: 'conversation'; conversation: PlaygroundSharedConversation }
+  | { kind: 'canvas'; canvas: PlaygroundSharedCanvas }
 
 /** One conversation export file: body, media type and suggested filename. */
 export interface PlaygroundSessionExport {

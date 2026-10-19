@@ -66,6 +66,18 @@ export const STATIC_I18N_KEYS = [
   // not start new generation or uploads.
   'Your wallet has unsettled debt. Top up to restore access; reading and exporting data stays available.',
   'Unable to check the account wallet debt.',
+  // Playground web-search admin hints selected by provider.
+  'Leave blank to use https://api.tavily.com.',
+  'Required. Enter the public URL of your self-hosted SearXNG instance.',
+  'Leave blank to use https://api.search.brave.com.',
+  // Playground web-search endpoint messages mapped from stable error codes.
+  'Web search is disabled.',
+  'Web search configuration is incomplete.',
+  'Insufficient wallet quota for this search.',
+  'Web search is temporarily unavailable.',
+  'Enter a web search query.',
+  'Unable to hold or settle the wallet quota for the search.',
+  'Web search settings saved',
   // Playground workflow run budget server messages (BL-03): the endpoints answer
   // with these stable-code messages, so the literal scan cannot see them.
   'Unable to price the workflow steps.',
@@ -1091,6 +1103,12 @@ export const STATIC_I18N_KEYS = [
   'The step that produced this result is no longer on the canvas.',
   'A connected reference image could not be read.',
   'A connected reference image is larger than the 8 MiB limit.',
+  'Too many reference images are connected to this step.',
+  'The size must use WIDTHxHEIGHT with each side between 64 and 8192 pixels.',
+  'The seed must be an integer between 1 and 2147483647.',
+  "This model's channel metadata does not list image generation.",
+  "This model's channel metadata does not list video generation.",
+  "This model's channel metadata lists neither image nor video generation.",
   // Canvas workflow run budget feedback (BL-03): the estimate dialog reports
   // these keys from constants, so the literal scan cannot see them.
   'The run budget could not be opened.',

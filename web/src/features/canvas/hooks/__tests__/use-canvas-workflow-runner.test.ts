@@ -25,7 +25,9 @@ import { api } from '@/lib/api'
 
 import {
   CANVAS_WORKFLOW_IMAGE_INPUT_MAX_BYTES,
+  CANVAS_WORKFLOW_IMAGE_INPUT_MAX_COUNT,
   CANVAS_WORKFLOW_MESSAGES,
+  CANVAS_WORKFLOW_RESULT_NODE_OFFSET_Y,
 } from '../../constants'
 import { CANVAS_WORKFLOW_ERRORS } from '../../lib/canvas-workflow'
 import type {
@@ -187,17 +189,17 @@ function useRunnerHarness(
     (
       kind: CanvasNodeData['kind'],
       sourceId: string,
-      data: Partial<CanvasNodeData>
+      data: Partial<CanvasNodeData>,
+      position: { x: number; y: number }
     ): string | null => {
       if (nodesRef.current.length >= nodeLimit) return null
       const id = `auto-${nodesRef.current.length + 1}`
-      const source = nodesRef.current.find((node) => node.id === sourceId)
       const nextNodes = [
         ...nodesRef.current,
         {
           id,
           type: kind,
-          position: { x: (source?.position.x ?? 0) + 340, y: 0 },
+          position,
           data: { kind, ...data },
         },
       ]
@@ -277,9 +279,123 @@ test('runs a model step into an image step and keeps the preview in memory', asy
     resultImageCount: 1,
   })
   expect(task?.data.workflow?.inputText).toBe('fox prompt')
+  expect(task?.data.workflow?.lastSeed).toEqual(expect.any(Number))
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 'r1')?.data.workflow
+      ?.seed
+  ).toBe(task?.data.workflow?.lastSeed)
   expect(hook.result.current.runner.results.t1).toEqual([
     'https://cdn.example.com/fox.png',
   ])
+})
+
+test('sends a fixed seed and records it on the step and result', async () => {
+  const post = vi.spyOn(api, 'post').mockImplementation(async (url) => {
+    if (url === '/pg/images/generations') {
+      return {
+        data: {
+          created: 1,
+          data: [{ url: 'https://cdn.example.com/seed.png' }],
+        },
+      }
+    }
+    throw new Error(`Unexpected POST ${url}`)
+  })
+  const chain = imageChain()
+  chain.nodes = chain.nodes.filter((node) => node.id !== 'm1')
+  chain.edges = [
+    ...chain.edges.filter(
+      (edge) => edge.source !== 'm1' && edge.target !== 'm1'
+    ),
+    { id: 'p1-t1', source: 'p1', target: 't1' },
+  ]
+  chain.nodes = chain.nodes.map((node) =>
+    node.id === 't1'
+      ? {
+          ...node,
+          data: {
+            ...node.data,
+            workflow: {
+              model: 'gpt-image-1',
+              generation: 'image',
+              seed: 42,
+            },
+          },
+        }
+      : node
+  )
+  const hook = renderHook(() => useRunnerHarness(chain.nodes, chain.edges))
+
+  act(() => hook.result.current.runner.run())
+  await waitFor(() => expect(hook.result.current.runner.phase).toBe('idle'))
+
+  const imageCall = post.mock.calls.find(
+    (call) => call[0] === '/pg/images/generations'
+  )
+  expect(imageCall?.[1]).toMatchObject({ seed: 42 })
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 't1')?.data.workflow
+  ).toMatchObject({ lastSeed: 42 })
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 'r1')?.data.workflow
+  ).toMatchObject({ seed: 42 })
+})
+
+test('creates one vertically stacked result node per generated image', async () => {
+  vi.spyOn(api, 'post').mockImplementation(async (url) => {
+    if (url === '/pg/images/generations') {
+      return {
+        data: {
+          created: 3,
+          data: [
+            { url: 'https://cdn.example.com/one.png' },
+            { url: 'https://cdn.example.com/two.png' },
+            { url: 'https://cdn.example.com/three.png' },
+          ],
+        },
+      }
+    }
+    throw new Error(`Unexpected POST ${url}`)
+  })
+  const chain = imageChain()
+  chain.nodes = chain.nodes.filter(
+    (node) => node.id !== 'm1' && node.id !== 'r1'
+  )
+  chain.edges = [
+    ...chain.edges.filter(
+      (edge) =>
+        edge.source !== 'm1' && edge.target !== 'm1' && edge.target !== 'r1'
+    ),
+    { id: 'p1-t1', source: 'p1', target: 't1' },
+  ]
+  const hook = renderHook(() => useRunnerHarness(chain.nodes, chain.edges))
+
+  act(() => hook.result.current.runner.run())
+  await waitFor(() => expect(hook.result.current.runner.phase).toBe('idle'))
+
+  const results = hook.result.current.nodes.filter(
+    (node) => node.data.kind === 'task-result'
+  )
+  expect(results).toHaveLength(3)
+  expect(results.map((node) => node.position.y)).toEqual([
+    0,
+    CANVAS_WORKFLOW_RESULT_NODE_OFFSET_Y,
+    CANVAS_WORKFLOW_RESULT_NODE_OFFSET_Y * 2,
+  ])
+  expect(results.map((node) => node.data.label)).toEqual([
+    'gpt-image-1 · Image #1',
+    'gpt-image-1 · Image #2',
+    'gpt-image-1 · Image #3',
+  ])
+  expect(results.map((node) => node.data.workflow?.preferred)).toEqual([
+    true,
+    false,
+    false,
+  ])
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 't1')?.data.workflow
+      ?.preferredResultNodeId
+  ).toBe(results[0].id)
 })
 
 test('a failed step stops the run until it is retried from that step', async () => {
@@ -836,6 +952,50 @@ test('reads a connected attachment as a reference image input', async () => {
   expect(body.images?.[0]).toMatch(/^data:image\/png;base64,/)
   const task = hook.result.current.nodes.find((node) => node.id === 't1')
   expect(task?.data.workflow?.inputImageCount).toBe(1)
+})
+
+test('reports an over-limit reference image set without reading or submitting', async () => {
+  const post = vi.spyOn(api, 'post')
+  const get = vi.spyOn(api, 'get')
+  const attachments = Array.from(
+    { length: CANVAS_WORKFLOW_IMAGE_INPUT_MAX_COUNT + 1 },
+    (_, index) =>
+      graphNode(`a${index}`, 'attachment', {
+        mediaType: 'image/png',
+        ref: { sessionId: 'pgs_1', attachmentId: `att_${index}` },
+      })
+  )
+  const hook = renderHook(() =>
+    useRunnerHarness(
+      [
+        ...attachments,
+        graphNode('t1', 'task', {
+          text: 'paint the photos',
+          workflow: { model: 'gpt-image-1', generation: 'image' },
+        }),
+      ],
+      attachments.map((node, index) => ({
+        id: `e${index}`,
+        source: node.id,
+        target: 't1',
+      }))
+    )
+  )
+
+  act(() => hook.result.current.runner.run())
+  await waitFor(() => expect(hook.result.current.runner.phase).toBe('idle'))
+
+  expect(get).not.toHaveBeenCalled()
+  expect(post).not.toHaveBeenCalled()
+  expect(hook.result.current.runner.message).toBe(
+    CANVAS_WORKFLOW_MESSAGES.IMAGE_INPUT_LIMIT
+  )
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 't1')?.data.workflow
+  ).toMatchObject({
+    status: 'failed',
+    error: CANVAS_WORKFLOW_MESSAGES.IMAGE_INPUT_LIMIT,
+  })
 })
 
 test('sends a reference image to a model step as content parts', async () => {

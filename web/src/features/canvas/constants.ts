@@ -16,6 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import {
+  PLAYGROUND_GENERATION_SEED_MAX,
+  PLAYGROUND_GENERATION_SEED_MIN,
+  PLAYGROUND_GENERATION_SIZE_MAX,
+  PLAYGROUND_GENERATION_SIZE_MIN,
+} from '@/features/playground/constants'
+
 import type {
   CanvasAssistantMode,
   CanvasNodeColor,
@@ -241,6 +248,22 @@ export const CANVAS_WORKFLOW_VIDEO_SIZE_RATIOS: Record<string, string> = {
   '1024x1024': '1:1',
 }
 
+// Seed zero is reserved by several providers for "random"; the canvas always
+// sends an explicit positive seed so "inherit last result" has a value to
+// reuse. A seed is a request parameter only and never a billing multiplier.
+export const CANVAS_WORKFLOW_SEED_MIN = PLAYGROUND_GENERATION_SEED_MIN
+export const CANVAS_WORKFLOW_SEED_MAX = PLAYGROUND_GENERATION_SEED_MAX
+
+// Custom sizes are WIDTHxHEIGHT and mirror the server-side bound. A selected
+// preset is sent unchanged; only explicit dimension strings are bounded.
+export const CANVAS_WORKFLOW_SIZE_MIN = PLAYGROUND_GENERATION_SIZE_MIN
+export const CANVAS_WORKFLOW_SIZE_MAX = PLAYGROUND_GENERATION_SIZE_MAX
+export const CANVAS_WORKFLOW_CUSTOM_SIZE = 'custom'
+
+// Batch artifacts are laid out vertically so one settled task with several
+// images reads as a visible variant stack.
+export const CANVAS_WORKFLOW_RESULT_NODE_OFFSET_Y = 220
+
 // Reference images read from connected upstream nodes. The bytes travel inside
 // the request body, so the count and each image's size stay bounded; the relay
 // reads and forwards the body under its own request-size limit.
@@ -320,6 +343,22 @@ export const CANVAS_WORKFLOW_MESSAGES = {
     'A connected reference image is larger than the 8 MiB limit.',
   SELECTION_EMPTY: 'Select at least one node to run.',
   SELECTION_NO_STEPS: 'The selection contains no workflow step to run.',
+  IMAGE_INPUT_LIMIT: 'Too many reference images are connected to this step.',
+  SIZE_INVALID:
+    'The size must use WIDTHxHEIGHT with each side between 64 and 8192 pixels.',
+  SEED_INVALID: 'The seed must be an integer between 1 and 2147483647.',
+} as const
+
+// Readable reasons shown when the selected model's channel metadata does not
+// advertise the chosen media endpoint. The fields stay visible but disabled so
+// the capability gap is explicit instead of silently changing a request.
+export const CANVAS_WORKFLOW_CAPABILITY_MESSAGES = {
+  IMAGE_UNSUPPORTED:
+    "This model's channel metadata does not list image generation.",
+  VIDEO_UNSUPPORTED:
+    "This model's channel metadata does not list video generation.",
+  NO_MEDIA:
+    "This model's channel metadata lists neither image nor video generation.",
 } as const
 
 // Run budget feedback keys the estimate dialog reports. The strings double as

@@ -348,6 +348,107 @@ func TestPlaygroundRejectsInvalidSnapshotsWithoutReplacingHistory(t *testing.T) 
 	}
 }
 
+// Web-search snapshots are part of the user turn: the normalized query and
+// hits are stored verbatim so a reload or replay rebuilds the same prompt and
+// citations. The gateway bounds every field and keeps the snapshot on user
+// messages only; an invalid snapshot leaves the stored history untouched.
+func TestPlaygroundMessageSearchSnapshots(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			playgroundTestDB(t, dialect)
+			session := createPlayground(t, 7, "web-search")
+			path := "/api/playground/sessions/" + session["id"].(string) + "/messages"
+			result := map[string]any{
+				"title":   "Go releases",
+				"url":     "https://go.dev/blog",
+				"snippet": "The latest Go release notes.",
+			}
+			accepted := map[string]any{"revision": 0, "messages": []any{map[string]any{
+				"client_key": "user-search",
+				"payload": map[string]any{
+					"key": "user-search", "from": "user",
+					"search": map[string]any{
+						"query":    "latest go release",
+						"provider": "tavily",
+						"results":  []any{result},
+					},
+					"versions": []any{map[string]any{"id": "u1", "content": "What changed?"}},
+				},
+			}}}
+			response := playgroundRequest(t, 7, http.MethodPut, path, accepted, controller.ReplacePlaygroundMessages)
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			messages, revision, err := model.ListPlaygroundMessages(7, session["id"].(string))
+			require.NoError(t, err)
+			require.EqualValues(t, 1, revision)
+			require.Len(t, messages, 1)
+			var stored struct {
+				Search struct {
+					Query    string `json:"query"`
+					Provider string `json:"provider"`
+					Results  []struct {
+						Title   string `json:"title"`
+						URL     string `json:"url"`
+						Snippet string `json:"snippet"`
+					} `json:"results"`
+				} `json:"search"`
+			}
+			require.NoError(t, common.UnmarshalJsonStr(string(messages[0].Payload), &stored))
+			assert.Equal(t, "latest go release", stored.Search.Query)
+			assert.Equal(t, "tavily", stored.Search.Provider)
+			require.Len(t, stored.Search.Results, 1)
+			assert.Equal(t, "Go releases", stored.Search.Results[0].Title)
+			assert.Equal(t, "https://go.dev/blog", stored.Search.Results[0].URL)
+			assert.Equal(t, "The latest Go release notes.", stored.Search.Results[0].Snippet)
+
+			tooManyResults := make([]any, 7)
+			for index := range tooManyResults {
+				tooManyResults[index] = map[string]any{
+					"title": fmt.Sprintf("Result %d", index), "url": "https://example.com", "snippet": "text",
+				}
+			}
+			largeResults := make([]any, 6)
+			for index := range largeResults {
+				largeResults[index] = map[string]any{
+					"title": strings.Repeat("t", 300), "url": "https://example.com/" + strings.Repeat("u", 3000), "snippet": strings.Repeat("s", 1200),
+				}
+			}
+			rejects := []struct {
+				name   string
+				from   string
+				search map[string]any
+			}{
+				{"snapshot on an assistant message", "assistant", map[string]any{"query": "q", "results": []any{}}},
+				{"blank query", "user", map[string]any{"query": " ", "results": []any{}}},
+				{"oversized provider", "user", map[string]any{"query": "q", "provider": strings.Repeat("p", 33), "results": []any{}}},
+				{"excess result count", "user", map[string]any{"query": "q", "results": tooManyResults}},
+				{"non-http result URL", "user", map[string]any{"query": "q", "results": []any{map[string]any{"title": "t", "url": "ftp://example.com", "snippet": "s"}}}},
+				{"result URL with credentials", "user", map[string]any{"query": "q", "results": []any{map[string]any{"title": "t", "url": "https://user:pass@example.com", "snippet": "s"}}}},
+				{"oversized title", "user", map[string]any{"query": "q", "results": []any{map[string]any{"title": strings.Repeat("t", 301), "url": "https://example.com", "snippet": "s"}}}},
+				{"oversized snippet", "user", map[string]any{"query": "q", "results": []any{map[string]any{"title": "t", "url": "https://example.com", "snippet": strings.Repeat("s", 1201)}}}},
+				{"oversized result list", "user", map[string]any{"query": "q", "results": largeResults}},
+			}
+			for _, test := range rejects {
+				t.Run(test.name, func(t *testing.T) {
+					body := map[string]any{"revision": 1, "messages": []any{map[string]any{
+						"client_key": "user-search",
+						"payload": map[string]any{
+							"key": "user-search", "from": test.from, "search": test.search,
+							"versions": []any{map[string]any{"id": "u1", "content": "What changed?"}},
+						},
+					}}}
+					rejected := playgroundRequest(t, 7, http.MethodPut, path, body, controller.ReplacePlaygroundMessages)
+					assert.Equal(t, http.StatusBadRequest, rejected.Code, rejected.Body.String())
+					messages, revision, err := model.ListPlaygroundMessages(7, session["id"].(string))
+					require.NoError(t, err)
+					require.EqualValues(t, 1, revision)
+					require.Len(t, messages, 1)
+					assert.Contains(t, string(messages[0].Payload), "latest go release")
+				})
+			}
+		})
+	}
+}
+
 // Tool call snapshots keep the requested call and the user-provided result
 // verbatim. The gateway only bounds the state: calls on non-assistant messages,
 // excess counts, duplicate or missing identities, oversized payloads and
@@ -2342,6 +2443,7 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	anonymousRead := playgroundAuthenticatedRequest(t, engine, "", http.MethodGet, "/api/playground/shared/"+shareEnvelope.Data.Token, nil)
 	require.Equal(t, 200, anonymousRead.Code, anonymousRead.Body.String())
 	assert.Contains(t, anonymousRead.Header().Get("Cache-Control"), "no-store")
+	assert.Contains(t, anonymousRead.Body.String(), `"kind":"conversation"`)
 	assert.Equal(t, "noindex, nofollow, noarchive", anonymousRead.Header().Get("X-Robots-Tag"))
 	anonymousMissing := playgroundAuthenticatedRequest(t, engine, "", http.MethodGet, "/api/playground/shared/unknown-token", nil)
 	assert.Equal(t, 404, anonymousMissing.Code)
@@ -2434,6 +2536,7 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodGet, canvasBase}, {http.MethodPost, canvasBase},
 		{http.MethodGet, canvasBase + "/missing"}, {http.MethodPatch, canvasBase + "/missing"},
 		{http.MethodDelete, canvasBase + "/missing"},
+		{http.MethodPost, canvasBase + "/missing/share"}, {http.MethodDelete, canvasBase + "/missing/share"},
 		{http.MethodPost, canvasBase + "/missing/restore"},
 		{http.MethodPost, canvasBase + "/missing/attachments"},
 		{http.MethodGet, canvasBase + "/missing/snapshots"},
@@ -2461,6 +2564,20 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	require.NotEmpty(t, canvasEnvelope.Data.ID)
 	canvasDetail := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, canvasBase+"/"+canvasEnvelope.Data.ID, nil)
 	require.Equal(t, 200, canvasDetail.Code, canvasDetail.Body.String())
+	canvasShare := playgroundAuthenticatedRequest(t, engine, token, http.MethodPost, canvasBase+"/"+canvasEnvelope.Data.ID+"/share", map[string]any{})
+	require.Equal(t, 200, canvasShare.Code, canvasShare.Body.String())
+	var canvasShareEnvelope struct {
+		Data struct{ Token string }
+	}
+	require.NoError(t, common.Unmarshal(canvasShare.Body.Bytes(), &canvasShareEnvelope))
+	require.NotEmpty(t, canvasShareEnvelope.Data.Token)
+	anonymousCanvas := playgroundAuthenticatedRequest(t, engine, "", http.MethodGet, "/api/playground/shared/"+canvasShareEnvelope.Data.Token, nil)
+	require.Equal(t, 200, anonymousCanvas.Code, anonymousCanvas.Body.String())
+	assert.Contains(t, anonymousCanvas.Body.String(), `"kind":"canvas"`)
+	assert.Contains(t, anonymousCanvas.Body.String(), `"document"`)
+	assert.NotContains(t, anonymousCanvas.Body.String(), `"ref"`)
+	require.Equal(t, 200, playgroundAuthenticatedRequest(t, engine, token, http.MethodDelete, canvasBase+"/"+canvasEnvelope.Data.ID+"/share", nil).Code)
+	assert.Equal(t, 404, playgroundAuthenticatedRequest(t, engine, "", http.MethodGet, "/api/playground/shared/"+canvasShareEnvelope.Data.Token, nil).Code)
 	require.Equal(t, 200, playgroundAuthenticatedRequest(t, engine, token, http.MethodDelete, canvasBase+"/"+canvasEnvelope.Data.ID, nil).Code)
 
 	// Assistant presets share the same session-only contract and stay
@@ -5760,6 +5877,21 @@ func TestPlaygroundSessionShares(t *testing.T) {
 					"sources":   []any{map[string]any{"href": "https://private.example", "title": "Private source"}},
 					"requestId": "private-request-id",
 				},
+				// Internal senders and unusable version pointers are never part
+				// of a public snapshot, even if legacy or corrupt rows contain
+				// them. They must not shift the two visible messages.
+				{
+					"key": "shared-system", "from": "system",
+					"versions": []any{map[string]any{"id": "shared-system-v1", "content": "system secret"}},
+				},
+				{
+					"key": "shared-empty", "from": "assistant",
+					"versions": []any{map[string]any{"id": "shared-empty-v1", "content": ""}},
+				},
+				{
+					"key": "shared-out-of-range", "from": "assistant", "activeVersionIndex": 9,
+					"versions": []any{map[string]any{"id": "shared-out-of-range-v1", "content": "unreachable secret"}},
+				},
 			}
 			for index, payload := range storedPayloads {
 				encoded, err := common.Marshal(payload)
@@ -5769,6 +5901,11 @@ func TestPlaygroundSessionShares(t *testing.T) {
 					Position: index * 1024, Payload: model.LongText(encoded), CreatedAt: now, UpdatedAt: now,
 				}).Error)
 			}
+			require.NoError(t, db.Create(&model.PlaygroundMessage{
+				SessionID: sessionID, UserID: 7, ClientKey: "shared-invalid-json",
+				Position: len(storedPayloads) * 1024, Payload: model.LongText(`{"from":"assistant","versions":[`),
+				CreatedAt: now, UpdatedAt: now,
+			}).Error)
 
 			createPath := "/api/playground/sessions/" + sessionID + "/share"
 			missingToken := "this-token-does-not-exist"
@@ -5776,6 +5913,9 @@ func TestPlaygroundSessionShares(t *testing.T) {
 			require.Equal(t, http.StatusNotFound, missing.Code, missing.Body.String())
 			assert.Contains(t, missing.Body.String(), "PLAYGROUND_SHARE_NOT_FOUND")
 			notFoundBody := missing.Body.String()
+			oversized := playgroundRequest(t, 0, http.MethodGet, "/api/playground/shared/"+strings.Repeat("a", 257), nil, controller.GetSharedPlaygroundSession)
+			assert.Equal(t, http.StatusNotFound, oversized.Code)
+			assert.Equal(t, notFoundBody, oversized.Body.String())
 
 			foreignCreate := playgroundRequest(t, 8, http.MethodPost, createPath, map[string]any{"expires_in_days": 7}, controller.CreatePlaygroundSessionShare)
 			assert.Equal(t, http.StatusNotFound, foreignCreate.Code, foreignCreate.Body.String())
@@ -5810,6 +5950,9 @@ func TestPlaygroundSessionShares(t *testing.T) {
 
 			firstToken, firstExpiry := createShare(7)
 			assert.GreaterOrEqual(t, firstExpiry, now+7*24*60*60)
+			decodedToken, decodeErr := base64.RawURLEncoding.DecodeString(firstToken)
+			require.NoError(t, decodeErr)
+			assert.Len(t, decodedToken, 16, "the plaintext token carries exactly 128 random bits")
 			var storedShare model.PlaygroundSessionShare
 			require.NoError(t, db.Where("session_id = ? AND revoked_at = 0", sessionID).First(&storedShare).Error)
 			hash := sha256.Sum256([]byte(firstToken))
@@ -5862,7 +6005,8 @@ func TestPlaygroundSessionShares(t *testing.T) {
 			assert.Equal(t, "application/pdf", snapshot.Data.Messages[1].Attachments[0].MediaType)
 			for _, secret := range []string{
 				"Draft answer", "private arguments", "private result", "private reasoning",
-				"private-request-id", "private.example", "att-secret", "call-secret", sessionID,
+				"private-request-id", "private.example", "att-secret", "call-secret",
+				"system secret", "unreachable secret", sessionID,
 			} {
 				assert.NotContains(t, read.Body.String(), secret)
 			}

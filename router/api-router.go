@@ -117,6 +117,7 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.PATCH("/knowledge-bases/:kbId", controller.UpdatePlaygroundKnowledgeBase)
 			playgroundRoute.DELETE("/knowledge-bases/:kbId", controller.DeletePlaygroundKnowledgeBase)
 			playgroundRoute.GET("/knowledge-bases/:kbId/documents", controller.ListPlaygroundKnowledgeDocuments)
+			playgroundRoute.POST("/knowledge-bases/:kbId/search", controller.SearchPlaygroundKnowledgeBase)
 			playgroundRoute.POST("/knowledge-bases/:kbId/documents", controller.CreatePlaygroundKnowledgeDocument)
 			playgroundRoute.GET("/knowledge-bases/:kbId/documents/:documentId", controller.GetPlaygroundKnowledgeDocument)
 			playgroundRoute.DELETE("/knowledge-bases/:kbId/documents/:documentId", controller.DeletePlaygroundKnowledgeDocument)
@@ -174,6 +175,10 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.GET("/canvases/:canvasId", controller.GetPlaygroundCanvasProject)
 			playgroundRoute.PATCH("/canvases/:canvasId", controller.UpdatePlaygroundCanvasProject)
 			playgroundRoute.DELETE("/canvases/:canvasId", controller.DeletePlaygroundCanvasProject)
+			// Canvas links follow the conversation share contract: a new link
+			// rotates the old one, and the anonymous route is the same.
+			playgroundRoute.POST("/canvases/:canvasId/share", controller.CreatePlaygroundCanvasShare)
+			playgroundRoute.DELETE("/canvases/:canvasId/share", controller.DeletePlaygroundCanvasShare)
 			// A trashed canvas waits in the shared trash window and comes back
 			// with its document, pins and counter share intact.
 			playgroundRoute.POST("/canvases/:canvasId/restore", controller.RestorePlaygroundCanvasProject)
@@ -371,6 +376,7 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.GET("/request_policy", controller.GetRequestPolicy)
 			optionRoute.PATCH("/request_policy", controller.UpdateRequestPolicy)
 			optionRoute.PUT("/", controller.UpdateOption)
+			optionRoute.PUT("/playground/web_search", controller.UpdatePlaygroundWebSearch)
 			optionRoute.PUT("/passkey/domains", controller.UpdatePasskeyDomains)
 			optionRoute.GET("/model_pricing", controller.GetModelPricingConfig)
 			optionRoute.PATCH("/model_pricing", controller.UpdateModelPricingConfig)

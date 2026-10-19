@@ -145,6 +145,28 @@ export const messageSearchSchema = z.object({
     .max(6),
 })
 
+// Knowledge retrieval snapshot of one user turn. The bounds mirror the stored
+// message validation so an oversized snapshot rejects the store instead of
+// silently dropping replay and citation data.
+const messageKnowledgeSchema = z.object({
+  query: z.string().refine((value) => Array.from(value).length <= 8000),
+  results: z
+    .array(
+      z.object({
+        knowledgeBaseId: z.string().min(1).max(200),
+        knowledgeBaseName: z.string().max(200),
+        documentId: z.string().min(1).max(200),
+        filename: z.string().min(1).max(255),
+        chunkId: z.string().min(1).max(200),
+        chunkIndex: z.number().int().nonnegative(),
+        score: z.number().finite(),
+        text: z.string().max(32 * 1024),
+        truncated: z.boolean().optional(),
+      })
+    )
+    .max(12),
+})
+
 const reasoningSchema = z.object({
   content: z.string(),
   duration: z.number().finite(),
@@ -166,6 +188,7 @@ const messageSchema = z.object({
   durationMs: z.number().finite().optional(),
   sources: z.array(sourceSchema).optional(),
   search: messageSearchSchema.optional(),
+  knowledge: messageKnowledgeSchema.optional(),
   reasoning: reasoningSchema.optional(),
   isReasoningStreaming: z.boolean().optional(),
   isReasoningComplete: z.boolean().optional(),
@@ -200,6 +223,8 @@ export const playgroundSessionSchema = z.object({
     )
     .max(6)
     .optional(),
+  /** Bound knowledge bases; absent in data written before LB-08. */
+  knowledgeBaseIds: z.array(z.string().min(1).max(128)).max(3).optional(),
   /** Absent in data written before context management existed. */
   context: playgroundContextSchema.optional(),
   /** Absent or null when the conversation sends its full stored history. */

@@ -87,6 +87,13 @@ test('a public share renders text, tool summaries and attachment placeholders wi
   ).toBeVisible()
   expect(document.querySelector('img')).toBeNull()
   expect(document.querySelector('a[href*="attachment"]')).toBeNull()
+  expect(document.title).toContain('Shared notes')
+  expect(
+    document.querySelector('meta[name="robots"]')?.getAttribute('content')
+  ).toBe('noindex, nofollow, noarchive')
+  expect(
+    document.querySelector('meta[name="referrer"]')?.getAttribute('content')
+  ).toBe('no-referrer')
 })
 
 test('a revoked, expired or missing share link shows the same not-found state', async () => {
