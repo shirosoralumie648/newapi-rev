@@ -21,7 +21,10 @@ import userEvent from '@testing-library/user-event'
 import { type ComponentProps, useState } from 'react'
 import { expect, test, vi } from 'vitest'
 
-import type { CanvasNodeDataUpdate } from '../../hooks/use-canvas-editor'
+import type {
+  CanvasNodeDataUpdate,
+  CanvasNodeDataUpdateOptions,
+} from '../../hooks/use-canvas-editor'
 import type { CanvasFlowNode, CanvasNodeData } from '../../types'
 import { CanvasNodeInspector } from '../canvas-node-inspector'
 
@@ -51,7 +54,11 @@ function CanvasNodeInspectorHarness(
     'node' | 'onUpdateData'
   > & {
     node: CanvasFlowNode
-    onUpdateData: (id: string, update: CanvasNodeDataUpdate) => void
+    onUpdateData: (
+      id: string,
+      update: CanvasNodeDataUpdate,
+      options?: CanvasNodeDataUpdateOptions
+    ) => void
   }
 ) {
   const [node, setNode] = useState<CanvasFlowNode>(props.node)
@@ -59,8 +66,8 @@ function CanvasNodeInspectorHarness(
     <CanvasNodeInspector
       {...props}
       node={node}
-      onUpdateData={(id, update) => {
-        props.onUpdateData(id, update)
+      onUpdateData={(id, update, options) => {
+        props.onUpdateData(id, update, options)
         setNode((current) => ({
           ...current,
           data: {

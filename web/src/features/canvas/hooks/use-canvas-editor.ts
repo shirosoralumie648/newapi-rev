@@ -579,7 +579,11 @@ export function useCanvasEditor(
         optionsRef.current.onRejectedConnection?.(CANVAS_WORKFLOW_ERRORS.CYCLE)
         return
       }
-      const nextEdges = reconnectEdge(oldEdge, connection, edgesRef.current)
+      // Reconnecting keeps the edge identity: selection, history and any
+      // stored reference still point at the same edge.
+      const nextEdges = reconnectEdge(oldEdge, connection, edgesRef.current, {
+        shouldReplaceId: false,
+      })
       if (nextEdges === edgesRef.current) return
       commit(nodesRef.current, nextEdges, { record: true, notify: true })
     },
