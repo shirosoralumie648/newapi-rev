@@ -8579,6 +8579,19 @@
     "You": "Вы",
     "Attachment content is not available in shared conversations.": "Содержимое вложений недоступно в общих диалогах.",
     "Share link expiration must be between 0 and 365 days.": "Срок действия ссылки для общего доступа должен быть от 0 до 365 дней.",
-    "Shared conversation not found.": "Общий диалог не найден."
+    "Shared conversation not found.": "Общий диалог не найден.",
+    "Preview not available": "Предпросмотр недоступен",
+    "Untitled canvas": "Холст без названия",
+    "Read-only shared canvas": "Общий холст только для чтения",
+    "This is a read-only copy of a canvas shared by a Playground user. Media previews are not included.": "Это копия холста, опубликованного пользователем Playground, только для чтения. Предпросмотры медиафайлов не включены.",
+    "Shared canvas": "Общий холст",
+    "The shared canvas has no nodes.": "На общем холсте нет узлов.",
+    "The owner of this canvas can revoke this link at any time.": "Владелец этого холста может в любой момент отозвать ссылку.",
+    "Loading shared link...": "Загрузка общей ссылки...",
+    "Shared link not found": "Общая ссылка не найдена",
+    "Unable to load the shared link": "Не удалось загрузить общую ссылку",
+    "Share canvas": "Поделиться холстом",
+    "Anyone with the link can read this canvas without signing in. The link is read-only and can be revoked at any time.": "Любой, у кого есть ссылка, может просматривать этот холст без входа. Ссылка доступна только для чтения, и её можно отозвать в любое время.",
+    "Creating a new link revokes all previous links for this canvas.": "Создание новой ссылки отзывает все предыдущие ссылки на этот холст."
   }
 }

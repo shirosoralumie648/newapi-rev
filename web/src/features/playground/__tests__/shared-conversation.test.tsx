@@ -18,11 +18,14 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen } from '@testing-library/react'
+import { ReactFlowProvider } from '@xyflow/react'
 import { afterEach, expect, test, vi } from 'vitest'
 
+import type { CanvasNodeData } from '@/features/canvas/types'
 import { api } from '@/lib/api'
 
-import { PlaygroundSharedConversation } from '../components/share/playground-shared-conversation'
+import { PlaygroundSharedPage } from '../components/share/playground-shared-page'
+import { SharedCanvasNodeView } from '../components/share/shared-canvas-node'
 
 const clients: QueryClient[] = []
 
@@ -33,8 +36,30 @@ function mount() {
   clients.push(client)
   return render(
     <QueryClientProvider client={client}>
-      <PlaygroundSharedConversation token='share-token' />
+      <PlaygroundSharedPage token='share-token' />
     </QueryClientProvider>
+  )
+}
+
+function sharedCanvasNodeProps(data: CanvasNodeData) {
+  return {
+    id: 'n1',
+    data,
+    selected: false,
+    type: data.kind,
+    zIndex: 0,
+    isConnectable: false,
+    dragging: false,
+    positionAbsoluteX: 0,
+    positionAbsoluteY: 0,
+  } as unknown as Parameters<typeof SharedCanvasNodeView>[0]
+}
+
+function renderSharedCanvasNode(data: CanvasNodeData) {
+  return render(
+    <ReactFlowProvider>
+      <SharedCanvasNodeView {...sharedCanvasNodeProps(data)} />
+    </ReactFlowProvider>
   )
 }
 
@@ -110,9 +135,79 @@ test('a revoked, expired or missing share link shows the same not-found state', 
 
   mount()
 
-  expect(await screen.findByText('Shared conversation not found')).toBeVisible()
+  expect(await screen.findByText('Shared link not found')).toBeVisible()
   expect(
     screen.getByText('This link may have been revoked or has expired.')
   ).toBeVisible()
   expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+})
+
+test('a canvas share renders its read-only board shell without media requests', async () => {
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        kind: 'canvas',
+        title: 'Shared board',
+        updated_at: 100,
+        document: { nodes: [], edges: [] },
+      },
+    },
+  })
+
+  mount()
+
+  expect(
+    await screen.findByRole('heading', { name: 'Shared board' })
+  ).toBeVisible()
+  expect(screen.getByText('Read-only shared canvas')).toBeVisible()
+  expect(screen.getByText('The shared canvas has no nodes.')).toBeVisible()
+  expect(
+    screen.getByText(
+      'The owner of this canvas can revoke this link at any time.'
+    )
+  ).toBeVisible()
+  expect(document.title).toContain('Read-only shared canvas')
+  expect(document.querySelector('img')).toBeNull()
+  expect(document.querySelector('a[href*="attachment"]')).toBeNull()
+})
+
+test('a shared media node exposes only its label and declared type', () => {
+  renderSharedCanvasNode({
+    kind: 'artifact',
+    label: 'chart.png',
+    mediaType: 'image/png',
+    ref: {
+      sessionId: 'pgs_secret',
+      attachmentId: 'pgf_secret',
+      taskId: 'task_secret',
+    },
+  })
+
+  expect(screen.getByText('Artifact')).toBeVisible()
+  expect(screen.getByText('chart.png')).toBeVisible()
+  expect(screen.getByText('image/png')).toBeVisible()
+  expect(screen.getByText('Preview not available')).toBeVisible()
+  expect(document.body.textContent).not.toContain('pgs_secret')
+  expect(document.body.textContent).not.toContain('pgf_secret')
+  expect(document.querySelector('img')).toBeNull()
+  expect(document.querySelector('a')).toBeNull()
+})
+
+test('a shared task result shows its bounded text preview and status', () => {
+  renderSharedCanvasNode({
+    kind: 'task-result',
+    workflow: {
+      status: 'succeeded',
+      output: 'Generated result',
+      resultImageCount: 1,
+      taskId: 'task_secret',
+    },
+  })
+
+  expect(screen.getByText('Task result')).toBeVisible()
+  expect(screen.getByText('Succeeded')).toBeVisible()
+  expect(screen.getByText('Generated result')).toBeVisible()
+  expect(screen.getByText('Preview not available')).toBeVisible()
+  expect(document.body.textContent).not.toContain('task_secret')
 })
