@@ -1129,7 +1129,7 @@ func SearchPlaygroundKnowledgeBase(base *PlaygroundKnowledgeBase, queryEmbedding
 		for index := range chunks {
 			chunk := &chunks[index]
 			document, ok := documentByID[chunk.DocumentID]
-			if !ok || staleIDs[chunk.DocumentID] {
+			if !ok || document.Status != PlaygroundKnowledgeDocumentStatusReady || staleIDs[chunk.DocumentID] {
 				continue
 			}
 			if chunk.EmbeddingModel != base.EmbeddingModel || chunk.EmbeddingDims != dims ||

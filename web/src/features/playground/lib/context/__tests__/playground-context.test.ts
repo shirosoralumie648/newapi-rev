@@ -28,6 +28,7 @@ import {
 } from '../../../constants'
 import type {
   Message,
+  MessageKnowledgeSnapshot,
   PlaygroundContextSettings,
   PlaygroundContextSummary,
 } from '../../../types'
@@ -35,6 +36,7 @@ import {
   clearPlaygroundAttachmentCache,
   primePlaygroundAttachment,
 } from '../../attachment-store'
+import { formatMessageKnowledgeContext } from '../../message/message-utils'
 import {
   buildContextSummaryRequest,
   estimateMessageTokens,
@@ -438,6 +440,41 @@ describe('context planning', () => {
     expect(estimateMessageTokens(searched)).toBeGreaterThan(
       estimateMessageTokens(message('m1', 'What changed in Go?'))
     )
+  })
+
+  test('a retrieved turn replays its stored knowledge hits as numbered context', () => {
+    const knowledge: MessageKnowledgeSnapshot = {
+      query: 'where is the handbook?',
+      results: [
+        {
+          knowledgeBaseId: 'kb-1',
+          knowledgeBaseName: 'Handbook',
+          documentId: 'doc-1',
+          filename: 'handbook.txt',
+          chunkId: 'chunk-1',
+          chunkIndex: 0,
+          score: 0.875,
+          text: 'The handbook lives in the shared drive.',
+        },
+      ],
+    }
+    const retrieved: Message = {
+      ...message('m1', 'Where is the handbook?'),
+      knowledge,
+    }
+
+    const formatted = formatMessageForRequest(retrieved)
+    expect(formatted).toHaveLength(1)
+    expect(formatted[0].content).toContain(
+      'Knowledge base results for "where is the handbook?".'
+    )
+    expect(formatted[0].content).toContain(
+      '[1] handbook.txt (Handbook)\nThe handbook lives in the shared drive.'
+    )
+    expect(
+      estimateMessageTokens(retrieved) -
+        estimateMessageTokens(message('m1', 'Where is the handbook?'))
+    ).toBe(estimateTextTokens(formatMessageKnowledgeContext(knowledge)))
   })
 
   test('answered tool calls expand into tool messages while pending calls stay out', () => {
