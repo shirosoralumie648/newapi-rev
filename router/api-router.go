@@ -202,6 +202,7 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.POST("/canvas-templates/market/:templateId/copy", controller.CopyPlaygroundCanvasTemplateFromMarket)
 			playgroundRoute.POST("/canvas-templates/import", controller.ImportPlaygroundCanvasTemplate)
 			playgroundRoute.GET("/canvas-templates/global", middleware.AdminAuth(), controller.ListGlobalPlaygroundCanvasTemplates)
+			playgroundRoute.POST("/canvas-templates/global", middleware.AdminAuth(), controller.CreateGlobalPlaygroundCanvasTemplate)
 			playgroundRoute.POST("/canvas-templates/global/import", middleware.AdminAuth(), controller.ImportGlobalPlaygroundCanvasTemplate)
 			playgroundRoute.GET("/canvas-templates/global/:templateId", middleware.AdminAuth(), controller.GetGlobalPlaygroundCanvasTemplate)
 			playgroundRoute.PATCH("/canvas-templates/global/:templateId", middleware.AdminAuth(), controller.UpdateGlobalPlaygroundCanvasTemplate)

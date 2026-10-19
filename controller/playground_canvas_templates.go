@@ -231,6 +231,14 @@ func playgroundCanvasTemplateAttachmentID(raw json.RawMessage) string {
 var playgroundCanvasTemplateVolatileWorkflowKeys = []string{
 	"status", "inputText", "inputImageCount", "output", "resultImageCount",
 	"taskId", "sourceNodeId", "error", "attempts", "updatedAt",
+	"lastSeed", "preferredResultNodeId",
+}
+
+// playgroundCanvasTemplateVolatileDataKeys is the rest of the per-canvas state
+// a saved chain must not replay elsewhere: a message preview belongs to its
+// conversation, and the preferred flag belongs to one run's result group.
+var playgroundCanvasTemplateVolatileDataKeys = []string{
+	"sourceDeleted", "snapshot", "preferred",
 }
 
 // playgroundCanvasTemplateSanitizeNodeData removes volatile run state and
@@ -247,9 +255,11 @@ func playgroundCanvasTemplateSanitizeNodeData(raw json.RawMessage, keptAttachmen
 		return raw, false, false, nil
 	}
 	changed := false
-	if _, present := decoded["sourceDeleted"]; present {
-		delete(decoded, "sourceDeleted")
-		changed = true
+	for _, key := range playgroundCanvasTemplateVolatileDataKeys {
+		if _, present := decoded[key]; present {
+			delete(decoded, key)
+			changed = true
+		}
 	}
 	if rawWorkflow, present := decoded["workflow"]; present {
 		var workflow map[string]json.RawMessage
@@ -362,6 +372,18 @@ func writePlaygroundCanvasTemplateError(c *gin.Context, err error) {
 }
 
 func CreatePlaygroundCanvasTemplate(c *gin.Context) {
+	createPlaygroundCanvasTemplate(c, false)
+}
+
+// CreateGlobalPlaygroundCanvasTemplate saves the administrator's current canvas
+// as a market template. The canvas is still read through the caller's owner
+// check, while the resulting row is ownerless and does not consume any account
+// quota.
+func CreateGlobalPlaygroundCanvasTemplate(c *gin.Context) {
+	createPlaygroundCanvasTemplate(c, true)
+}
+
+func createPlaygroundCanvasTemplate(c *gin.Context, global bool) {
 	userID := c.GetInt("id")
 	if userID <= 0 {
 		common.ApiErrorStatus(c, http.StatusUnauthorized, common.NewMessage("Authentication required."))
@@ -434,7 +456,12 @@ func CreatePlaygroundCanvasTemplate(c *gin.Context) {
 		writePlaygroundCanvasTemplateError(c, model.ErrPlaygroundCanvasTemplateLimit)
 		return
 	}
-	if err := model.CreatePlaygroundCanvasTemplate(userID, template, assets, policy); err != nil {
+	if global {
+		if err := model.CreateGlobalPlaygroundCanvasTemplate(template, assets, policy); err != nil {
+			writePlaygroundCanvasTemplateError(c, err)
+			return
+		}
+	} else if err := model.CreatePlaygroundCanvasTemplate(userID, template, assets, policy); err != nil {
 		writePlaygroundCanvasTemplateError(c, err)
 		return
 	}

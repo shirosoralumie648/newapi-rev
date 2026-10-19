@@ -155,6 +155,7 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"POST /api/playground/canvas-templates/market/:templateId/copy":              accessTokenSessionRule,
 	"POST /api/playground/canvas-templates/import":                               accessTokenSessionRule,
 	"GET /api/playground/canvas-templates/global":                                accessTokenScopeRule("option:read"),
+	"POST /api/playground/canvas-templates/global":                               accessTokenScopeRule("option:write"),
 	"POST /api/playground/canvas-templates/global/import":                        accessTokenScopeRule("option:write"),
 	"GET /api/playground/canvas-templates/global/:templateId":                    accessTokenScopeRule("option:read"),
 	"PATCH /api/playground/canvas-templates/global/:templateId":                  accessTokenScopeRule("option:write"),
