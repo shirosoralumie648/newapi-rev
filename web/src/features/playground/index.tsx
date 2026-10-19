@@ -90,6 +90,7 @@ import {
   appendParallelMessagePair,
   collectMessageRequestIds,
   createPendingQuote,
+  developerOptionsActive,
   estimatePlaygroundCost,
   forkPlaygroundSession,
   formatMemoryBlock,
@@ -195,6 +196,8 @@ function PlaygroundContent(props: {
     updateContextSettings,
     updateContextSummary,
     updateKnowledgeBaseIds,
+    developerOptions,
+    updateDeveloperOptions,
     applySessionSettings,
     clearMessages,
     sessions,
@@ -291,6 +294,7 @@ function PlaygroundContent(props: {
     systemPrompt,
     memoryBlock,
     contextSettings: context,
+    developerOptions,
     prepareContextSummary: contextController.prepareForSend,
     prepareKnowledge,
     onMessageUpdate: updateMessages,
@@ -1298,6 +1302,11 @@ function PlaygroundContent(props: {
               onSaveEdit={(newContent) => applyEdit(newContent, false)}
               onSaveEditAndSubmit={(newContent) => applyEdit(newContent, true)}
               contextSummary={contextSummary}
+              responseFormat={
+                developerOptionsActive(developerOptions)
+                  ? developerOptions.responseFormat
+                  : null
+              }
               openingMessage={openingMessage}
               suggestedQuestions={suggestedQuestions}
               onOpenArtifact={(artifact) =>
@@ -1353,6 +1362,7 @@ function PlaygroundContent(props: {
               contextPlan={contextController.plan}
               contextSettings={context}
               contextSummary={contextSummary}
+              developerOptions={developerOptions}
               sessionId={activeSession?.id}
               autoReadDefaultEnabled={preferences.autoReadDefault}
               autoReadEnabled={preferences.isAutoReadEnabled(activeSessionId)}
@@ -1402,6 +1412,7 @@ function PlaygroundContent(props: {
               onCompareModelsChange={setCompareModels}
               onOpenCompareRuns={() => setCompareRunsOpen(true)}
               onContextSettingsChange={updateContextSettings}
+              onDeveloperOptionsChange={updateDeveloperOptions}
               onKnowledgeBaseIdsChange={updateKnowledgeBaseIds}
               onGroupChange={(value) => updateConfig('group', value)}
               onConfigChange={updateConfig}
