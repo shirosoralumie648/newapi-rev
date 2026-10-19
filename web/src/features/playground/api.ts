@@ -186,6 +186,7 @@ const serverSessionSchema = z.object({
   system_prompt: z.string().optional(),
   opening_message: z.string().optional(),
   suggested_questions: z.array(z.string()).optional(),
+  knowledge_base_ids: z.array(z.string()).optional(),
   context: serverContextSettingsSchema.optional(),
   context_summary: serverContextSummarySchema.nullable().optional(),
   pinned: z.boolean().optional(),
@@ -207,6 +208,7 @@ export interface PlaygroundSessionInput {
   system_prompt?: string
   opening_message?: string
   suggested_questions?: string[]
+  knowledge_base_ids?: string[]
   context?: PlaygroundContextSettings
   context_summary?: PlaygroundContextSummary | null
   pinned?: boolean
@@ -406,6 +408,7 @@ function mapServerSession(value: unknown): PlaygroundServerSession {
     systemPrompt: session.system_prompt ?? '',
     openingMessage: session.opening_message ?? '',
     suggestedQuestions: session.suggested_questions ?? [],
+    knowledgeBaseIds: session.knowledge_base_ids ?? [],
     context: normalizeContextSettings({
       historyLimit: session.context?.history_limit,
       tokenBudget: session.context?.token_budget,

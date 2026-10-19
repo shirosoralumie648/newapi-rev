@@ -126,6 +126,10 @@ type PlaygroundSession struct {
 	// of strings. They are display-only prompts the user may send; the column
 	// stays nullable so an existing installation can add it on every dialect.
 	SuggestedQuestions string `json:"-" gorm:"type:text"`
+	// KnowledgeBaseIDs stores the conversation's bound knowledge bases as a
+	// JSON array of ids. Retrieval happens per send, so changing a base's
+	// documents affects the next turn without rewriting the conversation.
+	KnowledgeBaseIDs string `json:"-" gorm:"type:text"`
 	// PinnedAt is the timestamp the conversation was pinned, or 0 when it is
 	// not pinned. A pinned conversation stays in the pinned section of the
 	// client list; the server never reorders the list by it.

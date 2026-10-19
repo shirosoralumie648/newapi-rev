@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next'
 
 import { PromptInputButton } from '@/components/ai-elements/prompt-input'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Collapsible,
   CollapsibleContent,
@@ -63,12 +64,20 @@ import {
   PLAYGROUND_CONTEXT_HISTORY_LIMIT_MAX,
   PLAYGROUND_CONTEXT_TOKEN_BUDGET_MAX,
 } from '../../constants'
+import type { KnowledgeBase } from '../../knowledge-api'
 import type { PlaygroundContextPlan } from '../../lib'
 import type {
+  KnowledgeStaleDocument,
   ModelOption,
   PlaygroundContextSettings,
   PlaygroundContextSummary,
 } from '../../types'
+
+export type PlaygroundKnowledgeDiagnostics = {
+  staleDocuments: KnowledgeStaleDocument[]
+  resultCount: number
+  retrievedAt: number
+}
 
 type PlaygroundContextPanelProps = {
   settings: PlaygroundContextSettings
@@ -82,6 +91,14 @@ type PlaygroundContextPanelProps = {
   onSettingsChange: (settings: PlaygroundContextSettings) => void
   onRemoveSummary: () => void
   onSummarizeNow: () => void
+  /** Knowledge bases the account may bind to the conversation. */
+  knowledgeBases?: KnowledgeBase[]
+  /** Bases bound to the active conversation; at most three. */
+  knowledgeBaseIds?: string[]
+  onKnowledgeBaseIdsChange?: (knowledgeBaseIds: string[]) => void
+  /** Last retrieval result: stale documents the merge skipped. */
+  knowledgeDiagnostics?: PlaygroundKnowledgeDiagnostics | null
+  knowledgeLoading?: boolean
 }
 
 type PlaygroundContextContentProps = PlaygroundContextPanelProps & {
@@ -124,6 +141,15 @@ function PlaygroundContextContent(props: PlaygroundContextContentProps) {
     props.onSettingsChange({ ...props.settings, ...patch })
   }
 
+  const boundKnowledgeBaseIds = props.knowledgeBaseIds ?? []
+  const staleDocuments = props.knowledgeDiagnostics?.staleDocuments ?? []
+  const toggleKnowledgeBase = (knowledgeBaseId: string, checked: boolean) => {
+    const next = checked
+      ? [...boundKnowledgeBaseIds, knowledgeBaseId]
+      : boundKnowledgeBaseIds.filter((id) => id !== knowledgeBaseId)
+    props.onKnowledgeBaseIdsChange?.(next)
+  }
+
   return (
     <div className='grid gap-3 p-1'>
       <div className='space-y-1 px-1'>
@@ -136,6 +162,68 @@ function PlaygroundContextContent(props: PlaygroundContextContentProps) {
             }
           )}
         </p>
+
+        <div className='border-border/60 grid gap-2 border-t pt-3'>
+          <p className='px-1 text-xs font-semibold'>{t('Knowledge bases')}</p>
+          {props.knowledgeLoading ? (
+            <p className='text-muted-foreground px-1 text-xs'>
+              {t('Loading knowledge bases...')}
+            </p>
+          ) : (props.knowledgeBases ?? []).length === 0 ? (
+            <p className='text-muted-foreground px-1 text-xs'>
+              {t('No knowledge bases yet.')}
+            </p>
+          ) : (
+            <div className='grid gap-1'>
+              {(props.knowledgeBases ?? []).map((knowledgeBase) => {
+                const checked = boundKnowledgeBaseIds.includes(knowledgeBase.id)
+                return (
+                  <label
+                    className='hover:bg-muted/50 flex items-start gap-2 rounded-md px-1 py-1.5'
+                    key={knowledgeBase.id}
+                  >
+                    <Checkbox
+                      checked={checked}
+                      disabled={
+                        props.disabled ||
+                        (!checked && boundKnowledgeBaseIds.length >= 3)
+                      }
+                      onCheckedChange={(value) =>
+                        toggleKnowledgeBase(knowledgeBase.id, value === true)
+                      }
+                    />
+                    <span className='grid gap-0.5 text-xs leading-4'>
+                      <span className='font-medium'>{knowledgeBase.name}</span>
+                      <span className='text-muted-foreground'>
+                        {knowledgeBase.embeddingModel}
+                      </span>
+                    </span>
+                  </label>
+                )
+              })}
+            </div>
+          )}
+          <p className='text-muted-foreground px-1 text-xs'>
+            {t('Up to three knowledge bases are searched on every send.')}
+          </p>
+          {staleDocuments.length > 0 && (
+            <p
+              className='text-destructive px-1 text-xs leading-4'
+              role='status'
+            >
+              {t(
+                '{{count}} knowledge documents need rebuilding before they can be cited: {{files}}',
+                {
+                  count: staleDocuments.length,
+                  files: staleDocuments
+                    .map((document) => document.filename)
+                    .join(', '),
+                }
+              )}
+            </p>
+          )}
+        </div>
+
         {props.plan.droppedMessages.length > 0 && (
           <p
             role='status'
@@ -383,7 +471,8 @@ export function PlaygroundContextPanel(props: PlaygroundContextPanelProps) {
     props.settings.historyLimit > 0 ||
     props.settings.tokenBudget > 0 ||
     props.settings.autoSummarize ||
-    props.summary !== null
+    props.summary !== null ||
+    (props.knowledgeBaseIds?.length ?? 0) > 0
 
   const trigger = (
     <PromptInputButton

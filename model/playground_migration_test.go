@@ -270,7 +270,7 @@ func TestPlaygroundPresetSchemaMigration(t *testing.T) {
 			for range 2 {
 				require.NoError(t, db.AutoMigrate(&PlaygroundSession{}))
 			}
-			for _, column := range []string{"opening_message", "suggested_questions", "pinned_at", "archived_at", "tags"} {
+			for _, column := range []string{"opening_message", "suggested_questions", "knowledge_base_ids", "pinned_at", "archived_at", "tags"} {
 				assert.True(t, db.Migrator().HasColumn(&PlaygroundSession{}, column), column)
 			}
 			var session PlaygroundSession
@@ -278,6 +278,7 @@ func TestPlaygroundPresetSchemaMigration(t *testing.T) {
 			assert.Equal(t, "Legacy conversation", session.Title)
 			assert.Empty(t, session.OpeningMessage)
 			assert.Empty(t, session.SuggestedQuestions)
+			assert.Empty(t, session.KnowledgeBaseIDs)
 			assert.Zero(t, session.PinnedAt)
 			assert.Zero(t, session.ArchivedAt)
 			assert.Empty(t, session.Tags)
@@ -327,6 +328,9 @@ func TestPlaygroundShareCanvasColumnMigration(t *testing.T) {
 			require.NoError(t, db.Where("token_hash = ?", "canvas-token-hash").First(&canvasShare).Error)
 			assert.Equal(t, "pgc_upgraded", canvasShare.CanvasID)
 			assert.Empty(t, canvasShare.SessionID)
+		})
+	}
+}
 		})
 	}
 }

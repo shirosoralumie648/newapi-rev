@@ -74,6 +74,12 @@ interface UseChatHandlerOptions {
   prepareContextSummary?: (
     messages: Message[]
   ) => Promise<PlaygroundContextSummary | null>
+  /**
+   * Retrieves knowledge-base context for the newest user turn and returns the
+   * messages with the snapshot attached. A failure is expected to resolve with
+   * the original messages so a turn still sends without knowledge context.
+   */
+  prepareKnowledge?: (messages: Message[]) => Promise<Message[]>
   onMessageUpdate: (
     updater: (prev: Message[]) => Message[],
     sessionId?: string | null
@@ -123,6 +129,7 @@ export function useChatHandler({
   memoryBlock,
   contextSettings,
   prepareContextSummary,
+  prepareKnowledge,
   onMessageUpdate,
   onResponseComplete,
   sessionId,
@@ -668,24 +675,38 @@ export function useChatHandler({
         ensurePlaygroundMessageAttachments(messages),
         ensurePlaygroundDocumentTexts(messages),
       ]).then(async () => {
+        let prepared = messages
+        if (prepareKnowledge) {
+          try {
+            prepared = await prepareKnowledge(messages)
+          } catch {
+            prepared = messages
+          }
+          if (prepared !== messages) {
+            onMessageUpdate(() => prepared, sessionId)
+          }
+        }
         let contextSummary: PlaygroundContextSummary | null = null
         try {
-          contextSummary = (await prepareContextSummary?.(messages)) ?? null
+          contextSummary = (await prepareContextSummary?.(prepared)) ?? null
         } catch {
           contextSummary = null
         }
         if (config.stream) {
-          sendStreamingChat(messages, contextSummary, quote)
+          sendStreamingChat(prepared, contextSummary, quote)
         } else {
-          void sendNonStreamingChat(messages, contextSummary, undefined, quote)
+          void sendNonStreamingChat(prepared, contextSummary, undefined, quote)
         }
       })
     },
     [
       config.stream,
+      onMessageUpdate,
       prepareContextSummary,
+      prepareKnowledge,
       sendStreamingChat,
       sendNonStreamingChat,
+      sessionId,
     ]
   )
 
