@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Menu, PanelLeft } from 'lucide-react'
+import { Brain, Menu, PanelLeft } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -42,7 +42,7 @@ import { PlaygroundSessionList } from './playground-session-list'
  * artifacts and the asset library are creation-domain surfaces owned by the
  * canvas editor, so the chat workspace no longer exposes their entries.
  */
-export type PlaygroundInspectorView = 'presets' | 'trash'
+export type PlaygroundInspectorView = 'memory' | 'presets' | 'trash'
 
 interface PlaygroundWorkspaceProps {
   disabled?: boolean
@@ -56,6 +56,8 @@ interface PlaygroundWorkspaceProps {
     organization: PlaygroundSessionOrganization
   ) => void
   onDelete: (sessionId: string) => void
+  /** Rebuild one conversation from an exported JSON file. */
+  onImportFile?: (file: File) => Promise<void> | void
   children: React.ReactNode
   usagePanel?: React.ReactNode
   /** Synchronization status shown as the workspace status badge. */
@@ -65,6 +67,9 @@ interface PlaygroundWorkspaceProps {
   onCloseInspector: () => void
   onOpenTrash?: () => void
   onOpenPresets?: () => void
+  /** Opens the cross-session message search dialog. */
+  onOpenMessageSearch?: () => void
+  onToggleInspector?: (view: PlaygroundInspectorView) => void
 }
 
 export function PlaygroundWorkspace(props: PlaygroundWorkspaceProps) {
@@ -79,6 +84,8 @@ export function PlaygroundWorkspace(props: PlaygroundWorkspaceProps) {
       onAction={() => setIsSessionListOpen(false)}
       onCreate={props.onCreate}
       onDelete={props.onDelete}
+      onImportFile={props.onImportFile}
+      onOpenMessageSearch={props.onOpenMessageSearch}
       onOpenPresets={props.onOpenPresets}
       onOpenTrash={props.onOpenTrash}
       onOrganize={props.onOrganize}
@@ -92,7 +99,12 @@ export function PlaygroundWorkspace(props: PlaygroundWorkspaceProps) {
   let inspectorDescription = t(
     'Reusable assistants with their own model, parameters and system prompt.'
   )
-  if (props.inspectorView === 'trash') {
+  if (props.inspectorView === 'memory') {
+    inspectorTitle = t('Memory')
+    inspectorDescription = t(
+      'Durable notes the assistant can reuse across conversations.'
+    )
+  } else if (props.inspectorView === 'trash') {
     inspectorTitle = t('Trash')
     inspectorDescription = t(
       'Deleted conversations and canvases stay recoverable until the retention period ends.'
@@ -151,6 +163,21 @@ export function PlaygroundWorkspace(props: PlaygroundWorkspaceProps) {
               {props.syncLabel}
             </span>
             {props.usagePanel}
+            {props.onToggleInspector && (
+              <Button
+                aria-pressed={props.inspectorView === 'memory'}
+                disabled={props.disabled}
+                onClick={() => props.onToggleInspector?.('memory')}
+                size='sm'
+                type='button'
+                variant={
+                  props.inspectorView === 'memory' ? 'secondary' : 'ghost'
+                }
+              >
+                <Brain aria-hidden='true' />
+                {t('Memory')}
+              </Button>
+            )}
           </div>
         </div>
         <WorkspaceInspector

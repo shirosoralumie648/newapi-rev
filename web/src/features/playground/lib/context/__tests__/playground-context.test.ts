@@ -284,6 +284,41 @@ describe('context planning', () => {
     expect(tiny.includedMessages.map((item) => item.key)).toEqual(['m3'])
   })
 
+  test('the memory block counts toward the token budget and the estimate', () => {
+    const messages = [
+      message('m1', 'x'.repeat(400)),
+      message('m2', 'y'.repeat(400)),
+    ]
+    const memoryBlock = 'm'.repeat(40)
+
+    const withoutMemory = planPlaygroundContext({
+      messages,
+      settings: settings({ tokenBudget: 205 }),
+    })
+    expect(withoutMemory.includedMessages.map((item) => item.key)).toEqual([
+      'm1',
+      'm2',
+    ])
+
+    const withMemory = planPlaygroundContext({
+      messages,
+      settings: settings({ tokenBudget: 205 }),
+      memoryBlock,
+    })
+    expect(withMemory.includedMessages.map((item) => item.key)).toEqual(['m2'])
+    expect(withMemory.estimatedTokens).toBeGreaterThanOrEqual(
+      estimateTextTokens(memoryBlock)
+    )
+
+    expect(
+      planPlaygroundContext({
+        messages: [],
+        settings: settings(),
+        memoryBlock,
+      }).estimatedTokens
+    ).toBe(estimateTextTokens(memoryBlock))
+  })
+
   test('a text-only model replaces earlier images and reports them', () => {
     // A send caches the attachment bytes before the plan is built
     // (ensurePlaygroundMessageAttachments), so the request carries the image

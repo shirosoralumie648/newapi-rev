@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createInstance, type i18n } from 'i18next'
 import type { ComponentProps } from 'react'
@@ -286,4 +286,50 @@ test('an administrator creates a global preset with its conversation intro', asy
     )
   )
   expect(await screen.findByText('Published reviewer')).toBeVisible()
+})
+
+test('imports a preset JSON file into the account', async () => {
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: { items: [presetWire], total: 1, limit: 50 },
+    },
+  })
+  const post = vi.spyOn(api, 'post').mockResolvedValue({
+    data: {
+      success: true,
+      data: { ...presetWire, id: 'pgp_imported', name: 'Imported reviewer' },
+    },
+  })
+  renderPanel()
+
+  await screen.findByText('Code reviewer')
+  const document = JSON.stringify({
+    format: 'new-api-playground-preset',
+    version: 1,
+    preset: {
+      name: 'Imported reviewer',
+      opening_message: 'Welcome from the file.',
+      suggested_questions: ['Review this'],
+    },
+  })
+  const file = new File([document], 'reviewer.json', {
+    type: 'application/json',
+  })
+  Object.defineProperty(file, 'text', {
+    configurable: true,
+    value: () => Promise.resolve(document),
+  })
+  fireEvent.change(screen.getByLabelText('Preset file'), {
+    target: { files: [file] },
+  })
+
+  await waitFor(() =>
+    expect(post).toHaveBeenCalledWith(
+      '/api/playground/presets/import',
+      document,
+      expect.anything()
+    )
+  )
+  expect(await screen.findByText('Imported reviewer')).toBeVisible()
 })

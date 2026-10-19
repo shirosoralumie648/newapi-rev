@@ -27,6 +27,7 @@ function toolbarProps(runPhase: CanvasWorkflowRunPhase = 'idle') {
   return {
     inspectorView: 'details' as const,
     canCopy: false,
+    canDistribute: false,
     canExportSelection: false,
     canGroup: false,
     canPaste: false,
@@ -35,6 +36,7 @@ function toolbarProps(runPhase: CanvasWorkflowRunPhase = 'idle') {
     canUndo: false,
     canUngroup: false,
     disabled: false,
+    exportingPng: false,
     group: 'default',
     groups: [
       { label: 'default', value: 'default', ratio: 1 },
@@ -43,9 +45,13 @@ function toolbarProps(runPhase: CanvasWorkflowRunPhase = 'idle') {
     onAddNode: vi.fn(),
     onCancelRun: vi.fn(),
     onCopy: vi.fn(),
+    onDistributeHorizontal: vi.fn(),
+    onDistributeVertical: vi.fn(),
     onExport: vi.fn(),
     onExportArchive: vi.fn(),
+    onExportPng: vi.fn(),
     onExportSelectionArchive: vi.fn(),
+    onExportSelectionPng: vi.fn(),
     onGroupChange: vi.fn(),
     onGroupSelection: vi.fn(),
     onImportArchiveFile: vi.fn(),
@@ -95,6 +101,8 @@ test('disables edit actions that do not apply to the selection', async () => {
     'Paste',
     'Group selection',
     'Ungroup selection',
+    'Distribute horizontally',
+    'Distribute vertically',
   ]) {
     expect(screen.getByRole('menuitem', { name })).toHaveAttribute(
       'aria-disabled',
@@ -111,6 +119,7 @@ test('runs the edit actions the selection allows', async () => {
   const props = {
     ...toolbarProps(),
     canCopy: true,
+    canDistribute: true,
     canGroup: true,
     canPaste: true,
     canRedo: true,
@@ -136,6 +145,18 @@ test('runs the edit actions the selection allows', async () => {
   expect(props.onUngroupSelection).toHaveBeenCalledTimes(1)
 
   await user.click(screen.getByRole('button', { name: 'Edit' }))
+  await user.click(
+    screen.getByRole('menuitem', { name: 'Distribute horizontally' })
+  )
+  expect(props.onDistributeHorizontal).toHaveBeenCalledTimes(1)
+
+  await user.click(screen.getByRole('button', { name: 'Edit' }))
+  await user.click(
+    screen.getByRole('menuitem', { name: 'Distribute vertically' })
+  )
+  expect(props.onDistributeVertical).toHaveBeenCalledTimes(1)
+
+  await user.click(screen.getByRole('button', { name: 'Edit' }))
   await user.click(screen.getByRole('menuitem', { name: 'Select all' }))
   expect(props.onSelectAll).toHaveBeenCalledTimes(1)
 })
@@ -149,9 +170,9 @@ test('toggles the assistant view and reports its pressed state', async () => {
   expect(toggle).toHaveAttribute('aria-pressed', 'false')
 
   await user.click(toggle)
-  expect(props.onToggleAssistant).toHaveBeenCalledTimes(1)
+  expect(props.onToggleInspectorView).toHaveBeenCalledWith('assistant')
 
-  rerender(<CanvasToolbar {...props} assistantOpen />)
+  rerender(<CanvasToolbar {...props} inspectorView='assistant' />)
   expect(screen.getByRole('button', { name: 'Assistant' })).toHaveAttribute(
     'aria-pressed',
     'true'
@@ -162,6 +183,16 @@ test('exports the document as JSON, an archive or a selection archive', async ()
   const user = userEvent.setup()
   const props = { ...toolbarProps(), canExportSelection: true }
   render(<CanvasToolbar {...props} />)
+
+  await user.click(screen.getByRole('button', { name: 'Export' }))
+  await user.click(screen.getByRole('menuitem', { name: 'PNG image' }))
+  expect(props.onExportPng).toHaveBeenCalledTimes(1)
+
+  await user.click(screen.getByRole('button', { name: 'Export' }))
+  await user.click(
+    screen.getByRole('menuitem', { name: 'PNG of selected nodes' })
+  )
+  expect(props.onExportSelectionPng).toHaveBeenCalledTimes(1)
 
   await user.click(screen.getByRole('button', { name: 'Export' }))
   await user.click(screen.getByRole('menuitem', { name: 'JSON file' }))
@@ -186,6 +217,9 @@ test('disables the selection archive while nothing is selected', async () => {
   await user.click(screen.getByRole('button', { name: 'Export' }))
   expect(
     screen.getByRole('menuitem', { name: 'ZIP archive of selected nodes' })
+  ).toHaveAttribute('aria-disabled', 'true')
+  expect(
+    screen.getByRole('menuitem', { name: 'PNG of selected nodes' })
   ).toHaveAttribute('aria-disabled', 'true')
   expect(
     screen.getByRole('menuitem', { name: 'ZIP archive' })

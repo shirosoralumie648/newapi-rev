@@ -88,3 +88,72 @@ test('the read-aloud action is hidden without a handler', () => {
     screen.queryByRole('button', { name: 'Read aloud' })
   ).not.toBeInTheDocument()
 })
+
+test('the continue action reports the truncated assistant reply it continues', async () => {
+  const user = userEvent.setup()
+  const onContinue = vi.fn()
+  const truncated: Message = {
+    key: 'a1',
+    from: 'assistant',
+    status: 'complete',
+    versions: [{ id: 'v1', content: 'Half an answer', finishReason: 'length' }],
+  }
+
+  render(
+    <MessageActions canContinue message={truncated} onContinue={onContinue} />
+  )
+  await user.click(screen.getByRole('button', { name: 'Continue generation' }))
+
+  expect(onContinue).toHaveBeenCalledWith(truncated)
+})
+
+test('the continue action is hidden without a continuable reply', () => {
+  render(<MessageActions message={message} onContinue={() => undefined} />)
+
+  expect(
+    screen.queryByRole('button', { name: 'Continue generation' })
+  ).not.toBeInTheDocument()
+})
+
+test('the quote action reports the message it arms the composer with', async () => {
+  const user = userEvent.setup()
+  const onQuote = vi.fn()
+
+  render(<MessageActions message={message} onQuote={onQuote} />)
+  await user.click(screen.getByRole('button', { name: 'Quote' }))
+
+  expect(onQuote).toHaveBeenCalledWith(message)
+})
+
+test('the quote action is hidden for a message without visible content', () => {
+  const empty: Message = {
+    key: 'm-empty',
+    from: 'assistant',
+    status: 'complete',
+    versions: [{ id: 'v1', content: '   ' }],
+  }
+
+  render(<MessageActions message={empty} onQuote={() => undefined} />)
+
+  expect(
+    screen.queryByRole('button', { name: 'Quote' })
+  ).not.toBeInTheDocument()
+})
+
+test('the fork action reports the message it branches from', async () => {
+  const user = userEvent.setup()
+  const onFork = vi.fn()
+
+  render(<MessageActions message={message} onFork={onFork} />)
+  await user.click(screen.getByRole('button', { name: 'Fork from here' }))
+
+  expect(onFork).toHaveBeenCalledWith(message)
+})
+
+test('the fork action is disabled while a generation owns the workspace', () => {
+  const onFork = vi.fn()
+
+  render(<MessageActions isGenerating message={message} onFork={onFork} />)
+
+  expect(screen.getByRole('button', { name: 'Fork from here' })).toBeDisabled()
+})

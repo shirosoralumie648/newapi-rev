@@ -1,28 +1,22 @@
-/*
-Copyright (C) 2023-2026 QuantumNous
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as
-published by the Free Software Foundation, either version 3 of the
-License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program. If not, see <https://www.gnu.org/licenses/>.
-
-For commercial licensing, please contact support@quantumnous.com
-*/
-import { MESSAGE_ROLES, MESSAGE_STATUS } from '../../constants'
-import type { Message, MessageAttachment } from '../../types'
+import {
+  CONTINUE_GENERATION_INSTRUCTION,
+  MESSAGE_ROLES,
+  MESSAGE_STATUS,
+} from '../../constants'
+import type {
+  Message,
+  MessageAttachment,
+  MessageSearchSnapshot,
+} from '../../types'
+import { isMessageTruncated } from './message-continuation-utils'
 import {
   appendMessageVersion,
   createLoadingAssistantMessage,
   createUserMessage,
   getMessageContent,
+  getMessageSearchSources,
+  hasMessageContent,
+  updateCurrentVersionContent,
 } from './message-utils'
 import { isParallelMessage } from './parallel-compare-utils'
 
@@ -40,14 +34,15 @@ type ChatMessageRenderState = {
 // previous answer stays selectable as a branch.
 function startAssistantReply(
   message: Message,
-  startedAt: number = Date.now()
+  startedAt: number = Date.now(),
+  sources?: Message['sources']
 ): Message {
   return {
     ...appendMessageVersion(message, ''),
     startedAt,
     completedAt: undefined,
     durationMs: undefined,
-    sources: undefined,
+    sources: sources && sources.length > 0 ? sources : undefined,
     reasoning: undefined,
     isReasoningStreaming: false,
     isReasoningComplete: false,
@@ -66,7 +61,8 @@ function startAssistantReply(
 function regenerateAssistantReply(
   messages: Message[],
   userMessageIndex: number,
-  startedAt: number = Date.now()
+  startedAt: number = Date.now(),
+  sources?: Message['sources']
 ): Message[] {
   const assistantIndex = userMessageIndex + 1
   const assistant = messages[assistantIndex]
@@ -77,27 +73,28 @@ function regenerateAssistantReply(
   ) {
     return [
       ...messages.slice(0, assistantIndex),
-      startAssistantReply(assistant, startedAt),
+      startAssistantReply(assistant, startedAt, sources),
     ]
   }
 
   return [
     ...messages.slice(0, userMessageIndex + 1),
-    createLoadingAssistantMessage(startedAt),
+    createLoadingAssistantMessage(startedAt, sources),
   ]
 }
 
 export function appendUserMessagePair(
   messages: Message[],
   content: string,
-  attachments?: MessageAttachment[]
+  attachments?: MessageAttachment[],
+  search?: MessageSearchSnapshot
 ): Message[] {
   const submittedAt = Date.now()
 
   return [
     ...messages,
-    createUserMessage(content, submittedAt, attachments),
-    createLoadingAssistantMessage(submittedAt),
+    createUserMessage(content, submittedAt, attachments, search),
+    createLoadingAssistantMessage(submittedAt, getMessageSearchSources(search)),
   ]
 }
 
@@ -110,7 +107,67 @@ export function createToolContinuationMessages(
   messages: Message[],
   startedAt: number = Date.now()
 ): Message[] {
-  return [...messages, createLoadingAssistantMessage(startedAt)]
+  const last = messages.at(-1)
+  return [...messages, createLoadingAssistantMessage(startedAt, last?.sources)]
+}
+
+/**
+ * One continuation plan of a truncated reply: the state keeps the truncated
+ * version as a branch and appends an empty version the stream fills, while the
+ * request carries the truncated reply as the last assistant turn (assistant
+ * prefill semantics). `fallbackMessages` appends one user instruction for
+ * channels that reject an assistant prefill.
+ */
+export interface PlaygroundContinuationPlan {
+  stateMessages: Message[]
+  prefillMessages: Message[]
+  fallbackMessages: Message[]
+  /** The truncated text the continuation branch starts from. */
+  prefix: string
+}
+
+/**
+ * Continue a truncated assistant reply. Only the last message can continue:
+ * the reply must be an assistant message that was cut short, and the
+ * continuation itself is appended as a new version so the truncated text is
+ * never lost.
+ */
+export function createContinuationMessages(
+  messages: Message[],
+  messageKey: string
+): PlaygroundContinuationPlan | null {
+  const last = messages.at(-1)
+  if (
+    !last ||
+    last.key !== messageKey ||
+    last.from !== MESSAGE_ROLES.ASSISTANT ||
+    last.status === MESSAGE_STATUS.LOADING ||
+    last.status === MESSAGE_STATUS.STREAMING ||
+    !hasMessageContent(last) ||
+    !isMessageTruncated(last)
+  ) {
+    return null
+  }
+
+  // The new branch starts with the truncated text and the stream appends the
+  // continuation to it, so switching branches shows the complete answer while
+  // the truncated version stays available untouched.
+  const prefix = getMessageContent(last)
+  return {
+    stateMessages: [
+      ...messages.slice(0, -1),
+      updateCurrentVersionContent(
+        startAssistantReply(last, Date.now(), last.sources),
+        prefix
+      ),
+    ],
+    prefillMessages: messages,
+    fallbackMessages: [
+      ...messages,
+      createUserMessage(CONTINUE_GENERATION_INSTRUCTION),
+    ],
+    prefix,
+  }
 }
 
 export function createRegeneratedMessages(
@@ -126,12 +183,23 @@ export function createRegeneratedMessages(
   }
 
   if (messages[messageIndex].from === MESSAGE_ROLES.USER) {
-    return regenerateAssistantReply(messages, messageIndex)
+    return regenerateAssistantReply(
+      messages,
+      messageIndex,
+      Date.now(),
+      getMessageSearchSources(messages[messageIndex].search)
+    )
   }
 
+  // Regenerating a reply keeps its citations: they belong to the searched user
+  // turn, not to the version the provider is about to replace.
   return [
     ...messages.slice(0, messageIndex),
-    startAssistantReply(messages[messageIndex]),
+    startAssistantReply(
+      messages[messageIndex],
+      Date.now(),
+      messages[messageIndex].sources
+    ),
   ]
 }
 
@@ -170,14 +238,20 @@ export function applyMessageEdit(
     return null
   }
 
-  const updatedMessages = messages.map((message) =>
-    message.key === messageKey
-      ? {
-          ...appendMessageVersion(message, content),
-          createdAt: shouldSubmit ? submittedAt : message.createdAt,
-        }
-      : message
-  )
+  const updatedMessages = messages.map((message) => {
+    if (message.key !== messageKey) return message
+    const updated = {
+      ...appendMessageVersion(message, content),
+      createdAt: shouldSubmit ? submittedAt : message.createdAt,
+    }
+    // The search snapshot belonged to the prompt that was actually searched.
+    // Editing the turn makes it stale, so the edited version never replays old
+    // hits as if they answered the new text.
+    if (updated.from === MESSAGE_ROLES.USER) {
+      delete updated.search
+    }
+    return updated
+  })
 
   if (
     !shouldSubmit ||

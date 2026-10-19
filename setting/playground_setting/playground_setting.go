@@ -114,6 +114,84 @@ func sanitizedStorageBillingPrice(value float64, label string) float64 {
 	return value
 }
 
+// Web search providers the Playground can query on behalf of one turn. The
+// set is closed in the adapter, but the configuration is a plain provider
+// identifier so adding another adapter does not change the stored shape.
+const (
+	PlaygroundWebSearchProviderTavily  = "tavily"
+	PlaygroundWebSearchProviderSearXNG = "searxng"
+	PlaygroundWebSearchProviderBrave   = "brave"
+)
+
+// PlaygroundWebSearchSetting is the administrator configuration of the
+// optional web-search turn. The provider call itself never runs in the
+// browser: the gateway owns the endpoint and the credential, and the browser
+// only submits the query.
+type PlaygroundWebSearchSetting struct {
+	Enabled  bool   `json:"enabled"`
+	Provider string `json:"provider"`
+	// BaseURL overrides the provider endpoint. It is required for SearXNG and
+	// optional for the hosted providers, where an empty value selects the
+	// official endpoint. The adapter appends the provider's fixed search path.
+	BaseURL string `json:"base_url"`
+	// PriceUSDPerCall is the global wallet price of one successful search.
+	PriceUSDPerCall float64 `json:"price_usd_per_call"`
+	// GroupPriceUSDPerCall replaces the global price of one group. The key is
+	// a stable group identifier (an editable display name still matches); a
+	// present entry applies even when it is zero, so a group can search free.
+	GroupPriceUSDPerCall map[string]float64 `json:"group_price_usd_per_call"`
+}
+
+// IsEnabled reports whether the administrator enabled the web-search turn.
+func (setting *PlaygroundWebSearchSetting) IsEnabled() bool {
+	return setting != nil && setting.Enabled
+}
+
+// EffectivePriceUSDPerCall clamps an invalid global price to zero and audits
+// it, so a negative configuration can never turn a search into a credit.
+func (setting *PlaygroundWebSearchSetting) EffectivePriceUSDPerCall() float64 {
+	if setting == nil {
+		return 0
+	}
+	price := setting.PriceUSDPerCall
+	if math.IsNaN(price) || price < 0 {
+		common.SysError(common.LogText("playground web search price is invalid, using 0: %v", price))
+		return 0
+	}
+	return price
+}
+
+// PriceUSDPerCallForGroup resolves the configured price of one group. The
+// global price applies unless the group has an explicit override, which
+// applies even when it is zero.
+func (setting *PlaygroundWebSearchSetting) PriceUSDPerCallForGroup(group string) float64 {
+	if setting == nil {
+		return 0
+	}
+	price := setting.EffectivePriceUSDPerCall()
+	if len(setting.GroupPriceUSDPerCall) == 0 {
+		return price
+	}
+	identifier := group_setting.ResolveGroupID(group)
+	if override, ok := setting.GroupPriceUSDPerCall[identifier]; ok {
+		return sanitizedWebSearchPrice(override, "group price")
+	}
+	for rawGroup, override := range setting.GroupPriceUSDPerCall {
+		if group_setting.ResolveGroupID(rawGroup) == identifier {
+			return sanitizedWebSearchPrice(override, "group price")
+		}
+	}
+	return price
+}
+
+func sanitizedWebSearchPrice(value float64, label string) float64 {
+	if math.IsNaN(value) || value < 0 {
+		common.SysError(common.LogText("playground web search %s is invalid, using 0: %v", label, value))
+		return 0
+	}
+	return value
+}
+
 // PlaygroundQuotaPolicy is the effective per-account resource budget for the
 // Playground workspace: conversations, messages, attachments, artifacts and
 // canvas documents. It is deliberately independent of User.Quota and
@@ -132,9 +210,16 @@ type PlaygroundQuotaPolicy struct {
 	// stored attachments, so they have no account-level byte budget.
 	SnippetUserMaxCount    int   `json:"snippet_user_max_count"`
 	SnippetContentMaxBytes int64 `json:"snippet_content_max_bytes"`
-	MessageMaxCount        int   `json:"message_max_count"`
-	MessageMaxVersions     int   `json:"message_max_versions"`
-	MessageMaxBytes        int64 `json:"message_max_bytes"`
+	// MemoryUserMaxCount and MemoryContentMaxBytes bound the account's durable
+	// cross-session notes: how many memories it may store and how many bytes one
+	// memory's text may occupy. Memories are derived from the owner's own
+	// conversations and only add context to a normal /pg request, so they have
+	// no account-level byte budget.
+	MemoryUserMaxCount    int   `json:"memory_user_max_count"`
+	MemoryContentMaxBytes int64 `json:"memory_content_max_bytes"`
+	MessageMaxCount       int   `json:"message_max_count"`
+	MessageMaxVersions    int   `json:"message_max_versions"`
+	MessageMaxBytes       int64 `json:"message_max_bytes"`
 	// ParallelCompareMaxModels bounds one parallel-comparison message group:
 	// how many models a single send may fan out to. Each comparison request is
 	// an ordinary /pg call whose own rate limit, channel and billing apply, so
@@ -231,6 +316,14 @@ type PlaygroundSetting struct {
 	// default: enabling it is the explicit administrator decision to charge
 	// the same wallet for the bytes an account keeps.
 	StorageBilling *PlaygroundStorageBillingSetting `json:"storage_billing"`
+	// WebSearch is the optional search-with-this-turn feature. It stays off
+	// until an administrator configures a provider.
+	WebSearch *PlaygroundWebSearchSetting `json:"web_search"`
+	// WebSearchAPIKey is stored as its own top-level option so the sensitive
+	// option filter hides it; the nested WebSearch JSON never contains it.
+	// An empty value means SearXNG runs unauthenticated or the hosted provider
+	// is not configured yet.
+	WebSearchAPIKey string `json:"web_search_api_key"`
 }
 
 var playgroundSetting = newPlaygroundSetting()
@@ -245,6 +338,18 @@ func newPlaygroundSetting() PlaygroundSetting {
 		Defaults:       &defaults,
 		GroupOverrides: map[string]PlaygroundQuotaPolicy{},
 		StorageBilling: builtinPlaygroundStorageBillingSetting(),
+		WebSearch:      builtinPlaygroundWebSearchSetting(),
+	}
+}
+
+// builtinPlaygroundWebSearchSetting starts disabled with the hosted provider
+// most deployments already have a key for. The official base URL stays empty
+// so the adapter can choose it; SearXNG requires an explicit self-hosted URL.
+func builtinPlaygroundWebSearchSetting() *PlaygroundWebSearchSetting {
+	return &PlaygroundWebSearchSetting{
+		Enabled:              false,
+		Provider:             PlaygroundWebSearchProviderTavily,
+		GroupPriceUSDPerCall: map[string]float64{},
 	}
 }
 
@@ -336,6 +441,8 @@ func builtinPlaygroundQuotaPolicy() PlaygroundQuotaPolicy {
 		SystemPromptMaxBytes:      16 << 10,
 		SnippetUserMaxCount:       100,
 		SnippetContentMaxBytes:    8 << 10,
+		MemoryUserMaxCount:        100,
+		MemoryContentMaxBytes:     4 << 10,
 		MessageMaxCount:           100,
 		MessageMaxVersions:        100,
 		MessageMaxBytes:           1 << 20,
@@ -423,6 +530,27 @@ func GetPlaygroundSetting() *PlaygroundSetting {
 	return &playgroundSetting
 }
 
+// GetPlaygroundWebSearchSetting returns the persisted web-search
+// configuration. Callers must not mutate it outside tests.
+func GetPlaygroundWebSearchSetting() *PlaygroundWebSearchSetting {
+	if playgroundSetting.WebSearch == nil {
+		playgroundSetting.WebSearch = builtinPlaygroundWebSearchSetting()
+	}
+	return playgroundSetting.WebSearch
+}
+
+// IsWebSearchEnabled reports whether the search-with-this-turn control should
+// be offered to users. An unanswered or incomplete configuration stays off.
+func IsWebSearchEnabled() bool {
+	return GetPlaygroundWebSearchSetting().IsEnabled()
+}
+
+// GetPlaygroundWebSearchAPIKey returns the server-side provider credential.
+// It is never serialized into a web-console response.
+func GetPlaygroundWebSearchAPIKey() string {
+	return strings.TrimSpace(playgroundSetting.WebSearchAPIKey)
+}
+
 // IsSandboxPreviewEnabled reports whether administrators enabled the sandboxed
 // HTML/SVG artifact preview. A zero value (the shipped default) means the
 // browser must not render artifact content at all.
@@ -483,6 +611,12 @@ func applyPlaygroundQuotaOverrides(policy *PlaygroundQuotaPolicy, override *Play
 	}
 	if override.SnippetContentMaxBytes > 0 {
 		policy.SnippetContentMaxBytes = override.SnippetContentMaxBytes
+	}
+	if override.MemoryUserMaxCount > 0 {
+		policy.MemoryUserMaxCount = override.MemoryUserMaxCount
+	}
+	if override.MemoryContentMaxBytes > 0 {
+		policy.MemoryContentMaxBytes = override.MemoryContentMaxBytes
 	}
 	if override.MessageMaxCount > 0 {
 		policy.MessageMaxCount = override.MessageMaxCount

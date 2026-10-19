@@ -53,6 +53,12 @@ export interface StreamRequestCallbacks {
   onRequestId: (requestId: string) => void
   /** The usage frame the relay appended at the end of the stream. */
   onUsage: (usage: MessageUsage) => void
+  /**
+   * Provider finish reason of the last data frame, when the upstream reported
+   * one. It labels the stored version (for example `length` enables the
+   * "continue generation" action).
+   */
+  onFinishReason?: (finishReason: string) => void
   onComplete: () => void
   onError: (error: string, errorCode?: string) => void
 }
@@ -144,7 +150,8 @@ export function createStreamRequestController(
       }
 
       try {
-        const { updates, toolCalls, usage } = parseStreamChunk(data)
+        const { updates, toolCalls, usage, finishReason } =
+          parseStreamChunk(data)
 
         for (const update of updates) {
           callbacks.onUpdate(update.type, update.chunk)
@@ -156,6 +163,10 @@ export function createStreamRequestController(
 
         if (usage) {
           callbacks.onUsage(usage)
+        }
+
+        if (finishReason) {
+          callbacks.onFinishReason?.(finishReason)
         }
       } catch (error) {
         // eslint-disable-next-line no-console

@@ -138,6 +138,29 @@ describe('PlaygroundChat branch history', () => {
     ).not.toBeInTheDocument()
   })
 
+  test('shows a preset opening message and sends its suggested questions', async () => {
+    const user = userEvent.setup()
+    const onSelectPrompt = vi.fn()
+
+    render(
+      <PlaygroundChat
+        messages={[]}
+        onSelectPrompt={onSelectPrompt}
+        openingMessage='Welcome to the code review.'
+        suggestedQuestions={['Explain this diff', 'Find bugs']}
+      />
+    )
+
+    expect(screen.getByText('Welcome to the code review.')).toBeInTheDocument()
+    expect(screen.getByText('Suggested questions')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Analyze data' })
+    ).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Find bugs' }))
+    expect(onSelectPrompt).toHaveBeenCalledWith('Find bugs')
+  })
+
   test('renders the compression node right after the messages it covers', () => {
     const messages: Message[] = [
       {
@@ -179,5 +202,49 @@ describe('PlaygroundChat branch history', () => {
     expect(
       node.compareDocumentPosition(question) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
+  })
+})
+
+function historyMessage(
+  key: string,
+  from: 'user' | 'assistant',
+  content: string
+): Message {
+  return {
+    key,
+    from,
+    status: 'complete',
+    versions: [{ id: `${key}-v`, content }],
+  }
+}
+
+const longHistory: Message[] = Array.from({ length: 30 }, (_, index) =>
+  historyMessage(
+    `m${index}`,
+    index % 2 === 0 ? 'user' : 'assistant',
+    `Message number ${index}`
+  )
+)
+
+describe('PlaygroundChat message highlight', () => {
+  test('keeps the rendered window on the newest messages without a highlight', () => {
+    render(<PlaygroundChat messages={longHistory} />)
+
+    expect(screen.queryByText('Message number 0')).not.toBeInTheDocument()
+    expect(screen.getByText('Message number 29')).toBeInTheDocument()
+  })
+
+  test('renders and marks a highlighted message outside the rendered tail', () => {
+    render(<PlaygroundChat highlightedMessageKey='m1' messages={longHistory} />)
+
+    const highlighted = screen
+      .getByText('Message number 1')
+      .closest('[data-message-key]')
+    expect(highlighted).toHaveAttribute('data-message-key', 'm1')
+    expect(highlighted).toHaveAttribute('data-highlighted', 'true')
+    expect(screen.getByText('Message number 29')).toBeInTheDocument()
+    expect(
+      screen.getByText('Message number 29').closest('[data-message-key]')
+    ).not.toHaveAttribute('data-highlighted')
   })
 })

@@ -174,6 +174,44 @@ test('opens the trash from the session list footer', async () => {
   expect(onAction).toHaveBeenCalledTimes(1)
 })
 
+test('offers message search only when a handler is wired', async () => {
+  const user = userEvent.setup()
+  const onAction = vi.fn()
+  const onOpenMessageSearch = vi.fn()
+  const { rerender } = render(
+    <PlaygroundSessionList
+      activeSessionId='older'
+      onCreate={vi.fn()}
+      onDelete={vi.fn()}
+      onOrganize={vi.fn()}
+      onRename={vi.fn()}
+      onSwitch={vi.fn()}
+      sessions={sessions}
+    />
+  )
+  expect(
+    screen.queryByRole('button', { name: 'Search messages' })
+  ).not.toBeInTheDocument()
+
+  rerender(
+    <PlaygroundSessionList
+      activeSessionId='older'
+      onAction={onAction}
+      onCreate={vi.fn()}
+      onDelete={vi.fn()}
+      onOpenMessageSearch={onOpenMessageSearch}
+      onOrganize={vi.fn()}
+      onRename={vi.fn()}
+      onSwitch={vi.fn()}
+      sessions={sessions}
+    />
+  )
+  await user.click(screen.getByRole('button', { name: 'Search messages' }))
+
+  expect(onOpenMessageSearch).toHaveBeenCalledTimes(1)
+  expect(onAction).toHaveBeenCalledTimes(1)
+})
+
 test('offers export only for a persisted conversation', async () => {
   const user = userEvent.setup()
   render(
@@ -373,4 +411,31 @@ test('replaces the tag list through the tags dialog', async () => {
   await user.click(screen.getByRole('button', { name: 'Save tags' }))
 
   expect(onOrganize).toHaveBeenCalledWith('older', { tags: ['work'] })
+})
+
+test('hands the chosen export file to the conversation importer', async () => {
+  const user = userEvent.setup()
+  const onImportFile = vi.fn().mockResolvedValue(undefined)
+  const { container } = render(
+    <PlaygroundSessionList
+      activeSessionId='older'
+      onImportFile={onImportFile}
+      onCreate={vi.fn()}
+      onDelete={vi.fn()}
+      onOrganize={vi.fn()}
+      onRename={vi.fn()}
+      onSwitch={vi.fn()}
+      sessions={sessions}
+    />
+  )
+  const file = new File(['{"session":{}}'], 'chat.json', {
+    type: 'application/json',
+  })
+  const input = container.querySelector('input[type="file"]')
+  expect(input).not.toBeNull()
+  if (!input) return
+
+  await user.upload(input as HTMLInputElement, file)
+
+  expect(onImportFile).toHaveBeenCalledWith(file)
 })

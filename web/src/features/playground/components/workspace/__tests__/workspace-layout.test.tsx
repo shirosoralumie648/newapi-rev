@@ -75,6 +75,37 @@ test('the top bar no longer exposes the creation-domain entries', () => {
   expect(screen.getByText('Usage panel')).toBeVisible()
 })
 
+test('the top bar opens the memory inspector', async () => {
+  const user = userEvent.setup()
+  const onToggleInspector = vi.fn()
+  render(
+    <PlaygroundWorkspace {...baseProps} onToggleInspector={onToggleInspector}>
+      <div>Chat body</div>
+    </PlaygroundWorkspace>
+  )
+
+  await user.click(screen.getByRole('button', { name: 'Memory' }))
+  expect(onToggleInspector).toHaveBeenCalledWith('memory')
+})
+
+test('desktop marks the active memory inspector view', () => {
+  render(
+    <PlaygroundWorkspace
+      {...baseProps}
+      inspectorView='memory'
+      onToggleInspector={vi.fn()}
+    >
+      <div>Chat body</div>
+    </PlaygroundWorkspace>
+  )
+
+  expect(screen.getByRole('button', { name: 'Memory' })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  )
+  expect(screen.getByText('Inspector body')).toBeVisible()
+})
+
 test('desktop hides the inspector when no conversation panel is open', () => {
   render(
     <PlaygroundWorkspace {...baseProps}>

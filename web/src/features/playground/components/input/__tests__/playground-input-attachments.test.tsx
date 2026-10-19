@@ -41,6 +41,12 @@ function buildInputElement(
   overrides: Partial<ComponentProps<typeof PlaygroundInput>> = {}
 ) {
   const props: ComponentProps<typeof PlaygroundInput> = {
+    autoReadDefaultEnabled: false,
+    autoReadEnabled: false,
+    autoReadHasOverride: false,
+    autoTitleDefaultEnabled: true,
+    autoTitleEnabled: true,
+    autoTitleHasOverride: false,
     compareModels: [],
     config: DEFAULT_CONFIG,
     contextPlan: planPlaygroundContext({
@@ -53,6 +59,12 @@ function buildInputElement(
     groups: [{ label: 'default', value: 'default', ratio: 1, desc: '' }],
     modelValue: 'gpt-4o',
     models: [{ label: 'gpt-4o', value: 'gpt-4o' }],
+    onAutoReadChange: () => undefined,
+    onAutoReadDefaultChange: () => undefined,
+    onAutoReadUseDefault: () => undefined,
+    onAutoTitleChange: () => undefined,
+    onAutoTitleDefaultChange: () => undefined,
+    onAutoTitleUseDefault: () => undefined,
     onCompareModelsChange: () => undefined,
     onConfigChange: () => undefined,
     onContextSettingsChange: () => undefined,

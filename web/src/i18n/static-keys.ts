@@ -41,6 +41,10 @@ export const STATIC_I18N_KEYS = [
   'Attachment is too large.',
   'Attachment data could not be read.',
   'Attachment upload failed. Your message was not sent.',
+  // Conversation import feedback renders from PLAYGROUND_IMPORT_ERRORS.
+  'Invalid conversation export.',
+  'The conversation export is too large.',
+  'Unable to import the conversation.',
   // Playground document text extraction server messages.
   'This file type cannot be read as text.',
   'The document is too large to read as text.',
@@ -106,6 +110,10 @@ export const STATIC_I18N_KEYS = [
   'Assistant preset name must contain 1 to 100 characters.',
   'Assistant preset avatar must be an emoji or an http(s) image URL.',
   'Invalid assistant preset.',
+  'Invalid preset file.',
+  'Too many suggested questions.',
+  'Each suggested question must contain 1 to 200 characters.',
+  'The opening message is too long.',
 
   'Authentication required.',
   'Invalid Playground canvas archive.',
@@ -1151,6 +1159,19 @@ export const STATIC_I18N_KEYS = [
   'Prompt snippet content limit exceeded.',
   'Prompt snippets per user',
   'Prompt snippet size limit',
+  // Cross-session memory (LB-06): category labels render through
+  // t(PLAYGROUND_MEMORY_CATEGORY_LABELS[...]) and the error/quota labels from
+  // constants, so the literal scan cannot see all of them.
+  'Failed to load memories',
+  'Failed to save the memory',
+  'Failed to delete the memory',
+  'Preference',
+  'Project',
+  'Memory',
+  'Memories per user',
+  'Memory content size limit',
+  'Playground memory limit reached. Delete an old memory or ask your administrator for a larger limit.',
+  'This memory is longer than the allowed size.',
   // Playground quota policy groups and field labels render through
   // t(labelKey) from PLAYGROUND_QUOTA_GROUPS / PLAYGROUND_QUOTA_FIELDS; the
   // trash entries are the CH-04 additions.
@@ -1165,6 +1186,11 @@ export const STATIC_I18N_KEYS = [
   'Microphone access failed.',
   'Transcription failed',
   'No speech was detected.',
+  // Message-level actions (LB-04) render from MESSAGE_ACTION_LABELS and
+  // PLAYGROUND_FORK_ERRORS, so the literal scan cannot see them.
+  'Quote',
+  'Fork from here',
+  'Unable to fork the conversation.',
   // Referral anti-abuse (RF-06) mark levels, review states, review reasons and
   // the settings action label render through t(labelKey) from the referral
   // label maps in features/wallet/lib/referral.ts and
@@ -1223,4 +1249,39 @@ export const STATIC_I18N_KEYS = [
   // them.
   'Pending',
   'Grace',
+  // Playground knowledge bases (LB-07): document statuses and quota labels are
+  // rendered through t(key) from constants, and these server/client messages
+  // arrive as English keys rather than t('...') literals.
+  'Indexed',
+  'Indexing failed',
+  'Needs rebuild',
+  'Knowledge bases',
+  'Knowledge bases per user',
+  'Knowledge base documents per user',
+  'Documents per knowledge base',
+  'Knowledge base chunks per user',
+  'Chunks per knowledge base document',
+  'Knowledge chunk size limit',
+  'Embedding dimensions limit',
+  'Knowledge base storage per user',
+  'Playground knowledge base not found.',
+  'Playground knowledge document not found.',
+  'Invalid Playground knowledge base request.',
+  'Playground knowledge base request ID was already used for different content.',
+  'Playground knowledge base limit exceeded.',
+  'Playground knowledge document limit exceeded.',
+  'Playground knowledge chunk limit exceeded.',
+  'A knowledge chunk exceeds the text size limit.',
+  'The knowledge chunk embedding is invalid.',
+  'The knowledge chunk embedding model does not match the knowledge base.',
+  'Playground knowledge base storage is unavailable.',
+  'Unable to load or save Playground knowledge bases.',
+  'Playground knowledge object store wrote an unexpected size.',
+  'Knowledge indexing failed in the browser.',
+  // Canvas PNG export problem messages render through t(error.message) from
+  // CANVAS_PNG_EXPORT_MESSAGES, so the literal scan cannot see them.
+  'The canvas has no nodes to export.',
+  'Select at least one node to export.',
+  'The PNG image could not be created.',
+  'The PNG image could not be saved to the asset library.',
 ] as const

@@ -21,7 +21,7 @@ import { expect, test, vi } from 'vitest'
 
 import { CANVAS_MAX_NODES } from '../../constants'
 import { CANVAS_WORKFLOW_ERRORS } from '../../lib/canvas-workflow'
-import type { CanvasServerDocument } from '../../types'
+import type { CanvasFlowNode, CanvasServerDocument } from '../../types'
 import { useCanvasEditor } from '../use-canvas-editor'
 
 const EMPTY_DOCUMENT: CanvasServerDocument = { nodes: [], edges: [] }
@@ -479,6 +479,192 @@ test('grouping and pasting refuse an impossible edit without notifying autosave'
   expect(hook.result.current.pasteSelection()).toBe(false)
   expect(hook.result.current.ungroupSelection()).toBe(false)
   expect(onChange).not.toHaveBeenCalled()
+})
+
+test('arrow keys nudge the selection and shift uses the large step', () => {
+  const onChange = vi.fn()
+  const hook = renderHook(() => useCanvasEditor(LINKED_DOCUMENT, onChange))
+
+  act(() =>
+    hook.result.current.handleNodesChange([
+      { id: 'a', type: 'select', selected: true },
+    ])
+  )
+
+  expect(fireEvent.keyDown(window, { key: 'ArrowRight' })).toBe(false)
+  expect(hook.result.current.nodes[0].position).toEqual({ x: 1, y: 0 })
+
+  expect(fireEvent.keyDown(window, { key: 'ArrowDown', shiftKey: true })).toBe(
+    false
+  )
+  expect(hook.result.current.nodes[0].position).toEqual({ x: 1, y: 10 })
+  expect(onChange).toHaveBeenCalledTimes(2)
+
+  act(() => hook.result.current.undo())
+  expect(hook.result.current.nodes[0].position).toEqual({ x: 0, y: 0 })
+})
+
+test('delete removes selected nodes and edges while editable fields keep the key', () => {
+  const onChange = vi.fn()
+  const hook = renderHook(() =>
+    useCanvasEditor(
+      {
+        ...LINKED_DOCUMENT,
+        nodes: [
+          ...LINKED_DOCUMENT.nodes,
+          { id: 'c', type: 'text', position: { x: 480, y: 0 } },
+        ],
+        edges: [
+          ...LINKED_DOCUMENT.edges,
+          { id: 'b-c', source: 'b', target: 'c' },
+        ],
+      },
+      onChange
+    )
+  )
+
+  act(() =>
+    hook.result.current.handleNodesChange([
+      { id: 'b', type: 'select', selected: true },
+    ])
+  )
+  expect(fireEvent.keyDown(window, { key: 'Delete' })).toBe(false)
+  expect(hook.result.current.nodes.map((node) => node.id)).toEqual(['a', 'c'])
+  expect(hook.result.current.edges).toHaveLength(0)
+
+  const textarea = document.createElement('textarea')
+  document.body.appendChild(textarea)
+  expect(fireEvent.keyDown(textarea, { key: 'Backspace' })).toBe(true)
+  textarea.remove()
+})
+
+test('delete removes only a selected edge and keeps its nodes', () => {
+  const onChange = vi.fn()
+  const hook = renderHook(() => useCanvasEditor(LINKED_DOCUMENT, onChange))
+
+  act(() =>
+    hook.result.current.handleEdgesChange([
+      { id: 'a-b', type: 'select', selected: true },
+    ])
+  )
+  expect(fireEvent.keyDown(window, { key: 'Delete' })).toBe(false)
+  expect(hook.result.current.nodes.map((node) => node.id)).toEqual(['a', 'b'])
+  expect(hook.result.current.edges).toHaveLength(0)
+})
+
+test('reconnect replaces the edge endpoint and rejects a cycle', () => {
+  const onChange = vi.fn()
+  const onRejectedConnection = vi.fn()
+  const document: CanvasServerDocument = {
+    nodes: [
+      { id: 'a', type: 'prompt', position: { x: 0, y: 0 } },
+      { id: 'b', type: 'model', position: { x: 1, y: 0 } },
+      { id: 'c', type: 'task', position: { x: 2, y: 0 } },
+    ],
+    edges: [
+      { id: 'a-b', source: 'a', target: 'b' },
+      { id: 'b-c', source: 'b', target: 'c' },
+    ],
+  }
+  const hook = renderHook(() =>
+    useCanvasEditor(document, onChange, { onRejectedConnection })
+  )
+
+  const oldEdge = hook.result.current.edges[0]
+  act(() =>
+    hook.result.current.handleReconnect(oldEdge, {
+      source: 'a',
+      target: 'c',
+      sourceHandle: null,
+      targetHandle: null,
+    })
+  )
+  expect(
+    hook.result.current.edges.find((edge) => edge.id === oldEdge.id)
+  ).toMatchObject({
+    source: 'a',
+    target: 'c',
+  })
+
+  const cycleEdge = hook.result.current.edges.find(
+    (edge) => edge.id === oldEdge.id
+  ) as (typeof hook.result.current.edges)[number]
+  act(() =>
+    hook.result.current.handleReconnect(cycleEdge, {
+      source: 'c',
+      target: 'a',
+      sourceHandle: null,
+      targetHandle: null,
+    })
+  )
+  expect(onRejectedConnection).toHaveBeenCalledWith(
+    CANVAS_WORKFLOW_ERRORS.CYCLE
+  )
+  expect(
+    hook.result.current.edges.find((edge) => edge.id === oldEdge.id)
+  ).toMatchObject({
+    source: 'a',
+    target: 'c',
+  })
+})
+
+test('distributeSelection spaces three selected nodes evenly', () => {
+  const onChange = vi.fn()
+  const hook = renderHook(() =>
+    useCanvasEditor(
+      {
+        nodes: [
+          { id: 'a', type: 'text', position: { x: 0, y: 0 } },
+          { id: 'b', type: 'text', position: { x: 200, y: 0 } },
+          { id: 'c', type: 'text', position: { x: 500, y: 0 } },
+        ],
+        edges: [],
+      },
+      onChange
+    )
+  )
+
+  act(() =>
+    hook.result.current.handleNodesChange([
+      { id: 'a', type: 'select', selected: true },
+      { id: 'b', type: 'select', selected: true },
+      { id: 'c', type: 'select', selected: true },
+    ])
+  )
+  expect(hook.result.current.canDistribute).toBe(true)
+  act(() => {
+    expect(hook.result.current.distributeSelection('horizontal')).toBe(true)
+  })
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 'b')?.position.x
+  ).toBe(250)
+  expect(onChange).toHaveBeenCalledTimes(1)
+})
+
+test('dragging snaps to a nearby edge and records one history entry', () => {
+  const onChange = vi.fn()
+  const hook = renderHook(() => useCanvasEditor(LINKED_DOCUMENT, onChange))
+  const first = hook.result.current.nodes[0]
+  const dragged = {
+    ...hook.result.current.nodes[1],
+    position: { x: 258, y: 0 },
+  } as CanvasFlowNode
+  const event = new MouseEvent('mousedown')
+
+  act(() => hook.result.current.handleNodeDragStart(event, dragged, [dragged]))
+  act(() => hook.result.current.handleNodeDrag(event, dragged, [dragged]))
+
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 'b')?.position.x
+  ).toBe(256)
+  expect(hook.result.current.alignmentGuides.length).toBeGreaterThan(0)
+  expect(onChange).not.toHaveBeenCalled()
+
+  act(() => hook.result.current.handleNodeDragStop(event, dragged, [dragged]))
+  expect(hook.result.current.alignmentGuides).toEqual([])
+  expect(onChange).toHaveBeenCalledTimes(1)
+  expect(hook.result.current.canUndo).toBe(true)
+  expect(first.position).toEqual({ x: 0, y: 0 })
 })
 
 test('addGraph adds nodes and their links in one undoable step', () => {

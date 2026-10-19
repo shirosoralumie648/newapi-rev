@@ -49,9 +49,23 @@ const (
 	// conversation config; every compared version names the model that produced
 	// it.
 	playgroundMessageModelMaxLength = 512
+	// playgroundMessageFinishReasonMaxLength bounds the provider finish reason
+	// a version may record. It labels the stored message only; the value is
+	// opaque text and never consulted for billing.
+	playgroundMessageFinishReasonMaxLength = 64
 	// playgroundMessageErrorCodeMaxLength bounds the stable error code a failed
 	// version of a parallel comparison may carry.
 	playgroundMessageErrorCodeMaxLength = 500
+	// playgroundMessageSearch* bound the web-search snapshot a user message
+	// keeps for replay. The shape mirrors the normalized search response; the
+	// stored snapshot is context data, never a billing record.
+	playgroundMessageSearchMaxQueryRunes      = 512
+	playgroundMessageSearchMaxResults         = 6
+	playgroundMessageSearchMaxTitleBytes      = 300
+	playgroundMessageSearchMaxSnippetBytes    = 1200
+	playgroundMessageSearchMaxURLBytes        = 4096
+	playgroundMessageSearchMaxProviderBytes   = 32
+	playgroundMessageSearchMaxResultListBytes = 24 << 10
 	// playgroundParallelMinVersions is the smallest group that actually
 	// compares models: a single reply already has the ordinary message path.
 	playgroundParallelMinVersions = 2
@@ -181,6 +195,10 @@ type playgroundMessagePayload struct {
 		// remains the only source of the billed amount.
 		RequestId *string                 `json:"requestId,omitempty"`
 		Usage     *playgroundMessageUsage `json:"usage,omitempty"`
+		// FinishReason records why a generation ended (for example `length`
+		// or `interrupted`). It only labels the stored version so a truncated
+		// reply can offer "continue generation"; it never feeds billing.
+		FinishReason *string `json:"finishReason,omitempty"`
 	} `json:"versions"`
 	ActiveVersionIndex *int     `json:"activeVersionIndex,omitempty"`
 	CreatedAt          *float64 `json:"createdAt,omitempty"`
@@ -191,6 +209,12 @@ type playgroundMessagePayload struct {
 		Href  string `json:"href"`
 		Title string `json:"title"`
 	} `json:"sources,omitempty"`
+	// Search is the web-search snapshot of one user turn: the query the user
+	// searched with and the normalized results that were injected into the
+	// request. Persisting it lets a replay rebuild the exact same prompt and
+	// lets the assistant reply show its citations after a reload. The provider
+	// name labels the snapshot; no credential or raw payload is stored.
+	Search    *playgroundMessageSearch `json:"search,omitempty"`
 	Reasoning *struct {
 		Content     string   `json:"content"`
 		Duration    float64  `json:"duration"`
@@ -203,6 +227,20 @@ type playgroundMessagePayload struct {
 	IsContentComplete    *bool   `json:"isContentComplete,omitempty"`
 	Status               string  `json:"status,omitempty"`
 	ErrorCode            *string `json:"errorCode,omitempty"`
+}
+
+// playgroundMessageSearch is the stored web-search snapshot of one user turn.
+type playgroundMessageSearch struct {
+	Query    string                          `json:"query"`
+	Provider string                          `json:"provider,omitempty"`
+	Results  []playgroundMessageSearchResult `json:"results"`
+}
+
+// playgroundMessageSearchResult is one normalized hit the turn injected.
+type playgroundMessageSearchResult struct {
+	Title   string `json:"title"`
+	URL     string `json:"url"`
+	Snippet string `json:"snippet"`
 }
 
 // playgroundMessageToolCall is one requested tool call plus the result the user
@@ -310,6 +348,16 @@ func writePlaygroundError(c *gin.Context, err error) {
 		code = "PLAYGROUND_NOT_FOUND"
 		err = common.NewMessage(err.Error())
 	}
+	if errors.Is(err, model.ErrPlaygroundMemoryNotFound) {
+		status = http.StatusNotFound
+		code = "PLAYGROUND_NOT_FOUND"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundMemorySourceNotFound) {
+		status = http.StatusBadRequest
+		code = "PLAYGROUND_INVALID_REQUEST"
+		err = common.NewMessage(err.Error())
+	}
 	if errors.Is(err, model.ErrPlaygroundConflict) {
 		status = http.StatusConflict
 		code = "PLAYGROUND_CONFLICT"
@@ -345,6 +393,16 @@ func writePlaygroundError(c *gin.Context, err error) {
 	if errors.Is(err, model.ErrPlaygroundSnippetContentLimit) {
 		status = http.StatusUnprocessableEntity
 		code = "PLAYGROUND_SNIPPET_CONTENT_LIMIT_EXCEEDED"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundMemoryLimit) {
+		status = http.StatusUnprocessableEntity
+		code = "PLAYGROUND_MEMORY_LIMIT_EXCEEDED"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundMemoryContentLimit) {
+		status = http.StatusUnprocessableEntity
+		code = "PLAYGROUND_MEMORY_CONTENT_LIMIT_EXCEEDED"
 		err = common.NewMessage(err.Error())
 	}
 	if errors.Is(err, model.ErrPlaygroundSystemPromptLimit) {
@@ -806,6 +864,9 @@ func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroun
 			if version.ErrorCode != nil && len(*version.ErrorCode) > playgroundMessageErrorCodeMaxLength {
 				return nil, common.NewMessage("Invalid Playground message.")
 			}
+			if version.FinishReason != nil && (len(*version.FinishReason) > playgroundMessageFinishReasonMaxLength || strings.ContainsRune(*version.FinishReason, 0)) {
+				return nil, common.NewMessage("Invalid Playground message.")
+			}
 			if err := validatePlaygroundMessageUsage(version.RequestId, version.Usage); err != nil {
 				return nil, err
 			}
@@ -844,6 +905,11 @@ func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroun
 			parsed, err := url.Parse(source.Href)
 			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || len(source.Href) > 4096 || len(source.Title) > 500 {
 				return nil, common.NewMessage("Invalid Playground message.")
+			}
+		}
+		if payload.Search != nil {
+			if err := validatePlaygroundMessageSearch(payload.From, payload.Search); err != nil {
+				return nil, err
 			}
 		}
 		payloads = append(payloads, payload)
@@ -898,6 +964,44 @@ func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroun
 		messages = append(messages, model.PlaygroundMessage{ClientKey: payload.Key, Payload: model.LongText(encoded)})
 	}
 	return messages, nil
+}
+
+// validatePlaygroundMessageSearch bounds the search snapshot a stored message
+// may carry and keeps it on user turns only. The snapshot is context the user
+// already saw, so it is validated instead of trusted, while an oversized or
+// malformed list is rejected exactly like any other invalid message.
+func validatePlaygroundMessageSearch(from string, search *playgroundMessageSearch) error {
+	if from != "user" || search == nil {
+		return common.NewMessage("Invalid Playground message.")
+	}
+	query := strings.TrimSpace(search.Query)
+	if query == "" || utf8.RuneCountInString(query) > playgroundMessageSearchMaxQueryRunes {
+		return common.NewMessage("Invalid Playground message.")
+	}
+	if len(search.Provider) > playgroundMessageSearchMaxProviderBytes {
+		return common.NewMessage("Invalid Playground message.")
+	}
+	if len(search.Results) > playgroundMessageSearchMaxResults {
+		return common.NewMessage("Invalid Playground message.")
+	}
+	totalBytes := 0
+	for _, result := range search.Results {
+		resultURL := strings.TrimSpace(result.URL)
+		parsed, err := url.Parse(resultURL)
+		if err != nil || parsed.Host == "" || parsed.User != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return common.NewMessage("Invalid Playground message.")
+		}
+		if len(resultURL) > playgroundMessageSearchMaxURLBytes ||
+			len(result.Title) > playgroundMessageSearchMaxTitleBytes ||
+			len(result.Snippet) > playgroundMessageSearchMaxSnippetBytes {
+			return common.NewMessage("Invalid Playground message.")
+		}
+		totalBytes += len(result.Title) + len(resultURL) + len(result.Snippet)
+		if totalBytes > playgroundMessageSearchMaxResultListBytes {
+			return common.NewMessage("Invalid Playground message.")
+		}
+	}
+	return nil
 }
 
 // validatePlaygroundMessageDeletes bounds the client keys one delta removes.

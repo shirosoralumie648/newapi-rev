@@ -103,6 +103,10 @@ const serverErrorMessageKeys = {
     'Cannot pin an archived Playground conversation.',
   PLAYGROUND_PARALLEL_LIMIT_EXCEEDED:
     'Playground parallel comparison limit exceeded.',
+  PLAYGROUND_MEMORY_LIMIT_EXCEEDED:
+    'Playground memory limit reached. Delete an old memory or ask your administrator for a larger limit.',
+  PLAYGROUND_MEMORY_CONTENT_LIMIT_EXCEEDED:
+    'This memory is longer than the allowed size.',
   PLAYGROUND_WALLET_DEBT_READ_ONLY:
     'Your wallet has unsettled debt. Top up to restore access; reading and exporting data stays available.',
   PLAYGROUND_WALLET_DEBT_UNAVAILABLE:

@@ -111,6 +111,9 @@ const messageVersionSchema = z.object({
   // relay request id (64 characters, the logs.request_id column) and the token
   // usage the relay reported; the settle log stays the billing source.
   requestId: z.string().min(1).max(64).optional(),
+  // Provider finish reason of the version; it only decides whether the reply
+  // offers "continue generation" after a reload.
+  finishReason: z.string().max(64).optional(),
   usage: z
     .object({
       promptTokens: z.number().finite().nonnegative(),
@@ -123,6 +126,23 @@ const messageVersionSchema = z.object({
 const sourceSchema = z.object({
   href: z.string().max(4096),
   title: z.string().max(500),
+})
+
+// Web-search snapshot of one user turn. The bounds mirror the server-side
+// validation of a stored message: exceeding one rejects the whole store
+// instead of silently dropping the replay context.
+export const messageSearchSchema = z.object({
+  query: z.string().min(1).max(512),
+  provider: z.string().max(32).optional(),
+  results: z
+    .array(
+      z.object({
+        title: z.string().max(300),
+        url: z.string().max(4096),
+        snippet: z.string().max(1200),
+      })
+    )
+    .max(6),
 })
 
 const reasoningSchema = z.object({
@@ -145,6 +165,7 @@ const messageSchema = z.object({
   completedAt: z.number().finite().optional(),
   durationMs: z.number().finite().optional(),
   sources: z.array(sourceSchema).optional(),
+  search: messageSearchSchema.optional(),
   reasoning: reasoningSchema.optional(),
   isReasoningStreaming: z.boolean().optional(),
   isReasoningComplete: z.boolean().optional(),
@@ -170,7 +191,15 @@ export const playgroundSessionSchema = z.object({
   /** Greeting copied from a preset; absent in data written before the market. */
   openingMessage: z.string().max(8192).optional(),
   /** Starter questions copied from a preset; absent in older sessions. */
-  suggestedQuestions: z.array(z.string().min(1).max(200)).max(6).optional(),
+  suggestedQuestions: z
+    .array(
+      z
+        .string()
+        .min(1)
+        .refine((value) => Array.from(value).length <= 200)
+    )
+    .max(6)
+    .optional(),
   /** Absent in data written before context management existed. */
   context: playgroundContextSchema.optional(),
   /** Absent or null when the conversation sends its full stored history. */

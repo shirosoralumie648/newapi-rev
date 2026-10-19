@@ -30,6 +30,7 @@ import type {
   PlaygroundSession,
   PlaygroundSessionOrganization,
 } from '../../types'
+import { PlaygroundSessionImportButton } from './playground-session-import'
 import { PlaygroundSessionItem } from './playground-session-item'
 import { PlaygroundSessionTagsDialog } from './playground-session-tags-dialog'
 
@@ -62,8 +63,12 @@ interface PlaygroundSessionListProps {
   ) => void
   onDelete: (sessionId: string) => void
   onOpenTrash?: () => void
+  /** Opens the cross-session message search dialog. */
+  onOpenMessageSearch?: () => void
   onAction?: () => void
   onOpenPresets?: () => void
+  /** Rebuild one conversation from an exported JSON file. */
+  onImportFile?: (file: File) => Promise<void> | void
 }
 
 export function PlaygroundSessionList(props: PlaygroundSessionListProps) {
@@ -170,6 +175,12 @@ export function PlaygroundSessionList(props: PlaygroundSessionListProps) {
         >
           <Plus aria-hidden='true' />
         </Button>
+        {props.onImportFile ? (
+          <PlaygroundSessionImportButton
+            disabled={props.disabled}
+            onImport={props.onImportFile}
+          />
+        ) : null}
       </div>
 
       <div
@@ -279,6 +290,22 @@ export function PlaygroundSessionList(props: PlaygroundSessionListProps) {
           )}
         </div>
       </ScrollArea>
+
+      {props.onOpenMessageSearch && (
+        <Button
+          className='w-full justify-start'
+          onClick={() => {
+            props.onOpenMessageSearch?.()
+            props.onAction?.()
+          }}
+          size='sm'
+          type='button'
+          variant='outline'
+        >
+          <Search aria-hidden='true' />
+          {t('Search messages')}
+        </Button>
+      )}
 
       {props.onOpenTrash && (
         <Button

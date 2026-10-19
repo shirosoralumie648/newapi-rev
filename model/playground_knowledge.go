@@ -34,7 +34,6 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/service/documenttext"
 	"github.com/QuantumNous/new-api/service/objectstore"
-	"github.com/QuantumNous/new-api/setting/playground_setting"
 
 	"gorm.io/gorm"
 )
@@ -131,7 +130,7 @@ type PlaygroundKnowledgeDocument struct {
 }
 
 func (PlaygroundKnowledgeDocument) TableName() string {
-	return "playground_knowledge_documents"
+	return "playground_kb_documents"
 }
 
 // PlaygroundKnowledgeChunk is one embedded slice of a document. Embedding holds
@@ -154,7 +153,7 @@ type PlaygroundKnowledgeChunk struct {
 }
 
 func (PlaygroundKnowledgeChunk) TableName() string {
-	return "playground_knowledge_chunks"
+	return "playground_kb_chunks"
 }
 
 // PlaygroundKnowledgeBaseStats is the owner-scoped footprint of one base.
@@ -816,26 +815,37 @@ func ResetPlaygroundKnowledgeDocumentIndex(userID int, knowledgeBaseID, document
 
 // MarkPlaygroundKnowledgeDocumentFailed records a client-side embedding failure
 // without losing the extracted text. A later reset and retry can index it again.
+// A late failure report for a document that already finished indexing is
+// ignored so a reordered client request cannot mark ready chunks as failed.
 func MarkPlaygroundKnowledgeDocumentFailed(userID int, knowledgeBaseID, documentID, message string) (*PlaygroundKnowledgeDocument, error) {
 	message = strings.TrimSpace(message)
 	if runes := []rune(message); len(runes) > playgroundKnowledgeErrorLength {
 		message = string(runes[:playgroundKnowledgeErrorLength])
 	}
-	document, err := GetPlaygroundKnowledgeDocument(userID, knowledgeBaseID, documentID)
+	var document PlaygroundKnowledgeDocument
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockForUpdate(tx).Where("id = ? AND user_id = ? AND knowledge_base_id = ?", documentID, userID, knowledgeBaseID).First(&document).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrPlaygroundKnowledgeDocumentNotFound
+			}
+			return err
+		}
+		if document.Status == PlaygroundKnowledgeDocumentStatusReady {
+			return nil
+		}
+		document.Status = PlaygroundKnowledgeDocumentStatusFailed
+		document.ErrorMessage = message
+		document.UpdatedAt = common.GetTimestamp()
+		return tx.Model(&PlaygroundKnowledgeDocument{}).Where("id = ? AND user_id = ?", documentID, userID).Updates(map[string]any{
+			"status":        document.Status,
+			"error_message": document.ErrorMessage,
+			"updated_at":    document.UpdatedAt,
+		}).Error
+	})
 	if err != nil {
 		return nil, err
 	}
-	document.Status = PlaygroundKnowledgeDocumentStatusFailed
-	document.ErrorMessage = message
-	document.UpdatedAt = common.GetTimestamp()
-	if err := DB.Model(&PlaygroundKnowledgeDocument{}).Where("id = ? AND user_id = ?", documentID, userID).Updates(map[string]any{
-		"status":        document.Status,
-		"error_message": document.ErrorMessage,
-		"updated_at":    document.UpdatedAt,
-	}).Error; err != nil {
-		return nil, err
-	}
-	return document, nil
+	return &document, nil
 }
 
 // ReplacePlaygroundKnowledgeDocumentChunks stores one complete set of embedded

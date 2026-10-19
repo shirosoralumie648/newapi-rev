@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { CANVAS_HISTORY_LIMIT } from '../constants'
+import { CANVAS_HISTORY_LIMIT, CANVAS_HISTORY_MERGE_MS } from '../constants'
 import type { CanvasFlowEdge, CanvasFlowNode } from '../types'
 
 export type CanvasSnapshot = {
@@ -24,10 +24,19 @@ export type CanvasSnapshot = {
   edges: CanvasFlowEdge[]
 }
 
+/** A merge window lets keystrokes or a nudge burst share one undo entry. */
+export type CanvasHistoryMerge = {
+  key: string
+  at?: number
+  window?: number
+}
+
 export type CanvasHistory = {
   past: CanvasSnapshot[]
   present: CanvasSnapshot
   future: CanvasSnapshot[]
+  /** The entry the latest present value was merged into, if any. */
+  merge?: { key: string; at: number }
 }
 
 export function createCanvasHistory(present: CanvasSnapshot): CanvasHistory {
@@ -43,20 +52,44 @@ export function canvasSnapshotsEqual(
 
 /**
  * Records a new present value. Consecutive identical states (same references)
- * do not create history entries, and the past stack is capped.
+ * do not create history entries, and the past stack is capped. A merge key
+ * replaces the present value of a recent entry instead of appending another
+ * one, so typing a sentence or holding an arrow key is undone in one step.
  */
 export function pushCanvasHistory(
   history: CanvasHistory,
-  next: CanvasSnapshot
+  next: CanvasSnapshot,
+  merge?: CanvasHistoryMerge
 ): CanvasHistory {
   if (canvasSnapshotsEqual(history.present, next)) {
     return history
+  }
+  const at = merge?.at ?? Date.now()
+  const window = merge?.window ?? CANVAS_HISTORY_MERGE_MS
+  if (
+    merge &&
+    history.merge?.key === merge.key &&
+    history.past.length > 0 &&
+    at - history.merge.at >= 0 &&
+    at - history.merge.at <= window
+  ) {
+    return {
+      ...history,
+      present: next,
+      future: [],
+      merge: { key: merge.key, at },
+    }
   }
   const past = [...history.past, history.present]
   if (past.length > CANVAS_HISTORY_LIMIT) {
     past.shift()
   }
-  return { past, present: next, future: [] }
+  return {
+    past,
+    present: next,
+    future: [],
+    ...(merge ? { merge: { key: merge.key, at } } : {}),
+  }
 }
 
 export function undoCanvasHistory(history: CanvasHistory): {

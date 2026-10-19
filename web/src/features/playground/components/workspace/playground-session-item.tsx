@@ -25,6 +25,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 
+import { PLAYGROUND_SESSION_TITLE_MAX_LENGTH } from '../../constants'
 import type {
   PlaygroundSession,
   PlaygroundSessionOrganization,
@@ -73,7 +74,7 @@ export function PlaygroundSessionItem(props: PlaygroundSessionItemProps) {
     return (
       <div className='bg-muted/40 flex items-center gap-1 rounded-lg border p-1'>
         <Input
-          maxLength={200}
+          maxLength={PLAYGROUND_SESSION_TITLE_MAX_LENGTH}
           aria-label={t('Session name')}
           aria-invalid={hasTitleError}
           autoFocus

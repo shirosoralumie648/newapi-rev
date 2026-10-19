@@ -32,7 +32,6 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 
-import { getSearchActionNotice } from '../../lib'
 import type { PlaygroundContextPlan } from '../../lib'
 import type {
   ModelOption,
@@ -42,6 +41,8 @@ import type {
   PlaygroundContextSummary,
 } from '../../types'
 import { PlaygroundAssetPicker } from './playground-asset-picker'
+import { PlaygroundAutoReadControl } from './playground-auto-read-control'
+import { PlaygroundAutoTitleControl } from './playground-auto-title-control'
 import { PlaygroundComparePanel } from './playground-compare-panel'
 import { PlaygroundContextPanel } from './playground-context-panel'
 import { PlaygroundDictationPanel } from './playground-dictation-panel'
@@ -80,6 +81,29 @@ type PlaygroundInputToolsProps = {
   onContextSettingsChange: (settings: PlaygroundContextSettings) => void
   onRemoveContextSummary: () => void
   onSummarizeContext: () => void
+  /** Effective auto read-aloud state of the active conversation. */
+  autoReadEnabled: boolean
+  /** Account default applied to conversations without an override. */
+  autoReadDefaultEnabled: boolean
+  /** Whether the active conversation carries an explicit choice. */
+  autoReadHasOverride: boolean
+  onAutoReadChange: (value: boolean) => void
+  onAutoReadUseDefault: () => void
+  onAutoReadDefaultChange: (value: boolean) => void
+  /** Whether the administrator configured web search for this deployment. */
+  webSearchAvailable?: boolean
+  /** Whether the next submitted turn also searches the web. */
+  webSearchEnabled?: boolean
+  onWebSearchChange?: (value: boolean) => void
+  /** Effective automatic naming state of the active conversation. */
+  autoTitleEnabled: boolean
+  /** Account default applied to conversations without an override. */
+  autoTitleDefaultEnabled: boolean
+  /** Whether the active conversation carries an explicit naming choice. */
+  autoTitleHasOverride: boolean
+  onAutoTitleChange: (value: boolean) => void
+  onAutoTitleUseDefault: () => void
+  onAutoTitleDefaultChange: (value: boolean) => void
 }
 
 export function PlaygroundInputTools({
@@ -104,14 +128,24 @@ export function PlaygroundInputTools({
   onContextSettingsChange,
   onRemoveContextSummary,
   onSummarizeContext,
+  autoReadEnabled,
+  autoReadDefaultEnabled,
+  autoReadHasOverride,
+  onAutoReadChange,
+  onAutoReadUseDefault,
+  onAutoReadDefaultChange,
+  webSearchAvailable = false,
+  webSearchEnabled = false,
+  onWebSearchChange,
+  autoTitleEnabled,
+  autoTitleDefaultEnabled,
+  autoTitleHasOverride,
+  onAutoTitleChange,
+  onAutoTitleUseDefault,
+  onAutoTitleDefaultChange,
 }: PlaygroundInputToolsProps) {
   const { t } = useTranslation()
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
-
-  const handleSearchAction = () => {
-    const notice = getSearchActionNotice()
-    toast.info(t(notice.title))
-  }
 
   const handleClearMessages = () => {
     onClearMessages?.()
@@ -127,24 +161,35 @@ export function PlaygroundInputTools({
           onInsertText={onInsertText}
         />
 
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <PromptInputButton
-                aria-label={t('Search')}
-                className='text-muted-foreground hover:text-foreground hover:bg-muted/70 font-medium'
-                disabled={disabled}
-                onClick={handleSearchAction}
-                variant='ghost'
-              >
-                <GlobeIcon size={16} />
-              </PromptInputButton>
-            }
-          />
-          <TooltipContent>
-            <p>{t('Search')}</p>
-          </TooltipContent>
-        </Tooltip>
+        {webSearchAvailable ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <PromptInputButton
+                  aria-label={t('Search this turn')}
+                  aria-pressed={webSearchEnabled}
+                  className={
+                    webSearchEnabled
+                      ? 'bg-primary/10 text-primary hover:bg-primary/15 font-medium'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/70 font-medium'
+                  }
+                  disabled={disabled || !onWebSearchChange}
+                  onClick={() => onWebSearchChange?.(!webSearchEnabled)}
+                  variant='ghost'
+                >
+                  <GlobeIcon size={16} />
+                </PromptInputButton>
+              }
+            />
+            <TooltipContent>
+              <p>
+                {webSearchEnabled
+                  ? t('Web search is on for this turn')
+                  : t('Search the web with this turn')}
+              </p>
+            </TooltipContent>
+          </Tooltip>
+        ) : null}
 
         {onDictateTranscript ? (
           <PlaygroundDictationPanel
@@ -154,6 +199,26 @@ export function PlaygroundInputTools({
             onTranscript={onDictateTranscript}
           />
         ) : null}
+
+        <PlaygroundAutoReadControl
+          defaultEnabled={autoReadDefaultEnabled}
+          disabled={disabled}
+          enabled={autoReadEnabled}
+          hasOverride={autoReadHasOverride}
+          onDefaultChange={onAutoReadDefaultChange}
+          onEnabledChange={onAutoReadChange}
+          onUseDefault={onAutoReadUseDefault}
+        />
+
+        <PlaygroundAutoTitleControl
+          defaultEnabled={autoTitleDefaultEnabled}
+          disabled={disabled}
+          enabled={autoTitleEnabled}
+          hasOverride={autoTitleHasOverride}
+          onDefaultChange={onAutoTitleDefaultChange}
+          onEnabledChange={onAutoTitleChange}
+          onUseDefault={onAutoTitleUseDefault}
+        />
 
         <PlaygroundComparePanel
           compareModels={compareModels}

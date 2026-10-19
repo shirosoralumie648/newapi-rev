@@ -42,7 +42,7 @@ func setupPlaygroundToken(c *gin.Context, group string) error {
 // canonical relay pipeline with the requested format. The browser never holds
 // an API key: the synthetic in-memory token makes group resolution, channel
 // selection, limits and billing identical to a direct API call.
-func playgroundRelay(c *gin.Context, relayFormat string) {
+func playgroundRelay(c *gin.Context, relayFormat types.RelayFormat) {
 	var newAPIError *types.NewAPIError
 
 	defer func() {

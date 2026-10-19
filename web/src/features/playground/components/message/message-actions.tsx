@@ -23,8 +23,11 @@ import {
   FileCode2,
   FileText,
   Frame,
+  GitBranch,
   Image as ImageIcon,
   MoreHorizontal,
+  Play,
+  Quote,
   RefreshCw,
   Trash2,
   Video,
@@ -57,8 +60,15 @@ import { MessageActionButton } from './message-action-button'
 interface MessageActionsProps {
   message: Message
   onCopy?: (message: Message) => void
+  /** Sets the message as the quote of the next composer turn. */
+  onQuote?: (message: Message) => void
+  /** Copies the conversation up to this message into a new conversation. */
+  onFork?: (message: Message) => void
   onReadAloud?: (message: Message) => void
   onRegenerate?: (message: Message) => void
+  /** Offered when the active version was cut short and can be continued. */
+  onContinue?: (message: Message) => void
+  canContinue?: boolean
   onToggleSource?: (message: Message) => void
   onEdit?: (message: Message) => void
   onDelete?: (message: Message) => void
@@ -84,8 +94,12 @@ type MessageActionItem = {
 export function MessageActions({
   message,
   onCopy,
+  onQuote,
+  onFork,
   onReadAloud,
   onRegenerate,
+  onContinue,
+  canContinue = false,
   onToggleSource,
   onEdit,
   onDelete,
@@ -130,6 +144,25 @@ export function MessageActions({
         ? MESSAGE_ACTION_LABELS.COPIED
         : MESSAGE_ACTION_LABELS.COPY,
       onClick: handleCopy,
+    })
+  }
+
+  if (hasContent && !isLoading && message.status !== 'error' && onQuote) {
+    actions.push({
+      icon: Quote,
+      label: MESSAGE_ACTION_LABELS.QUOTE,
+      onClick: () => onQuote(message),
+    })
+  }
+
+  // Forking only copies the history; it stays available for any message and is
+  // blocked while a generation owns the workspace.
+  if (onFork) {
+    actions.push({
+      disabled: isGenerating,
+      icon: GitBranch,
+      label: MESSAGE_ACTION_LABELS.FORK,
+      onClick: guardAction(() => onFork(message)),
     })
   }
 
@@ -207,6 +240,22 @@ export function MessageActions({
       icon: RefreshCw,
       label: MESSAGE_ACTION_LABELS.REGENERATE,
       onClick: handleRegenerate,
+    })
+  }
+
+  if (
+    canContinue &&
+    isAssistant &&
+    hasContent &&
+    !isLoading &&
+    message.status !== 'error' &&
+    onContinue
+  ) {
+    actions.push({
+      disabled: isGenerating,
+      icon: Play,
+      label: 'Continue generation',
+      onClick: guardAction(() => onContinue(message)),
     })
   }
 

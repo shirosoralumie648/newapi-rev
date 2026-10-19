@@ -39,6 +39,7 @@ import type {
   PlaygroundConfig,
   PlaygroundContextSettings,
   PlaygroundContextSummary,
+  PlaygroundPendingQuote,
   ParameterEnabled,
 } from '../types'
 
@@ -47,6 +48,8 @@ interface UseParallelChatOptions {
   parameterEnabled: ParameterEnabled
   /** Conversation-level instruction injected as the first request message. */
   systemPrompt: string
+  /** Enabled cross-session memory block injected after the system prompt. */
+  memoryBlock?: string
   /** Context limits and summary model applied when the payloads are built. */
   contextSettings: PlaygroundContextSettings
   /** Messages of the active conversation; retries reuse the stored prefix. */
@@ -125,7 +128,9 @@ export function useParallelChat(options: UseParallelChatOptions) {
       groupMessageKey: string,
       entries: Array<{ model: string; versionIndex: number }>,
       contextSummary: PlaygroundContextSummary | null,
-      prepare?: (message: Message) => Message
+      prepare?: (message: Message) => Message,
+      /** Composer quote shared by every request of the comparison. */
+      quote?: PlaygroundPendingQuote | null
     ) => {
       const generation = generationRef.current + 1
       generationRef.current = generation
@@ -150,7 +155,9 @@ export function useParallelChat(options: UseParallelChatOptions) {
             { ...latest.config, model: entry.model, stream: false },
             latest.parameterEnabled,
             latest.systemPrompt,
-            { settings: latest.contextSettings, summary: contextSummary }
+            { settings: latest.contextSettings, summary: contextSummary },
+            latest.memoryBlock,
+            quote
           )
 
           let requestId: string | undefined
@@ -216,7 +223,7 @@ export function useParallelChat(options: UseParallelChatOptions) {
    * UI and the persisted snapshot already hold them.
    */
   const sendParallelChat = useCallback(
-    (messages: Message[]) => {
+    (messages: Message[], quote?: PlaygroundPendingQuote | null) => {
       const group = messages.at(-1)
       if (!isParallelMessage(group)) return
       const entries = group.versions
@@ -243,7 +250,14 @@ export function useParallelChat(options: UseParallelChatOptions) {
         } catch {
           contextSummary = null
         }
-        await runComparison(promptMessages, group.key, entries, contextSummary)
+        await runComparison(
+          promptMessages,
+          group.key,
+          entries,
+          contextSummary,
+          undefined,
+          quote
+        )
       })()
     },
     [runComparison]
