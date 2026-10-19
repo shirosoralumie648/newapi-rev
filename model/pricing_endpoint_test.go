@@ -190,6 +190,48 @@ func TestPricingNativeChannelEndpointTypesUnchanged(t *testing.T) {
 	assert.Equal(t, []constant.EndpointType{constant.EndpointTypeAnthropic, constant.EndpointTypeOpenAI}, byModel["claude-3-5-sonnet"])
 }
 
+func TestPricingImageToolsFollowModelCapabilities(t *testing.T) {
+	resetPricingEndpointTestTables(t)
+
+	insertPricingEndpointChannel(t, 204, constant.ChannelTypeOpenAI, dto.ChannelOtherSettings{})
+	insertPricingEndpointAbility(t, 204, "gpt-image-1")
+	insertPricingEndpointAbility(t, 204, "gpt-4o")
+
+	pricings := make(map[string]Pricing)
+	for _, pricing := range GetPricing() {
+		pricings[pricing.ModelName] = pricing
+	}
+
+	require.Contains(t, pricings, "gpt-image-1")
+	require.Contains(t, pricings, "gpt-4o")
+	require.NotNil(t, pricings["gpt-image-1"].ImageTools)
+	assert.Equal(t, PricingImageTools{
+		Edit:              true,
+		Outpaint:          true,
+		BackgroundRemoval: true,
+		StyleReference:    true,
+	}, *pricings["gpt-image-1"].ImageTools)
+	assert.Nil(t, pricings["gpt-4o"].ImageTools)
+}
+
+func TestImageToolCapabilitiesForModel(t *testing.T) {
+	for _, tc := range []struct {
+		model string
+		want  PricingImageTools
+	}{
+		{model: "gpt-image-1", want: PricingImageTools{Edit: true, Outpaint: true, BackgroundRemoval: true, StyleReference: true}},
+		{model: "GPT-Image-2", want: PricingImageTools{Edit: true, Outpaint: true, BackgroundRemoval: true, StyleReference: true}},
+		{model: "chatgpt-image-latest", want: PricingImageTools{Edit: true, Outpaint: true, BackgroundRemoval: true, StyleReference: true}},
+		{model: "dall-e-2", want: PricingImageTools{}},
+		{model: "gpt-4o", want: PricingImageTools{}},
+		{model: "", want: PricingImageTools{}},
+	} {
+		t.Run(tc.model, func(t *testing.T) {
+			assert.Equal(t, tc.want, imageToolCapabilitiesForModel(tc.model))
+		})
+	}
+}
+
 func TestInitChannelCacheInvalidatesPricingCache(t *testing.T) {
 	resetPricingEndpointTestTables(t)
 

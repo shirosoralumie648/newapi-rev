@@ -65,6 +65,17 @@ export function useCanvasWorkflowOptions() {
       capabilities[model.model_name] = {
         endpointTypes: model.supported_endpoint_types ?? [],
         usageFields: [...usageFields],
+        ...(model.image_tools
+          ? {
+              imageTools: {
+                edit: model.image_tools.edit === true,
+                outpaint: model.image_tools.outpaint === true,
+                backgroundRemoval:
+                  model.image_tools.background_removal === true,
+                styleReference: model.image_tools.style_reference === true,
+              },
+            }
+          : {}),
       }
     }
     return capabilities

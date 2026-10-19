@@ -76,6 +76,7 @@ import {
   type CanvasPngExportResult,
   type CanvasPngExportScope,
 } from '../lib/canvas-export'
+import { canvasImageToolModels } from '../lib/canvas-image-tools'
 import {
   canvasGenerationPrefillGraph,
   type CanvasArtifactTarget,
@@ -226,8 +227,23 @@ export function CanvasEditor(props: CanvasEditorProps) {
   const imageTools = useCanvasImageTools({
     canvasId: props.project.id,
     group: workflowOptions.group,
+    modelCapabilities: workflowOptions.modelCapabilities,
     addLinkedNode: editor.addLinkedNode,
   })
+
+  // A dialog only lists models that advertise the tool. Unknown catalog
+  // metadata leaves the full list intact, matching the workflow controls.
+  const imageToolModels = useMemo(
+    () =>
+      imageTools.tool
+        ? canvasImageToolModels(
+            workflowOptions.models,
+            workflowOptions.modelCapabilities,
+            imageTools.tool
+          )
+        : workflowOptions.models,
+    [imageTools.tool, workflowOptions.modelCapabilities, workflowOptions.models]
+  )
 
   const assistant = useCanvasAssistant({
     nodes: editor.nodes,
@@ -788,10 +804,13 @@ export function CanvasEditor(props: CanvasEditorProps) {
       <CanvasImageToolsDialog
         busy={imageTools.busy}
         disabled={props.disabled}
-        models={workflowOptions.models}
+        models={imageToolModels}
+        onBackgroundRemoval={imageTools.backgroundRemoval}
         onClose={imageTools.close}
         onCrop={imageTools.crop}
+        onOutpaint={imageTools.outpaint}
         onRedraw={imageTools.redraw}
+        onStyleReference={imageTools.styleReference}
         onUpscale={imageTools.upscale}
         source={imageTools.source}
         sourceSize={imageTools.sourceSize}

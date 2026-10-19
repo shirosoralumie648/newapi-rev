@@ -229,6 +229,22 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 			}
 			imageRequest.Quality = formData.Get("quality")
 			imageRequest.Size = formData.Get("size")
+			if background := strings.TrimSpace(formData.Get("background")); background != "" {
+				switch background {
+				case "transparent", "opaque", "auto":
+					imageRequest.Background, _ = common.Marshal(background)
+				default:
+					return nil, errors.New("background must be transparent, opaque or auto")
+				}
+			}
+			if outputFormat := strings.TrimSpace(formData.Get("output_format")); outputFormat != "" {
+				switch outputFormat {
+				case "png", "jpeg", "webp":
+					imageRequest.OutputFormat, _ = common.Marshal(outputFormat)
+				default:
+					return nil, errors.New("output_format must be png, jpeg or webp")
+				}
+			}
 			if parameters := formData.Get("parameters"); parameters != "" {
 				imageRequest.Extra = map[string]json.RawMessage{"parameters": json.RawMessage(parameters)}
 			}

@@ -26,11 +26,13 @@ import { api } from '@/lib/api'
 import {
   CANVAS_ATTACHMENT_INLINE_MAX_BYTES,
   CANVAS_IMAGE_TOOL_MESSAGES,
+  CANVAS_IMAGE_TOOL_PROMPTS,
   CANVAS_LINKED_NODE_OFFSET_X,
   CANVAS_WORKFLOW_IMAGE_INPUT_MAX_BYTES,
 } from '../../constants'
 import {
   composeCanvasMask,
+  composeCanvasOutpaint,
   cropCanvasImage,
   readCanvasImageSize,
   scaleCanvasImage,
@@ -56,6 +58,7 @@ vi.mock('../../lib/canvas-image-render', () => ({
     }
   },
   composeCanvasMask: vi.fn(),
+  composeCanvasOutpaint: vi.fn(),
   cropCanvasImage: vi.fn(),
   readCanvasImageSize: vi.fn(),
   scaleCanvasImage: vi.fn(),
@@ -123,7 +126,10 @@ function redrawInput() {
   }
 }
 
-function useHarness(addLinkedNode?: () => string | null) {
+function useHarness(
+  addLinkedNode?: () => string | null,
+  modelCapabilities?: UseCanvasImageToolsOptions['modelCapabilities']
+) {
   const link = vi.fn<UseCanvasImageToolsOptions['addLinkedNode']>(
     addLinkedNode ?? (() => 'node-new')
   )
@@ -131,6 +137,7 @@ function useHarness(addLinkedNode?: () => string | null) {
     useCanvasImageTools({
       canvasId: 'pgc_1',
       group: 'default',
+      ...(modelCapabilities ? { modelCapabilities } : {}),
       addLinkedNode: link,
     })
   )
@@ -161,6 +168,16 @@ beforeEach(() => {
     height: Math.max(1, Math.round(50 * factor)),
   }))
   vi.mocked(composeCanvasMask).mockResolvedValue(pngBlob())
+  vi.mocked(composeCanvasOutpaint).mockResolvedValue({
+    blob: pngBlob(),
+    mask: pngBlob(),
+    width: 100,
+    height: 100,
+    sourceX: 0,
+    sourceY: 25,
+    sourceWidth: 100,
+    sourceHeight: 50,
+  })
   vi.mocked(uploadPlaygroundAttachmentDirect).mockResolvedValue({
     id: 'pgf_direct',
     sessionId: 'pgc_1',
@@ -422,6 +439,169 @@ test('a redraw answered by a task plugin records a task result node', async () =
     { x: 100 + CANVAS_LINKED_NODE_OFFSET_X, y: 60 }
   )
   expect(hook.result.current.tool).toBeNull()
+})
+
+test('an outpaint composes a mask and posts the target ratio', async () => {
+  vi.spyOn(api, 'get').mockImplementation(async () => ({ data: pngBlob() }))
+  const post = vi.spyOn(api, 'post').mockImplementation(async (url) => {
+    if (url === EDIT_URL) return { data: { data: [{ b64_json: pngBase64() }] } }
+    if (url === UPLOAD_URL) return attachmentReply('pgf_outpaint')
+    throw new Error(`Unexpected POST ${url}`)
+  })
+  const { hook, link } = useHarness()
+
+  act(() => hook.result.current.open(imageNode(), 'outpaint'))
+  await waitFor(() => expect(hook.result.current.source).not.toBeNull())
+
+  let applied = false
+  await act(async () => {
+    applied = await hook.result.current.outpaint({
+      prompt: 'add sky',
+      model: 'gpt-image-1',
+      ratio: '1:1',
+    })
+  })
+
+  expect(applied).toBe(true)
+  expect(composeCanvasOutpaint).toHaveBeenCalledWith(
+    expect.stringContaining('data:image/png;base64,'),
+    expect.objectContaining({ value: '1:1', size: '1024x1024' })
+  )
+  const edit = post.mock.calls.find(([url]) => url === EDIT_URL)
+  expect(edit).toBeTruthy()
+  const form = edit?.[1] as FormData
+  expect(form.get('model')).toBe('gpt-image-1')
+  expect(form.get('prompt')).toBe('add sky')
+  expect(form.get('size')).toBe('1024x1024')
+  expect(form.get('image')).toBeInstanceOf(Blob)
+  expect(form.get('mask')).toBeInstanceOf(Blob)
+  expect(link).toHaveBeenCalledWith(
+    'image',
+    'n1',
+    expect.objectContaining({
+      label: 'photo · outpainted',
+      ref: { sessionId: 'pgc_1', attachmentId: 'pgf_outpaint' },
+    }),
+    { x: 100 + CANVAS_LINKED_NODE_OFFSET_X, y: 60 }
+  )
+})
+
+test('background removal posts a transparent request without a mask', async () => {
+  vi.spyOn(api, 'get').mockImplementation(async () => ({ data: pngBlob() }))
+  const post = vi.spyOn(api, 'post').mockImplementation(async (url) => {
+    if (url === EDIT_URL) return { data: { data: [{ b64_json: pngBase64() }] } }
+    if (url === UPLOAD_URL) return attachmentReply('pgf_nobg')
+    throw new Error(`Unexpected POST ${url}`)
+  })
+  const { hook, link } = useHarness()
+
+  act(() => hook.result.current.open(imageNode(), 'backgroundRemoval'))
+  await waitFor(() => expect(hook.result.current.source).not.toBeNull())
+
+  let applied = false
+  await act(async () => {
+    applied = await hook.result.current.backgroundRemoval({
+      prompt: '',
+      model: 'gpt-image-1',
+    })
+  })
+
+  expect(applied).toBe(true)
+  const edit = post.mock.calls.find(([url]) => url === EDIT_URL)
+  const form = edit?.[1] as FormData
+  expect(form.get('model')).toBe('gpt-image-1')
+  expect(form.get('prompt')).toBe(CANVAS_IMAGE_TOOL_PROMPTS.BACKGROUND_REMOVAL)
+  expect(form.get('size')).toBe('auto')
+  expect(form.get('background')).toBe('transparent')
+  expect(form.get('output_format')).toBe('png')
+  expect(form.get('image')).toBeInstanceOf(Blob)
+  expect(form.get('mask')).toBeNull()
+  expect(link).toHaveBeenCalledWith(
+    'image',
+    'n1',
+    expect.objectContaining({
+      label: 'photo · background removed',
+      ref: { sessionId: 'pgc_1', attachmentId: 'pgf_nobg' },
+    }),
+    { x: 100 + CANVAS_LINKED_NODE_OFFSET_X, y: 60 }
+  )
+})
+
+test('a style reference posts both images with the prompt', async () => {
+  vi.spyOn(api, 'get').mockImplementation(async () => ({ data: pngBlob() }))
+  const post = vi.spyOn(api, 'post').mockImplementation(async (url) => {
+    if (url === EDIT_URL) return { data: { data: [{ b64_json: pngBase64() }] } }
+    if (url === UPLOAD_URL) return attachmentReply('pgf_style')
+    throw new Error(`Unexpected POST ${url}`)
+  })
+  const { hook, link } = useHarness()
+
+  act(() => hook.result.current.open(imageNode(), 'styleReference'))
+  await waitFor(() => expect(hook.result.current.source).not.toBeNull())
+
+  let applied = false
+  await act(async () => {
+    applied = await hook.result.current.styleReference({
+      prompt: 'paint it blue',
+      model: 'gpt-image-1',
+      styleImage: new File(['style'], 'style.png', { type: 'image/png' }),
+      styleFilename: 'style.png',
+      size: '1024x1024',
+    })
+  })
+
+  expect(applied).toBe(true)
+  const edit = post.mock.calls.find(([url]) => url === EDIT_URL)
+  const form = edit?.[1] as FormData
+  expect(form.get('model')).toBe('gpt-image-1')
+  expect(form.get('prompt')).toBe('paint it blue')
+  expect(form.get('size')).toBe('1024x1024')
+  expect(form.getAll('image[]')).toHaveLength(2)
+  expect(form.get('mask')).toBeNull()
+  expect(link).toHaveBeenCalledWith(
+    'image',
+    'n1',
+    expect.objectContaining({
+      label: 'photo · style referenced',
+      ref: { sessionId: 'pgc_1', attachmentId: 'pgf_style' },
+    }),
+    { x: 100 + CANVAS_LINKED_NODE_OFFSET_X, y: 60 }
+  )
+})
+
+test('a tool refused by the model capability never sends a request', async () => {
+  vi.spyOn(api, 'get').mockImplementation(async () => ({ data: pngBlob() }))
+  const post = vi.spyOn(api, 'post')
+  const { hook, link } = useHarness(undefined, {
+    'gpt-image-1': {
+      imageTools: {
+        edit: true,
+        outpaint: false,
+        backgroundRemoval: false,
+        styleReference: false,
+      },
+    },
+  })
+
+  act(() => hook.result.current.open(imageNode(), 'outpaint'))
+  await waitFor(() => expect(hook.result.current.source).not.toBeNull())
+
+  let applied = true
+  await act(async () => {
+    applied = await hook.result.current.outpaint({
+      prompt: '',
+      model: 'gpt-image-1',
+      ratio: '1:1',
+    })
+  })
+
+  expect(applied).toBe(false)
+  expect(hook.result.current.message).toBe(
+    CANVAS_IMAGE_TOOL_MESSAGES.TOOL_UNSUPPORTED
+  )
+  expect(composeCanvasOutpaint).not.toHaveBeenCalled()
+  expect(post).not.toHaveBeenCalled()
+  expect(link).not.toHaveBeenCalled()
 })
 
 test('a full canvas reports the node limit after the bytes are stored', async () => {

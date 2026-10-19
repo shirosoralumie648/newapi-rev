@@ -1259,6 +1259,25 @@ export const STATIC_I18N_KEYS = [
   'The generated image could not be added to the canvas.',
   'The canvas is full; the result could not be added.',
   'The image operation failed.',
+  // Canvas creative image tools (CV-08): the outpaint, background removal and
+  // style reference titles, problem messages and capability tooltips render
+  // through t(key) from CANVAS_IMAGE_TOOL_TITLES,
+  // CANVAS_IMAGE_TOOL_MESSAGES and CANVAS_IMAGE_TOOL_CAPABILITY_MESSAGES.
+  'Outpaint image',
+  'Remove background',
+  'Use style reference',
+  'Choose a model for the outpaint.',
+  'Choose a model for background removal.',
+  'Choose a model for the style reference.',
+  'Describe the result you want from the style reference.',
+  'Choose a style image.',
+  'The style image must be a PNG, JPEG, WebP or GIF file.',
+  'The style image is larger than the 8 MiB limit.',
+  'The selected model does not support this image tool.',
+  'No available model advertises masked image edits.',
+  'No available model advertises masked outpaint edits.',
+  'No available model advertises transparent-background removal.',
+  'No available model advertises style-reference edits.',
   // Legacy referral migration (RF-09): the binding source label renders
   // through t(label) from REFERRAL_SOURCE_LABEL_KEYS, and the migration log
   // line and the reconciliation warning are returned from Go, so the literal

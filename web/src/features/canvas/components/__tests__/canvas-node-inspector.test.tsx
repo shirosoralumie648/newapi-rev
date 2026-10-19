@@ -605,6 +605,60 @@ test('opens one image tool per image node', async () => {
   expect(onOpenImageTools).toHaveBeenCalledWith(node, 'redraw')
   await user.click(screen.getByRole('button', { name: 'Upscale image' }))
   expect(onOpenImageTools).toHaveBeenCalledWith(node, 'upscale')
+  await user.click(screen.getByRole('button', { name: 'Outpaint image' }))
+  expect(onOpenImageTools).toHaveBeenCalledWith(node, 'outpaint')
+  await user.click(screen.getByRole('button', { name: 'Remove background' }))
+  expect(onOpenImageTools).toHaveBeenCalledWith(node, 'backgroundRemoval')
+  await user.click(screen.getByRole('button', { name: 'Use style reference' }))
+  expect(onOpenImageTools).toHaveBeenCalledWith(node, 'styleReference')
+})
+
+test('hides image tools the available models do not advertise', async () => {
+  const user = userEvent.setup()
+  const onOpenImageTools = vi.fn()
+  render(
+    <CanvasNodeInspector
+      modelCapabilities={{
+        'gpt-image-1': {
+          imageTools: {
+            edit: true,
+            outpaint: true,
+            backgroundRemoval: false,
+            styleReference: false,
+          },
+        },
+      }}
+      models={[{ label: 'gpt-image-1', value: 'gpt-image-1' }]}
+      node={makeNode({
+        kind: 'image',
+        label: 'photo',
+        ref: { sessionId: 'pgc_1', attachmentId: 'pgf_1' },
+      })}
+      onDelete={vi.fn()}
+      onOpenImageTools={onOpenImageTools}
+      onUpdateData={vi.fn()}
+    />
+  )
+
+  expect(
+    screen.getByRole('button', { name: 'Redraw image area' })
+  ).toBeInTheDocument()
+  expect(
+    screen.getByRole('button', { name: 'Outpaint image' })
+  ).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Remove background' })).toBeNull()
+  expect(
+    screen.queryByRole('button', { name: 'Use style reference' })
+  ).toBeNull()
+  expect(
+    screen.getByRole('button', { name: 'Why some image tools are hidden' })
+  ).toBeInTheDocument()
+
+  await user.click(screen.getByRole('button', { name: 'Outpaint image' }))
+  expect(onOpenImageTools).toHaveBeenCalledWith(
+    expect.objectContaining({ id: 'n1' }),
+    'outpaint'
+  )
 })
 
 test('hides the image tools when the inspector cannot open them', () => {
