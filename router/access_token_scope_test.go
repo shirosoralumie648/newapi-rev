@@ -37,6 +37,9 @@ var accessTokenExemptRoutes = []string{
 	"GET /api/ratio_config",
 	"GET /api/user/groups",
 
+	// Anonymous public share link.
+	"GET /api/playground/shared/:token",
+
 	// Anonymous account entry points.
 	"GET /api/verification",
 	"GET /api/reset_password",
