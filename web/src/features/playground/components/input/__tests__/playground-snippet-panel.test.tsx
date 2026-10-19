@@ -37,6 +37,9 @@ const snippetWire = {
   id: 'pgs_1',
   name: 'Review checklist',
   content: 'Check every endpoint for owner scoping.',
+  current_version: 1,
+  production_version: 1,
+  version_count: 1,
   created_at: 10,
   updated_at: 20,
 }
@@ -218,4 +221,165 @@ test('deleting a snippet confirms first and then removes it', async () => {
     )
   )
   expect(screen.queryByText('Review checklist')).toBeNull()
+})
+
+test('inserting a templated snippet fills its variables before the composer receives it', async () => {
+  const user = userEvent.setup()
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        items: [
+          {
+            ...snippetWire,
+            content: 'Review {{subject}} for {{audience:developers}}.',
+          },
+        ],
+        total: 1,
+        limit: 50,
+      },
+    },
+  })
+  const { onInsertSnippet } = renderPanel()
+
+  await user.click(screen.getByRole('button', { name: 'Prompt snippets' }))
+  await screen.findByText('Review checklist')
+  await user.click(screen.getByRole('button', { name: 'Insert' }))
+
+  expect(await screen.findByDisplayValue('developers')).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Insert' })).toBeDisabled()
+  await user.type(screen.getByLabelText('subject'), 'the diff view')
+  await user.click(screen.getByRole('button', { name: 'Insert' }))
+
+  expect(onInsertSnippet).toHaveBeenCalledExactlyOnceWith(
+    'Review the diff view for developers.'
+  )
+})
+
+test('a snippet can be applied to the conversation system prompt', async () => {
+  const user = userEvent.setup()
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: { items: [snippetWire], total: 1, limit: 50 },
+    },
+  })
+  const onSystemPromptChange = vi.fn()
+  renderPanel({
+    onSystemPromptChange,
+    systemPrompt: 'Existing instructions.',
+  })
+
+  await user.click(screen.getByRole('button', { name: 'Prompt snippets' }))
+  await screen.findByText('Review checklist')
+  await user.click(
+    screen.getByRole('button', { name: 'Insert into system prompt' })
+  )
+
+  expect(onSystemPromptChange).toHaveBeenCalledExactlyOnceWith(
+    'Existing instructions.\n\nCheck every endpoint for owner scoping.'
+  )
+})
+
+test('the history dialog loads revisions and rolls the production pointer back', async () => {
+  const user = userEvent.setup()
+  const detail = {
+    ...snippetWire,
+    current_version: 2,
+    production_version: 2,
+    version_count: 2,
+    content: 'Second body.',
+    versions: [
+      {
+        version: 1,
+        content: 'First body.',
+        byte_size: 11,
+        created_at: 10,
+      },
+      {
+        version: 2,
+        content: 'Second body.',
+        byte_size: 12,
+        created_at: 20,
+      },
+    ],
+  }
+  vi.spyOn(api, 'get').mockImplementation((url: string) => {
+    if (url === '/api/playground/snippets/pgs_1') {
+      return Promise.resolve({ data: { success: true, data: detail } })
+    }
+    return Promise.resolve({
+      data: {
+        success: true,
+        data: { items: [snippetWire], total: 1, limit: 50 },
+      },
+    })
+  })
+  const post = vi.spyOn(api, 'post').mockResolvedValue({
+    data: {
+      success: true,
+      data: { ...detail, production_version: 1, content: 'First body.' },
+    },
+  })
+  renderPanel()
+
+  await user.click(screen.getByRole('button', { name: 'Prompt snippets' }))
+  await screen.findByText('Review checklist')
+  await user.click(screen.getByRole('button', { name: 'Version history' }))
+  expect(await screen.findByText('v2')).toBeVisible()
+  await user.click(
+    screen.getAllByRole('button', { name: 'Roll back to this version' })[1]
+  )
+  await user.click(screen.getByRole('button', { name: 'Roll back' }))
+
+  await waitFor(() =>
+    expect(post).toHaveBeenCalledWith(
+      '/api/playground/snippets/pgs_1/rollback',
+      { version: 1 },
+      expect.anything()
+    )
+  )
+})
+
+test('importing an exported template posts the document and lists the copy', async () => {
+  const user = userEvent.setup()
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: { success: true, data: { items: [], total: 0, limit: 50 } },
+  })
+  const imported = {
+    ...snippetWire,
+    id: 'pgs_imported',
+    name: 'Imported checklist',
+  }
+  const post = vi.spyOn(api, 'post').mockResolvedValue({
+    data: { success: true, data: imported },
+  })
+  renderPanel()
+  const document = JSON.stringify({
+    format: 'new-api-playground-prompt-template',
+    schema_version: 1,
+    template: {
+      name: 'Imported checklist',
+      production_version: 1,
+      versions: [{ version: 1, content: 'Imported body.' }],
+    },
+  })
+
+  await user.click(screen.getByRole('button', { name: 'Prompt snippets' }))
+  await screen.findByText('No prompt snippets yet')
+  await user.upload(
+    screen.getByLabelText('Prompt snippet file'),
+    new File([document], 'checklist.json', { type: 'application/json' })
+  )
+
+  await waitFor(() =>
+    expect(post).toHaveBeenCalledWith(
+      '/api/playground/snippets/import',
+      document,
+      expect.objectContaining({
+        headers: { 'Content-Type': 'application/json' },
+      })
+    )
+  )
+  expect(await screen.findByText('Imported checklist')).toBeVisible()
 })

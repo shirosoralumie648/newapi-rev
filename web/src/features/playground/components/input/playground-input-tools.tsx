@@ -354,6 +354,8 @@ export function PlaygroundInputTools({
         <PlaygroundSnippetPanel
           disabled={disabled}
           onInsertSnippet={onInsertText}
+          onSystemPromptChange={onSystemPromptChange}
+          systemPrompt={systemPrompt}
         />
 
         <PlaygroundContextPanel

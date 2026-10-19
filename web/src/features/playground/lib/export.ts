@@ -62,8 +62,10 @@ export async function exportPlaygroundPresetFile(
 }
 
 /**
- * Downloads one prompt snippet with its portable revision history. The server
- * renders the same document the snippet import endpoint accepts.
+ * Downloads one prompt snippet with its full immutable version history. The
+ * server renders the same portable JSON document the snippet import endpoint
+ * accepts, so importing the file on another account restores every revision
+ * and the production pointer.
  */
 export async function exportPlaygroundSnippetFile(
   snippetId: string

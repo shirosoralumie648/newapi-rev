@@ -1070,6 +1070,8 @@ const playgroundMessageCostLookupSchema = z.object({
 const playgroundUsageSchema = z.object({
   group: z.string(),
   sessions: playgroundUsageMetricSchema,
+  snippets: playgroundUsageMetricSchema,
+  snippet_versions: playgroundUsageMetricSchema,
   memories: playgroundUsageMetricSchema,
   attachments: playgroundUsageMetricSchema,
   artifacts: playgroundUsageMetricSchema,
@@ -1106,6 +1108,8 @@ export interface PlaygroundUsageMetric {
 export interface PlaygroundResourceUsage {
   group: string
   sessions: PlaygroundUsageMetric
+  snippets: PlaygroundUsageMetric
+  snippetVersions: PlaygroundUsageMetric
   memories: PlaygroundUsageMetric
   attachments: PlaygroundUsageMetric
   artifacts: PlaygroundUsageMetric
@@ -1246,6 +1250,8 @@ export async function getPlaygroundUsage(
   return {
     group: metrics.group,
     sessions: toMetric(metrics.sessions),
+    snippets: toMetric(metrics.snippets),
+    snippetVersions: toMetric(metrics.snippet_versions),
     memories: toMetric(metrics.memories),
     attachments: toMetric(metrics.attachments),
     artifacts: toMetric(metrics.artifacts),

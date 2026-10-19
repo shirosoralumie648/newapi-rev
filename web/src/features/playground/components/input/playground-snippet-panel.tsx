@@ -672,9 +672,6 @@ export function PlaygroundSnippetPanel(props: PlaygroundSnippetPanelProps) {
     </>
   )
 
-  const title = t('Prompt snippets')
-  void title
-
   if (isMobile) {
     return (
       <>

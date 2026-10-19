@@ -118,7 +118,7 @@ test('downloads a preset as the JSON document the import endpoint accepts', asyn
   expect(await readDownload(downloads[0])).toBe(content)
 })
 
-test('downloads a snippet as the JSON document the import endpoint accepts', async () => {
+test('downloads a prompt snippet with its portable version history', async () => {
   const content =
     '{"format":"new-api-playground-prompt-template","schema_version":1,"template":{"name":"Reviewer","production_version":1,"versions":[{"version":1,"content":"Review {{path}}","created_at":1700000000}]}}'
   const get = vi.spyOn(api, 'get').mockResolvedValue({

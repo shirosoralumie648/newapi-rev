@@ -1255,12 +1255,21 @@ export const STATIC_I18N_KEYS = [
   'Failed to load prompt snippets',
   'Failed to save the prompt snippet',
   'Failed to delete the prompt snippet',
+  'Failed to load the prompt snippet versions',
+  'Failed to roll back the prompt snippet',
+  'Failed to export the prompt snippet',
+  'Failed to import the prompt snippet',
   'Invalid prompt snippet.',
+  'Invalid prompt snippet file.',
   'Prompt snippet not found.',
+  'Prompt snippet version not found.',
   'Prompt snippet limit exceeded.',
   'Prompt snippet content limit exceeded.',
+  'Prompt snippet version limit exceeded.',
   'Prompt snippets per user',
   'Prompt snippet size limit',
+  'Prompt snippet versions per template',
+  'Prompt snippet versions per user',
   // Cross-session memory (LB-06): category labels render through
   // t(PLAYGROUND_MEMORY_CATEGORY_LABELS[...]) and the error/quota labels from
   // constants, so the literal scan cannot see all of them.

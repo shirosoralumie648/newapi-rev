@@ -4499,6 +4499,11 @@ func TestPlaygroundSnippetPersistenceAndOwnership(t *testing.T) {
 			assert.Equal(t, 3, envelope.Data.CurrentVersion)
 			assert.Equal(t, 3, envelope.Data.ProductionVersion)
 
+			// Publish an older revision before exporting, so the round trip
+			// proves the production pointer is independent of the newest one.
+			beforeExport := playgroundRequest(t, 7, http.MethodPost, "/api/playground/snippets/"+id+"/rollback", map[string]any{"version": 2}, controller.RollbackPlaygroundSnippet)
+			require.Equal(t, http.StatusOK, beforeExport.Code, beforeExport.Body.String())
+
 			// Export renders the full history, and importing the document
 			// restores it for the same account as a new template.
 			exported := playgroundRequest(t, 7, http.MethodGet, "/api/playground/snippets/"+id+"/export", nil, controller.ExportPlaygroundSnippet)
@@ -4532,9 +4537,10 @@ func TestPlaygroundSnippetPersistenceAndOwnership(t *testing.T) {
 			assert.Equal(t, 1, document.SchemaVersion)
 			assert.NotZero(t, document.ExportedAt)
 			assert.Equal(t, "Checklist", document.Template.Name)
-			assert.Equal(t, 3, document.Template.ProductionVersion)
+			assert.Equal(t, 2, document.Template.ProductionVersion)
 			require.Len(t, document.Template.Versions, 3)
 			assert.Equal(t, "Check every endpoint for owner scoping.", document.Template.Versions[0].Content)
+			assert.Equal(t, second, document.Template.Versions[1].Content)
 			assert.Equal(t, third, document.Template.Versions[2].Content)
 
 			imported := playgroundRequest(t, 7, http.MethodPost, "/api/playground/snippets/import", []byte(exportEnvelope.Data.Content), controller.ImportPlaygroundSnippet)
@@ -4548,8 +4554,8 @@ func TestPlaygroundSnippetPersistenceAndOwnership(t *testing.T) {
 			assert.NotEqual(t, id, importedEnvelope.Data.ID)
 			assert.Equal(t, "Checklist", importedEnvelope.Data.Name)
 			assert.Equal(t, 3, importedEnvelope.Data.VersionCount)
-			assert.Equal(t, 3, importedEnvelope.Data.ProductionVersion)
-			assert.Equal(t, third, importedEnvelope.Data.Content)
+			assert.Equal(t, 2, importedEnvelope.Data.ProductionVersion)
+			assert.Equal(t, second, importedEnvelope.Data.Content)
 			require.Len(t, importedEnvelope.Data.Versions, 3)
 			require.NoError(t, db.Where("user_id = ?", 7).First(&usage).Error)
 			assert.EqualValues(t, 2, usage.Snippets)

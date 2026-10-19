@@ -36,6 +36,8 @@ Object.defineProperty(HTMLElement.prototype, 'getAnimations', {
 const usage = {
   group: 'pro',
   sessions: { used: 3, limit: 10, used_bytes: 0, limit_bytes: 0 },
+  snippets: { used: 4, limit: 100, used_bytes: 0, limit_bytes: 0 },
+  snippet_versions: { used: 7, limit: 1000, used_bytes: 0, limit_bytes: 0 },
   memories: { used: 2, limit: 100, used_bytes: 0, limit_bytes: 0 },
   attachments: {
     used: 1,
@@ -156,6 +158,10 @@ test('opening the usage popover lists each resource against its account limit', 
 
   expect(await screen.findByText('Conversations')).toBeVisible()
   expect(screen.getByText('3 of 10')).toBeVisible()
+  expect(screen.getByText('Prompt snippets')).toBeVisible()
+  expect(screen.getByText('4 of 100')).toBeVisible()
+  expect(screen.getByText('Prompt snippet versions')).toBeVisible()
+  expect(screen.getByText('7 of 1,000')).toBeVisible()
   expect(screen.getByText('Memories')).toBeVisible()
   expect(screen.getByText('2 of 100')).toBeVisible()
   expect(screen.getByText('Artifacts')).toBeVisible()
