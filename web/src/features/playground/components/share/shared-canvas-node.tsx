@@ -76,7 +76,10 @@ export function SharedCanvasNodeView(props: NodeProps) {
 
   const mediaKind = MEDIA_KINDS.includes(kind)
   return (
-    <CanvasNodeCard className='h-auto w-64 gap-0 p-0'>
+    <CanvasNodeCard
+      className='h-auto w-64 gap-0 p-0'
+      handles={{ target: false, source: false }}
+    >
       <NodeHeader className='flex items-center justify-between gap-2 p-2'>
         <NodeTitle className='text-xs font-medium'>
           {t(CANVAS_NODE_KIND_LABELS[kind])}
