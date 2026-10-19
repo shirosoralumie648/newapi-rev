@@ -32,6 +32,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 
+import { DEFAULT_DEVELOPER_OPTIONS } from '../../constants'
 import type { KnowledgeBase } from '../../knowledge-api'
 import type { PlaygroundContextPlan } from '../../lib'
 import type {
@@ -40,6 +41,7 @@ import type {
   PlaygroundConfig,
   PlaygroundContextSettings,
   PlaygroundContextSummary,
+  PlaygroundDeveloperOptions,
 } from '../../types'
 import { PlaygroundAssetPicker } from './playground-asset-picker'
 import { PlaygroundAutoReadControl } from './playground-auto-read-control'
@@ -49,6 +51,7 @@ import {
   PlaygroundContextPanel,
   type PlaygroundKnowledgeDiagnostics,
 } from './playground-context-panel'
+import { PlaygroundDeveloperPanel } from './playground-developer-panel'
 import { PlaygroundDictationPanel } from './playground-dictation-panel'
 import { PlaygroundParameterPanel } from './playground-parameter-panel'
 import { PlaygroundSnippetPanel } from './playground-snippet-panel'
@@ -92,6 +95,10 @@ type PlaygroundInputToolsProps = {
   onContextSettingsChange: (settings: PlaygroundContextSettings) => void
   onRemoveContextSummary: () => void
   onSummarizeContext: () => void
+  /** Request-side developer settings of the active conversation. */
+  developerOptions?: PlaygroundDeveloperOptions
+  /** Stores changed developer settings on the active conversation. */
+  onDeveloperOptionsChange?: (options: PlaygroundDeveloperOptions) => void
   /** Knowledge bases the account may bind to the conversation. */
   knowledgeBases?: KnowledgeBase[]
   knowledgeBaseIds?: string[]
@@ -154,6 +161,8 @@ export function PlaygroundInputTools({
   onContextSettingsChange,
   onRemoveContextSummary,
   onSummarizeContext,
+  developerOptions = DEFAULT_DEVELOPER_OPTIONS,
+  onDeveloperOptionsChange,
   knowledgeBases,
   knowledgeBaseIds,
   onKnowledgeBaseIdsChange,
@@ -326,6 +335,12 @@ export function PlaygroundInputTools({
           plan={contextPlan}
           settings={contextSettings}
           summary={contextSummary}
+        />
+
+        <PlaygroundDeveloperPanel
+          disabled={disabled}
+          onOptionsChange={(next) => onDeveloperOptionsChange?.(next)}
+          options={developerOptions}
         />
 
         <Tooltip>

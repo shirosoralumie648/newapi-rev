@@ -53,6 +53,7 @@ import type {
   Message,
   MessageKnowledgeSnapshot,
   MessageVersion,
+  PlaygroundDeveloperResponseFormat,
   PlaygroundMessageCost,
 } from '../../types'
 import { MessageAttachmentList } from './message-attachment-list'
@@ -60,6 +61,7 @@ import { MessageError } from './message-error'
 import { MessageKnowledgeSources } from './message-knowledge-sources'
 import { MessageMetadata } from './message-metadata'
 import { MessageSpeech } from './message-speech'
+import { MessageStructuredOutput } from './message-structured-output'
 import { MessageToolCalls } from './message-tool-calls'
 
 type PlaygroundMessageContentProps = {
@@ -85,6 +87,11 @@ type PlaygroundMessageContentProps = {
     toolCallId: string,
     result: string
   ) => void
+  /**
+   * Response format of the active conversation's developer settings when it
+   * asks for JSON; the preview of a settled assistant reply keys off it.
+   */
+  responseFormat?: PlaygroundDeveloperResponseFormat | null
   version: MessageVersion
 }
 
@@ -103,6 +110,7 @@ export function PlaygroundMessageContent({
   onContinueToolCalls,
   onDenyToolCall,
   onProvideToolResult,
+  responseFormat = null,
   version,
 }: PlaygroundMessageContentProps) {
   const { t } = useTranslation()
@@ -134,6 +142,12 @@ export function PlaygroundMessageContent({
           knowledgeResultCount
         )
       : displayContent
+  const showsStructuredOutput =
+    message.from === 'assistant' &&
+    isMessageFinal &&
+    versionContent.length > 0 &&
+    responseFormat !== null &&
+    responseFormat.type !== 'text'
 
   return (
     <div
@@ -226,6 +240,12 @@ export function PlaygroundMessageContent({
               ) : null}
             </>
           )}
+          {showsStructuredOutput && responseFormat ? (
+            <MessageStructuredOutput
+              content={versionContent}
+              format={responseFormat}
+            />
+          ) : null}
           <MessageToolCalls
             autoFilledToolCallKeys={autoFilledToolCallKeys}
             executingToolCallKeys={executingToolCallKeys}
