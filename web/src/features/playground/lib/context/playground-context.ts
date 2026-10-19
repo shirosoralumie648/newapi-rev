@@ -50,6 +50,7 @@ import {
 } from '../message/message-usage-utils'
 import {
   formatMessageForAPI,
+  formatMessageSearchContext,
   getCurrentVersion,
   isValidMessage,
 } from '../message/message-utils'
@@ -96,7 +97,10 @@ export function formatMessageForRequest(
   const documentContext = playgroundDocumentContextText(
     getCurrentVersion(message).attachments ?? []
   )
-  const formatted = formatMessageForAPI(message, documentContext)
+  const searchContext = message.search
+    ? formatMessageSearchContext(message.search)
+    : ''
+  const formatted = formatMessageForAPI(message, documentContext, searchContext)
   if (message.from !== MESSAGE_ROLES.ASSISTANT) {
     return [formatted]
   }
@@ -166,6 +170,9 @@ export function estimateMessageTokens(message: Message): number {
   let tokens = estimateTextTokens(omitInlineBase64Media(version.content).text)
   tokens +=
     countMessageImages(message) * PLAYGROUND_CONTEXT_IMAGE_TOKEN_ESTIMATE
+  if (message.search) {
+    tokens += estimateTextTokens(formatMessageSearchContext(message.search))
+  }
   for (const call of version.toolCalls ?? []) {
     tokens += estimateTextTokens(call.arguments)
   }

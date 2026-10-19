@@ -122,6 +122,28 @@ export interface PlaygroundMessageCost {
   timing?: RequestTimingBreakdown
 }
 
+/**
+ * One normalized web-search hit of a turn. The server already bounded every
+ * field; the browser only stores and renders it.
+ */
+export interface MessageSearchResult {
+  title: string
+  url: string
+  snippet: string
+}
+
+/**
+ * Web-search snapshot of one user turn: the query that was searched and the
+ * normalized hits injected into the request. It is the source of truth for
+ * replay, so the same turn always carries the same context, and the assistant
+ * reply copies the hits into `sources` for citation rendering.
+ */
+export interface MessageSearchSnapshot {
+  query: string
+  provider?: string
+  results: MessageSearchResult[]
+}
+
 export interface Message {
   key: string
   from: MessageRole
@@ -139,6 +161,7 @@ export interface Message {
   completedAt?: number
   durationMs?: number
   sources?: { href: string; title: string }[]
+  search?: MessageSearchSnapshot
   reasoning?: {
     content: string
     duration: number

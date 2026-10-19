@@ -81,7 +81,10 @@ func GetPlaygroundSettings(c *gin.Context) {
 		common.ApiErrorStatus(c, http.StatusUnauthorized, common.NewMessage("Authentication required."))
 		return
 	}
-	common.ApiSuccess(c, gin.H{"sandbox_preview_enabled": playground_setting.IsSandboxPreviewEnabled()})
+	common.ApiSuccess(c, gin.H{
+		"sandbox_preview_enabled": playground_setting.IsSandboxPreviewEnabled(),
+		"web_search_enabled":      playground_setting.IsWebSearchEnabled(),
+	})
 }
 
 // GetPlaygroundMessageCosts resolves the caller's own relay requests to their

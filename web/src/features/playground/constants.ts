@@ -109,6 +109,7 @@ export const API_ENDPOINTS = {
   PLAYGROUND_USAGE: '/api/playground/usage',
   PLAYGROUND_STORAGE_BILLING: '/api/playground/storage/billing',
   PLAYGROUND_SETTINGS: '/api/playground/settings',
+  PLAYGROUND_SEARCH: '/api/playground/search',
   PLAYGROUND_MESSAGE_COSTS: '/api/playground/message-costs',
   PLAYGROUND_ASSETS: '/api/playground/assets',
   PLAYGROUND_TASKS: '/api/playground/tasks',
@@ -129,6 +130,12 @@ export const PLAYGROUND_REQUEST_ID_MAX_LENGTH = 64
 // Sanity ceiling for the display-only token counts, mirroring the bound the
 // server applies to a stored message version.
 export const PLAYGROUND_MESSAGE_TOKEN_MAX = 2 ** 40
+
+// Web-search bounds mirroring the server validation of one search turn: the
+// query is a chat turn, not a document, and the composer must not offer a
+// search the server would reject.
+export const PLAYGROUND_SEARCH_QUERY_MAX_LENGTH = 512
+export const PLAYGROUND_SEARCH_MAX_RESULTS = 6
 
 // Context management bounds. The server validates the same ranges, so a value
 // accepted here is always storable. An image attachment is counted as a fixed

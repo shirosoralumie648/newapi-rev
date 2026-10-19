@@ -83,6 +83,7 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.POST("/workflows/runs", controller.PlaygroundWorkflowRunCreate)
 			playgroundRoute.POST("/workflows/runs/:runId/settle", controller.PlaygroundWorkflowRunSettle)
 			playgroundRoute.GET("/settings", controller.GetPlaygroundSettings)
+			playgroundRoute.POST("/search", middleware.SearchRateLimit(), controller.PlaygroundWebSearch)
 			playgroundRoute.GET("/message-costs", controller.GetPlaygroundMessageCosts)
 			playgroundRoute.GET("/trash", controller.ListPlaygroundTrash)
 			playgroundRoute.GET("/assets", controller.ListPlaygroundAssets)

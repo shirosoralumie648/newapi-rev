@@ -65,6 +65,7 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"POST /api/playground/workflows/runs":                                        accessTokenSessionRule,
 	"POST /api/playground/workflows/runs/:runId/settle":                          accessTokenSessionRule,
 	"GET /api/playground/settings":                                               accessTokenSessionRule,
+	"POST /api/playground/search":                                                accessTokenSessionRule,
 	"GET /api/playground/message-costs":                                          accessTokenSessionRule,
 	"GET /api/playground/trash":                                                  accessTokenSessionRule,
 	"GET /api/playground/assets":                                                 accessTokenSessionRule,

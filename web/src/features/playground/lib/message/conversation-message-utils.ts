@@ -3,7 +3,11 @@ import {
   MESSAGE_ROLES,
   MESSAGE_STATUS,
 } from '../../constants'
-import type { Message, MessageAttachment } from '../../types'
+import type {
+  Message,
+  MessageAttachment,
+  MessageSearchSnapshot,
+} from '../../types'
 import { isMessageTruncated } from './message-continuation-utils'
 import {
   appendMessageVersion,

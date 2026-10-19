@@ -26,6 +26,7 @@ import {
   DEFAULT_CONFIG,
   DEFAULT_PARAMETER_ENABLED,
   PLAYGROUND_REQUEST_ID_HEADER,
+  PLAYGROUND_SEARCH_MAX_RESULTS,
   PLAYGROUND_WORKFLOW_RUN_HEADER,
 } from './constants'
 import {
@@ -957,6 +958,7 @@ const playgroundUsageSchema = z.object({
 
 const playgroundSettingsSchema = z.object({
   sandbox_preview_enabled: z.boolean(),
+  web_search_enabled: z.boolean().optional(),
 })
 
 export interface PlaygroundUsageMetric {
@@ -1165,10 +1167,13 @@ export async function getPlaygroundStorageBilling(
  * Server-side Playground feature switches. `sandboxPreviewEnabled` is the
  * administrator opt-in for rendering HTML/SVG artifact content inside the
  * sandboxed preview; while it is false the browser must keep artifact content
- * inert.
+ * inert. `webSearchEnabled` is the administrator opt-in for the
+ * search-with-this-turn control; the browser never sees the provider endpoint
+ * or credential.
  */
 export interface PlaygroundServerSettings {
   sandboxPreviewEnabled: boolean
+  webSearchEnabled: boolean
 }
 
 export async function getPlaygroundSettings(
@@ -1177,7 +1182,61 @@ export async function getPlaygroundSettings(
   const response = await api.get(API_ENDPOINTS.PLAYGROUND_SETTINGS, { signal })
   requireServerSuccess(response.data)
   const settings = playgroundSettingsSchema.parse(response.data.data)
-  return { sandboxPreviewEnabled: settings.sandbox_preview_enabled }
+  return {
+    sandboxPreviewEnabled: settings.sandbox_preview_enabled,
+    webSearchEnabled: settings.web_search_enabled === true,
+  }
+}
+
+/** One normalized web-search hit returned to the composer. */
+export interface PlaygroundWebSearchResult {
+  title: string
+  url: string
+  snippet: string
+}
+
+/** One successful, already billed web-search provider call. */
+export interface PlaygroundWebSearchResponse {
+  query: string
+  provider: string
+  results: PlaygroundWebSearchResult[]
+}
+
+const playgroundWebSearchResultSchema = z.object({
+  title: z.string().max(300),
+  url: z.string().max(4096),
+  snippet: z.string().max(1200),
+})
+
+const playgroundWebSearchResponseSchema = z.object({
+  query: z.string().min(1).max(512),
+  provider: z.string().max(32).optional(),
+  results: z
+    .array(playgroundWebSearchResultSchema)
+    .max(PLAYGROUND_SEARCH_MAX_RESULTS),
+})
+
+/**
+ * Runs one web search for the current turn. The provider call and its wallet
+ * charge happen server-side; the returned hits are injected into the next
+ * request and stored on the user message for replay and citation rendering.
+ */
+export async function searchPlaygroundWeb(
+  query: string,
+  signal?: AbortSignal
+): Promise<PlaygroundWebSearchResponse> {
+  const response = await api.post(
+    API_ENDPOINTS.PLAYGROUND_SEARCH,
+    { query },
+    { signal }
+  )
+  requireServerSuccess(response.data)
+  const parsed = playgroundWebSearchResponseSchema.parse(response.data.data)
+  return {
+    query: parsed.query,
+    provider: parsed.provider ?? '',
+    results: parsed.results,
+  }
 }
 
 const serverPresetSchema = z.object({
