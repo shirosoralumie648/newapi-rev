@@ -785,6 +785,14 @@ export interface ChatCompletionResponse {
 }
 
 // Configuration types
+/**
+ * Wire protocol of one conversation. The workspace sends the same prompt
+ * through the OpenAI Chat Completions, OpenAI Responses or Anthropic Messages
+ * endpoint; each protocol uses its own relay route and payload shape while
+ * group, channel selection and billing stay identical.
+ */
+export type PlaygroundProtocol = 'chat' | 'responses' | 'messages'
+
 export interface PlaygroundConfig {
   model: string
   group: string
@@ -801,6 +809,8 @@ export interface PlaygroundConfig {
    */
   reasoning_effort: string
   stream: boolean
+  /** Wire protocol the next send uses; `chat` keeps the OpenAI shape. */
+  protocol: PlaygroundProtocol
 }
 
 export interface ParameterEnabled {

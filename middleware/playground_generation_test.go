@@ -40,6 +40,18 @@ func newPlaygroundGenerationTestRouter() *gin.Engine {
 		generation, _ := common.GetContextKeyType[*model.TaskGenerationParams](c, constant.ContextKeyPlaygroundGenerationParams)
 		c.JSON(http.StatusOK, gin.H{"path": c.Request.URL.Path, "generation": generation})
 	})
+	echoProtocol := func(c *gin.Context) {
+		payload := map[string]any{}
+		_ = common.UnmarshalBodyReusable(c, &payload)
+		c.JSON(http.StatusOK, gin.H{
+			"path":               c.Request.URL.Path,
+			"usingGroup":         common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
+			"requestGroupHeader": c.Request.Header.Get("X-Playground-Group"),
+			"body":               payload,
+		})
+	}
+	router.POST("/pg/responses", PlaygroundRelayBridge("/v1/responses"), echoProtocol)
+	router.POST("/pg/messages", PlaygroundRelayBridge("/v1/messages"), echoProtocol)
 	return router
 }
 
@@ -148,4 +160,57 @@ func TestPlaygroundGenerationSnapshotRecordsDisplayMetadata(t *testing.T) {
 	assert.Equal(t, "video", videoResponse.Generation.Kind)
 	assert.Equal(t, "waves", videoResponse.Generation.Prompt)
 	assert.Equal(t, 10, videoResponse.Generation.Duration)
+}
+
+func TestPlaygroundProtocolBridgeMapsPathsAndConsumesGroup(t *testing.T) {
+	router := newPlaygroundGenerationTestRouter()
+
+	type bridgeResponse struct {
+		Path               string         `json:"path"`
+		UsingGroup         string         `json:"usingGroup"`
+		RequestGroupHeader string         `json:"requestGroupHeader"`
+		Body               map[string]any `json:"body"`
+	}
+	post := func(t *testing.T, path, body string, headerGroup string) *httptest.ResponseRecorder {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(body))
+		request.Header.Set("Content-Type", "application/json")
+		if headerGroup != "" {
+			request.Header.Set("X-Playground-Group", headerGroup)
+		}
+		router.ServeHTTP(recorder, request)
+		return recorder
+	}
+
+	t.Run("messages keeps its payload and consumes the header group", func(t *testing.T) {
+		recorder := post(t, "/pg/messages", `{"model":"claude-sonnet","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}`, "vip")
+		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+		var response bridgeResponse
+		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+		assert.Equal(t, "/v1/messages", response.Path)
+		assert.Equal(t, "vip", response.UsingGroup)
+		assert.Empty(t, response.RequestGroupHeader)
+		assert.Equal(t, "claude-sonnet", response.Body["model"])
+		assert.Equal(t, float64(64), response.Body["max_tokens"])
+	})
+
+	t.Run("responses reads the body group and forwards the original body", func(t *testing.T) {
+		recorder := post(t, "/pg/responses", `{"model":"gpt-5","input":"hi","group":"vip","max_output_tokens":32}`, "")
+		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+		var response bridgeResponse
+		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+		assert.Equal(t, "/v1/responses", response.Path)
+		assert.Equal(t, "vip", response.UsingGroup)
+		assert.Equal(t, "hi", response.Body["input"])
+		assert.Equal(t, float64(32), response.Body["max_output_tokens"])
+		// The bridge reads the routing field but leaves the bytes to the relay,
+		// which converts the request exactly as a direct /v1 call would.
+		assert.Equal(t, "vip", response.Body["group"])
+	})
+
+	t.Run("an unusable group is rejected before the relay starts", func(t *testing.T) {
+		recorder := post(t, "/pg/messages", `{"model":"claude-sonnet","max_tokens":64,"messages":[]}`, "missing-group")
+		assert.Equal(t, http.StatusForbidden, recorder.Code, recorder.Body.String())
+	})
 }

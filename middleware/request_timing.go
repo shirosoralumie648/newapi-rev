@@ -18,8 +18,11 @@ var requestTimingPaths = map[string]struct{}{
 	"/v1/messages":         {},
 	"/v1/responses":        {},
 	// The Playground chat entry runs through the same relay pipeline, and its
-	// message metadata shows the same breakdown.
+	// message metadata shows the same breakdown. The protocol bridges are
+	// observed before they rewrite the path to their /v1 counterparts.
 	"/pg/chat/completions": {},
+	"/pg/responses":        {},
+	"/pg/messages":         {},
 }
 
 // RequestTiming starts a per-request timing session for the main LLM entry

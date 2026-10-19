@@ -119,6 +119,12 @@ const (
 // request can send.
 var playgroundReasoningEffortValues = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
 
+// playgroundProtocolValues lists the wire protocols a conversation may store.
+// Each value selects a Playground relay route whose payload shape matches the
+// canonical /v1 endpoint the bridge rewrites to, so a stored protocol is always
+// one the workspace can send (PG2-09).
+var playgroundProtocolValues = []string{"chat", "responses", "messages"}
+
 // playgroundDeveloperToolChoiceValues and playgroundDeveloperResponseFormatTypes
 // list the accepted developer-settings enums. They mirror the OpenAI wire shape
 // the client injects unchanged into a relay request.
@@ -1093,6 +1099,9 @@ func encodePlaygroundSettings(request playgroundSessionRequest, systemPromptMaxB
 			case "reasoning_effort":
 				text, ok := value.(string)
 				valid = ok && (text == "" || slices.Contains(playgroundReasoningEffortValues, text))
+			case "protocol":
+				text, ok := value.(string)
+				valid = ok && slices.Contains(playgroundProtocolValues, text)
 			}
 			if !valid {
 				return nil, common.NewMessage("Invalid Playground configuration.")

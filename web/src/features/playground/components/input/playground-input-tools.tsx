@@ -51,6 +51,7 @@ import {
 } from './playground-context-panel'
 import { PlaygroundDictationPanel } from './playground-dictation-panel'
 import { PlaygroundParameterPanel } from './playground-parameter-panel'
+import { PlaygroundProtocolSelect } from './playground-protocol-select'
 import { PlaygroundSnippetPanel } from './playground-snippet-panel'
 import { PlaygroundSystemPromptPanel } from './playground-system-prompt-panel'
 import { PlaygroundToolExecutionControl } from './playground-tool-execution-control'
@@ -290,6 +291,12 @@ export function PlaygroundInputTools({
             </TooltipContent>
           </Tooltip>
         ) : null}
+
+        <PlaygroundProtocolSelect
+          disabled={disabled}
+          onChange={(protocol) => onConfigChange('protocol', protocol)}
+          value={config.protocol}
+        />
 
         <PlaygroundParameterPanel
           config={config}

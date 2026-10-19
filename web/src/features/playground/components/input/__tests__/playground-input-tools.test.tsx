@@ -51,7 +51,11 @@ function renderTools(
   requestViewer?: {
     hasCapturedRequest: boolean
     onOpen: () => void
-  }
+  },
+  onConfigChange: (
+    key: keyof typeof DEFAULT_CONFIG,
+    value: unknown
+  ) => void = () => undefined
 ) {
   // The dictation panel mounts a transcription mutation, which needs the query
   // client the app installs at its root.
@@ -88,7 +92,7 @@ function renderTools(
           onAutoTitleChange={() => undefined}
           onAutoTitleDefaultChange={() => undefined}
           onAutoTitleUseDefault={() => undefined}
-          onConfigChange={() => undefined}
+          onConfigChange={onConfigChange}
           onContextSettingsChange={() => undefined}
           onDictateTranscript={onDictateTranscript}
           onInsertText={() => undefined}
@@ -114,7 +118,10 @@ function renderTools(
 
 beforeAll(() => {
   i18next.addResourceBundle('en', 'translation', {
+    'API protocol': 'API protocol',
     Attach: 'Attach',
+    'Anthropic Messages': 'Anthropic Messages',
+    'Chat Completions': 'Chat Completions',
     Clear: 'Clear',
     'Clear chat history': 'Clear chat history',
     'Clear chat history?': 'Clear chat history?',
@@ -230,4 +237,29 @@ test('hides the reasoning effort control for a model without an effort', async (
   await screen.findByText('Temperature')
 
   expect(screen.queryByText('Reasoning Effort')).toBeNull()
+})
+
+test('the protocol selector reports the chosen wire protocol', async () => {
+  const user = userEvent.setup()
+  const onConfigChange = vi.fn()
+  renderTools(
+    undefined,
+    undefined,
+    '',
+    DEFAULT_CONFIG,
+    undefined,
+    undefined,
+    undefined,
+    onConfigChange
+  )
+
+  const trigger = screen.getByRole('combobox', { name: 'API protocol' })
+  expect(trigger).toHaveTextContent('Chat Completions')
+
+  await user.click(trigger)
+  await user.click(
+    await screen.findByRole('option', { name: 'Anthropic Messages' })
+  )
+
+  expect(onConfigChange).toHaveBeenCalledWith('protocol', 'messages')
 })

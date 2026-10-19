@@ -24,6 +24,8 @@ type RequestErrorLike = {
     data?: {
       error?: {
         code?: string
+        type?: string
+        message?: string
       }
       message?: string
     }
@@ -37,10 +39,15 @@ export type RequestErrorDetails = {
 
 export function parseRequestErrorDetails(error: unknown): RequestErrorDetails {
   const requestError = error as RequestErrorLike
+  const responseError = requestError?.response?.data?.error
 
+  // The Anthropic error shape is {type:"error", error:{type, message}}; the
+  // OpenAI shape is {error:{code, message}}. Both name the code in a different
+  // member, so the parser accepts either.
   return {
-    errorCode: requestError?.response?.data?.error?.code || undefined,
+    errorCode: responseError?.code || responseError?.type || undefined,
     errorMessage:
+      responseError?.message ||
       requestError?.response?.data?.message ||
       requestError?.message ||
       ERROR_MESSAGES.API_REQUEST_ERROR,

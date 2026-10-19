@@ -454,6 +454,8 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	// router/relay-router.go: the Playground workspace, chat and media
 	// bridges alike, is session-only.
 	"POST /pg/chat/completions":     accessTokenSessionRule,
+	"POST /pg/responses":            accessTokenSessionRule,
+	"POST /pg/messages":             accessTokenSessionRule,
 	"POST /pg/images/generations":   accessTokenSessionRule,
 	"POST /pg/images/edits":         accessTokenSessionRule,
 	"POST /pg/videos":               accessTokenSessionRule,

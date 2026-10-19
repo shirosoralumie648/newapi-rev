@@ -38,6 +38,9 @@ export const playgroundConfigSchema = z.object({
   // relay accepts, so an edited store cannot produce an invalid request.
   reasoning_effort: z.string().max(16).optional(),
   stream: z.boolean().optional(),
+  // Absent in data written before the protocol selector existed; the session
+  // mapper restores the chat protocol.
+  protocol: z.enum(['chat', 'responses', 'messages']).optional(),
 })
 
 export const parameterEnabledSchema = z.object({

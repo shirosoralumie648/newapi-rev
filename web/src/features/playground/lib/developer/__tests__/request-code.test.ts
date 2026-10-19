@@ -140,3 +140,65 @@ test('each tab dispatches to its own builder and the base URL keeps a fallback',
     'https://your-new-api-host'
   )
 })
+
+test('the Responses export converts the body and targets /v1/responses', () => {
+  const json = JSON.parse(buildPlaygroundMessagesJson(payload, 'responses'))
+  expect(json.max_output_tokens).toBe(256)
+  expect(json.instructions).toBe('You are terse.')
+  expect(json.input[0].content[1].type).toBe('input_image')
+
+  const curl = buildPlaygroundRequestCode(
+    'curl',
+    payload,
+    BASE_URL,
+    'responses'
+  )
+  expect(curl).toContain('https://api.example.com/v1/responses')
+  expect(curl).toContain('Authorization: Bearer $NEWAPI_API_KEY')
+  expect(curl).toContain('max_output_tokens')
+  expect(curl).not.toContain(PIXEL_PNG_BASE64)
+})
+
+test('the Messages export always sends max_tokens and Anthropic auth headers', () => {
+  const json = JSON.parse(
+    buildPlaygroundMessagesJson(
+      { ...payload, max_tokens: undefined },
+      'messages'
+    )
+  )
+  expect(json.max_tokens).toBe(4096)
+  expect(json.system).toBe('You are terse.')
+  expect(json.messages).toHaveLength(1)
+
+  const curl = buildPlaygroundRequestCode('curl', payload, BASE_URL, 'messages')
+  expect(curl).toContain('https://api.example.com/v1/messages')
+  expect(curl).toContain('x-api-key: $NEWAPI_API_KEY')
+  expect(curl).toContain('anthropic-version: 2023-06-01')
+  expect(curl).not.toContain(PIXEL_PNG_BASE64)
+})
+
+test('non-chat Python and Node exports use a plain HTTP request for the selected protocol', () => {
+  const python = buildPlaygroundRequestCode(
+    'python',
+    payload,
+    BASE_URL,
+    'messages'
+  )
+  expect(python).toContain('import requests')
+  expect(python).toContain('requests.post(')
+  expect(python).toContain('https://api.example.com/v1/messages')
+  expect(python).toContain(
+    '_attachment_data_url("attachment-1.png", "image/png")'
+  )
+  expect(python).not.toContain('from openai import OpenAI')
+
+  const node = buildPlaygroundRequestCode(
+    'node',
+    payload,
+    BASE_URL,
+    'responses'
+  )
+  expect(node).toContain('await fetch("https://api.example.com/v1/responses"')
+  expect(node).toContain('attachmentDataUrl("attachment-1.png", "image/png")')
+  expect(node).not.toContain('new OpenAI')
+})

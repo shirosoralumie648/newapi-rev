@@ -1208,6 +1208,11 @@ export const STATIC_I18N_KEYS = [
   'High',
   'Extra high',
   'Maximum',
+  // Protocol labels render through t(labelKey) from
+  // PLAYGROUND_PROTOCOL_OPTIONS; the value also selects the relay route.
+  'Chat Completions',
+  'Responses',
+  'Anthropic Messages',
   // Prompt snippet failure messages render from PLAYGROUND_SNIPPET_ERRORS and
   // the server returns the rest through message_key, so the literal scan
   // cannot see them.
