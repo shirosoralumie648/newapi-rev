@@ -2308,6 +2308,88 @@ func TestPlaygroundWorkflowRunHistoryMatrix(t *testing.T) {
 			var runCount int64
 			require.NoError(t, db.Model(&model.PlaygroundWorkflowRun{}).Where("canvas_id = ?", canvasID).Count(&runCount).Error)
 			assert.Zero(t, runCount)
+
+			// A run tied to a conversation leaves with it: the purge removes
+			// the rows and remeasures the account counters in one transaction.
+			quotaCanvas := createCanvasProject(t, 7, "workflow-quota")
+			quotaCanvasID := quotaCanvas["id"].(string)
+			session := createPlayground(t, 7, "workflow-history")
+			sessionID := session["id"].(string)
+			sessionRun := decodeRun(playgroundRequest(t, 7, http.MethodPost, "/api/playground/workflows/history", map[string]any{
+				"canvas_id": quotaCanvasID, "session_id": sessionID,
+			}, controller.CreatePlaygroundWorkflowRunHistory))
+			assert.Equal(t, sessionID, sessionRun.SessionID)
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+sessionID, nil, controller.DeletePlaygroundSession).Code)
+			require.NoError(t, model.PurgePlaygroundSession(7, sessionID))
+			require.NoError(t, db.Where("user_id = ?", 7).First(&usage).Error)
+			assert.Zero(t, usage.WorkflowRunCount)
+			assert.Zero(t, usage.WorkflowRunBytes)
+			require.NoError(t, db.Model(&model.PlaygroundWorkflowRun{}).Where("session_id = ?", sessionID).Count(&runCount).Error)
+			assert.Zero(t, runCount)
+
+			// The unified usage view reports the run budget the write paths
+			// enforce, sourced from the same locked counters.
+			usageResponse := playgroundRequest(t, 7, http.MethodGet, "/api/playground/usage", nil, controller.GetPlaygroundUsage)
+			require.Equal(t, http.StatusOK, usageResponse.Code, usageResponse.Body.String())
+			var usageEnvelope struct {
+				Data struct {
+					WorkflowRuns struct {
+						Used       int64 `json:"used"`
+						Limit      int64 `json:"limit"`
+						UsedBytes  int64 `json:"used_bytes"`
+						LimitBytes int64 `json:"limit_bytes"`
+					} `json:"workflow_runs"`
+				} `json:"data"`
+			}
+			require.NoError(t, common.Unmarshal(usageResponse.Body.Bytes(), &usageEnvelope))
+			assert.Zero(t, usageEnvelope.Data.WorkflowRuns.Used)
+			assert.Zero(t, usageEnvelope.Data.WorkflowRuns.UsedBytes)
+			assert.Positive(t, usageEnvelope.Data.WorkflowRuns.Limit)
+			assert.Positive(t, usageEnvelope.Data.WorkflowRuns.LimitBytes)
+
+			// The account count, the snapshot byte budget and the per-run node
+			// cap each refuse an oversized write with their stable code and
+			// leave the counters untouched.
+			usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+				policy.WorkflowRunUserMaxCount = 1
+				policy.WorkflowRunMaxBytes = 512
+				policy.WorkflowRunNodeMaxCount = 2
+			})
+			quotaRun := decodeRun(playgroundRequest(t, 7, http.MethodPost, "/api/playground/workflows/history", map[string]any{
+				"canvas_id": quotaCanvasID,
+			}, controller.CreatePlaygroundWorkflowRunHistory))
+			require.NoError(t, db.Where("user_id = ?", 7).First(&usage).Error)
+			assert.EqualValues(t, 1, usage.WorkflowRunCount)
+
+			overflowRun := playgroundRequest(t, 7, http.MethodPost, "/api/playground/workflows/history", map[string]any{
+				"canvas_id": quotaCanvasID,
+			}, controller.CreatePlaygroundWorkflowRunHistory)
+			assert.Equal(t, http.StatusUnprocessableEntity, overflowRun.Code, overflowRun.Body.String())
+			assert.Contains(t, overflowRun.Body.String(), `"PLAYGROUND_WORKFLOW_RUN_LIMIT_EXCEEDED"`)
+
+			tooManyNodes := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/workflows/history/"+quotaRun.ID, map[string]any{
+				"revision": quotaRun.Revision, "status": "completed",
+				"nodes": []map[string]any{
+					{"node_id": "m1", "kind": "model", "model": "gpt-4o", "status": "succeeded", "output": "a"},
+					{"node_id": "m2", "kind": "model", "model": "gpt-4o", "status": "succeeded", "output": "b"},
+					{"node_id": "m3", "kind": "model", "model": "gpt-4o", "status": "succeeded", "output": "c"},
+				},
+			}, controller.UpdatePlaygroundWorkflowRunHistory)
+			assert.Equal(t, http.StatusUnprocessableEntity, tooManyNodes.Code, tooManyNodes.Body.String())
+			assert.Contains(t, tooManyNodes.Body.String(), `"PLAYGROUND_WORKFLOW_RUN_LIMIT_EXCEEDED"`)
+
+			oversizedSnapshot := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/workflows/history/"+quotaRun.ID, map[string]any{
+				"revision": quotaRun.Revision, "status": "completed",
+				"nodes": []map[string]any{{
+					"node_id": "m1", "kind": "model", "model": "gpt-4o", "status": "succeeded",
+					"output": strings.Repeat("x", 600),
+				}},
+			}, controller.UpdatePlaygroundWorkflowRunHistory)
+			assert.Equal(t, http.StatusUnprocessableEntity, oversizedSnapshot.Code, oversizedSnapshot.Body.String())
+			assert.Contains(t, oversizedSnapshot.Body.String(), `"PLAYGROUND_WORKFLOW_RUN_STORAGE_LIMIT_EXCEEDED"`)
+			require.NoError(t, db.Where("user_id = ?", 7).First(&usage).Error)
+			assert.EqualValues(t, 1, usage.WorkflowRunCount)
+			assert.LessOrEqual(t, usage.WorkflowRunBytes, int64(512))
 		})
 	}
 }

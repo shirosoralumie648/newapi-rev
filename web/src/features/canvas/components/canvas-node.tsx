@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { NodeProps } from '@xyflow/react'
-import { FileText, ImageIcon, Music, Unlink, Video } from 'lucide-react'
+import { FileText, ImageIcon, Music, Unlink, Video, Zap } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -177,6 +177,12 @@ export function CanvasFlowNodeView(props: NodeProps) {
         <div className='flex items-center gap-1'>
           {workflow?.preferred ? (
             <Badge variant='secondary'>{t('Preferred')}</Badge>
+          ) : null}
+          {workflow?.cacheHit === true && workflow.status === 'succeeded' ? (
+            <Badge variant='secondary'>
+              <Zap aria-hidden='true' />
+              {t('Cached')}
+            </Badge>
           ) : null}
           {workflow?.status ? (
             <CanvasWorkflowStatusBadge status={workflow.status} />

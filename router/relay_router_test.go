@@ -188,25 +188,24 @@ func TestClaudeTokenCountingEndpointRequiresAuthAndAvailableModel(t *testing.T) 
 	})
 }
 
-// TestPlaygroundProtocolBridgeBillsThroughRelay proves a workspace Messages
-// request runs the ordinary relay pipeline: the upstream receives the canonical
-// /v1/messages path, the caller's quota is settled and a consume log is written.
+// TestPlaygroundProtocolBridgeBillsThroughRelay proves the workspace protocol
+// bridges run the ordinary relay pipeline: the upstream receives the canonical
+// /v1 path, the caller's quota is settled and a consume log is written.
 func TestPlaygroundProtocolBridgeBillsThroughRelay(t *testing.T) {
 	setupRelayRouterTestDB(t)
-	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.Log{}, &model.UserSession{}))
+	require.NoError(t, model.DB.AutoMigrate(
+		&model.Channel{}, &model.Ability{}, &model.Log{}, &model.UserSession{},
+		// The relay bills through the ordinary subscription/wallet pipeline,
+		// which reads the subscription and wallet accounting tables.
+		&model.UserSubscription{},
+		&model.WalletHold{}, &model.WalletHoldGrant{}, &model.WalletDebt{},
+		&model.CreditGrant{}, &model.WalletLedgerEntry{},
+	))
 	ratio_setting.InitRatioSettings()
 
-	upstreamPaths := make(chan string, 1)
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		upstreamPaths <- r.URL.Path
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"msg_pg","type":"message","role":"assistant","model":"claude-3-5-sonnet-20241022","content":[{"type":"text","text":"hello from upstream"}],"stop_reason":"end_turn","usage":{"input_tokens":12,"output_tokens":4}}`))
-	}))
-	defer upstream.Close()
-
 	user := model.User{
-		Username:    "playground-messages-user",
-		AffCode:     "playground-messages-user",
+		Username:    "playground-protocol-user",
+		AffCode:     "playground-protocol-user",
 		Status:      common.UserStatusEnabled,
 		Group:       "default",
 		Quota:       1_000_000,
@@ -215,7 +214,7 @@ func TestPlaygroundProtocolBridgeBillsThroughRelay(t *testing.T) {
 	require.NoError(t, model.DB.Create(&user).Error)
 
 	secret := common.SessionSecret
-	common.SessionSecret = "playground-messages-billing-test"
+	common.SessionSecret = "playground-protocol-billing-test"
 	t.Cleanup(func() { common.SessionSecret = secret })
 	now := time.Now().Unix()
 	sid, err := common.GenerateRandomCharsKey(32)
@@ -226,50 +225,98 @@ func TestPlaygroundProtocolBridgeBillsThroughRelay(t *testing.T) {
 	accessToken, _, err := service.IssueAccessToken(service.AuthIdentity{UserID: user.Id, SessionID: session.SID, UserAuthVersion: 1, SessionVersion: 1})
 	require.NoError(t, err)
 
-	baseURL := upstream.URL
-	channel := model.Channel{
-		Name:    "playground-messages-channel",
-		Type:    constant.ChannelTypeAnthropic,
-		Key:     "sk-playground-messages",
-		Status:  common.ChannelStatusEnabled,
-		Models:  "claude-3-5-sonnet-20241022",
-		Group:   "default",
-		BaseURL: &baseURL,
-	}
-	require.NoError(t, model.DB.Create(&channel).Error)
-	require.NoError(t, model.DB.Create(&model.Ability{
-		ChannelId: channel.Id,
-		Model:     "claude-3-5-sonnet-20241022",
-		Group:     "default",
-		Enabled:   true,
-	}).Error)
-
 	engine := gin.New()
 	SetRelayRouter(engine)
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/pg/messages", strings.NewReader(
-		`{"model":"claude-3-5-sonnet-20241022","max_tokens":32,"messages":[{"role":"user","content":"hello"}],"stream":false}`,
-	))
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer "+accessToken)
-	engine.ServeHTTP(recorder, request)
 
-	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
-	assert.Contains(t, recorder.Body.String(), "hello from upstream")
-	select {
-	case path := <-upstreamPaths:
-		assert.Equal(t, "/v1/messages", path)
-	default:
-		t.Fatal("the relay did not call the upstream channel")
+	tests := []struct {
+		name             string
+		requestPath      string
+		requestBody      string
+		model            string
+		channelType      int
+		upstreamBody     string
+		wantUpstreamPath string
+		wantReply        string
+	}{
+		{
+			name:             "Messages bridge",
+			requestPath:      "/pg/messages",
+			requestBody:      `{"model":"claude-3-5-sonnet-20241022","max_tokens":32,"messages":[{"role":"user","content":"hello"}],"stream":false}`,
+			model:            "claude-3-5-sonnet-20241022",
+			channelType:      constant.ChannelTypeAnthropic,
+			upstreamBody:     `{"id":"msg_pg","type":"message","role":"assistant","model":"claude-3-5-sonnet-20241022","content":[{"type":"text","text":"hello from messages"}],"stop_reason":"end_turn","usage":{"input_tokens":12,"output_tokens":4}}`,
+			wantUpstreamPath: "/v1/messages",
+			wantReply:        "hello from messages",
+		},
+		{
+			name:             "Responses bridge",
+			requestPath:      "/pg/responses",
+			requestBody:      `{"model":"gpt-4o","input":[{"role":"user","content":"hello"}],"stream":false}`,
+			model:            "gpt-4o",
+			channelType:      constant.ChannelTypeOpenAI,
+			upstreamBody:     `{"id":"resp_pg","object":"response","status":"completed","model":"gpt-4o","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello from responses"}]}],"usage":{"input_tokens":12,"output_tokens":4,"total_tokens":16}}`,
+			wantUpstreamPath: "/v1/responses",
+			wantReply:        "hello from responses",
+		},
 	}
 
-	var stored model.User
-	require.NoError(t, model.DB.First(&stored, user.Id).Error)
-	assert.Less(t, stored.Quota, 1_000_000, "the reply is billed through the ordinary relay pipeline")
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			upstreamPaths := make(chan string, 1)
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				upstreamPaths <- r.URL.Path
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(test.upstreamBody))
+			}))
+			t.Cleanup(upstream.Close)
 
-	var consumeLogs int64
-	require.NoError(t, model.LOG_DB.Model(&model.Log{}).Where("user_id = ?", user.Id).Count(&consumeLogs).Error)
-	assert.EqualValues(t, 1, consumeLogs)
+			baseURL := upstream.URL
+			channel := model.Channel{
+				Name:    "playground-" + test.model + "-channel",
+				Type:    test.channelType,
+				Key:     "sk-playground-" + test.model,
+				Status:  common.ChannelStatusEnabled,
+				Models:  test.model,
+				Group:   "default",
+				BaseURL: &baseURL,
+			}
+			require.NoError(t, model.DB.Create(&channel).Error)
+			require.NoError(t, model.DB.Create(&model.Ability{
+				ChannelId: channel.Id,
+				Model:     test.model,
+				Group:     "default",
+				Enabled:   true,
+			}).Error)
+
+			var before model.User
+			require.NoError(t, model.DB.First(&before, user.Id).Error)
+			var logsBefore int64
+			require.NoError(t, model.LOG_DB.Model(&model.Log{}).Where("user_id = ?", user.Id).Count(&logsBefore).Error)
+
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, test.requestPath, strings.NewReader(test.requestBody))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Authorization", "Bearer "+accessToken)
+			engine.ServeHTTP(recorder, request)
+
+			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+			assert.Contains(t, recorder.Body.String(), test.wantReply)
+			select {
+			case path := <-upstreamPaths:
+				assert.Equal(t, test.wantUpstreamPath, path)
+			default:
+				t.Fatal("the relay did not call the upstream channel")
+			}
+
+			var stored model.User
+			require.NoError(t, model.DB.First(&stored, user.Id).Error)
+			assert.Less(t, stored.Quota, before.Quota, "the reply is billed through the ordinary relay pipeline")
+
+			var logsAfter int64
+			require.NoError(t, model.LOG_DB.Model(&model.Log{}).Where("user_id = ?", user.Id).Count(&logsAfter).Error)
+			assert.EqualValues(t, logsBefore+1, logsAfter)
+		})
+	}
 }
 
 // TestMidjourneyImageAccessControl covers the accepted proofs of

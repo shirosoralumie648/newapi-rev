@@ -18,16 +18,16 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { beforeEach, expect, test, vi } from 'vitest'
 
-import { callPlaygroundMCPTool } from '../../api'
-import { PLAYGROUND_TOOL_EXECUTION_ERRORS } from '../../constants'
-import type { MessageToolCall } from '../../types'
+import { callPlaygroundMCPTool } from '../../../api'
+import { PLAYGROUND_TOOL_EXECUTION_ERRORS } from '../../../constants'
+import type { MessageToolCall } from '../../../types'
 import type { PlaygroundMCPToolRef } from '../mcp-tools'
 import {
   executeSupportedToolCall,
   type ToolExecutionScope,
 } from '../tool-executor'
 
-vi.mock('../../api', () => ({
+vi.mock('../../../api', () => ({
   callPlaygroundMCPTool: vi.fn(),
   searchPlaygroundWeb: vi.fn(),
 }))

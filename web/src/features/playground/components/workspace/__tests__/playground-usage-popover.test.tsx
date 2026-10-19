@@ -65,6 +65,12 @@ const usage = {
     used_bytes: 9 * 1024,
     limit_bytes: 16 * 1024 * 1024,
   },
+  workflow_runs: {
+    used: 2,
+    limit: 64,
+    used_bytes: 18 * 1024,
+    limit_bytes: 32 * 1024 * 1024,
+  },
   knowledge_bases: { used: 3, limit: 20, used_bytes: 0, limit_bytes: 0 },
   kb_documents: { used: 4, limit: 200, used_bytes: 0, limit_bytes: 0 },
   kb_chunks: {
@@ -170,6 +176,9 @@ test('opening the usage popover lists each resource against its account limit', 
   expect(screen.getByText('Compare runs')).toBeVisible()
   expect(screen.getByText('2 of 30')).toBeVisible()
   expect(screen.getByText('9 KiB of 16 MiB')).toBeVisible()
+  expect(screen.getByText('Workflow runs')).toBeVisible()
+  expect(screen.getByText('2 of 64')).toBeVisible()
+  expect(screen.getByText('18 KiB of 32 MiB')).toBeVisible()
   expect(screen.getByText('Knowledge bases')).toBeVisible()
   expect(screen.getByText('3 of 20')).toBeVisible()
   expect(screen.getByText('Knowledge base documents')).toBeVisible()

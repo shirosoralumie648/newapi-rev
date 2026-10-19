@@ -213,3 +213,44 @@ test('exports the Messages protocol through its own endpoint and auth header', a
   expect(panel).toHaveTextContent('x-api-key')
   expect(panel).toHaveTextContent('anthropic-version')
 })
+
+test('reports the payload fields the selected protocol does not send', () => {
+  render(
+    <PlaygroundRequestViewer
+      open
+      onOpenChange={() => undefined}
+      request={{
+        payload: {
+          ...payload,
+          frequency_penalty: 0.2,
+          response_format: { type: 'json_object' },
+        },
+        capturedAt: Date.now(),
+        protocol: 'messages',
+      }}
+    />
+  )
+
+  expect(
+    screen.getByText(
+      'Not sent with this protocol: frequency_penalty, response_format'
+    )
+  ).toBeVisible()
+})
+
+test('reports nothing when the chat protocol forwards every payload field', () => {
+  render(
+    <PlaygroundRequestViewer
+      open
+      onOpenChange={() => undefined}
+      request={{
+        payload: { ...payload, frequency_penalty: 0.2 },
+        capturedAt: Date.now(),
+      }}
+    />
+  )
+
+  expect(
+    screen.queryByText(/^Not sent with this protocol:/)
+  ).not.toBeInTheDocument()
+})

@@ -225,6 +225,8 @@ function beginWorkflowStep(
     updatedAt: Date.now(),
   }
   delete next.error
+  // A new attempt must not inherit the previous attempt's cached marker.
+  delete next.cacheHit
   return { workflow: next }
 }
 
