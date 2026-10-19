@@ -6827,6 +6827,7 @@
     "Settings updated successfully": "Settings updated successfully",
     "Settled": "Settled",
     "Settled by the task usage expression": "Settled by the task usage expression",
+    "Settled cost details are unavailable because consumption logs are turned off.": "Settled cost details are unavailable because consumption logs are turned off.",
     "Settled quota": "Settled quota",
     "Setup expired. Scan the new QR code and save the new backup codes.": "Setup expired. Scan the new QR code and save the new backup codes.",
     "Setup guide": "Setup guide",

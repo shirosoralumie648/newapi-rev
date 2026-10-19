@@ -6827,6 +6827,7 @@
     "Settings updated successfully": "Paramètres mis à jour avec succès",
     "Settled": "Réglé",
     "Settled by the task usage expression": "Réglé par l'expression d'usage de la tâche",
+    "Settled cost details are unavailable because consumption logs are turned off.": "Les détails du coût réglé sont indisponibles car les journaux de consommation sont désactivés.",
     "Settled quota": "Quota réglé",
     "Setup expired. Scan the new QR code and save the new backup codes.": "La configuration a expiré. Scannez le nouveau code QR et conservez les nouveaux codes de secours.",
     "Setup guide": "Guide de configuration",

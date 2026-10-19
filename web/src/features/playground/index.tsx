@@ -1219,6 +1219,7 @@ function PlaygroundContent(props: {
           )}
           <PlaygroundSessionUsage
             className='shrink-0 pt-0'
+            costLoggingEnabled={messageCostQuery.data?.enabled}
             costs={messageCosts}
             messages={messages}
           />

@@ -6827,6 +6827,7 @@
     "Settings updated successfully": "设置更新成功",
     "Settled": "已结算",
     "Settled by the task usage expression": "按任务用量表达式结算",
+    "Settled cost details are unavailable because consumption logs are turned off.": "消费日志已关闭，因此无法显示结算费用明细。",
     "Settled quota": "已结算额度",
     "Setup expired. Scan the new QR code and save the new backup codes.": "设置已过期，请扫描新的二维码并保存新的备用码。",
     "Setup guide": "设置引导",

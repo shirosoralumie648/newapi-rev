@@ -6827,6 +6827,7 @@
     "Settings updated successfully": "設定が正常に更新されました",
     "Settled": "精算済み",
     "Settled by the task usage expression": "タスク使用量の式で精算",
+    "Settled cost details are unavailable because consumption logs are turned off.": "消費ログがオフになっているため、確定した費用の詳細を表示できません。",
     "Settled quota": "精算済みクォータ",
     "Setup expired. Scan the new QR code and save the new backup codes.": "設定の有効期限が切れました。新しいQRコードを読み取り、新しいバックアップコードを保存してください。",
     "Setup guide": "セットアップガイド",

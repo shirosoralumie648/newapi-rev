@@ -6827,6 +6827,7 @@
     "Settings updated successfully": "Настройки успешно обновлены",
     "Settled": "Выплачено",
     "Settled by the task usage expression": "Расчёт по выражению использования задачи",
+    "Settled cost details are unavailable because consumption logs are turned off.": "Сведения об итоговой стоимости недоступны, так как журналы потребления отключены.",
     "Settled quota": "Списанная квота",
     "Setup expired. Scan the new QR code and save the new backup codes.": "Срок настройки истёк. Отсканируйте новый QR-код и сохраните новые резервные коды.",
     "Setup guide": "Руководство по настройке",

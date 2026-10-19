@@ -6827,6 +6827,7 @@
     "Settings updated successfully": "設定更新成功",
     "Settled": "已結算",
     "Settled by the task usage expression": "按任務用量表達式結算",
+    "Settled cost details are unavailable because consumption logs are turned off.": "消費日誌已關閉，因此無法顯示結算費用明細。",
     "Settled quota": "已結算額度",
     "Setup expired. Scan the new QR code and save the new backup codes.": "設定已過期，請掃描新的 QR 碼並儲存新的備用碼。",
     "Setup guide": "設定引導",

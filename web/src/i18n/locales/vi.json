@@ -6827,6 +6827,7 @@
     "Settings updated successfully": "Cài đặt đã được cập nhật thành công",
     "Settled": "Đã thanh toán",
     "Settled by the task usage expression": "Quyết toán theo biểu thức mức dùng của tác vụ",
+    "Settled cost details are unavailable because consumption logs are turned off.": "Không thể hiển thị chi tiết chi phí quyết toán vì nhật ký tiêu thụ đã tắt.",
     "Settled quota": "Hạn ngạch đã thanh toán",
     "Setup expired. Scan the new QR code and save the new backup codes.": "Thiết lập đã hết hạn. Quét mã QR mới và lưu các mã dự phòng mới.",
     "Setup guide": "Hướng dẫn thiết lập",
