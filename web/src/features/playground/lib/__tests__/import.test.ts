@@ -297,6 +297,9 @@ function forkSourceSession(): PlaygroundSession {
       model: 'fork-model',
       createdAt: 3,
     },
+    pinned: false,
+    archived: false,
+    tags: [],
     messages: [
       {
         key: 'm1',
@@ -353,6 +356,9 @@ function mockForkCreatedSession() {
     title: 'Forked conversation',
     revision: 1,
     messageRevision: 0,
+    pinned: false,
+    archived: false,
+    tags: [],
   } as never)
 }
 
