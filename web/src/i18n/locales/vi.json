@@ -8631,6 +8631,21 @@
     "The seed must be an integer between 1 and 2147483647.": "Seed phải là số nguyên từ 1 đến 2147483647.",
     "This model's channel metadata does not list image generation.": "Siêu dữ liệu kênh của mô hình này không liệt kê tạo ảnh.",
     "This model's channel metadata does not list video generation.": "Siêu dữ liệu kênh của mô hình này không liệt kê tạo video.",
-    "This model's channel metadata lists neither image nor video generation.": "Siêu dữ liệu kênh của mô hình này không liệt kê cả tạo ảnh lẫn tạo video."
+    "This model's channel metadata lists neither image nor video generation.": "Siêu dữ liệu kênh của mô hình này không liệt kê cả tạo ảnh lẫn tạo video.",
+    "Copy cURL": "Sao chép cURL",
+    "Copy Messages JSON": "Sao chép Messages JSON",
+    "Copy Node.js": "Sao chép Node.js",
+    "Copy Python": "Sao chép Python",
+    "cURL": "cURL",
+    "\"group\" is a Playground-only routing field; the /v1 endpoint uses the API token group instead.": "\"group\" là trường định tuyến riêng của Playground; endpoint /v1 thay vào đó lấy nhóm từ token API.",
+    "Exports target the OpenAI-compatible /v1/chat/completions endpoint with a placeholder key. Attachments are replaced by file placeholders instead of base64 bytes.": "Bản xuất gửi tới endpoint /v1/chat/completions tương thích OpenAI với khóa giữ chỗ. Tệp đính kèm được thay bằng placeholder tệp thay vì byte base64.",
+    "Messages JSON": "Messages JSON",
+    "No request captured": "Chưa ghi lại yêu cầu nào",
+    "Node.js": "Node.js",
+    "Python": "Python",
+    "Request preview": "Xem trước yêu cầu",
+    "Send a message to inspect the exact request payload.": "Gửi một tin nhắn để xem nội dung yêu cầu thực tế.",
+    "The exact request built by the last send, ready to copy into your own code.": "Yêu cầu chính xác được tạo ở lần gửi gần nhất, sẵn sàng để sao chép vào mã của bạn.",
+    "View the request payload of the last send": "Xem nội dung yêu cầu của lần gửi gần nhất"
   }
 }

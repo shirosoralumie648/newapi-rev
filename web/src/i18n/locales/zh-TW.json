@@ -8631,6 +8631,21 @@
     "The seed must be an integer between 1 and 2147483647.": "種子必須是 1 到 2147483647 之間的整數。",
     "This model's channel metadata does not list image generation.": "該模型的渠道中繼資料未列出圖片生成。",
     "This model's channel metadata does not list video generation.": "該模型的渠道中繼資料未列出影片生成。",
-    "This model's channel metadata lists neither image nor video generation.": "該模型的渠道中繼資料既未列出圖片生成，也未列出影片生成。"
+    "This model's channel metadata lists neither image nor video generation.": "該模型的渠道中繼資料既未列出圖片生成，也未列出影片生成。",
+    "Copy cURL": "複製 cURL",
+    "Copy Messages JSON": "複製 Messages JSON",
+    "Copy Node.js": "複製 Node.js",
+    "Copy Python": "複製 Python",
+    "cURL": "cURL",
+    "\"group\" is a Playground-only routing field; the /v1 endpoint uses the API token group instead.": "「group」是 Playground 專用的路由欄位；/v1 介面改為從 API 金鑰讀取分組。",
+    "Exports target the OpenAI-compatible /v1/chat/completions endpoint with a placeholder key. Attachments are replaced by file placeholders instead of base64 bytes.": "匯出的程式碼使用預留位置金鑰請求 OpenAI 相容的 /v1/chat/completions 介面；附件會替換為檔案預留位置，而不是 base64 位元組。",
+    "Messages JSON": "Messages JSON",
+    "No request captured": "尚未擷取請求",
+    "Node.js": "Node.js",
+    "Python": "Python",
+    "Request preview": "請求預覽",
+    "Send a message to inspect the exact request payload.": "傳送一則訊息即可查看實際的請求負載。",
+    "The exact request built by the last send, ready to copy into your own code.": "最近一次傳送實際建構的請求，可直接複製到自己的程式碼中。",
+    "View the request payload of the last send": "查看最近一次傳送的請求負載"
   }
 }

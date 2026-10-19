@@ -8631,6 +8631,21 @@
     "The seed must be an integer between 1 and 2147483647.": "The seed must be an integer between 1 and 2147483647.",
     "This model's channel metadata does not list image generation.": "This model's channel metadata does not list image generation.",
     "This model's channel metadata does not list video generation.": "This model's channel metadata does not list video generation.",
-    "This model's channel metadata lists neither image nor video generation.": "This model's channel metadata lists neither image nor video generation."
+    "This model's channel metadata lists neither image nor video generation.": "This model's channel metadata lists neither image nor video generation.",
+    "Copy cURL": "Copy cURL",
+    "Copy Messages JSON": "Copy Messages JSON",
+    "Copy Node.js": "Copy Node.js",
+    "Copy Python": "Copy Python",
+    "cURL": "cURL",
+    "\"group\" is a Playground-only routing field; the /v1 endpoint uses the API token group instead.": "\"group\" is a Playground-only routing field; the /v1 endpoint uses the API token group instead.",
+    "Exports target the OpenAI-compatible /v1/chat/completions endpoint with a placeholder key. Attachments are replaced by file placeholders instead of base64 bytes.": "Exports target the OpenAI-compatible /v1/chat/completions endpoint with a placeholder key. Attachments are replaced by file placeholders instead of base64 bytes.",
+    "Messages JSON": "Messages JSON",
+    "No request captured": "No request captured",
+    "Node.js": "Node.js",
+    "Python": "Python",
+    "Request preview": "Request preview",
+    "Send a message to inspect the exact request payload.": "Send a message to inspect the exact request payload.",
+    "The exact request built by the last send, ready to copy into your own code.": "The exact request built by the last send, ready to copy into your own code.",
+    "View the request payload of the last send": "View the request payload of the last send"
   }
 }

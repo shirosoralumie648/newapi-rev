@@ -8631,6 +8631,21 @@
     "The seed must be an integer between 1 and 2147483647.": "シードは 1～2147483647 の整数である必要があります。",
     "This model's channel metadata does not list image generation.": "このモデルのチャネルメタデータには画像生成が含まれていません。",
     "This model's channel metadata does not list video generation.": "このモデルのチャネルメタデータには動画生成が含まれていません。",
-    "This model's channel metadata lists neither image nor video generation.": "このモデルのチャネルメタデータには画像生成も動画生成も含まれていません。"
+    "This model's channel metadata lists neither image nor video generation.": "このモデルのチャネルメタデータには画像生成も動画生成も含まれていません。",
+    "Copy cURL": "cURL をコピー",
+    "Copy Messages JSON": "Messages JSON をコピー",
+    "Copy Node.js": "Node.js をコピー",
+    "Copy Python": "Python をコピー",
+    "cURL": "cURL",
+    "\"group\" is a Playground-only routing field; the /v1 endpoint uses the API token group instead.": "「group」は Playground 専用のルーティングフィールドです。/v1 エンドポイントは代わりに API トークンのグループを使用します。",
+    "Exports target the OpenAI-compatible /v1/chat/completions endpoint with a placeholder key. Attachments are replaced by file placeholders instead of base64 bytes.": "エクスポートはプレースホルダーのキーで OpenAI 互換の /v1/chat/completions エンドポイントを対象とします。添付ファイルは base64 バイトではなくファイルのプレースホルダーに置き換えられます。",
+    "Messages JSON": "Messages JSON",
+    "No request captured": "リクエストがまだありません",
+    "Node.js": "Node.js",
+    "Python": "Python",
+    "Request preview": "リクエストプレビュー",
+    "Send a message to inspect the exact request payload.": "メッセージを送信すると、実際のリクエストペイロードを確認できます。",
+    "The exact request built by the last send, ready to copy into your own code.": "最後の送信で実際に組み立てられたリクエストを、そのまま自分のコードにコピーできます。",
+    "View the request payload of the last send": "最後に送信したリクエストのペイロードを表示"
   }
 }

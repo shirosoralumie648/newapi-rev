@@ -8631,6 +8631,21 @@
     "The seed must be an integer between 1 and 2147483647.": "Seed должен быть целым числом от 1 до 2147483647.",
     "This model's channel metadata does not list image generation.": "Метаданные канала этой модели не указывают генерацию изображений.",
     "This model's channel metadata does not list video generation.": "Метаданные канала этой модели не указывают генерацию видео.",
-    "This model's channel metadata lists neither image nor video generation.": "Метаданные канала этой модели не указывают ни генерацию изображений, ни генерацию видео."
+    "This model's channel metadata lists neither image nor video generation.": "Метаданные канала этой модели не указывают ни генерацию изображений, ни генерацию видео.",
+    "Copy cURL": "Скопировать cURL",
+    "Copy Messages JSON": "Скопировать Messages JSON",
+    "Copy Node.js": "Скопировать Node.js",
+    "Copy Python": "Скопировать Python",
+    "cURL": "cURL",
+    "\"group\" is a Playground-only routing field; the /v1 endpoint uses the API token group instead.": "«group» — поле маршрутизации, используемое только в Playground; эндпоинт /v1 вместо этого берёт группу из API-токена.",
+    "Exports target the OpenAI-compatible /v1/chat/completions endpoint with a placeholder key. Attachments are replaced by file placeholders instead of base64 bytes.": "Экспорт обращается к OpenAI-совместимому эндпоинту /v1/chat/completions с ключом-заполнителем. Вложения заменяются заполнителями файлов вместо байтов base64.",
+    "Messages JSON": "Messages JSON",
+    "No request captured": "Запрос не зафиксирован",
+    "Node.js": "Node.js",
+    "Python": "Python",
+    "Request preview": "Просмотр запроса",
+    "Send a message to inspect the exact request payload.": "Отправьте сообщение, чтобы увидеть точное тело запроса.",
+    "The exact request built by the last send, ready to copy into your own code.": "Точный запрос, собранный при последней отправке, готовый к копированию в ваш код.",
+    "View the request payload of the last send": "Посмотреть тело запроса последней отправки"
   }
 }

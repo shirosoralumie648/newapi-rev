@@ -818,6 +818,7 @@ export function useChatHandler({
   }
 
   return {
+    capturedRequest,
     sendChat,
     continueChat,
     stopGeneration,

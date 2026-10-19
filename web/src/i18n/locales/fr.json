@@ -8631,6 +8631,21 @@
     "The seed must be an integer between 1 and 2147483647.": "Le seed doit être un entier compris entre 1 et 2147483647.",
     "This model's channel metadata does not list image generation.": "Les métadonnées du canal de ce modèle n'indiquent pas la génération d'images.",
     "This model's channel metadata does not list video generation.": "Les métadonnées du canal de ce modèle n'indiquent pas la génération de vidéos.",
-    "This model's channel metadata lists neither image nor video generation.": "Les métadonnées du canal de ce modèle n'indiquent ni génération d'images ni génération de vidéos."
+    "This model's channel metadata lists neither image nor video generation.": "Les métadonnées du canal de ce modèle n'indiquent ni génération d'images ni génération de vidéos.",
+    "Copy cURL": "Copier la commande cURL",
+    "Copy Messages JSON": "Copier les messages JSON",
+    "Copy Node.js": "Copier le code Node.js",
+    "Copy Python": "Copier le code Python",
+    "cURL": "cURL",
+    "\"group\" is a Playground-only routing field; the /v1 endpoint uses the API token group instead.": "« group » est un champ de routage propre au Playground ; l'endpoint /v1 utilise à la place le groupe du jeton API.",
+    "Exports target the OpenAI-compatible /v1/chat/completions endpoint with a placeholder key. Attachments are replaced by file placeholders instead of base64 bytes.": "Les exports ciblent l'endpoint compatible OpenAI /v1/chat/completions avec une clé fictive. Les pièces jointes sont remplacées par des fichiers de remplacement plutôt que par des octets base64.",
+    "Messages JSON": "Messages JSON",
+    "No request captured": "Aucune requête capturée",
+    "Node.js": "Node.js",
+    "Python": "Python",
+    "Request preview": "Aperçu de la requête",
+    "Send a message to inspect the exact request payload.": "Envoyez un message pour inspecter la charge utile exacte de la requête.",
+    "The exact request built by the last send, ready to copy into your own code.": "La requête exacte construite lors du dernier envoi, prête à copier dans votre propre code.",
+    "View the request payload of the last send": "Voir la charge utile de la dernière requête"
   }
 }
