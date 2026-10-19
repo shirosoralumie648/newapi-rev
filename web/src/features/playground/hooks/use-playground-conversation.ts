@@ -33,6 +33,7 @@ import {
 import type {
   Message,
   MessageAttachment,
+  MessageSearchSnapshot,
   PlaygroundPendingQuote,
 } from '../types'
 
@@ -71,12 +72,14 @@ export function usePlaygroundConversation({
     (
       text: string,
       attachments?: MessageAttachment[],
+      search?: MessageSearchSnapshot,
       quote?: PlaygroundPendingQuote | null
     ) => {
       const nextMessages = appendUserMessagePair(
         messagesRef.current,
         text,
-        attachments
+        attachments,
+        search
       )
       updateMessages(nextMessages)
       sendChat(nextMessages, quote)

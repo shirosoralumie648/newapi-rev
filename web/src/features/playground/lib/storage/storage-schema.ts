@@ -128,6 +128,23 @@ const sourceSchema = z.object({
   title: z.string().max(500),
 })
 
+// Web-search snapshot of one user turn. The bounds mirror the server-side
+// validation of a stored message: exceeding one rejects the whole store
+// instead of silently dropping the replay context.
+export const messageSearchSchema = z.object({
+  query: z.string().min(1).max(512),
+  provider: z.string().max(32).optional(),
+  results: z
+    .array(
+      z.object({
+        title: z.string().max(300),
+        url: z.string().max(4096),
+        snippet: z.string().max(1200),
+      })
+    )
+    .max(6),
+})
+
 const reasoningSchema = z.object({
   content: z.string(),
   duration: z.number().finite(),
@@ -148,6 +165,7 @@ const messageSchema = z.object({
   completedAt: z.number().finite().optional(),
   durationMs: z.number().finite().optional(),
   sources: z.array(sourceSchema).optional(),
+  search: messageSearchSchema.optional(),
   reasoning: reasoningSchema.optional(),
   isReasoningStreaming: z.boolean().optional(),
   isReasoningComplete: z.boolean().optional(),
@@ -173,7 +191,15 @@ export const playgroundSessionSchema = z.object({
   /** Greeting copied from a preset; absent in data written before the market. */
   openingMessage: z.string().max(8192).optional(),
   /** Starter questions copied from a preset; absent in older sessions. */
-  suggestedQuestions: z.array(z.string().min(1).max(200)).max(6).optional(),
+  suggestedQuestions: z
+    .array(
+      z
+        .string()
+        .min(1)
+        .refine((value) => Array.from(value).length <= 200)
+    )
+    .max(6)
+    .optional(),
   /** Absent in data written before context management existed. */
   context: playgroundContextSchema.optional(),
   /** Absent or null when the conversation sends its full stored history. */

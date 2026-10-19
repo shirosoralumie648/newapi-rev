@@ -331,3 +331,53 @@ export function canvasExpandRemovedNodes(
   }
   return expanded
 }
+
+/**
+ * Every descendant of the given roots, following the parent chain to the depth
+ * bound. Used by drag snapping and PNG export so a selected group carries its
+ * children as one visual unit.
+ */
+export function canvasDescendantIds(
+  nodes: CanvasFlowNode[],
+  roots: Iterable<string>
+): Set<string> {
+  const rootIds = new Set(roots)
+  if (rootIds.size === 0) return rootIds
+  const descendants = new Set(rootIds)
+  for (let depth = 0; depth < CANVAS_GROUP_MAX_DEPTH; depth++) {
+    let changed = false
+    for (const node of nodes) {
+      if (!node.parentId || descendants.has(node.id)) continue
+      if (descendants.has(node.parentId)) {
+        descendants.add(node.id)
+        changed = true
+      }
+    }
+    if (!changed) break
+  }
+  return descendants
+}
+
+/**
+ * The selected nodes whose parent is not also selected. Moving or distributing
+ * a group and one of its children in the same gesture must not apply the same
+ * delta twice.
+ */
+export function canvasSelectedTopLevel(
+  nodes: CanvasFlowNode[]
+): CanvasFlowNode[] {
+  const selectedIds = new Set(
+    nodes.filter((node) => node.selected === true).map((node) => node.id)
+  )
+  if (selectedIds.size === 0) return []
+  const byId = new Map(nodes.map((node) => [node.id, node]))
+  return nodes.filter((node) => {
+    if (!selectedIds.has(node.id)) return false
+    let parentId = node.parentId
+    for (let depth = 0; parentId && depth < CANVAS_GROUP_MAX_DEPTH; depth++) {
+      if (selectedIds.has(parentId)) return false
+      parentId = byId.get(parentId)?.parentId
+    }
+    return true
+  })
+}

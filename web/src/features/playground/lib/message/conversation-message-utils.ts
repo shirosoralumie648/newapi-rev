@@ -10,6 +10,7 @@ import {
   createLoadingAssistantMessage,
   createUserMessage,
   getMessageContent,
+  getMessageSearchSources,
   hasMessageContent,
   updateCurrentVersionContent,
 } from './message-utils'
@@ -29,14 +30,15 @@ type ChatMessageRenderState = {
 // previous answer stays selectable as a branch.
 function startAssistantReply(
   message: Message,
-  startedAt: number = Date.now()
+  startedAt: number = Date.now(),
+  sources?: Message['sources']
 ): Message {
   return {
     ...appendMessageVersion(message, ''),
     startedAt,
     completedAt: undefined,
     durationMs: undefined,
-    sources: undefined,
+    sources: sources && sources.length > 0 ? sources : undefined,
     reasoning: undefined,
     isReasoningStreaming: false,
     isReasoningComplete: false,
@@ -55,7 +57,8 @@ function startAssistantReply(
 function regenerateAssistantReply(
   messages: Message[],
   userMessageIndex: number,
-  startedAt: number = Date.now()
+  startedAt: number = Date.now(),
+  sources?: Message['sources']
 ): Message[] {
   const assistantIndex = userMessageIndex + 1
   const assistant = messages[assistantIndex]
@@ -66,27 +69,28 @@ function regenerateAssistantReply(
   ) {
     return [
       ...messages.slice(0, assistantIndex),
-      startAssistantReply(assistant, startedAt),
+      startAssistantReply(assistant, startedAt, sources),
     ]
   }
 
   return [
     ...messages.slice(0, userMessageIndex + 1),
-    createLoadingAssistantMessage(startedAt),
+    createLoadingAssistantMessage(startedAt, sources),
   ]
 }
 
 export function appendUserMessagePair(
   messages: Message[],
   content: string,
-  attachments?: MessageAttachment[]
+  attachments?: MessageAttachment[],
+  search?: MessageSearchSnapshot
 ): Message[] {
   const submittedAt = Date.now()
 
   return [
     ...messages,
-    createUserMessage(content, submittedAt, attachments),
-    createLoadingAssistantMessage(submittedAt),
+    createUserMessage(content, submittedAt, attachments, search),
+    createLoadingAssistantMessage(submittedAt, getMessageSearchSources(search)),
   ]
 }
 
@@ -99,7 +103,8 @@ export function createToolContinuationMessages(
   messages: Message[],
   startedAt: number = Date.now()
 ): Message[] {
-  return [...messages, createLoadingAssistantMessage(startedAt)]
+  const last = messages.at(-1)
+  return [...messages, createLoadingAssistantMessage(startedAt, last?.sources)]
 }
 
 /**
@@ -147,7 +152,10 @@ export function createContinuationMessages(
   return {
     stateMessages: [
       ...messages.slice(0, -1),
-      updateCurrentVersionContent(startAssistantReply(last), prefix),
+      updateCurrentVersionContent(
+        startAssistantReply(last, Date.now(), last.sources),
+        prefix
+      ),
     ],
     prefillMessages: messages,
     fallbackMessages: [
@@ -171,12 +179,23 @@ export function createRegeneratedMessages(
   }
 
   if (messages[messageIndex].from === MESSAGE_ROLES.USER) {
-    return regenerateAssistantReply(messages, messageIndex)
+    return regenerateAssistantReply(
+      messages,
+      messageIndex,
+      Date.now(),
+      getMessageSearchSources(messages[messageIndex].search)
+    )
   }
 
+  // Regenerating a reply keeps its citations: they belong to the searched user
+  // turn, not to the version the provider is about to replace.
   return [
     ...messages.slice(0, messageIndex),
-    startAssistantReply(messages[messageIndex]),
+    startAssistantReply(
+      messages[messageIndex],
+      Date.now(),
+      messages[messageIndex].sources
+    ),
   ]
 }
 
@@ -215,14 +234,20 @@ export function applyMessageEdit(
     return null
   }
 
-  const updatedMessages = messages.map((message) =>
-    message.key === messageKey
-      ? {
-          ...appendMessageVersion(message, content),
-          createdAt: shouldSubmit ? submittedAt : message.createdAt,
-        }
-      : message
-  )
+  const updatedMessages = messages.map((message) => {
+    if (message.key !== messageKey) return message
+    const updated = {
+      ...appendMessageVersion(message, content),
+      createdAt: shouldSubmit ? submittedAt : message.createdAt,
+    }
+    // The search snapshot belonged to the prompt that was actually searched.
+    // Editing the turn makes it stale, so the edited version never replays old
+    // hits as if they answered the new text.
+    if (updated.from === MESSAGE_ROLES.USER) {
+      delete updated.search
+    }
+    return updated
+  })
 
   if (
     !shouldSubmit ||

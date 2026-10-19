@@ -16,17 +16,28 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Background, ReactFlow, type ReactFlowProps } from '@xyflow/react'
+import {
+  Background,
+  ReactFlow,
+  type Node,
+  type ReactFlowProps,
+} from '@xyflow/react'
 import type { ReactNode } from 'react'
 
 import '@xyflow/react/dist/style.css'
 import { Controls } from './controls'
 
-type CanvasProps = ReactFlowProps & {
+type CanvasProps<NodeType extends Node = Node> = ReactFlowProps<NodeType> & {
   children?: ReactNode
+  /** Renders the built-in zoom controls; editors can supply their own. */
+  showControls?: boolean
 }
 
-export const Canvas = ({ children, ...props }: CanvasProps) => (
+export const Canvas = <NodeType extends Node = Node>({
+  children,
+  showControls = true,
+  ...props
+}: CanvasProps<NodeType>) => (
   <ReactFlow
     deleteKeyCode={['Backspace', 'Delete']}
     fitView
@@ -37,7 +48,7 @@ export const Canvas = ({ children, ...props }: CanvasProps) => (
     {...props}
   >
     <Background bgColor='var(--sidebar)' />
-    <Controls />
+    {showControls ? <Controls /> : null}
     {children}
   </ReactFlow>
 )

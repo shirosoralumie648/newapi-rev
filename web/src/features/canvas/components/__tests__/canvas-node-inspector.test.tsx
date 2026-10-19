@@ -134,6 +134,28 @@ test('does not offer source navigation for a content-only node', () => {
   expect(screen.queryByRole('button', { name: 'Open artifact' })).toBeNull()
 })
 
+test('commits node text while typing under one history merge key', async () => {
+  const user = userEvent.setup()
+  const onUpdateData = vi.fn()
+  render(
+    <CanvasNodeInspector
+      node={makeNode({ kind: 'text', text: '' })}
+      onDelete={vi.fn()}
+      onUpdateData={onUpdateData}
+    />
+  )
+
+  await user.type(
+    screen.getByRole('textbox', { name: 'Node content' }),
+    'hello'
+  )
+  expect(onUpdateData).toHaveBeenLastCalledWith(
+    'n1',
+    { text: 'hello' },
+    { mergeKey: 'text:n1' }
+  )
+})
+
 test('configures a workflow step and retries a failed attempt', async () => {
   const user = userEvent.setup()
   const onRetry = vi.fn()
@@ -165,7 +187,9 @@ test('configures a workflow step and retries a failed attempt', async () => {
   expect(screen.getByText('upstream exploded')).toBeInTheDocument()
 
   await user.selectOptions(screen.getByRole('combobox'), 'gpt-4o-mini')
-  expect(onUpdateData).toHaveBeenCalledWith('n1', expect.any(Function))
+  expect(onUpdateData).toHaveBeenCalledWith('n1', expect.any(Function), {
+    mergeKey: 'workflow:n1',
+  })
   const update = onUpdateData.mock.calls[0][1] as (
     data: CanvasNodeData
   ) => Partial<CanvasNodeData>
@@ -234,7 +258,11 @@ test('inserts a mention of a connected resource into the instruction', async () 
   expect(screen.getByRole('button', { name: /photo\.png/ })).toBeInTheDocument()
 
   await user.click(screen.getByRole('button', { name: /photo\.png/ }))
-  expect(onUpdateData).toHaveBeenCalledWith('n1', { text: 'hello @photo.png ' })
+  expect(onUpdateData).toHaveBeenCalledWith(
+    'n1',
+    { text: 'hello @photo.png ' },
+    { mergeKey: 'text:n1' }
+  )
 })
 
 test('opens the mention picker from the insert reference action', async () => {
@@ -262,7 +290,11 @@ test('opens the mention picker from the insert reference action', async () => {
   await user.click(screen.getByRole('button', { name: 'Insert reference' }))
   await user.click(screen.getByRole('button', { name: /Prompt/ }))
 
-  expect(onUpdateData).toHaveBeenCalledWith('n1', { text: '@Prompt ' })
+  expect(onUpdateData).toHaveBeenCalledWith(
+    'n1',
+    { text: '@Prompt ' },
+    { mergeKey: 'text:n1' }
+  )
 })
 
 test('configures the generation parameters and group of a task step', async () => {

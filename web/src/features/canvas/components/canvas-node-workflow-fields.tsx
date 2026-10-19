@@ -40,7 +40,10 @@ import {
   CANVAS_WORKFLOW_VIDEO_SIZES,
   CANVAS_WORKFLOW_VIDEO_SIZE_RATIOS,
 } from '../constants'
-import type { CanvasNodeDataUpdate } from '../hooks/use-canvas-editor'
+import type {
+  CanvasNodeDataUpdate,
+  CanvasNodeDataUpdateOptions,
+} from '../hooks/use-canvas-editor'
 import type { CanvasWorkflowRunPhase } from '../hooks/use-canvas-workflow-runner'
 import {
   canvasWorkflowMentionMatches,
@@ -65,7 +68,11 @@ interface CanvasNodeWorkflowFieldsProps {
   previews: string[]
   runPhase: CanvasWorkflowRunPhase
   disabled?: boolean
-  onUpdateData: (id: string, update: CanvasNodeDataUpdate) => void
+  onUpdateData: (
+    id: string,
+    update: CanvasNodeDataUpdate,
+    options?: CanvasNodeDataUpdateOptions
+  ) => void
   onRetry: (nodeId: string) => void
 }
 
@@ -111,14 +118,22 @@ export function CanvasNodeWorkflowFields(props: CanvasNodeWorkflowFieldsProps) {
   }, [node.id, node.data.text])
 
   const updateWorkflow = (patch: Partial<CanvasNodeWorkflowState>) => {
-    props.onUpdateData(node.id, (data) => ({
-      workflow: { ...data.workflow, ...patch },
-    }))
+    props.onUpdateData(
+      node.id,
+      (data) => ({
+        workflow: { ...data.workflow, ...patch },
+      }),
+      { mergeKey: `workflow:${node.id}` }
+    )
   }
 
   const commitInstruction = () => {
     if (draft === (node.data.text ?? '')) return
-    props.onUpdateData(node.id, { text: draft })
+    props.onUpdateData(
+      node.id,
+      { text: draft },
+      { mergeKey: `text:${node.id}` }
+    )
   }
 
   const insertMention = (mention: CanvasWorkflowMention) => {
@@ -131,7 +146,11 @@ export function CanvasNodeWorkflowFields(props: CanvasNodeWorkflowFieldsProps) {
     caretRef.current = next.caret
     setDraft(next.value)
     setMentionQuery(null)
-    props.onUpdateData(node.id, { text: next.value })
+    props.onUpdateData(
+      node.id,
+      { text: next.value },
+      { mergeKey: `text:${node.id}` }
+    )
   }
 
   const imageSizeOptions = withCurrentValue(PLAYGROUND_IMAGE_SIZES, size)

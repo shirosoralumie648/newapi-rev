@@ -63,6 +63,8 @@ const exported = {
     id: 'pgs_old',
     title: 'Imported chat',
     system_prompt: 'Be brief.',
+    opening_message: 'Welcome aboard.',
+    suggested_questions: ['Explain this', 'Find bugs'],
     config: { model: 'import-model', temperature: 0.4 },
     parameter_enabled: { temperature: true },
     context: {
@@ -131,6 +133,8 @@ test('parses the export contract and drops generation-only metadata', () => {
     config: { model: 'import-model', temperature: 0.4 },
     parameterEnabled: { temperature: true },
     systemPrompt: 'Be brief.',
+    openingMessage: 'Welcome aboard.',
+    suggestedQuestions: ['Explain this', 'Find bugs'],
     context: { historyLimit: 12, tokenBudget: 0 },
   })
   expect(document.messages[0].versions[0].attachments?.[0]).toMatchObject({
@@ -201,6 +205,8 @@ test('same-account import re-uploads attachments into the new conversation', asy
       title: 'Imported chat',
       config: document.config,
       system_prompt: 'Be brief.',
+      opening_message: 'Welcome aboard.',
+      suggested_questions: ['Explain this', 'Find bugs'],
     }),
     undefined
   )
@@ -223,6 +229,8 @@ test('same-account import re-uploads attachments into the new conversation', asy
   expect(result.session).toMatchObject({
     id: expect.any(String),
     title: 'Imported chat',
+    openingMessage: 'Welcome aboard.',
+    suggestedQuestions: ['Explain this', 'Find bugs'],
     server: { id: 'pgs_new', revision: 3, messageRevision: 7 },
     syncPending: false,
   })

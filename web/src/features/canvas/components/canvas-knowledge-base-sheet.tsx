@@ -61,12 +61,18 @@ import {
   type KnowledgeBase,
   type KnowledgeDocument,
 } from '@/features/playground/knowledge-api'
-import { getGroupFallback } from '@/features/playground/lib'
+import {
+  getGroupFallback,
+  playgroundAttachmentUploadMediaType,
+} from '@/features/playground/lib'
 import { playgroundQueryKeys } from '@/features/playground/lib/query-keys'
 import type { GroupOption } from '@/features/playground/types'
 import { toIntlLocale } from '@/i18n/languages'
 import { formatBytes, formatNumber } from '@/lib/format'
-import { getServerMessage } from '@/lib/server-error-message'
+import {
+  getServerMessage,
+  translateServerText,
+} from '@/lib/server-error-message'
 
 interface CanvasKnowledgeBaseSheetProps {
   open: boolean
@@ -87,6 +93,7 @@ const STATUS_LABELS: Record<KnowledgeDocument['status'], string> = {
 function KnowledgeDocumentRow(props: {
   busy: boolean
   document: KnowledgeDocument
+  embeddingModel: string
   locale?: string
   onDelete: (document: KnowledgeDocument) => void
   onRetry: (document: KnowledgeDocument) => void
@@ -98,6 +105,10 @@ function KnowledgeDocumentRow(props: {
       : props.document.status === 'failed'
         ? 'destructive'
         : 'warning'
+  const needsRebuild =
+    props.document.status === 'ready' &&
+    props.document.embeddingModel !== '' &&
+    props.document.embeddingModel !== props.embeddingModel
 
   return (
     <div className='flex flex-col gap-2 rounded-lg border p-3'>
@@ -113,13 +124,18 @@ function KnowledgeDocumentRow(props: {
             })}
           </p>
         </div>
-        <Badge variant={statusVariant}>
-          {t(STATUS_LABELS[props.document.status])}
-        </Badge>
+        <div className='flex flex-wrap items-center justify-end gap-1'>
+          {needsRebuild && (
+            <Badge variant='outline'>{t('Needs rebuild')}</Badge>
+          )}
+          <Badge variant={statusVariant}>
+            {t(STATUS_LABELS[props.document.status])}
+          </Badge>
+        </div>
       </div>
       {props.document.errorMessage !== '' && (
         <p className='text-destructive text-xs' role='alert'>
-          {props.document.errorMessage}
+          {translateServerText(t, props.document.errorMessage)}
         </p>
       )}
       <div className='flex items-center justify-end gap-1'>
@@ -294,7 +310,7 @@ export function CanvasKnowledgeBaseSheet(props: CanvasKnowledgeBaseSheetProps) {
     try {
       document = await createKnowledgeDocument(selectedBase.id, {
         filename: file.name,
-        mediaType: file.type || 'application/octet-stream',
+        mediaType: playgroundAttachmentUploadMediaType(file.type, file.name),
         data: await file.arrayBuffer(),
         clientKey: createKnowledgeClientKey('pgkd'),
       })
@@ -573,6 +589,7 @@ export function CanvasKnowledgeBaseSheet(props: CanvasKnowledgeBaseSheetProps) {
                       busy === `delete:${document.id}`
                     }
                     document={document}
+                    embeddingModel={selectedBase.embeddingModel}
                     key={document.id}
                     locale={locale}
                     onDelete={(item) =>

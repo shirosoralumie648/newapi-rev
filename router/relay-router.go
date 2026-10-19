@@ -78,6 +78,7 @@ func SetRelayRouter(router *gin.Engine) {
 	// task plugins, model grouping and billing see the canonical request.
 	playgroundMediaRouter := router.Group("/pg")
 	playgroundMediaRouter.Use(middleware.RouteTag("relay"))
+	playgroundMediaRouter.Use(middleware.DisableCache())
 	playgroundMediaRouter.Use(middleware.SystemPerformanceCheck())
 	playgroundMediaRouter.Use(middleware.UserAuth())
 	{

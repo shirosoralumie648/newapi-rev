@@ -65,6 +65,7 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"POST /api/playground/workflows/runs":                                        accessTokenSessionRule,
 	"POST /api/playground/workflows/runs/:runId/settle":                          accessTokenSessionRule,
 	"GET /api/playground/settings":                                               accessTokenSessionRule,
+	"POST /api/playground/search":                                                accessTokenSessionRule,
 	"GET /api/playground/message-costs":                                          accessTokenSessionRule,
 	"GET /api/playground/trash":                                                  accessTokenSessionRule,
 	"GET /api/playground/assets":                                                 accessTokenSessionRule,
@@ -428,6 +429,7 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"POST /pg/images/generations":   accessTokenSessionRule,
 	"POST /pg/images/edits":         accessTokenSessionRule,
 	"POST /pg/videos":               accessTokenSessionRule,
+	"POST /pg/embeddings":           accessTokenSessionRule,
 	"POST /pg/audio/speech":         accessTokenSessionRule,
 	"POST /pg/audio/transcriptions": accessTokenSessionRule,
 }

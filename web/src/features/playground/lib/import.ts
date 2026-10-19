@@ -55,6 +55,7 @@ import {
   normalizeContextSummary,
 } from './context/playground-context'
 import {
+  messageSearchSchema,
   messagesSchema,
   parameterEnabledSchema,
   playgroundConfigSchema,
@@ -129,6 +130,9 @@ const exportedMessageSchema = z.object({
   completedAt: z.number().optional(),
   durationMs: z.number().optional(),
   sources: z.array(exportedSourceSchema).max(100).optional(),
+  // The searched snapshot is part of the turn: an imported conversation must
+  // rebuild the same model context and citation list as the exported one.
+  search: messageSearchSchema.optional(),
   reasoning: exportedReasoningSchema.nullish(),
   isReasoningStreaming: z.boolean().optional(),
   isReasoningComplete: z.boolean().optional(),
@@ -146,6 +150,11 @@ const exportedDocumentSchema = z.object({
       .string()
       .max(64 << 10)
       .optional(),
+    opening_message: z
+      .string()
+      .max(8 << 10)
+      .optional(),
+    suggested_questions: z.array(z.string().min(1).max(200)).max(6).optional(),
     config: z.unknown().optional(),
     parameter_enabled: z.unknown().optional(),
     context: z.unknown().optional(),
@@ -169,6 +178,8 @@ export interface PlaygroundImportDocument {
   config: PlaygroundConfig
   parameterEnabled: ParameterEnabled
   systemPrompt: string
+  openingMessage: string
+  suggestedQuestions: string[]
   context: PlaygroundContextSettings
   contextSummary: PlaygroundContextSummary | null
   messages: Message[]
@@ -297,6 +308,7 @@ function normalizeExportedMessage(value: unknown): Message | null {
     ...(data.sources && data.sources.length > 0
       ? { sources: data.sources }
       : {}),
+    ...(data.search ? { search: data.search } : {}),
     ...(data.reasoning
       ? {
           reasoning: {
@@ -418,6 +430,8 @@ export function parsePlaygroundSessionExport(
       ...parameterEnabled.data,
     },
     systemPrompt: document.session.system_prompt ?? '',
+    openingMessage: document.session.opening_message ?? '',
+    suggestedQuestions: document.session.suggested_questions ?? [],
     context: mapExportedContextSettings(document.session.context),
     contextSummary: mapExportedContextSummary(document.session.context_summary),
     messages,
@@ -656,6 +670,8 @@ export async function importPlaygroundSessionDocument(
       config: document.config,
       parameter_enabled: document.parameterEnabled,
       system_prompt: document.systemPrompt,
+      opening_message: document.openingMessage,
+      suggested_questions: document.suggestedQuestions,
       context: document.context,
       context_summary: document.contextSummary,
     },
@@ -696,6 +712,8 @@ export async function importPlaygroundSessionDocument(
         config: document.config,
         parameterEnabled: document.parameterEnabled,
         systemPrompt: document.systemPrompt,
+        openingMessage: document.openingMessage,
+        suggestedQuestions: document.suggestedQuestions,
         context: document.context,
         contextSummary: document.contextSummary,
         messages,
