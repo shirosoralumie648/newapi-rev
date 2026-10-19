@@ -23,6 +23,7 @@ import type {
   PlaygroundConfig,
   PlaygroundContextSettings,
   PlaygroundContextSummary,
+  PlaygroundPendingQuote,
   ParameterEnabled,
 } from '../../types'
 import {
@@ -31,6 +32,7 @@ import {
 } from '../context/playground-context'
 import { applyModelMediaPolicy } from '../message/message-media-utils'
 import { isValidMessage } from '../message/message-utils'
+import { buildQuoteRequestMessage } from '../message/quote-utils'
 import {
   modelSupportsReasoningEffort,
   normalizeReasoningEffort,
@@ -52,6 +54,8 @@ export interface ChatCompletionPayloadContext {
  * cross-session memory block right after it; an empty or whitespace-only value
  * adds nothing. With context management enabled the request carries only the
  * messages the plan keeps, prefixed by the compression node when one applies.
+ * A pending composer quote leads the request as its own `user` message; the
+ * stored history is unaffected.
  */
 export function buildChatCompletionPayload(
   messages: Message[],
@@ -59,7 +63,8 @@ export function buildChatCompletionPayload(
   parameterEnabled: ParameterEnabled,
   systemPrompt = '',
   context?: ChatCompletionPayloadContext,
-  memoryBlock = ''
+  memoryBlock = '',
+  quote?: PlaygroundPendingQuote | null
 ): ChatCompletionRequest {
   // Filter and format valid messages; the plan applies the limits and the
   // compression node, the plain path sends the history unchanged.
@@ -91,11 +96,16 @@ export function buildChatCompletionPayload(
     baseMessages,
     config.model
   ).messages
+  // The quote block leads the request so the model reads the quoted text
+  // before the turn that answers it.
+  const quoteMessage = quote ? buildQuoteRequestMessage(quote) : null
 
   const payload: ChatCompletionRequest = {
     model: config.model,
     group: config.group,
-    messages: requestMessages,
+    messages: quoteMessage
+      ? [quoteMessage, ...requestMessages]
+      : requestMessages,
     stream: config.stream,
   }
 

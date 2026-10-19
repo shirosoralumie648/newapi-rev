@@ -122,6 +122,28 @@ export interface PlaygroundMessageCost {
   timing?: RequestTimingBreakdown
 }
 
+/**
+ * One normalized web-search hit of a turn. The server already bounded every
+ * field; the browser only stores and renders it.
+ */
+export interface MessageSearchResult {
+  title: string
+  url: string
+  snippet: string
+}
+
+/**
+ * Web-search snapshot of one user turn: the query that was searched and the
+ * normalized hits injected into the request. It is the source of truth for
+ * replay, so the same turn always carries the same context, and the assistant
+ * reply copies the hits into `sources` for citation rendering.
+ */
+export interface MessageSearchSnapshot {
+  query: string
+  provider?: string
+  results: MessageSearchResult[]
+}
+
 export interface Message {
   key: string
   from: MessageRole
@@ -139,6 +161,7 @@ export interface Message {
   completedAt?: number
   durationMs?: number
   sources?: { href: string; title: string }[]
+  search?: MessageSearchSnapshot
   reasoning?: {
     content: string
     duration: number
@@ -187,6 +210,16 @@ export interface PlaygroundContextSummary {
   usage?: MessageUsage
 }
 
+/**
+ * A partial organization change for one conversation. An omitted switch keeps
+ * its stored value; `tags` replaces the complete list when present.
+ */
+export interface PlaygroundSessionOrganization {
+  pinned?: boolean
+  archived?: boolean
+  tags?: string[]
+}
+
 export interface PlaygroundSession {
   id: string
   title: string
@@ -207,6 +240,12 @@ export interface PlaygroundSession {
   context: PlaygroundContextSettings
   /** Persisted compression node, or null when the full history is sent. */
   contextSummary: PlaygroundContextSummary | null
+  /** Conversation stays in the pinned section of the client-side list. */
+  pinned: boolean
+  /** Archived conversations collapse into their own client-side section. */
+  archived: boolean
+  /** Client-side labels stored as a bounded JSON array on the server. */
+  tags: string[]
   messages: Message[]
   server?: { id: string; revision: number; messageRevision: number }
   syncPending?: boolean
@@ -274,6 +313,17 @@ export interface PlaygroundMemory {
 export interface PlaygroundMemoryExtractionSettings {
   enabled: boolean
   model: string
+}
+
+/**
+ * Composer-level quote of an earlier message: the key the quote points at plus
+ * the text snapshot shown in the quote bar. The stored message contract has no
+ * quote field, so the snapshot travels with the next request only and is
+ * discarded once that send starts.
+ */
+export interface PlaygroundPendingQuote {
+  messageKey: string
+  text: string
 }
 
 /**

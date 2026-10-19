@@ -21,8 +21,8 @@ import { z } from 'zod'
 import {
   DEFAULT_CONFIG,
   DEFAULT_PARAMETER_ENABLED,
-  PLAYGROUND_AUTO_READ_OVERRIDE_MAX_ENTRIES,
   PLAYGROUND_NEW_SESSION_PROMPT_MAX_BYTES,
+  PLAYGROUND_PREFERENCE_OVERRIDE_MAX_ENTRIES,
   STORAGE_KEYS,
 } from '../../constants'
 import type { ParameterEnabled, PlaygroundConfig } from '../../types'
@@ -56,6 +56,16 @@ export interface PlaygroundAutoReadPreferences {
   overrides: Record<string, boolean>
 }
 
+/**
+ * Automatic conversation naming preference of one account: the default for new
+ * conversations plus the explicit per-conversation overrides. Naming is on by
+ * default; the conversation switch only writes an override when it differs.
+ */
+export interface PlaygroundAutoTitlePreferences {
+  defaultEnabled: boolean
+  overrides: Record<string, boolean>
+}
+
 const newSessionDefaultsSchema = z.object({
   config: playgroundConfigSchema,
   parameterEnabled: parameterEnabledSchema,
@@ -63,6 +73,11 @@ const newSessionDefaultsSchema = z.object({
 })
 
 const autoReadPreferencesSchema = z.object({
+  defaultEnabled: z.boolean(),
+  overrides: z.unknown(),
+})
+
+const autoTitlePreferencesSchema = z.object({
   defaultEnabled: z.boolean(),
   overrides: z.record(z.string(), z.boolean()),
 })
@@ -154,7 +169,7 @@ function normalizeOverrides(value: unknown): Record<string, boolean> {
       typeof entry[1] === 'boolean'
   )
   return Object.fromEntries(
-    entries.slice(0, PLAYGROUND_AUTO_READ_OVERRIDE_MAX_ENTRIES)
+    entries.slice(0, PLAYGROUND_PREFERENCE_OVERRIDE_MAX_ENTRIES)
   )
 }
 
@@ -178,6 +193,31 @@ export function saveAutoReadPreferences(
 ): boolean {
   if (userId === null) return false
   return writeEnvelope(STORAGE_KEYS.AUTO_READ_ALOUD, userId, {
+    defaultEnabled: preferences.defaultEnabled,
+    overrides: normalizeOverrides(preferences.overrides),
+  })
+}
+
+export function loadAutoTitlePreferences(
+  userId: number | null
+): PlaygroundAutoTitlePreferences {
+  if (userId === null) return { defaultEnabled: true, overrides: {} }
+  const parsed = autoTitlePreferencesSchema.safeParse(
+    readEnvelope(STORAGE_KEYS.AUTO_TITLE, userId)
+  )
+  if (!parsed.success) return { defaultEnabled: true, overrides: {} }
+  return {
+    defaultEnabled: parsed.data.defaultEnabled,
+    overrides: normalizeOverrides(parsed.data.overrides),
+  }
+}
+
+export function saveAutoTitlePreferences(
+  userId: number | null,
+  preferences: PlaygroundAutoTitlePreferences
+): boolean {
+  if (userId === null) return false
+  return writeEnvelope(STORAGE_KEYS.AUTO_TITLE, userId, {
     defaultEnabled: preferences.defaultEnabled,
     overrides: normalizeOverrides(preferences.overrides),
   })

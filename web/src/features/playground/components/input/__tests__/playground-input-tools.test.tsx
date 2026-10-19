@@ -56,6 +56,9 @@ function renderTools(
           autoReadDefaultEnabled={false}
           autoReadEnabled={false}
           autoReadHasOverride={false}
+          autoTitleDefaultEnabled
+          autoTitleEnabled
+          autoTitleHasOverride={false}
           config={config}
           contextPlan={planPlaygroundContext({
             messages: [],
@@ -71,6 +74,9 @@ function renderTools(
           onAutoReadChange={() => undefined}
           onAutoReadDefaultChange={() => undefined}
           onAutoReadUseDefault={() => undefined}
+          onAutoTitleChange={() => undefined}
+          onAutoTitleDefaultChange={() => undefined}
+          onAutoTitleUseDefault={() => undefined}
           onConfigChange={() => undefined}
           onContextSettingsChange={() => undefined}
           onDictateTranscript={onDictateTranscript}

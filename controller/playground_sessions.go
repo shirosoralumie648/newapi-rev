@@ -56,6 +56,16 @@ const (
 	// playgroundMessageErrorCodeMaxLength bounds the stable error code a failed
 	// version of a parallel comparison may carry.
 	playgroundMessageErrorCodeMaxLength = 500
+	// playgroundMessageSearch* bound the web-search snapshot a user message
+	// keeps for replay. The shape mirrors the normalized search response; the
+	// stored snapshot is context data, never a billing record.
+	playgroundMessageSearchMaxQueryRunes      = 512
+	playgroundMessageSearchMaxResults         = 6
+	playgroundMessageSearchMaxTitleBytes      = 300
+	playgroundMessageSearchMaxSnippetBytes    = 1200
+	playgroundMessageSearchMaxURLBytes        = 4096
+	playgroundMessageSearchMaxProviderBytes   = 32
+	playgroundMessageSearchMaxResultListBytes = 24 << 10
 	// playgroundParallelMinVersions is the smallest group that actually
 	// compares models: a single reply already has the ordinary message path.
 	playgroundParallelMinVersions = 2
@@ -75,6 +85,10 @@ const (
 	// summary is rejected instead of truncated so the stored node always
 	// matches what the model produced.
 	playgroundContextSummaryMaxBytes = 32 << 10
+	// Conversation tags are a compact client-side organizing aid: a bounded
+	// number of short labels stored as one JSON array.
+	playgroundSessionTagMaxCount  = 10
+	playgroundSessionTagMaxLength = 24
 )
 
 // playgroundReasoningEffortValues lists the effort strings the relay accepts
@@ -93,11 +107,16 @@ type playgroundSessionRequest struct {
 	OpeningMessage   *string         `json:"opening_message"`
 	// SuggestedQuestions is a pointer so an update can distinguish "keep the
 	// stored questions" from an explicit empty list that clears them.
-	SuggestedQuestions *[]string                `json:"suggested_questions"`
-	Context            json.RawMessage          `json:"context"`
-	ContextSummary     json.RawMessage          `json:"context_summary"`
-	Revision           *int64                   `json:"revision"`
-	Messages           []playgroundMessageInput `json:"messages"`
+	SuggestedQuestions *[]string       `json:"suggested_questions"`
+	Context            json.RawMessage `json:"context"`
+	ContextSummary     json.RawMessage `json:"context_summary"`
+	// Pinned and Archived are explicit state switches: absent keeps the stored
+	// value, while a boolean sets it. Tags is the complete replacement list.
+	Pinned   *bool                    `json:"pinned"`
+	Archived *bool                    `json:"archived"`
+	Tags     *[]string                `json:"tags"`
+	Revision *int64                   `json:"revision"`
+	Messages []playgroundMessageInput `json:"messages"`
 }
 
 type playgroundSessionResponse struct {
@@ -115,6 +134,11 @@ type playgroundSessionResponse struct {
 	// its defaults. ContextSummary is the persisted compression node or null.
 	Context         map[string]any  `json:"context"`
 	ContextSummary  json.RawMessage `json:"context_summary"`
+	PinnedAt        int64           `json:"pinned_at"`
+	ArchivedAt      int64           `json:"archived_at"`
+	Pinned          bool            `json:"pinned"`
+	Archived        bool            `json:"archived"`
+	Tags            []string        `json:"tags"`
 	Revision        int64           `json:"revision"`
 	MessageRevision int64           `json:"message_revision"`
 	CreatedAt       int64           `json:"created_at"`
@@ -185,6 +209,12 @@ type playgroundMessagePayload struct {
 		Href  string `json:"href"`
 		Title string `json:"title"`
 	} `json:"sources,omitempty"`
+	// Search is the web-search snapshot of one user turn: the query the user
+	// searched with and the normalized results that were injected into the
+	// request. Persisting it lets a replay rebuild the exact same prompt and
+	// lets the assistant reply show its citations after a reload. The provider
+	// name labels the snapshot; no credential or raw payload is stored.
+	Search    *playgroundMessageSearch `json:"search,omitempty"`
 	Reasoning *struct {
 		Content     string   `json:"content"`
 		Duration    float64  `json:"duration"`
@@ -197,6 +227,20 @@ type playgroundMessagePayload struct {
 	IsContentComplete    *bool   `json:"isContentComplete,omitempty"`
 	Status               string  `json:"status,omitempty"`
 	ErrorCode            *string `json:"errorCode,omitempty"`
+}
+
+// playgroundMessageSearch is the stored web-search snapshot of one user turn.
+type playgroundMessageSearch struct {
+	Query    string                          `json:"query"`
+	Provider string                          `json:"provider,omitempty"`
+	Results  []playgroundMessageSearchResult `json:"results"`
+}
+
+// playgroundMessageSearchResult is one normalized hit the turn injected.
+type playgroundMessageSearchResult struct {
+	Title   string `json:"title"`
+	URL     string `json:"url"`
+	Snippet string `json:"snippet"`
 }
 
 // playgroundMessageToolCall is one requested tool call plus the result the user
@@ -371,6 +415,11 @@ func writePlaygroundError(c *gin.Context, err error) {
 		code = "PLAYGROUND_CONTEXT_SUMMARY_LIMIT_EXCEEDED"
 		err = common.NewMessage(err.Error())
 	}
+	if errors.Is(err, model.ErrPlaygroundSessionArchived) {
+		status = http.StatusBadRequest
+		code = "PLAYGROUND_SESSION_ARCHIVED"
+		err = common.NewMessage(err.Error())
+	}
 	common.ApiErrorStatus(c, status, err, gin.H{"code": code})
 }
 
@@ -413,6 +462,8 @@ func playgroundDecodeSession(session *model.PlaygroundSession) (playgroundSessio
 	response := playgroundSessionResponse{ID: session.ID, ClientID: session.ClientID, Created: session.CreatedNow, Title: session.Title, Revision: session.Revision, MessageRevision: session.MessageRevision,
 		SystemPrompt: session.SystemPrompt, OpeningMessage: string(session.OpeningMessage), SuggestedQuestions: []string{},
 		Context: map[string]any{}, ContextSummary: json.RawMessage("null"),
+		PinnedAt: session.PinnedAt, ArchivedAt: session.ArchivedAt,
+		Pinned: session.PinnedAt > 0, Archived: session.ArchivedAt > 0, Tags: []string{},
 		CreatedAt: session.CreatedAt, UpdatedAt: session.UpdatedAt, Config: map[string]any{}, ParameterEnabled: map[string]bool{}}
 	if err := common.Unmarshal([]byte(session.Config), &response.Config); err != nil {
 		return response, err
@@ -426,6 +477,14 @@ func playgroundDecodeSession(session *model.PlaygroundSession) (playgroundSessio
 		}
 		if response.SuggestedQuestions == nil {
 			response.SuggestedQuestions = []string{}
+		}
+	}
+	// Tags were validated on write. A NULL or legacy value reads back as no
+	// tags instead of failing the conversation, mirroring the optional local
+	// field that predates this column.
+	if stored := strings.TrimSpace(session.Tags); stored != "" && stored != "null" {
+		if err := common.UnmarshalJsonStr(stored, &response.Tags); err == nil && response.Tags == nil {
+			response.Tags = []string{}
 		}
 	}
 	if stored := strings.TrimSpace(session.ContextConfig); stored != "" && stored != "null" {
@@ -532,6 +591,38 @@ func encodePlaygroundContextSummary(raw json.RawMessage) (encoded string, clear 
 	return string(payload), false, nil
 }
 
+// encodePlaygroundSessionTags normalizes the complete tag list of one
+// conversation. Tags are trimmed, blank entries are dropped, exact duplicates
+// keep their first position, and the resulting list must fit the stored
+// contract. The whole list is replaced on every write, so removal is expressed
+// by sending the remaining tags (or an empty list).
+func encodePlaygroundSessionTags(tags []string) (string, error) {
+	values := make([]string, 0, min(len(tags), playgroundSessionTagMaxCount))
+	seen := make(map[string]bool, len(tags))
+	for _, raw := range tags {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			continue
+		}
+		if utf8.RuneCountInString(value) > playgroundSessionTagMaxLength || strings.ContainsRune(value, 0) {
+			return "", common.NewMessage("Invalid Playground conversation tags.")
+		}
+		if seen[value] {
+			continue
+		}
+		seen[value] = true
+		values = append(values, value)
+	}
+	if len(values) > playgroundSessionTagMaxCount {
+		return "", common.NewMessage("Invalid Playground conversation tags.")
+	}
+	encoded, err := common.Marshal(values)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
+}
+
 // encodePlaygroundSettings validates the session settings one request may
 // carry. A system prompt is bounded by the owner's policy; it stays optional so
 // a request that only renames a conversation keeps the stored prompt. The
@@ -575,6 +666,13 @@ func encodePlaygroundSettings(request playgroundSessionRequest, systemPromptMaxB
 			return nil, err
 		}
 		updates["suggested_questions"] = encoded
+	}
+	if request.Tags != nil {
+		encoded, err := encodePlaygroundSessionTags(*request.Tags)
+		if err != nil {
+			return nil, err
+		}
+		updates["tags"] = encoded
 	}
 	if request.Context != nil {
 		encoded, err := encodePlaygroundContextSettings(request.Context)
@@ -809,6 +907,11 @@ func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroun
 				return nil, common.NewMessage("Invalid Playground message.")
 			}
 		}
+		if payload.Search != nil {
+			if err := validatePlaygroundMessageSearch(payload.From, payload.Search); err != nil {
+				return nil, err
+			}
+		}
 		payloads = append(payloads, payload)
 	}
 
@@ -861,6 +964,44 @@ func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroun
 		messages = append(messages, model.PlaygroundMessage{ClientKey: payload.Key, Payload: model.LongText(encoded)})
 	}
 	return messages, nil
+}
+
+// validatePlaygroundMessageSearch bounds the search snapshot a stored message
+// may carry and keeps it on user turns only. The snapshot is context the user
+// already saw, so it is validated instead of trusted, while an oversized or
+// malformed list is rejected exactly like any other invalid message.
+func validatePlaygroundMessageSearch(from string, search *playgroundMessageSearch) error {
+	if from != "user" || search == nil {
+		return common.NewMessage("Invalid Playground message.")
+	}
+	query := strings.TrimSpace(search.Query)
+	if query == "" || utf8.RuneCountInString(query) > playgroundMessageSearchMaxQueryRunes {
+		return common.NewMessage("Invalid Playground message.")
+	}
+	if len(search.Provider) > playgroundMessageSearchMaxProviderBytes {
+		return common.NewMessage("Invalid Playground message.")
+	}
+	if len(search.Results) > playgroundMessageSearchMaxResults {
+		return common.NewMessage("Invalid Playground message.")
+	}
+	totalBytes := 0
+	for _, result := range search.Results {
+		resultURL := strings.TrimSpace(result.URL)
+		parsed, err := url.Parse(resultURL)
+		if err != nil || parsed.Host == "" || parsed.User != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return common.NewMessage("Invalid Playground message.")
+		}
+		if len(resultURL) > playgroundMessageSearchMaxURLBytes ||
+			len(result.Title) > playgroundMessageSearchMaxTitleBytes ||
+			len(result.Snippet) > playgroundMessageSearchMaxSnippetBytes {
+			return common.NewMessage("Invalid Playground message.")
+		}
+		totalBytes += len(result.Title) + len(resultURL) + len(result.Snippet)
+		if totalBytes > playgroundMessageSearchMaxResultListBytes {
+			return common.NewMessage("Invalid Playground message.")
+		}
+	}
+	return nil
 }
 
 // validatePlaygroundMessageDeletes bounds the client keys one delta removes.
@@ -951,6 +1092,18 @@ func CreatePlaygroundSession(c *gin.Context) {
 	if suggestedQuestions, ok := updates["suggested_questions"]; ok {
 		session.SuggestedQuestions = suggestedQuestions.(string)
 	}
+	if tags, ok := updates["tags"]; ok {
+		session.Tags = tags.(string)
+	}
+	now := common.GetTimestamp()
+	if request.Archived != nil && *request.Archived {
+		session.ArchivedAt = now
+	}
+	// Archiving wins over a simultaneous pin, matching the update contract:
+	// archived conversations are never pinned.
+	if request.Pinned != nil && *request.Pinned && session.ArchivedAt == 0 {
+		session.PinnedAt = now
+	}
 	if request.ClientID != "" {
 		session.ClientID = &request.ClientID
 	}
@@ -998,7 +1151,9 @@ func UpdatePlaygroundSession(c *gin.Context) {
 		writePlaygroundError(c, err)
 		return
 	}
-	session, err := model.UpdatePlaygroundSessionFields(c.GetInt("id"), c.Param("id"), *request.Revision, updates)
+	session, err := model.UpdatePlaygroundSessionFields(c.GetInt("id"), c.Param("id"), *request.Revision, updates, model.PlaygroundSessionOrganization{
+		Pinned: request.Pinned, Archived: request.Archived,
+	})
 	if err != nil {
 		writePlaygroundError(c, err)
 		return

@@ -4,6 +4,8 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/middleware"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/gin-gonic/gin"
@@ -141,6 +144,54 @@ func TestAccessTokenRouteRulesCoverEveryDashboardRoute(t *testing.T) {
 		assert.Equal(t, "scope", rule.Kind(), key)
 		assert.Equal(t, service.AccessTokenScopeOf(permission), rule.Scope(), key)
 	}
+}
+
+// The browser-side Playground is session-only: its new search route must
+// reject an anonymous caller and a personal access token, while still being
+// registered on the real router (the coverage test above only proves the rule
+// is declared).
+func TestPlaygroundSearchRouteRequiresDashboardSession(t *testing.T) {
+	setupRelayRouterTestDB(t)
+	gin.SetMode(gin.TestMode)
+	require.NoError(t, model.DB.AutoMigrate(
+		&model.UserAccessToken{}, &model.Option{}, &model.AuditLog{},
+		&model.CasbinRule{}, &model.AuthzRole{},
+	))
+	require.NoError(t, authz.Init(model.DB))
+
+	user := model.User{
+		Username: "playground-search-route", Password: "unused",
+		Role: common.RoleCommonUser, Status: common.UserStatusEnabled,
+		Group: "default", AuthVersion: 1, AffCode: "playground-search-route-aff",
+	}
+	require.NoError(t, model.DB.Create(&user).Error)
+	suffix, err := common.GenerateRandomCharsKey(43)
+	require.NoError(t, err)
+	rawToken := model.AccessTokenPrefix + suffix
+	pat := &model.UserAccessToken{
+		Name:      "playground search route test",
+		TokenHash: model.AccessTokenFingerprint(rawToken),
+		TokenHint: model.AccessTokenHint(rawToken),
+	}
+	require.NoError(t, pat.SetScopes([]string{"profile:read"}))
+	require.NoError(t, model.CreateUserAccessToken(user.Id, pat, service.AccessTokenMaxPerUser))
+
+	engine := gin.New()
+	SetApiRouter(engine)
+
+	anonymous := httptest.NewRecorder()
+	anonymousRequest := httptest.NewRequest(http.MethodPost, "/api/playground/search", strings.NewReader(`{"query":"go"}`))
+	anonymousRequest.Header.Set("Content-Type", "application/json")
+	engine.ServeHTTP(anonymous, anonymousRequest)
+	require.Equal(t, http.StatusUnauthorized, anonymous.Code, anonymous.Body.String())
+
+	scoped := httptest.NewRecorder()
+	scopedRequest := httptest.NewRequest(http.MethodPost, "/api/playground/search", strings.NewReader(`{"query":"go"}`))
+	scopedRequest.Header.Set("Authorization", "Bearer "+rawToken)
+	scopedRequest.Header.Set("Content-Type", "application/json")
+	engine.ServeHTTP(scoped, scopedRequest)
+	assert.Equal(t, http.StatusForbidden, scoped.Code, scoped.Body.String())
+	assert.Contains(t, scoped.Body.String(), `"code":"AUTH_SESSION_REQUIRED"`)
 }
 
 func TestAccessTokenCatalogCoversEveryPermission(t *testing.T) {

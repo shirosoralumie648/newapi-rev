@@ -109,6 +109,7 @@ export const API_ENDPOINTS = {
   PLAYGROUND_USAGE: '/api/playground/usage',
   PLAYGROUND_STORAGE_BILLING: '/api/playground/storage/billing',
   PLAYGROUND_SETTINGS: '/api/playground/settings',
+  PLAYGROUND_SEARCH: '/api/playground/search',
   PLAYGROUND_MESSAGE_COSTS: '/api/playground/message-costs',
   PLAYGROUND_ASSETS: '/api/playground/assets',
   PLAYGROUND_SHARED: '/api/playground/shared',
@@ -130,6 +131,12 @@ export const PLAYGROUND_REQUEST_ID_MAX_LENGTH = 64
 // Sanity ceiling for the display-only token counts, mirroring the bound the
 // server applies to a stored message version.
 export const PLAYGROUND_MESSAGE_TOKEN_MAX = 2 ** 40
+
+// Web-search bounds mirroring the server validation of one search turn: the
+// query is a chat turn, not a document, and the composer must not offer a
+// search the server would reject.
+export const PLAYGROUND_SEARCH_QUERY_MAX_LENGTH = 512
+export const PLAYGROUND_SEARCH_MAX_RESULTS = 6
 
 // Context management bounds. The server validates the same ranges, so a value
 // accepted here is always storable. An image attachment is counted as a fixed
@@ -218,18 +225,36 @@ export const STORAGE_KEYS = {
   MEMORY_EXTRACTION: 'playground_memory_extraction',
   NEW_SESSION_DEFAULTS: 'playground_new_session_defaults',
   AUTO_READ_ALOUD: 'playground_auto_read_aloud',
+  AUTO_TITLE: 'playground_auto_title',
 } as const
 
 // The new-conversation defaults are a client-side preference, not a store: the
 // system prompt copied into a new conversation is bounded by the same byte
 // budget the server accepts for a stored prompt.
 export const PLAYGROUND_NEW_SESSION_PROMPT_MAX_BYTES = 16 << 10
-// Bound the per-account auto read-aloud overrides so a corrupted store cannot
-// grow without limit.
-export const PLAYGROUND_AUTO_READ_OVERRIDE_MAX_ENTRIES = 200
+// Bound the per-account preference overrides so a corrupted store cannot grow
+// without limit.
+export const PLAYGROUND_PREFERENCE_OVERRIDE_MAX_ENTRIES = 200
 
 export const DEFAULT_SESSION_TITLE = 'New conversation'
+
+// Automatic conversation naming. The title request is one ordinary billed
+// non-streaming `/pg/chat/completions` call; it reads only the first user
+// message and the latest completed reply, so its input and output stay bounded.
+export const PLAYGROUND_AUTO_TITLE_MAX_LENGTH = 50
+export const PLAYGROUND_AUTO_TITLE_INPUT_MAX_CHARS = 4000
+export const PLAYGROUND_AUTO_TITLE_MAX_TOKENS = 64
+// This is model input, not user interface text, so it stays untranslated.
+export const PLAYGROUND_AUTO_TITLE_SYSTEM_PROMPT = `Write a short title for the following conversation. Use the language of the conversation, keep it at most ${PLAYGROUND_AUTO_TITLE_MAX_LENGTH} characters, and reply with the title only, without quotes or ending punctuation.`
+
 export const MAX_STORED_SESSIONS = 20
+// Conversation tags are a client-side organizing aid. The server enforces the
+// same bounds and stays authoritative.
+export const MAX_SESSION_TAGS = 10
+export const MAX_SESSION_TAG_LENGTH = 24
+// Mirrors the server's stored-title bound: a longer title is refused instead of
+// stored trimmed, so a fork title is cut to the same rune count.
+export const PLAYGROUND_SESSION_TITLE_MAX_LENGTH = 200
 
 // Assistant preset display bounds. The server validates the same values and
 // owns the authoritative per-account quota (preset count and prompt bytes).
@@ -467,6 +492,8 @@ export const MESSAGE_ACTION_BUTTON_STYLES = {
 export const MESSAGE_ACTION_LABELS = {
   COPY: 'Copy',
   COPIED: 'Copied!',
+  QUOTE: 'Quote',
+  FORK: 'Fork from here',
   READ_ALOUD: 'Read aloud',
   REGENERATE: 'Regenerate',
   SHOW_PREVIEW: 'Show preview',
@@ -478,4 +505,19 @@ export const MESSAGE_ACTION_LABELS = {
   GENERATE_VIDEO: 'Generate video',
   NO_CONTENT: 'No content to copy',
   WAIT_GENERATION: 'Please wait for the current generation to complete',
+} as const
+
+// Composer quote. Quoting an earlier message carries a snapshot of its visible
+// text into the next request only, so the stored message contract stays
+// untouched. The protocol frame below is model input, not user interface text,
+// and the snapshot is bounded to keep one quote from dominating the request.
+export const PLAYGROUND_QUOTE_TEXT_MAX_CHARS = 4000
+export const PLAYGROUND_QUOTE_CONTEXT_OPEN = '[quoted message: {{key}}]'
+export const PLAYGROUND_QUOTE_CONTEXT_CLOSE = '[/quoted message]'
+
+// Conversation fork. The copy is rebuilt through the ordinary create/upload
+// chain, so the server enforces the same message and attachment quotas as a
+// manual conversation; a refusal leaves the source conversation untouched.
+export const PLAYGROUND_FORK_ERRORS = {
+  FAILED: 'Unable to fork the conversation.',
 } as const
