@@ -91,7 +91,7 @@ function KnowledgeDocumentRow(props: {
   busy: boolean
   document: KnowledgeDocument
   embeddingModel: string
-  locale: string
+  locale?: string
   onDelete: (document: KnowledgeDocument) => void
   onRetry: (document: KnowledgeDocument) => void
 }) {

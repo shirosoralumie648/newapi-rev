@@ -49,6 +49,10 @@ const (
 	// conversation config; every compared version names the model that produced
 	// it.
 	playgroundMessageModelMaxLength = 512
+	// playgroundMessageFinishReasonMaxLength bounds the provider finish reason
+	// a version may record. It labels the stored message only; the value is
+	// opaque text and never consulted for billing.
+	playgroundMessageFinishReasonMaxLength = 64
 	// playgroundMessageErrorCodeMaxLength bounds the stable error code a failed
 	// version of a parallel comparison may carry.
 	playgroundMessageErrorCodeMaxLength = 500
@@ -167,6 +171,10 @@ type playgroundMessagePayload struct {
 		// remains the only source of the billed amount.
 		RequestId *string                 `json:"requestId,omitempty"`
 		Usage     *playgroundMessageUsage `json:"usage,omitempty"`
+		// FinishReason records why a generation ended (for example `length`
+		// or `interrupted`). It only labels the stored version so a truncated
+		// reply can offer "continue generation"; it never feeds billing.
+		FinishReason *string `json:"finishReason,omitempty"`
 	} `json:"versions"`
 	ActiveVersionIndex *int     `json:"activeVersionIndex,omitempty"`
 	CreatedAt          *float64 `json:"createdAt,omitempty"`
@@ -296,6 +304,16 @@ func writePlaygroundError(c *gin.Context, err error) {
 		code = "PLAYGROUND_NOT_FOUND"
 		err = common.NewMessage(err.Error())
 	}
+	if errors.Is(err, model.ErrPlaygroundMemoryNotFound) {
+		status = http.StatusNotFound
+		code = "PLAYGROUND_NOT_FOUND"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundMemorySourceNotFound) {
+		status = http.StatusBadRequest
+		code = "PLAYGROUND_INVALID_REQUEST"
+		err = common.NewMessage(err.Error())
+	}
 	if errors.Is(err, model.ErrPlaygroundConflict) {
 		status = http.StatusConflict
 		code = "PLAYGROUND_CONFLICT"
@@ -331,6 +349,16 @@ func writePlaygroundError(c *gin.Context, err error) {
 	if errors.Is(err, model.ErrPlaygroundSnippetContentLimit) {
 		status = http.StatusUnprocessableEntity
 		code = "PLAYGROUND_SNIPPET_CONTENT_LIMIT_EXCEEDED"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundMemoryLimit) {
+		status = http.StatusUnprocessableEntity
+		code = "PLAYGROUND_MEMORY_LIMIT_EXCEEDED"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundMemoryContentLimit) {
+		status = http.StatusUnprocessableEntity
+		code = "PLAYGROUND_MEMORY_CONTENT_LIMIT_EXCEEDED"
 		err = common.NewMessage(err.Error())
 	}
 	if errors.Is(err, model.ErrPlaygroundSystemPromptLimit) {
@@ -736,6 +764,9 @@ func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroun
 				return nil, common.NewMessage("Invalid Playground message.")
 			}
 			if version.ErrorCode != nil && len(*version.ErrorCode) > playgroundMessageErrorCodeMaxLength {
+				return nil, common.NewMessage("Invalid Playground message.")
+			}
+			if version.FinishReason != nil && (len(*version.FinishReason) > playgroundMessageFinishReasonMaxLength || strings.ContainsRune(*version.FinishReason, 0)) {
 				return nil, common.NewMessage("Invalid Playground message.")
 			}
 			if err := validatePlaygroundMessageUsage(version.RequestId, version.Usage); err != nil {

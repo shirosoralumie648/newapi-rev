@@ -23,9 +23,12 @@ import {
   FileCode2,
   FileText,
   Frame,
+  Image as ImageIcon,
   MoreHorizontal,
+  Play,
   RefreshCw,
   Trash2,
+  Video,
   Volume2,
   type LucideIcon,
 } from 'lucide-react'
@@ -57,11 +60,16 @@ interface MessageActionsProps {
   onCopy?: (message: Message) => void
   onReadAloud?: (message: Message) => void
   onRegenerate?: (message: Message) => void
+  /** Offered when the active version was cut short and can be continued. */
+  onContinue?: (message: Message) => void
+  canContinue?: boolean
   onToggleSource?: (message: Message) => void
   onEdit?: (message: Message) => void
   onDelete?: (message: Message) => void
   onCreateArtifact?: (message: Message) => void
   onSendToCanvas?: (message: Message) => void
+  /** Hands the message prompt and reference images to the canvas generation. */
+  onGenerateMedia?: (message: Message, kind: 'image' | 'video') => void
   isSourceVisible?: boolean
   isGenerating?: boolean
   alwaysVisible?: boolean
@@ -82,11 +90,14 @@ export function MessageActions({
   onCopy,
   onReadAloud,
   onRegenerate,
+  onContinue,
+  canContinue = false,
   onToggleSource,
   onEdit,
   onDelete,
   onCreateArtifact,
   onSendToCanvas,
+  onGenerateMedia,
   isSourceVisible = false,
   isGenerating = false,
   alwaysVisible = false,
@@ -166,6 +177,26 @@ export function MessageActions({
     })
   }
 
+  if (
+    hasContent &&
+    !isLoading &&
+    message.status !== 'error' &&
+    onGenerateMedia
+  ) {
+    actions.push({
+      disabled: isGenerating,
+      icon: ImageIcon,
+      label: MESSAGE_ACTION_LABELS.GENERATE_IMAGE,
+      onClick: guardAction(() => onGenerateMedia(message, 'image')),
+    })
+    actions.push({
+      disabled: isGenerating,
+      icon: Video,
+      label: MESSAGE_ACTION_LABELS.GENERATE_VIDEO,
+      onClick: guardAction(() => onGenerateMedia(message, 'video')),
+    })
+  }
+
   if (isAssistant && hasContent && !isLoading && onToggleSource) {
     actions.push({
       icon: FileCode2,
@@ -182,6 +213,22 @@ export function MessageActions({
       icon: RefreshCw,
       label: MESSAGE_ACTION_LABELS.REGENERATE,
       onClick: handleRegenerate,
+    })
+  }
+
+  if (
+    canContinue &&
+    isAssistant &&
+    hasContent &&
+    !isLoading &&
+    message.status !== 'error' &&
+    onContinue
+  ) {
+    actions.push({
+      disabled: isGenerating,
+      icon: Play,
+      label: 'Continue generation',
+      onClick: guardAction(() => onContinue(message)),
     })
   }
 

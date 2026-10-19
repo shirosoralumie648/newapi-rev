@@ -42,13 +42,14 @@ const baseProps = {
   onDelete: vi.fn(),
   inspectorView: null,
   inspector: <div>Inspector body</div>,
-  onToggleInspector: vi.fn(),
   onCloseInspector: vi.fn(),
+  syncLabel: 'Playground',
+  usagePanel: <div>Usage panel</div>,
 }
 
-test('desktop shows chat and inspector side by side without a modal', () => {
+test('desktop shows the conversation and its conversation-domain inspector', () => {
   render(
-    <PlaygroundWorkspace {...baseProps} inspectorView='artifacts'>
+    <PlaygroundWorkspace {...baseProps} inspectorView='presets'>
       <div>Chat body</div>
     </PlaygroundWorkspace>
   )
@@ -56,9 +57,24 @@ test('desktop shows chat and inspector side by side without a modal', () => {
   expect(screen.getByText('Chat body')).toBeVisible()
   expect(screen.getByText('Inspector body')).toBeVisible()
   expect(screen.queryByRole('dialog')).toBeNull()
+  expect(screen.getByText('Usage panel')).toBeVisible()
+  expect(screen.getByRole('status')).toHaveTextContent('Playground')
 })
 
-test('desktop hides the inspector and reports the requested view', async () => {
+test('the top bar no longer exposes the creation-domain entries', () => {
+  render(
+    <PlaygroundWorkspace {...baseProps}>
+      <div>Chat body</div>
+    </PlaygroundWorkspace>
+  )
+
+  for (const name of ['Generate', 'Canvases', 'Artifacts', 'Library']) {
+    expect(screen.queryByRole('button', { name })).toBeNull()
+  }
+  expect(screen.getByText('Usage panel')).toBeVisible()
+})
+
+test('the top bar opens the memory inspector', async () => {
   const user = userEvent.setup()
   const onToggleInspector = vi.fn()
   render(
@@ -67,33 +83,36 @@ test('desktop hides the inspector and reports the requested view', async () => {
     </PlaygroundWorkspace>
   )
 
-  expect(screen.queryByText('Inspector body')).toBeNull()
-  const artifacts = screen.getByRole('button', { name: 'Artifacts' })
-  const canvases = screen.getByRole('button', { name: 'Canvases' })
-  expect(artifacts).toHaveAttribute('aria-pressed', 'false')
-  expect(canvases).toHaveAttribute('aria-pressed', 'false')
-  await user.click(artifacts)
-  expect(onToggleInspector).toHaveBeenCalledWith('artifacts')
-  await user.click(canvases)
-  expect(onToggleInspector).toHaveBeenCalledWith('canvas')
+  await user.click(screen.getByRole('button', { name: 'Memory' }))
+  expect(onToggleInspector).toHaveBeenCalledWith('memory')
 })
 
-test('desktop marks the active canvas inspector view', () => {
+test('desktop marks the active memory inspector view', () => {
   render(
-    <PlaygroundWorkspace {...baseProps} inspectorView='canvas'>
+    <PlaygroundWorkspace
+      {...baseProps}
+      inspectorView='memory'
+      onToggleInspector={vi.fn()}
+    >
       <div>Chat body</div>
     </PlaygroundWorkspace>
   )
 
-  expect(screen.getByRole('button', { name: 'Canvases' })).toHaveAttribute(
+  expect(screen.getByRole('button', { name: 'Memory' })).toHaveAttribute(
     'aria-pressed',
     'true'
   )
-  expect(screen.getByRole('button', { name: 'Artifacts' })).toHaveAttribute(
-    'aria-pressed',
-    'false'
-  )
   expect(screen.getByText('Inspector body')).toBeVisible()
+})
+
+test('desktop hides the inspector when no conversation panel is open', () => {
+  render(
+    <PlaygroundWorkspace {...baseProps}>
+      <div>Chat body</div>
+    </PlaygroundWorkspace>
+  )
+
+  expect(screen.queryByText('Inspector body')).toBeNull()
 })
 
 test('mobile presents the inspector in a sheet closing to the controller', async () => {
@@ -103,7 +122,7 @@ test('mobile presents the inspector in a sheet closing to the controller', async
   render(
     <PlaygroundWorkspace
       {...baseProps}
-      inspectorView='artifacts'
+      inspectorView='presets'
       onCloseInspector={onCloseInspector}
     >
       <div>Chat body</div>

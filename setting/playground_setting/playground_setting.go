@@ -132,9 +132,16 @@ type PlaygroundQuotaPolicy struct {
 	// stored attachments, so they have no account-level byte budget.
 	SnippetUserMaxCount    int   `json:"snippet_user_max_count"`
 	SnippetContentMaxBytes int64 `json:"snippet_content_max_bytes"`
-	MessageMaxCount        int   `json:"message_max_count"`
-	MessageMaxVersions     int   `json:"message_max_versions"`
-	MessageMaxBytes        int64 `json:"message_max_bytes"`
+	// MemoryUserMaxCount and MemoryContentMaxBytes bound the account's durable
+	// cross-session notes: how many memories it may store and how many bytes one
+	// memory's text may occupy. Memories are derived from the owner's own
+	// conversations and only add context to a normal /pg request, so they have
+	// no account-level byte budget.
+	MemoryUserMaxCount    int   `json:"memory_user_max_count"`
+	MemoryContentMaxBytes int64 `json:"memory_content_max_bytes"`
+	MessageMaxCount       int   `json:"message_max_count"`
+	MessageMaxVersions    int   `json:"message_max_versions"`
+	MessageMaxBytes       int64 `json:"message_max_bytes"`
 	// ParallelCompareMaxModels bounds one parallel-comparison message group:
 	// how many models a single send may fan out to. Each comparison request is
 	// an ordinary /pg call whose own rate limit, channel and billing apply, so
@@ -336,6 +343,8 @@ func builtinPlaygroundQuotaPolicy() PlaygroundQuotaPolicy {
 		SystemPromptMaxBytes:      16 << 10,
 		SnippetUserMaxCount:       100,
 		SnippetContentMaxBytes:    8 << 10,
+		MemoryUserMaxCount:        100,
+		MemoryContentMaxBytes:     4 << 10,
 		MessageMaxCount:           100,
 		MessageMaxVersions:        100,
 		MessageMaxBytes:           1 << 20,
@@ -483,6 +492,12 @@ func applyPlaygroundQuotaOverrides(policy *PlaygroundQuotaPolicy, override *Play
 	}
 	if override.SnippetContentMaxBytes > 0 {
 		policy.SnippetContentMaxBytes = override.SnippetContentMaxBytes
+	}
+	if override.MemoryUserMaxCount > 0 {
+		policy.MemoryUserMaxCount = override.MemoryUserMaxCount
+	}
+	if override.MemoryContentMaxBytes > 0 {
+		policy.MemoryContentMaxBytes = override.MemoryContentMaxBytes
 	}
 	if override.MessageMaxCount > 0 {
 		policy.MessageMaxCount = override.MessageMaxCount

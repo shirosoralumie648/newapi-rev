@@ -118,14 +118,14 @@ func playgroundTestDB(t *testing.T, dialect string) *gorm.DB {
 	common.SetDatabaseTypes(common.DatabaseType(dialect), previousLog)
 	model.DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundKnowledgeChunk{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundUserUsage{}, &model.PlaygroundUpload{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMessage{}, &model.PlaygroundSession{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundKnowledgeChunk{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundUserUsage{}, &model.PlaygroundUpload{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundMessage{}, &model.PlaygroundSession{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
 		model.DB = previous
 		common.SetDatabaseTypes(previousMain, previousLog)
 	})
-	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUpload{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeChunk{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUpload{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeChunk{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -171,6 +171,9 @@ func playgroundRequest(t *testing.T, user int, method, path string, body any, ha
 		}
 		if parts[3] == "snippets" {
 			c.Params = append(c.Params, gin.Param{Key: "snippetId", Value: parts[4]})
+		}
+		if parts[3] == "memories" {
+			c.Params = append(c.Params, gin.Param{Key: "memoryId", Value: parts[4]})
 		}
 		if parts[3] == "tasks" {
 			c.Params = append(c.Params, gin.Param{Key: "taskId", Value: parts[4]})
@@ -322,6 +325,7 @@ func TestPlaygroundRejectsInvalidSnapshotsWithoutReplacingHistory(t *testing.T) 
 		{"invalid role", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "owner", "versions": []any{map[string]any{"id": "v", "content": "text"}}}}}}},
 		{"oversized body", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "user", "versions": []any{map[string]any{"id": "v", "content": strings.Repeat("x", 2<<20)}}}}}}},
 		{"oversized request id", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "assistant", "versions": []any{map[string]any{"id": "v", "content": "text", "requestId": strings.Repeat("r", 65)}}}}}}},
+		{"oversized finish reason", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "assistant", "versions": []any{map[string]any{"id": "v", "content": "text", "finishReason": strings.Repeat("f", 65)}}}}}}},
 		{"empty request id", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "assistant", "versions": []any{map[string]any{"id": "v", "content": "text", "requestId": ""}}}}}}},
 		{"negative usage", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "assistant", "versions": []any{map[string]any{"id": "v", "content": "text", "usage": map[string]any{"promptTokens": -1, "completionTokens": 0, "totalTokens": 0}}}}}}}},
 		{"fractional usage", map[string]any{"revision": 0, "messages": []any{map[string]any{"client_key": "m", "payload": map[string]any{"key": "m", "from": "assistant", "versions": []any{map[string]any{"id": "v", "content": "text", "usage": map[string]any{"promptTokens": 1.5, "completionTokens": 0, "totalTokens": 1.5}}}}}}}},
@@ -2294,6 +2298,11 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodGet, "/api/playground/snippets/missing"},
 		{http.MethodPatch, "/api/playground/snippets/missing"},
 		{http.MethodDelete, "/api/playground/snippets/missing"},
+		{http.MethodGet, "/api/playground/memories"},
+		{http.MethodPost, "/api/playground/memories"},
+		{http.MethodGet, "/api/playground/memories/missing"},
+		{http.MethodPatch, "/api/playground/memories/missing"},
+		{http.MethodDelete, "/api/playground/memories/missing"},
 		{http.MethodGet, attachmentBase}, {http.MethodPost, attachmentBase},
 		{http.MethodGet, attachmentBase + "/missing"}, {http.MethodGet, attachmentBase + "/missing/content"},
 		{http.MethodGet, attachmentBase + "/missing/text"},
@@ -2450,6 +2459,28 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	assert.Contains(t, presetRead.Body.String(), `"system_prompt":"Be brief."`)
 	require.Equal(t, 200, playgroundAuthenticatedRequest(t, engine, token, http.MethodDelete, presetBase+"/"+presetEnvelope.Data.ID, nil).Code)
 
+	// Cross-session memories share the same contract and stay owner-scoped.
+	memoryBase := "/api/playground/memories"
+	memoryCreated := playgroundAuthenticatedRequest(t, engine, token, http.MethodPost, memoryBase, map[string]any{
+		"content": "Prefers short status updates.", "category": "preference",
+	})
+	require.Equal(t, 200, memoryCreated.Code, memoryCreated.Body.String())
+	var memoryEnvelope struct {
+		Data struct{ ID string }
+	}
+	require.NoError(t, common.Unmarshal(memoryCreated.Body.Bytes(), &memoryEnvelope))
+	require.NotEmpty(t, memoryEnvelope.Data.ID)
+	memoryList := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, memoryBase, nil)
+	require.Equal(t, 200, memoryList.Code, memoryList.Body.String())
+	assert.Contains(t, memoryList.Body.String(), `"total":1`)
+	memoryUpdated := playgroundAuthenticatedRequest(t, engine, token, http.MethodPatch, memoryBase+"/"+memoryEnvelope.Data.ID, map[string]any{"enabled": false})
+	require.Equal(t, 200, memoryUpdated.Code, memoryUpdated.Body.String())
+	assert.Contains(t, memoryUpdated.Body.String(), `"enabled":false`)
+	memoryRead := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, memoryBase+"/"+memoryEnvelope.Data.ID, nil)
+	require.Equal(t, 200, memoryRead.Code, memoryRead.Body.String())
+	assert.Contains(t, memoryRead.Body.String(), "Prefers short status updates.")
+	require.Equal(t, 200, playgroundAuthenticatedRequest(t, engine, token, http.MethodDelete, memoryBase+"/"+memoryEnvelope.Data.ID, nil).Code)
+
 	// A conversation created through the router carries its system prompt.
 	sessionWithPrompt := playgroundAuthenticatedRequest(t, engine, token, http.MethodPost, "/api/playground/sessions", map[string]any{
 		"title": "Router prompt", "config": map[string]any{"model": "test-model"}, "system_prompt": "Be brief.",
@@ -2600,8 +2631,9 @@ func TestPlaygroundMessageVersionBranches(t *testing.T) {
 						"versions": []any{
 							map[string]any{"id": "a1", "content": "First answer"},
 							map[string]any{"id": "a2", "content": "Regenerated answer",
-								"requestId": "req-branch-2",
-								"usage":     map[string]any{"promptTokens": 12, "completionTokens": 34, "totalTokens": 46}},
+								"requestId":    "req-branch-2",
+								"finishReason": "length",
+								"usage":        map[string]any{"promptTokens": 12, "completionTokens": 34, "totalTokens": 46}},
 						},
 					}},
 				},
@@ -2621,6 +2653,9 @@ func TestPlaygroundMessageVersionBranches(t *testing.T) {
 			// The generation record of the selected version round-trips verbatim.
 			assert.Contains(t, string(messages[1].Payload), `"requestId":"req-branch-2"`)
 			assert.Contains(t, string(messages[1].Payload), `"totalTokens":46`)
+			// A truncated reply keeps its provider finish reason so the client
+			// can offer "continue generation" after a reload.
+			assert.Contains(t, string(messages[1].Payload), `"finishReason":"length"`)
 
 			for _, index := range []int{-1, 2} {
 				invalid := map[string]any{
@@ -3002,6 +3037,7 @@ func TestPlaygroundUsageForUserReportsOwnerTotals(t *testing.T) {
 		policy.ArtifactUserMaxBytes = 8192
 		policy.CanvasUserMaxProjects = 6
 		policy.CanvasUserMaxBytes = 16384
+		policy.MemoryUserMaxCount = 7
 		policy.TaskMaxConcurrency = 4
 		policy.TaskUserResultMaxBytes = 1 << 20
 		policy.ObjectUserMaxBytes = 1 << 21
@@ -3012,6 +3048,10 @@ func TestPlaygroundUsageForUserReportsOwnerTotals(t *testing.T) {
 	artifactResult(t, playgroundRequest(t, 7, http.MethodPost, "/api/playground/sessions/"+sessionID+"/artifacts", input, controller.CreatePlaygroundArtifact))
 	playgroundUploadAttachment(t, 7, sessionID, "usage-file", "image/png", playgroundPNGFixture(64))
 	createCanvasProject(t, 7, "usage-canvas")
+	memoryCreated := playgroundRequest(t, 7, http.MethodPost, "/api/playground/memories", map[string]any{
+		"content": "Likes concise status updates.", "category": "preference",
+	}, controller.CreatePlaygroundMemory)
+	require.Equal(t, http.StatusOK, memoryCreated.Code, memoryCreated.Body.String())
 
 	otherSession, otherInput := playgroundArtifactSourceFixture(t, 8, "usage-other")
 	artifactResult(t, playgroundRequest(t, 8, http.MethodPost, "/api/playground/sessions/"+otherSession+"/artifacts", otherInput, controller.CreatePlaygroundArtifact))
@@ -3036,6 +3076,8 @@ func TestPlaygroundUsageForUserReportsOwnerTotals(t *testing.T) {
 	assert.Equal(t, "default", usage.Group, "the view names the group its limits came from")
 	assert.EqualValues(t, 1, usage.Sessions.Used)
 	assert.EqualValues(t, 5, usage.Sessions.Limit)
+	assert.EqualValues(t, 1, usage.Memories.Used)
+	assert.EqualValues(t, 7, usage.Memories.Limit)
 	assert.EqualValues(t, 1, usage.Attachments.Used)
 	assert.EqualValues(t, 4, usage.Attachments.Limit)
 	assert.EqualValues(t, 64, usage.Attachments.UsedBytes)
@@ -3971,6 +4013,182 @@ func TestPlaygroundSnippetPersistenceAndOwnership(t *testing.T) {
 			assert.Zero(t, stored)
 			require.NoError(t, db.Where("user_id = ?", 7).First(&usage).Error)
 			assert.Zero(t, usage.Snippets)
+		})
+	}
+}
+
+// Memories are the cross-session notes an account keeps: owner-scoped CRUD
+// over a locked counter, an owner-checked source conversation, and the same
+// stable capacity errors the resource policy produces. The source pointer
+// outlives a purge but is cleared with it, so a dangling conversation can
+// never be opened from the memory panel.
+func TestPlaygroundMemoryPersistenceAndOwnership(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			// The new table is part of the migration contract and must stay
+			// idempotent on every dialect.
+			require.NoError(t, db.AutoMigrate(&model.PlaygroundMemory{}))
+
+			source := createPlayground(t, 7, "memory-source")
+			sourceID := source["id"].(string)
+			otherSource := createPlayground(t, 8, "memory-other-source")
+			otherSourceID := otherSource["id"].(string)
+
+			created := playgroundRequest(t, 7, http.MethodPost, "/api/playground/memories", map[string]any{
+				"content": "  Prefers concise answers with short examples.  ", "category": "preference", "source_session_id": sourceID,
+			}, controller.CreatePlaygroundMemory)
+			require.Equal(t, http.StatusOK, created.Code, created.Body.String())
+			var envelope struct {
+				Success bool
+				Data    struct {
+					ID              string  `json:"id"`
+					Content         string  `json:"content"`
+					Category        string  `json:"category"`
+					SourceSessionID *string `json:"source_session_id"`
+					Enabled         bool    `json:"enabled"`
+					CreatedAt       int64   `json:"created_at"`
+					UpdatedAt       int64   `json:"updated_at"`
+				}
+			}
+			require.NoError(t, common.Unmarshal(created.Body.Bytes(), &envelope))
+			require.True(t, envelope.Success, created.Body.String())
+			id := envelope.Data.ID
+			require.True(t, strings.HasPrefix(id, "pgm_"), id)
+			assert.Equal(t, "Prefers concise answers with short examples.", envelope.Data.Content)
+			assert.Equal(t, "preference", envelope.Data.Category)
+			require.NotNil(t, envelope.Data.SourceSessionID)
+			assert.Equal(t, sourceID, *envelope.Data.SourceSessionID)
+			assert.True(t, envelope.Data.Enabled, "a new memory is enabled by default")
+			assert.NotZero(t, envelope.Data.CreatedAt)
+
+			// The write keeps the account counter row exact, and the unified
+			// usage view reports the same count against the policy limit.
+			var usage model.PlaygroundUserUsage
+			require.NoError(t, db.Where("user_id = ?", 7).First(&usage).Error)
+			assert.EqualValues(t, 1, usage.Memories)
+			usageView, err := model.PlaygroundUsageForUser(7)
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, usageView.Memories.Used)
+			assert.EqualValues(t, playground_setting.GetPlaygroundQuotaPolicy("default").MemoryUserMaxCount, usageView.Memories.Limit)
+
+			// The listing is owner-scoped and reports the effective budget.
+			listed := playgroundRequest(t, 7, http.MethodGet, "/api/playground/memories", nil, controller.ListPlaygroundMemories)
+			var listing struct {
+				Success bool
+				Data    struct {
+					Items []struct {
+						ID              string  `json:"id"`
+						SourceSessionID *string `json:"source_session_id"`
+					}
+					Total int
+					Limit int
+				}
+			}
+			require.NoError(t, common.Unmarshal(listed.Body.Bytes(), &listing))
+			require.True(t, listing.Success, listed.Body.String())
+			require.Len(t, listing.Data.Items, 1)
+			assert.Equal(t, id, listing.Data.Items[0].ID)
+			require.NotNil(t, listing.Data.Items[0].SourceSessionID)
+			assert.Equal(t, sourceID, *listing.Data.Items[0].SourceSessionID)
+			assert.Equal(t, 1, listing.Data.Total)
+			assert.Equal(t, playground_setting.GetPlaygroundQuotaPolicy("default").MemoryUserMaxCount, listing.Data.Limit)
+			foreignList := playgroundRequest(t, 8, http.MethodGet, "/api/playground/memories", nil, controller.ListPlaygroundMemories)
+			assert.Contains(t, foreignList.Body.String(), `"total":0`)
+
+			// Mutation is owner-scoped; another account gets the same 404.
+			foreignRead := playgroundRequest(t, 8, http.MethodGet, "/api/playground/memories/"+id, nil, controller.GetPlaygroundMemory)
+			assert.Equal(t, http.StatusNotFound, foreignRead.Code, foreignRead.Body.String())
+			foreignUpdate := playgroundRequest(t, 8, http.MethodPatch, "/api/playground/memories/"+id, map[string]any{"content": "Hijacked"}, controller.UpdatePlaygroundMemory)
+			assert.Equal(t, http.StatusNotFound, foreignUpdate.Code, foreignUpdate.Body.String())
+			foreignDelete := playgroundRequest(t, 8, http.MethodDelete, "/api/playground/memories/"+id, nil, controller.DeletePlaygroundMemory)
+			assert.Equal(t, http.StatusNotFound, foreignDelete.Code, foreignDelete.Body.String())
+
+			// A memory can only point at an active conversation of the same
+			// account; an explicit null clears the source, an absent field
+			// keeps it.
+			foreignSource := playgroundRequest(t, 7, http.MethodPost, "/api/playground/memories", map[string]any{
+				"content": "Stolen source", "source_session_id": otherSourceID,
+			}, controller.CreatePlaygroundMemory)
+			assert.Equal(t, http.StatusBadRequest, foreignSource.Code, foreignSource.Body.String())
+			assert.Contains(t, foreignSource.Body.String(), "PLAYGROUND_INVALID_REQUEST")
+			unknownSource := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/memories/"+id, map[string]any{
+				"source_session_id": "pgs_missing",
+			}, controller.UpdatePlaygroundMemory)
+			assert.Equal(t, http.StatusBadRequest, unknownSource.Code, unknownSource.Body.String())
+
+			updated := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/memories/"+id, map[string]any{
+				"content": "Prefers bullet points.", "category": "style", "enabled": false, "source_session_id": nil,
+			}, controller.UpdatePlaygroundMemory)
+			require.Equal(t, http.StatusOK, updated.Code, updated.Body.String())
+			assert.Contains(t, updated.Body.String(), `"content":"Prefers bullet points."`)
+			assert.Contains(t, updated.Body.String(), `"category":"style"`)
+			assert.Contains(t, updated.Body.String(), `"enabled":false`)
+			assert.Contains(t, updated.Body.String(), `"source_session_id":null`)
+			kept := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/memories/"+id, map[string]any{"category": "tone"}, controller.UpdatePlaygroundMemory)
+			require.Equal(t, http.StatusOK, kept.Code, kept.Body.String())
+			assert.Contains(t, kept.Body.String(), "Prefers bullet points.", "unsent content keeps its stored value")
+			assert.Contains(t, kept.Body.String(), `"source_session_id":null`, "an absent field keeps the cleared source")
+
+			// Purging the source conversation keeps the memory and only drops
+			// the pointer, so the panel can never open a purged conversation.
+			second := playgroundRequest(t, 7, http.MethodPost, "/api/playground/memories", map[string]any{
+				"content": "Works on the gateway project.", "source_session_id": sourceID,
+			}, controller.CreatePlaygroundMemory)
+			require.Equal(t, http.StatusOK, second.Code, second.Body.String())
+			var secondEnvelope struct {
+				Data struct{ ID string }
+			}
+			require.NoError(t, common.Unmarshal(second.Body.Bytes(), &secondEnvelope))
+			secondID := secondEnvelope.Data.ID
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodDelete, "/api/playground/sessions/"+sourceID, nil, controller.DeletePlaygroundSession).Code)
+			require.NoError(t, model.PurgePlaygroundSession(7, sourceID))
+			purged := playgroundRequest(t, 7, http.MethodGet, "/api/playground/memories/"+secondID, nil, controller.GetPlaygroundMemory)
+			require.Equal(t, http.StatusOK, purged.Code, purged.Body.String())
+			assert.Contains(t, purged.Body.String(), `"source_session_id":null`)
+			require.Equal(t, http.StatusOK, playgroundRequest(t, 7, http.MethodDelete, "/api/playground/memories/"+secondID, nil, controller.DeletePlaygroundMemory).Code)
+
+			for name, body := range map[string]map[string]any{
+				"missing content":  {"category": "fact"},
+				"blank content":    {"content": "  \n"},
+				"overlong label":   {"content": "x", "category": strings.Repeat("c", 51)},
+				"numeric source":   {"content": "x", "source_session_id": 7},
+				"empty source":     {"content": "x", "source_session_id": ""},
+				"malformed source": {"content": "x", "source_session_id": map[string]any{"id": "pgs_x"}},
+			} {
+				response := playgroundRequest(t, 7, http.MethodPost, "/api/playground/memories", body, controller.CreatePlaygroundMemory)
+				assert.Equal(t, http.StatusBadRequest, response.Code, name+": "+response.Body.String())
+			}
+			emptyPatch := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/memories/"+id, map[string]any{}, controller.UpdatePlaygroundMemory)
+			assert.Equal(t, http.StatusBadRequest, emptyPatch.Code, emptyPatch.Body.String())
+			assert.Contains(t, emptyPatch.Body.String(), "Invalid Playground memory.")
+
+			// The resource policy bounds the text of one memory and the account
+			// count with stable capacity errors.
+			usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+				policy.MemoryContentMaxBytes = 16
+			})
+			tooLong := playgroundRequest(t, 7, http.MethodPatch, "/api/playground/memories/"+id, map[string]any{
+				"content": strings.Repeat("x", 17),
+			}, controller.UpdatePlaygroundMemory)
+			assert.Equal(t, http.StatusUnprocessableEntity, tooLong.Code, tooLong.Body.String())
+			assert.Contains(t, tooLong.Body.String(), "PLAYGROUND_MEMORY_CONTENT_LIMIT_EXCEEDED")
+			usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+				policy.MemoryUserMaxCount = 1
+			})
+			overflow := playgroundRequest(t, 7, http.MethodPost, "/api/playground/memories", map[string]any{"content": "One too many"}, controller.CreatePlaygroundMemory)
+			assert.Equal(t, http.StatusUnprocessableEntity, overflow.Code, overflow.Body.String())
+			assert.Contains(t, overflow.Body.String(), "PLAYGROUND_MEMORY_LIMIT_EXCEEDED")
+
+			deleted := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/memories/"+id, nil, controller.DeletePlaygroundMemory)
+			require.Equal(t, http.StatusOK, deleted.Code, deleted.Body.String())
+			repeat := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/memories/"+id, nil, controller.DeletePlaygroundMemory)
+			assert.Equal(t, http.StatusNotFound, repeat.Code, repeat.Body.String())
+			var stored int64
+			require.NoError(t, db.Model(&model.PlaygroundMemory{}).Where("user_id = ?", 7).Count(&stored).Error)
+			assert.Zero(t, stored)
+			require.NoError(t, db.Where("user_id = ?", 7).First(&usage).Error)
+			assert.Zero(t, usage.Memories)
 		})
 	}
 }

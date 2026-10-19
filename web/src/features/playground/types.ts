@@ -86,6 +86,13 @@ export interface MessageVersion {
   requestId?: string
   /** Token usage the relay reported when this version finished generating. */
   usage?: MessageUsage
+  /**
+   * Why the generation of this version ended, as the provider reported it
+   * (`length` when the output hit the token cap, `interrupted` when the user
+   * stopped it). The value only labels the stored version so a truncated reply
+   * can offer "continue generation"; it never feeds billing.
+   */
+  finishReason?: string
 }
 
 /**
@@ -241,6 +248,32 @@ export interface PromptSnippet {
   content: string
   createdAt: number
   updatedAt: number
+}
+
+/**
+ * A durable cross-session note owned by the account. Memories are derived from
+ * the owner's own conversations (or written by hand), optionally point back at
+ * the source conversation, and are injected as one system message into the
+ * next request only while enabled.
+ */
+export interface PlaygroundMemory {
+  id: string
+  content: string
+  category: string
+  sourceSessionId: string | null
+  enabled: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+/**
+ * Browser-owned extraction preference of one account. It is off by default so
+ * no conversation is sent to the extraction model until the owner opts in;
+ * the model is empty while the setting follows the context summary model.
+ */
+export interface PlaygroundMemoryExtractionSettings {
+  enabled: boolean
+  model: string
 }
 
 /**

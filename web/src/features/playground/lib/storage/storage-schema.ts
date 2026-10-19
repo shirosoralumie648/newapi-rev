@@ -111,6 +111,9 @@ const messageVersionSchema = z.object({
   // relay request id (64 characters, the logs.request_id column) and the token
   // usage the relay reported; the settle log stays the billing source.
   requestId: z.string().min(1).max(64).optional(),
+  // Provider finish reason of the version; it only decides whether the reply
+  // offers "continue generation" after a reload.
+  finishReason: z.string().max(64).optional(),
   usage: z
     .object({
       promptTokens: z.number().finite().nonnegative(),
@@ -170,7 +173,15 @@ export const playgroundSessionSchema = z.object({
   /** Greeting copied from a preset; absent in data written before the market. */
   openingMessage: z.string().max(8192).optional(),
   /** Starter questions copied from a preset; absent in older sessions. */
-  suggestedQuestions: z.array(z.string().min(1).max(200)).max(6).optional(),
+  suggestedQuestions: z
+    .array(
+      z
+        .string()
+        .min(1)
+        .refine((value) => Array.from(value).length <= 200)
+    )
+    .max(6)
+    .optional(),
   /** Absent in data written before context management existed. */
   context: playgroundContextSchema.optional(),
   /** Absent or null when the conversation sends its full stored history. */

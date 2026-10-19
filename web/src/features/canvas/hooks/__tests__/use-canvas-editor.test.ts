@@ -480,3 +480,90 @@ test('grouping and pasting refuse an impossible edit without notifying autosave'
   expect(hook.result.current.ungroupSelection()).toBe(false)
   expect(onChange).not.toHaveBeenCalled()
 })
+
+test('addGraph adds nodes and their links in one undoable step', () => {
+  const onChange = vi.fn()
+  const hook = renderHook(() => useCanvasEditor(EMPTY_DOCUMENT, onChange))
+
+  let created: string[] | null = null
+  act(() => {
+    created = hook.result.current.addGraph(
+      [
+        {
+          kind: 'task',
+          position: { x: 0, y: 0 },
+          data: { kind: 'task', text: 'a red fox' },
+        },
+        {
+          kind: 'attachment',
+          position: { x: -300, y: 0 },
+          data: {
+            kind: 'attachment',
+            ref: { sessionId: 'pgs_1', attachmentId: 'a1' },
+          },
+        },
+      ],
+      [{ source: 1, target: 0 }]
+    )
+  })
+
+  expect(created).toHaveLength(2)
+  expect(hook.result.current.nodes).toHaveLength(2)
+  expect(hook.result.current.edges).toHaveLength(1)
+  expect(hook.result.current.edges[0].source).toBe(
+    hook.result.current.nodes[1].id
+  )
+  expect(hook.result.current.edges[0].target).toBe(
+    hook.result.current.nodes[0].id
+  )
+
+  act(() => hook.result.current.undo())
+  expect(hook.result.current.nodes).toHaveLength(0)
+  expect(hook.result.current.edges).toHaveLength(0)
+})
+
+test('addGraph refuses a graph that does not fit the canvas budget', () => {
+  const fullDocument: CanvasServerDocument = {
+    nodes: Array.from({ length: CANVAS_MAX_NODES }, (_, index) => ({
+      id: `node-${index}`,
+      type: 'text' as const,
+      position: { x: index, y: index },
+    })),
+    edges: [],
+  }
+  const onChange = vi.fn()
+  const hook = renderHook(() => useCanvasEditor(fullDocument, onChange))
+
+  let created: string[] | null = ['pending']
+  act(() => {
+    created = hook.result.current.addGraph(
+      [
+        {
+          kind: 'task',
+          position: { x: 0, y: 0 },
+          data: { kind: 'task', text: 'a red fox' },
+        },
+      ],
+      []
+    )
+  })
+
+  expect(created).toBeNull()
+  expect(hook.result.current.nodes).toHaveLength(CANVAS_MAX_NODES)
+  expect(onChange).not.toHaveBeenCalled()
+})
+
+test('selectNode marks exactly one node and stays out of the undo history', () => {
+  const onChange = vi.fn()
+  const hook = renderHook(() => useCanvasEditor(LINKED_DOCUMENT, onChange))
+
+  act(() => hook.result.current.selectNode('a'))
+  expect(hook.result.current.selectedNode?.id).toBe('a')
+  expect(hook.result.current.canUndo).toBe(false)
+
+  act(() => hook.result.current.selectNode('b'))
+  expect(hook.result.current.selectedNode?.id).toBe('b')
+
+  act(() => hook.result.current.selectNode(null))
+  expect(hook.result.current.selectedNode).toBeNull()
+})

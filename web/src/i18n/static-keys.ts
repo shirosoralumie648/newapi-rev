@@ -41,6 +41,10 @@ export const STATIC_I18N_KEYS = [
   'Attachment is too large.',
   'Attachment data could not be read.',
   'Attachment upload failed. Your message was not sent.',
+  // Conversation import feedback renders from PLAYGROUND_IMPORT_ERRORS.
+  'Invalid conversation export.',
+  'The conversation export is too large.',
+  'Unable to import the conversation.',
   // Playground document text extraction server messages.
   'This file type cannot be read as text.',
   'The document is too large to read as text.',
@@ -106,6 +110,10 @@ export const STATIC_I18N_KEYS = [
   'Assistant preset name must contain 1 to 100 characters.',
   'Assistant preset avatar must be an emoji or an http(s) image URL.',
   'Invalid assistant preset.',
+  'Invalid preset file.',
+  'Too many suggested questions.',
+  'Each suggested question must contain 1 to 200 characters.',
+  'The opening message is too long.',
 
   'Authentication required.',
   'Invalid Playground canvas archive.',
@@ -1149,6 +1157,19 @@ export const STATIC_I18N_KEYS = [
   'Prompt snippet content limit exceeded.',
   'Prompt snippets per user',
   'Prompt snippet size limit',
+  // Cross-session memory (LB-06): category labels render through
+  // t(PLAYGROUND_MEMORY_CATEGORY_LABELS[...]) and the error/quota labels from
+  // constants, so the literal scan cannot see all of them.
+  'Failed to load memories',
+  'Failed to save the memory',
+  'Failed to delete the memory',
+  'Preference',
+  'Project',
+  'Memory',
+  'Memories per user',
+  'Memory content size limit',
+  'Playground memory limit reached. Delete an old memory or ask your administrator for a larger limit.',
+  'This memory is longer than the allowed size.',
   // Playground quota policy groups and field labels render through
   // t(labelKey) from PLAYGROUND_QUOTA_GROUPS / PLAYGROUND_QUOTA_FIELDS; the
   // trash entries are the CH-04 additions.

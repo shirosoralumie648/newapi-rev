@@ -34,7 +34,7 @@ test('the conversation sheet creates, focuses and handles keyboard on mobile', a
   await expect(page.getByRole('dialog')).toBeHidden()
 })
 
-test('the artifact sheet opens and closes with Escape on mobile', async ({
+test('the composer attachment layer offers upload and saved assets', async ({
   page,
 }) => {
   await page.goto('/playground')
@@ -45,11 +45,12 @@ test('the artifact sheet opens and closes with Escape on mobile', async ({
     .getByRole('button', { name: 'New session' })
     .click()
 
-  const toggle = page.getByRole('button', { name: 'Artifacts', exact: true })
-  await toggle.click()
+  await page.getByRole('button', { name: 'Attach' }).click()
+  const sheet = page.getByRole('dialog')
+  await expect(sheet).toBeVisible()
+  await expect(sheet.getByRole('tab', { name: 'Upload files' })).toBeVisible()
+  await expect(sheet.getByRole('tab', { name: 'My assets' })).toBeVisible()
 
-  await expect(page.getByRole('dialog')).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog')).toBeHidden()
-  await expect(toggle).toHaveAttribute('aria-pressed', 'false')
 })

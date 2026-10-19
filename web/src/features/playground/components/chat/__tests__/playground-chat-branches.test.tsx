@@ -138,6 +138,29 @@ describe('PlaygroundChat branch history', () => {
     ).not.toBeInTheDocument()
   })
 
+  test('shows a preset opening message and sends its suggested questions', async () => {
+    const user = userEvent.setup()
+    const onSelectPrompt = vi.fn()
+
+    render(
+      <PlaygroundChat
+        messages={[]}
+        onSelectPrompt={onSelectPrompt}
+        openingMessage='Welcome to the code review.'
+        suggestedQuestions={['Explain this diff', 'Find bugs']}
+      />
+    )
+
+    expect(screen.getByText('Welcome to the code review.')).toBeInTheDocument()
+    expect(screen.getByText('Suggested questions')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Analyze data' })
+    ).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Find bugs' }))
+    expect(onSelectPrompt).toHaveBeenCalledWith('Find bugs')
+  })
+
   test('renders the compression node right after the messages it covers', () => {
     const messages: Message[] = [
       {

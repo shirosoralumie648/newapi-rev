@@ -203,3 +203,29 @@ test('moves a persisted conversation to the trash instead of deleting it outrigh
   await user.click(screen.getByRole('button', { name: 'Move to trash' }))
   expect(onDelete).toHaveBeenCalledWith('saved')
 })
+
+test('hands the chosen export file to the conversation importer', async () => {
+  const user = userEvent.setup()
+  const onImportFile = vi.fn().mockResolvedValue(undefined)
+  const { container } = render(
+    <PlaygroundSessionList
+      activeSessionId='older'
+      onImportFile={onImportFile}
+      onCreate={vi.fn()}
+      onDelete={vi.fn()}
+      onRename={vi.fn()}
+      onSwitch={vi.fn()}
+      sessions={sessions}
+    />
+  )
+  const file = new File(['{"session":{}}'], 'chat.json', {
+    type: 'application/json',
+  })
+  const input = container.querySelector('input[type="file"]')
+  expect(input).not.toBeNull()
+  if (!input) return
+
+  await user.upload(input as HTMLInputElement, file)
+
+  expect(onImportFile).toHaveBeenCalledWith(file)
+})

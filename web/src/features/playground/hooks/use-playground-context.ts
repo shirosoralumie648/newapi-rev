@@ -43,6 +43,8 @@ interface UsePlaygroundContextOptions {
   messages: Message[]
   config: PlaygroundConfig
   systemPrompt: string
+  /** Enabled cross-session memory block injected after the system prompt. */
+  memoryBlock?: string
   settings: PlaygroundContextSettings
   summary: PlaygroundContextSummary | null
   /** Persists the compression node (or its removal) on the conversation. */
@@ -81,6 +83,7 @@ export function usePlaygroundContext(options: UsePlaygroundContextOptions) {
         settings: options.settings,
         summary: options.summary,
         systemPrompt: options.systemPrompt,
+        memoryBlock: options.memoryBlock,
         model: options.config.model,
       }),
     [
@@ -88,6 +91,7 @@ export function usePlaygroundContext(options: UsePlaygroundContextOptions) {
       options.settings,
       options.summary,
       options.systemPrompt,
+      options.memoryBlock,
       options.config.model,
     ]
   )
@@ -188,6 +192,7 @@ export function usePlaygroundContext(options: UsePlaygroundContextOptions) {
         settings: current.settings,
         summary: current.summary,
         systemPrompt: current.systemPrompt,
+        memoryBlock: current.memoryBlock,
         model: current.config.model,
       })
       if (!current.settings.autoSummarize || !freshPlan.needsSummary) {
@@ -209,6 +214,7 @@ export function usePlaygroundContext(options: UsePlaygroundContextOptions) {
       settings: current.settings,
       summary: current.summary,
       systemPrompt: current.systemPrompt,
+      memoryBlock: current.memoryBlock,
       model: current.config.model,
     })
     if (!freshPlan.needsSummary) return
