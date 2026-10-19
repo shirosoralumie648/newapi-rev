@@ -428,6 +428,7 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"POST /pg/images/generations":   accessTokenSessionRule,
 	"POST /pg/images/edits":         accessTokenSessionRule,
 	"POST /pg/videos":               accessTokenSessionRule,
+	"POST /pg/embeddings":           accessTokenSessionRule,
 	"POST /pg/audio/speech":         accessTokenSessionRule,
 	"POST /pg/audio/transcriptions": accessTokenSessionRule,
 }

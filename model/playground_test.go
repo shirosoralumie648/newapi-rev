@@ -2259,6 +2259,7 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	require.NoError(t, model.CreateUserAccessToken(user.Id, &pat, service.AccessTokenMaxPerUser))
 	engine := gin.New()
 	router.SetApiRouter(engine)
+	router.SetRelayRouter(engine)
 	sessionID, input := playgroundArtifactSourceFixture(t, user.Id, "authenticated")
 	attachmentBase := "/api/playground/sessions/" + sessionID + "/attachments"
 	for _, route := range []struct{ method, path string }{
@@ -2270,6 +2271,7 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodGet, "/api/playground/sessions/" + sessionID + "/export"},
 		{http.MethodPost, "/api/playground/sessions/" + sessionID + "/restore"},
 		{http.MethodPost, "/api/playground/tasks/missing/cancel"},
+		{http.MethodPost, "/pg/embeddings"},
 		{http.MethodGet, "/api/playground/presets"},
 		{http.MethodPost, "/api/playground/presets"},
 		{http.MethodGet, "/api/playground/presets/market"},
@@ -5389,6 +5391,17 @@ func TestPlaygroundKnowledgeBaseMatrix(t *testing.T) {
 			assert.Equal(t, 2, readyDocument.ChunkCount)
 			assert.Equal(t, 3, readyDocument.EmbeddingDims)
 			assert.Equal(t, "embedding-3-small", readyDocument.EmbeddingModel)
+
+			// A late failure report from a reordered client request cannot mark
+			// already indexed chunks as failed.
+			lateFailure := playgroundRequest(t, 7, http.MethodPost, documentPath+"/"+documentID+"/failure", map[string]any{
+				"message": "late browser failure",
+			}, controller.FailPlaygroundKnowledgeDocument)
+			require.Equal(t, http.StatusOK, lateFailure.Code, lateFailure.Body.String())
+			var lateDocument playgroundKnowledgeDocumentJSON
+			playgroundKnowledgeResponseData(t, lateFailure, &lateDocument)
+			assert.Equal(t, model.PlaygroundKnowledgeDocumentStatusReady, lateDocument.Status)
+			assert.Empty(t, lateDocument.ErrorMessage)
 
 			counters := playgroundUsageCounters(t, db, 7)
 			assert.EqualValues(t, 1, counters.KnowledgeBaseCount)
