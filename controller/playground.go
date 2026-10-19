@@ -83,3 +83,16 @@ func Playground(c *gin.Context) {
 func PlaygroundEmbeddings(c *gin.Context) {
 	playgroundRelay(c, types.RelayFormatEmbedding)
 }
+
+// PlaygroundRerank serves the non-chat model workbench through the canonical
+// /v1/rerank pipeline.
+func PlaygroundRerank(c *gin.Context) {
+	playgroundRelay(c, types.RelayFormatRerank)
+}
+
+// PlaygroundModerations serves the non-chat model workbench through the
+// canonical /v1/moderations pipeline. Moderation uses the OpenAI relay format,
+// matching the direct route.
+func PlaygroundModerations(c *gin.Context) {
+	playgroundRelay(c, types.RelayFormatOpenAI)
+}

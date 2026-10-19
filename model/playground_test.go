@@ -2520,6 +2520,8 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodPost, "/api/playground/sessions/" + sessionID + "/restore"},
 		{http.MethodPost, "/api/playground/tasks/missing/cancel"},
 		{http.MethodPost, "/pg/embeddings"},
+		{http.MethodPost, "/pg/rerank"},
+		{http.MethodPost, "/pg/moderations"},
 		{http.MethodGet, "/api/playground/presets"},
 		{http.MethodPost, "/api/playground/presets"},
 		{http.MethodGet, "/api/playground/presets/market"},
@@ -6917,7 +6919,7 @@ func TestPlaygroundTaskGenerationMetadataRoundTripAndFilters(t *testing.T) {
 				},
 				{
 					TaskID: "generation-without-metadata", UserId: 7, Platform: "sunoapi", Status: model.TaskStatusSuccess,
-					SubmitTime: common.GetTimestamp(),
+					SubmitTime:  common.GetTimestamp(),
 					PrivateData: model.TaskPrivateData{PlaygroundOrigin: true},
 				},
 			}
