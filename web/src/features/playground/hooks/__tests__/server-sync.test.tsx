@@ -28,6 +28,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import {
   DEFAULT_CONFIG,
   DEFAULT_CONTEXT_SETTINGS,
+  DEFAULT_DEVELOPER_OPTIONS,
   DEFAULT_PARAMETER_ENABLED,
 } from '../../constants'
 import { playgroundQueryKeys } from '../../lib/query-keys'
@@ -65,6 +66,7 @@ const localDraft: PlaygroundSession = {
   knowledgeBaseIds: [],
   context: { ...DEFAULT_CONTEXT_SETTINGS },
   contextSummary: null,
+  developerOptions: { ...DEFAULT_DEVELOPER_OPTIONS, tools: [] },
   pinned: false,
   archived: false,
   tags: [],

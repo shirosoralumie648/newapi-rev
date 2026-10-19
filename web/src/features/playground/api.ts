@@ -33,6 +33,7 @@ import {
   normalizeContextSettings,
   normalizeContextSummary,
 } from './lib/context/playground-context'
+import { normalizeDeveloperOptions } from './lib/developer/developer-options'
 import { normalizeSessionTags } from './lib/session-organization'
 import {
   messagesSchema,
@@ -102,12 +103,30 @@ export async function sendChatCompletion(
   }
 }
 
+// Read-only model metadata from /api/user/models?details=1. Plain strings stay
+// accepted so an older server still yields usable options.
+const serverModelDetailSchema = z.object({
+  model_name: z.string().min(1),
+  description: z.string().optional(),
+  quota_type: z.number().finite().optional(),
+  model_ratio: z.number().finite().optional(),
+  model_price: z.number().finite().optional(),
+  completion_ratio: z.number().finite().optional(),
+  cache_ratio: z.number().finite().nullable().optional(),
+  billing_mode: z.string().optional(),
+  billing_expr: z.string().optional(),
+  context_length: z.number().finite().nonnegative().optional(),
+  capabilities: z.array(z.string()).optional(),
+  supports_chat: z.boolean().optional(),
+  is_image_generation: z.boolean().optional(),
+})
+
 /**
  * Get user available models
  */
 export async function getUserModels(group: string): Promise<ModelOption[]> {
   const res = await api.get(API_ENDPOINTS.USER_MODELS, {
-    params: { group },
+    params: { group, details: 1 },
   })
   const { data } = res
   requireServerSuccess(data)
@@ -116,10 +135,36 @@ export async function getUserModels(group: string): Promise<ModelOption[]> {
     return []
   }
 
-  return data.data.map((model: string) => ({
-    label: model,
-    value: model,
-  }))
+  return data.data.flatMap((entry: unknown): ModelOption[] => {
+    if (typeof entry === 'string') {
+      return [{ label: entry, value: entry }]
+    }
+    const parsed = serverModelDetailSchema.safeParse(entry)
+    if (!parsed.success) {
+      return []
+    }
+    const model = parsed.data
+    return [
+      {
+        label: model.model_name,
+        value: model.model_name,
+        description: model.description,
+        quotaType: model.quota_type,
+        modelRatio: model.model_ratio,
+        modelPrice: model.model_price,
+        completionRatio: model.completion_ratio,
+        cacheRatio: model.cache_ratio,
+        billingMode: model.billing_mode,
+        billingExpr: model.billing_expr,
+        contextLength: model.context_length,
+        capabilities: model.capabilities?.filter(
+          (capability) => capability.length > 0
+        ),
+        supportsChat: model.supports_chat ?? true,
+        isImageGeneration: model.is_image_generation ?? false,
+      },
+    ]
+  })
 }
 
 /**
@@ -189,6 +234,12 @@ const serverSessionSchema = z.object({
   knowledge_base_ids: z.array(z.string()).optional(),
   context: serverContextSettingsSchema.optional(),
   context_summary: serverContextSummarySchema.nullable().optional(),
+  /**
+   * Request-side developer settings the server stored for the conversation.
+   * The value is an object in the OpenAI wire shape; a legacy row reads back
+   * as an empty object, and the mapper turns it into the disabled defaults.
+   */
+  developer_options: z.unknown().optional(),
   pinned: z.boolean().optional(),
   archived: z.boolean().optional(),
   pinned_at: z.number().int().nonnegative().optional(),
@@ -211,6 +262,12 @@ export interface PlaygroundSessionInput {
   knowledge_base_ids?: string[]
   context?: PlaygroundContextSettings
   context_summary?: PlaygroundContextSummary | null
+  /**
+   * Complete request-side developer settings replacement in the OpenAI wire
+   * shape. An explicit null clears the stored value; omitting the field keeps
+   * it, matching the server contract.
+   */
+  developer_options?: Record<string, unknown> | null
   pinned?: boolean
   archived?: boolean
   tags?: string[]
@@ -418,6 +475,7 @@ function mapServerSession(value: unknown): PlaygroundServerSession {
     contextSummary: normalizeContextSummary(
       mapServerContextSummary(session.context_summary)
     ),
+    developerOptions: normalizeDeveloperOptions(session.developer_options),
     pinned: archived ? false : (session.pinned ?? (session.pinned_at ?? 0) > 0),
     archived,
     tags: normalizeSessionTags(session.tags),
@@ -978,6 +1036,7 @@ const playgroundUsageSchema = z.object({
   kb_chunks: playgroundUsageMetricSchema,
   storage: playgroundUsageMetricSchema,
   tasks: playgroundUsageMetricSchema,
+  comparison_runs: playgroundUsageMetricSchema,
 })
 
 const playgroundSettingsSchema = z.object({
@@ -1010,6 +1069,7 @@ export interface PlaygroundResourceUsage {
   knowledgeBaseChunks: PlaygroundUsageMetric
   storage: PlaygroundUsageMetric
   tasks: PlaygroundUsageMetric
+  comparisonRuns: PlaygroundUsageMetric
 }
 
 /**
@@ -1088,6 +1148,7 @@ export async function getPlaygroundUsage(
     knowledgeBaseChunks: toMetric(metrics.kb_chunks),
     storage: toMetric(metrics.storage),
     tasks: toMetric(metrics.tasks),
+    comparisonRuns: toMetric(metrics.comparison_runs),
   }
 }
 

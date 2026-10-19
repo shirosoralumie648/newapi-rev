@@ -21,6 +21,7 @@ import { describe, expect, test } from 'vitest'
 import {
   DEFAULT_CONFIG,
   DEFAULT_CONTEXT_SETTINGS,
+  DEFAULT_DEVELOPER_OPTIONS,
   DEFAULT_PARAMETER_ENABLED,
 } from '../../../constants'
 import type { Message, PlaygroundSession } from '../../../types'
@@ -54,6 +55,7 @@ function session(
     knowledgeBaseIds: [],
     context: { ...DEFAULT_CONTEXT_SETTINGS },
     contextSummary: null,
+    developerOptions: { ...DEFAULT_DEVELOPER_OPTIONS, tools: [] },
     pinned: false,
     archived: false,
     tags: [],

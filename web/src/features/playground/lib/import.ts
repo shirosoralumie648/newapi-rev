@@ -28,6 +28,7 @@ import {
 } from '../api'
 import {
   DEFAULT_CONFIG,
+  DEFAULT_DEVELOPER_OPTIONS,
   DEFAULT_PARAMETER_ENABLED,
   PLAYGROUND_ATTACHMENT_MAX_COUNT,
   PLAYGROUND_FORK_ERRORS,
@@ -54,6 +55,10 @@ import {
   normalizeContextSettings,
   normalizeContextSummary,
 } from './context/playground-context'
+import {
+  normalizeDeveloperOptions,
+  serializeDeveloperOptions,
+} from './developer/developer-options'
 import {
   messageSearchSchema,
   messagesSchema,
@@ -717,6 +722,7 @@ export async function importPlaygroundSessionDocument(
         knowledgeBaseIds: [],
         context: document.context,
         contextSummary: document.contextSummary,
+        developerOptions: normalizeDeveloperOptions(DEFAULT_DEVELOPER_OPTIONS),
         pinned: created.pinned,
         archived: created.archived,
         tags: [...created.tags],
@@ -799,6 +805,9 @@ export async function forkPlaygroundSession(options: {
       knowledge_base_ids: options.sourceSession.knowledgeBaseIds,
       context: options.sourceSession.context,
       context_summary: null,
+      developer_options: serializeDeveloperOptions(
+        options.sourceSession.developerOptions
+      ),
     },
     options.signal
   )
@@ -838,6 +847,9 @@ export async function forkPlaygroundSession(options: {
         knowledgeBaseIds: [...options.sourceSession.knowledgeBaseIds],
         context: options.sourceSession.context,
         contextSummary: null,
+        developerOptions: normalizeDeveloperOptions(
+          options.sourceSession.developerOptions
+        ),
         pinned: created.pinned,
         archived: created.archived,
         tags: [...created.tags],

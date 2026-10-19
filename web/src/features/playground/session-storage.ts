@@ -23,6 +23,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import {
   DEFAULT_CONFIG,
   DEFAULT_CONTEXT_SETTINGS,
+  DEFAULT_DEVELOPER_OPTIONS,
   DEFAULT_PARAMETER_ENABLED,
   DEFAULT_SESSION_TITLE,
   MAX_STORED_SESSIONS,
@@ -32,6 +33,7 @@ import {
   normalizeContextSettings,
   normalizeContextSummary,
 } from './lib/context/playground-context'
+import { normalizeDeveloperOptions } from './lib/developer/developer-options'
 import { normalizeSessionTags } from './lib/session-organization'
 import {
   clearLegacyPlaygroundData,
@@ -84,6 +86,7 @@ function createSession(
     knowledgeBaseIds: [...knowledgeBaseIds],
     context: { ...context },
     contextSummary,
+    developerOptions: normalizeDeveloperOptions(DEFAULT_DEVELOPER_OPTIONS),
     pinned: false,
     archived: false,
     tags: [],
@@ -112,6 +115,7 @@ function normalizeSession(value: unknown): PlaygroundSession | null {
     knowledgeBaseIds: parsed.data.knowledgeBaseIds ?? [],
     context: normalizeContextSettings(parsed.data.context),
     contextSummary: normalizeContextSummary(parsed.data.contextSummary),
+    developerOptions: normalizeDeveloperOptions(parsed.data.developerOptions),
     pinned: parsed.data.archived ? false : (parsed.data.pinned ?? false),
     archived: parsed.data.archived ?? false,
     tags: normalizeSessionTags(parsed.data.tags),
@@ -206,6 +210,7 @@ function migrateStoredSession(value: unknown): PlaygroundSession | null {
       : undefined,
     context: source.context,
     contextSummary: source.contextSummary,
+    developerOptions: source.developerOptions,
     pinned: source.pinned,
     archived: source.archived,
     tags: source.tags,

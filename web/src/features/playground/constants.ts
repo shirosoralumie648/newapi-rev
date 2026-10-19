@@ -117,6 +117,7 @@ export const API_ENDPOINTS = {
   PLAYGROUND_TASKS: '/api/playground/tasks',
   PLAYGROUND_WORKFLOW_ESTIMATE: '/api/playground/workflows/estimate',
   PLAYGROUND_WORKFLOW_RUNS: '/api/playground/workflows/runs',
+  PLAYGROUND_COMPARISONS: '/api/playground/comparisons',
 } as const
 
 // The relay answers every request with the request id it recorded, so a
@@ -219,6 +220,58 @@ export const PLAYGROUND_PARALLEL_MESSAGES = {
 // an id has no row and stops immediately when consume logs are switched off.
 export const PLAYGROUND_COST_LOOKUP_POLL_INTERVAL_MS = 2000
 export const PLAYGROUND_COST_LOOKUP_MAX_ATTEMPTS = 5
+
+// Compare-run matrix bounds. The server mirrors the product ceilings as quota
+// defaults and re-validates every field, so the client never stores or sends a
+// matrix outside what the owner's policy allows. One run holds at most
+// 6 models x 10 prompts = 60 cells, which also stays below the 64-step
+// estimate endpoint ceiling.
+export const PLAYGROUND_COMPARISON_MIN_MODELS = 2
+export const PLAYGROUND_COMPARISON_MAX_MODELS = 6
+export const PLAYGROUND_COMPARISON_MAX_PROMPTS = 10
+export const PLAYGROUND_COMPARISON_MAX_CONCURRENCY = 6
+export const PLAYGROUND_COMPARISON_DEFAULT_CONCURRENCY = 2
+export const PLAYGROUND_COMPARISON_PROMPT_MAX_BYTES = 16 * 1024
+export const PLAYGROUND_COMPARISON_TITLE_MAX_LENGTH = 200
+// The stored output and error of one cell are bounded by the server contract;
+// the client cuts to a smaller budget so a multi-byte answer can never become
+// an invalid snapshot. The fallback error text replaces an empty provider
+// message so a failed cell still explains itself.
+export const PLAYGROUND_COMPARISON_OUTPUT_MAX_BYTES = 12 * 1024
+export const PLAYGROUND_COMPARISON_ERROR_MAX_BYTES = 1500
+export const PLAYGROUND_COMPARISON_MESSAGES = {
+  ESTIMATE_FAILED: 'Unable to price the comparison run.',
+  START_FAILED: 'The comparison run could not be started.',
+  SAVE_FAILED:
+    'The comparison run could not be saved. Reload it and try again.',
+  LOAD_FAILED: 'The comparison run could not be loaded.',
+  HISTORY_FAILED: 'Failed to load comparison history.',
+  DELETE_FAILED: 'The comparison run could not be deleted.',
+  BUDGET_EXCEEDED:
+    'The run budget cap was reached; the remaining cells were canceled.',
+  QUOTA_EXCEEDED:
+    'The account ran out of quota; the remaining cells were canceled.',
+  NO_CHOICE: 'The model returned no completion choice.',
+  RUN_FAILED: 'The comparison run stopped before every cell finished.',
+  RETRY_FAILED: 'The cell could not be retried.',
+  BASELINE_FAILED: 'The baseline model could not be saved.',
+  SETTLE_FAILED:
+    'The run budget could not be settled. The unspent cap is released automatically after it expires.',
+  PROMPTS_EMPTY: 'Enter at least one prompt.',
+  PROMPTS_INVALID: 'Line {{line}} is not a valid JSONL prompt.',
+  PROMPTS_LIMIT: 'You can run up to {{count}} prompts at once',
+  PROMPT_TOO_LARGE:
+    'A prompt is longer than the size limit. Shorten it before running.',
+  MODELS_LIMIT: 'Select between {{min}} and {{max}} models.',
+} as const
+// Stable relay/budget codes that mean every later cell would fail too, so the
+// run stops after the current requests instead of spending on doomed calls.
+export const PLAYGROUND_COMPARISON_STOP_ERROR_CODES: readonly string[] = [
+  'workflow_budget_exceeded',
+  'insufficient_user_quota',
+  'pre_consume_token_quota_failed',
+  'token_period_quota_exhausted',
+]
 
 // Default group — uses 'default' as the safe fallback; auto-group is
 // only selected when the backend confirms it is available for the user.

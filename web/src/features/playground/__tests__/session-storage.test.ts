@@ -23,6 +23,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import {
   DEFAULT_CONFIG,
   DEFAULT_CONTEXT_SETTINGS,
+  DEFAULT_DEVELOPER_OPTIONS,
   DEFAULT_PARAMETER_ENABLED,
   MAX_SESSION_TAG_LENGTH,
   STORAGE_KEYS,
@@ -44,6 +45,7 @@ const session = (id: string, title = id): PlaygroundSession => ({
   knowledgeBaseIds: [],
   context: { ...DEFAULT_CONTEXT_SETTINGS },
   contextSummary: null,
+  developerOptions: { ...DEFAULT_DEVELOPER_OPTIONS, tools: [] },
   pinned: false,
   archived: false,
   tags: [],

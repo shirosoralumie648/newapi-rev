@@ -102,6 +102,19 @@ export function canvasWorkflowResultKind(
 export type CanvasWorkflowModelCapability = {
   endpointTypes?: string[]
   usageFields?: string[]
+  /**
+   * Image-edit operations the enabled channels of the model expose. Undefined
+   * means the catalog did not report any, so the canvas treats the capability
+   * as unknown and keeps the tool available.
+   */
+  imageTools?: CanvasWorkflowImageToolCapability
+}
+
+export type CanvasWorkflowImageToolCapability = {
+  edit?: boolean
+  outpaint?: boolean
+  backgroundRemoval?: boolean
+  styleReference?: boolean
 }
 
 export type CanvasWorkflowGenerationSupport = {

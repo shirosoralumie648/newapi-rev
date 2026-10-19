@@ -41,6 +41,7 @@ import {
   createEmptyCanvasDocument,
 } from '../lib/canvas-document'
 import type {
+  CanvasProjectMode,
   CanvasProjectSummary,
   CanvasServerDocument,
   CanvasServerProject,
@@ -279,11 +280,12 @@ export function useCanvasProject(
   }, [flush])
 
   const createNewProject = useCallback(
-    async (title?: string) => {
+    async (mode?: CanvasProjectMode, title?: string) => {
       await flush()
       const created = await createCanvasProject({
         clientId: nanoid(),
         title: title ?? CANVAS_DEFAULT_TITLE,
+        mode,
         document: createEmptyCanvasDocument(),
       })
       if (!mounted.current) return created

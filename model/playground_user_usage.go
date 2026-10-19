@@ -95,8 +95,13 @@ type PlaygroundUserUsage struct {
 	KnowledgeBaseDocumentCount int64 `json:"knowledge_base_document_count" gorm:"not null;default:0"`
 	KnowledgeBaseChunkCount    int64 `json:"knowledge_base_chunk_count" gorm:"not null;default:0"`
 	KnowledgeBaseBytes         int64 `json:"knowledge_base_bytes" gorm:"not null;default:0"`
-	CreatedAt                  int64 `json:"created_at" gorm:"not null"`
-	UpdatedAt                  int64 `json:"updated_at" gorm:"not null"`
+	// ComparisonRunCount and ComparisonRunBytes count the persisted compare-run
+	// matrices of the account and their stored JSON snapshot bytes. The columns
+	// were appended to an existing table, so they carry DEFAULT 0 for upgrades.
+	ComparisonRunCount int64 `json:"comparison_run_count" gorm:"not null;default:0"`
+	ComparisonRunBytes int64 `json:"comparison_run_bytes" gorm:"not null;default:0"`
+	CreatedAt          int64 `json:"created_at" gorm:"not null"`
+	UpdatedAt          int64 `json:"updated_at" gorm:"not null"`
 }
 
 // TableName pins the table name the plan defines; GORM would otherwise
@@ -129,6 +134,8 @@ type playgroundUserUsageCounters struct {
 	KnowledgeBaseDocumentCount int64
 	KnowledgeBaseChunkCount    int64
 	KnowledgeBaseBytes         int64
+	ComparisonRunCount         int64
+	ComparisonRunBytes         int64
 }
 
 func (usage *PlaygroundUserUsage) counters() playgroundUserUsageCounters {
@@ -154,6 +161,8 @@ func (usage *PlaygroundUserUsage) counters() playgroundUserUsageCounters {
 		KnowledgeBaseDocumentCount: usage.KnowledgeBaseDocumentCount,
 		KnowledgeBaseChunkCount:    usage.KnowledgeBaseChunkCount,
 		KnowledgeBaseBytes:         usage.KnowledgeBaseBytes,
+		ComparisonRunCount:         usage.ComparisonRunCount,
+		ComparisonRunBytes:         usage.ComparisonRunBytes,
 	}
 }
 
@@ -180,6 +189,8 @@ func (usage *PlaygroundUserUsage) load(counters playgroundUserUsageCounters) {
 	usage.KnowledgeBaseDocumentCount = counters.KnowledgeBaseDocumentCount
 	usage.KnowledgeBaseChunkCount = counters.KnowledgeBaseChunkCount
 	usage.KnowledgeBaseBytes = counters.KnowledgeBaseBytes
+	usage.ComparisonRunCount = counters.ComparisonRunCount
+	usage.ComparisonRunBytes = counters.ComparisonRunBytes
 }
 
 // playgroundUserUsageDelta is a signed change applied to a locked counter row.
@@ -207,6 +218,8 @@ type playgroundUserUsageDelta struct {
 	KnowledgeBaseDocumentCount int64
 	KnowledgeBaseChunkCount    int64
 	KnowledgeBaseBytes         int64
+	ComparisonRunCount         int64
+	ComparisonRunBytes         int64
 }
 
 func (usage *PlaygroundUserUsage) apply(delta playgroundUserUsageDelta) {
@@ -231,6 +244,8 @@ func (usage *PlaygroundUserUsage) apply(delta playgroundUserUsageDelta) {
 	usage.KnowledgeBaseDocumentCount = max(0, usage.KnowledgeBaseDocumentCount+delta.KnowledgeBaseDocumentCount)
 	usage.KnowledgeBaseChunkCount = max(0, usage.KnowledgeBaseChunkCount+delta.KnowledgeBaseChunkCount)
 	usage.KnowledgeBaseBytes = max(0, usage.KnowledgeBaseBytes+delta.KnowledgeBaseBytes)
+	usage.ComparisonRunCount = max(0, usage.ComparisonRunCount+delta.ComparisonRunCount)
+	usage.ComparisonRunBytes = max(0, usage.ComparisonRunBytes+delta.ComparisonRunBytes)
 }
 
 // lockPlaygroundUserUsage acquires the account's counter row for the rest of
@@ -294,6 +309,8 @@ func savePlaygroundUserUsage(tx *gorm.DB, usage *PlaygroundUserUsage) error {
 		"knowledge_base_document_count": usage.KnowledgeBaseDocumentCount,
 		"knowledge_base_chunk_count":    usage.KnowledgeBaseChunkCount,
 		"knowledge_base_bytes":          usage.KnowledgeBaseBytes,
+		"comparison_run_count":          usage.ComparisonRunCount,
+		"comparison_run_bytes":          usage.ComparisonRunBytes,
 		"updated_at":                    usage.UpdatedAt,
 	}).Error
 }
@@ -405,6 +422,15 @@ func playgroundUserUsageSnapshot(tx *gorm.DB, userID int) (PlaygroundUserUsage, 
 	usage.KnowledgeBaseDocumentCount = knowledge.DocumentCount
 	usage.KnowledgeBaseChunkCount = knowledgeChunks.ChunkCount
 	usage.KnowledgeBaseBytes = knowledge.DocumentBytes + knowledge.TextBytes + knowledgeChunks.ChunkBytes
+	var comparisons struct {
+		Used      int64
+		UsedBytes int64
+	}
+	if err := tx.Model(&PlaygroundComparisonRun{}).Where("user_id = ?", userID).
+		Select("COUNT(*) AS used, COALESCE(SUM(byte_size), 0) AS used_bytes").Scan(&comparisons).Error; err != nil {
+		return usage, err
+	}
+	usage.ComparisonRunCount, usage.ComparisonRunBytes = comparisons.Used, comparisons.UsedBytes
 	return usage, nil
 }
 
@@ -443,7 +469,7 @@ type PlaygroundUsageReconciliation struct {
 // them.
 func playgroundUsageOwnerIDs(db *gorm.DB) ([]int, error) {
 	seen := map[int]bool{}
-	for _, resource := range []any{&PlaygroundSession{}, &PlaygroundPreset{}, &PlaygroundSnippet{}, &PlaygroundMemory{}, &PlaygroundAttachment{}, &PlaygroundUpload{}, &PlaygroundArtifact{}, &PlaygroundCanvasProject{}, &PlaygroundCanvasTemplate{}, &PlaygroundCanvasSnapshot{}, &PlaygroundKnowledgeBase{}} {
+	for _, resource := range []any{&PlaygroundSession{}, &PlaygroundPreset{}, &PlaygroundSnippet{}, &PlaygroundMemory{}, &PlaygroundAttachment{}, &PlaygroundUpload{}, &PlaygroundArtifact{}, &PlaygroundCanvasProject{}, &PlaygroundCanvasTemplate{}, &PlaygroundCanvasSnapshot{}, &PlaygroundKnowledgeBase{}, &PlaygroundComparisonRun{}} {
 		ids := make([]int, 0)
 		if err := db.Model(resource).Distinct("user_id").Pluck("user_id", &ids).Error; err != nil {
 			return nil, err

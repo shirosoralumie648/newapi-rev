@@ -55,6 +55,14 @@ export type BillingPluginVariant = {
   billing_usage_examples?: BillingUsageExample[]
 }
 
+/** Image-edit operations the enabled channels of a model advertise. */
+export type PricingImageTools = {
+  edit?: boolean
+  outpaint?: boolean
+  background_removal?: boolean
+  style_reference?: boolean
+}
+
 export type PricingModel = {
   billing_plugin_variants?: BillingPluginVariant[]
   id: number
@@ -87,6 +95,8 @@ export type PricingModel = {
   billing_usage_schema?: BillingUsageSchema
   /** Display-only labeled usage vectors for pricing examples. */
   billing_usage_examples?: BillingUsageExample[]
+  /** Image-edit operations the model's enabled channels support. */
+  image_tools?: PricingImageTools
   /** Pricing version returned by backend, useful for cache busting */
   pricing_version?: string
   /**

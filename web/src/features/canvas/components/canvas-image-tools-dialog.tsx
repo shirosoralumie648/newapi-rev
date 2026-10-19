@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { Loader2 } from 'lucide-react'
 import {
+  type ChangeEvent,
   type PointerEvent as ReactPointerEvent,
   useEffect,
   useRef,
@@ -36,22 +37,34 @@ import type { ModelOption } from '@/features/playground/types'
 import {
   CANVAS_IMAGE_TOOL_BRUSH_SIZES,
   CANVAS_IMAGE_TOOL_MESSAGES,
+  CANVAS_IMAGE_TOOL_OUTPAINT_RATIOS,
+  CANVAS_IMAGE_TOOL_STYLE_IMAGE_TYPES,
   CANVAS_IMAGE_TOOL_TITLES,
   CANVAS_WORKFLOW_IMAGE_SIZE_RATIOS,
+  type CanvasImageToolOutpaintRatio,
 } from '../constants'
 import {
   availableCanvasImageUpscaleFactors,
+  canvasImageBackgroundRemovalError,
   canvasImageCropRect,
   canvasImageCropRectFromDisplay,
+  canvasImageOutpaintError,
+  canvasImageOutpaintLayout,
+  canvasImageOutpaintRatio,
   canvasImageRedrawError,
   canvasImageScale,
+  canvasImageStyleImageError,
+  canvasImageStyleReferenceError,
   clampCanvasImageCropRect,
   isCanvasImageCropUsable,
+  type CanvasImageBackgroundRemovalInput,
   type CanvasImageCropRect,
   type CanvasImageMaskStroke,
+  type CanvasImageOutpaintInput,
   type CanvasImagePoint,
   type CanvasImageRedrawInput,
   type CanvasImageSize,
+  type CanvasImageStyleReferenceInput,
   type CanvasImageToolKind,
 } from '../lib/canvas-image-tools'
 
@@ -69,6 +82,11 @@ export interface CanvasImageToolsDialogProps {
   onCrop: (rect: CanvasImageCropRect) => Promise<boolean>
   onRedraw: (input: CanvasImageRedrawInput) => Promise<boolean>
   onUpscale: (factor: number) => Promise<boolean>
+  onOutpaint: (input: CanvasImageOutpaintInput) => Promise<boolean>
+  onBackgroundRemoval: (
+    input: CanvasImageBackgroundRemovalInput
+  ) => Promise<boolean>
+  onStyleReference: (input: CanvasImageStyleReferenceInput) => Promise<boolean>
 }
 
 /**
@@ -90,6 +108,11 @@ export function CanvasImageToolsDialog(props: CanvasImageToolsDialogProps) {
   const [model, setModel] = useState('')
   const [size, setSize] = useState('')
   const [factor, setFactor] = useState<number | null>(null)
+  const [outpaintRatioValue, setOutpaintRatioValue] =
+    useState<CanvasImageToolOutpaintRatio>(
+      CANVAS_IMAGE_TOOL_OUTPAINT_RATIOS[0].value
+    )
+  const [styleImage, setStyleImage] = useState<File | null>(null)
 
   const cropSurfaceRef = useRef<HTMLDivElement | null>(null)
   const redrawSurfaceRef = useRef<HTMLDivElement | null>(null)
@@ -123,6 +146,8 @@ export function CanvasImageToolsDialog(props: CanvasImageToolsDialogProps) {
     setPrompt('')
     setSize('')
     setModel(props.models[0]?.value ?? '')
+    setOutpaintRatioValue(CANVAS_IMAGE_TOOL_OUTPAINT_RATIOS[0].value)
+    setStyleImage(null)
     setFactor(
       sourceSize
         ? (availableCanvasImageUpscaleFactors(sourceSize)[0] ?? null)
@@ -139,6 +164,20 @@ export function CanvasImageToolsDialog(props: CanvasImageToolsDialogProps) {
       ? isCanvasImageCropUsable(cropRect, sourceSize)
       : false
   const redrawProblem = canvasImageRedrawError({ prompt, model, strokes })
+  const outpaintProblem = canvasImageOutpaintError({ model })
+  const backgroundRemovalProblem = canvasImageBackgroundRemovalError({ model })
+  const styleReferenceProblem = canvasImageStyleReferenceError({
+    prompt,
+    model,
+    styleImage,
+  })
+  const styleImageProblem = styleImage
+    ? canvasImageStyleImageError(styleImage)
+    : null
+  const outpaintRatio = canvasImageOutpaintRatio(outpaintRatioValue)
+  const outpaintLayout = sourceSize
+    ? canvasImageOutpaintLayout(sourceSize, outpaintRatio)
+    : null
   const maskStrokes = draft ? [...strokes, draft] : strokes
 
   const updateCropField = (key: keyof CanvasImageCropRect, value: number) => {
@@ -266,6 +305,37 @@ export function CanvasImageToolsDialog(props: CanvasImageToolsDialogProps) {
   const handleUpscale = async () => {
     if (factor === null) return
     await props.onUpscale(factor)
+  }
+
+  const handleOutpaint = async () => {
+    if (outpaintProblem) return
+    await props.onOutpaint({
+      prompt,
+      model,
+      ratio: outpaintRatioValue,
+    })
+  }
+
+  const handleBackgroundRemoval = async () => {
+    if (backgroundRemovalProblem) return
+    await props.onBackgroundRemoval({ prompt, model })
+  }
+
+  const handleStyleReference = async () => {
+    if (styleReferenceProblem || !styleImage) return
+    await props.onStyleReference({
+      prompt,
+      model,
+      styleImage,
+      styleFilename: styleImage.name || 'style.png',
+      ...(size ? { size } : {}),
+    })
+  }
+
+  const handleStyleImageChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null
+    setStyleImage(file)
+    event.target.value = ''
   }
 
   const preview = props.source ? (
@@ -529,6 +599,172 @@ export function CanvasImageToolsDialog(props: CanvasImageToolsDialogProps) {
     </div>
   )
 
+  const modelField = (
+    <label className='grid gap-1.5'>
+      <span className='text-muted-foreground text-xs'>{t('Model')}</span>
+      <NativeSelect
+        disabled={props.busy || props.disabled || props.models.length === 0}
+        onChange={(event) => setModel(event.target.value)}
+        value={model}
+      >
+        {props.models.length === 0 ? (
+          <NativeSelectOption value=''>
+            {t('No models available')}
+          </NativeSelectOption>
+        ) : null}
+        {props.models.map((option) => (
+          <NativeSelectOption key={option.value} value={option.value}>
+            {option.label}
+          </NativeSelectOption>
+        ))}
+      </NativeSelect>
+    </label>
+  )
+
+  const outpaintBody = (
+    <div className='grid gap-3'>
+      <p className='text-muted-foreground text-xs'>
+        {t(
+          'Extend the image into a new aspect ratio. The model fills the blank area.'
+        )}
+      </p>
+      <div className='mx-auto w-fit max-w-full'>{preview}</div>
+      <label className='grid gap-1.5'>
+        <span className='text-muted-foreground text-xs'>
+          {t('Target aspect ratio')}
+        </span>
+        <NativeSelect
+          disabled={props.busy || props.disabled}
+          onChange={(event) =>
+            setOutpaintRatioValue(
+              event.target.value as CanvasImageToolOutpaintRatio
+            )
+          }
+          value={outpaintRatioValue}
+        >
+          {CANVAS_IMAGE_TOOL_OUTPAINT_RATIOS.map((option) => (
+            <NativeSelectOption key={option.value} value={option.value}>
+              {option.value}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+      </label>
+      {outpaintLayout ? (
+        <p className='text-muted-foreground text-xs'>
+          {`${t('Target size')}: ${outpaintLayout.width} × ${outpaintLayout.height}`}
+        </p>
+      ) : null}
+      <p className='text-muted-foreground text-xs'>
+        {t(
+          'The source image keeps its pixels and is centered in the new canvas.'
+        )}
+      </p>
+      {modelField}
+      <label className='grid gap-1.5'>
+        <span className='text-muted-foreground text-xs'>
+          {t('Prompt (optional)')}
+        </span>
+        <Textarea
+          aria-label={t('Prompt (optional)')}
+          disabled={props.busy || props.disabled}
+          onChange={(event) => setPrompt(event.target.value)}
+          value={prompt}
+        />
+      </label>
+    </div>
+  )
+
+  const backgroundRemovalBody = (
+    <div className='grid gap-3'>
+      <div className='mx-auto w-fit max-w-full'>{preview}</div>
+      <p className='text-muted-foreground text-xs'>
+        {t('Remove the background and keep the subject on transparency.')}
+      </p>
+      <p className='text-muted-foreground text-xs'>
+        {t(
+          'The selected model receives the image with a transparent background request.'
+        )}
+      </p>
+      {modelField}
+      <label className='grid gap-1.5'>
+        <span className='text-muted-foreground text-xs'>
+          {t('Prompt (optional)')}
+        </span>
+        <Textarea
+          aria-label={t('Prompt (optional)')}
+          disabled={props.busy || props.disabled}
+          onChange={(event) => setPrompt(event.target.value)}
+          placeholder={t(
+            'Describe anything the background removal should preserve.'
+          )}
+          value={prompt}
+        />
+      </label>
+    </div>
+  )
+
+  const styleReferenceBody = (
+    <div className='grid gap-3'>
+      <div className='mx-auto w-fit max-w-full'>{preview}</div>
+      <label className='grid gap-1.5'>
+        <span className='text-muted-foreground text-xs'>
+          {t('Style image')}
+        </span>
+        <Input
+          accept={CANVAS_IMAGE_TOOL_STYLE_IMAGE_TYPES.join(',')}
+          aria-label={t('Style image')}
+          disabled={props.busy || props.disabled}
+          onChange={handleStyleImageChange}
+          type='file'
+        />
+        <span className='text-muted-foreground text-xs'>
+          {styleImage
+            ? styleImage.name
+            : t(CANVAS_IMAGE_TOOL_MESSAGES.STYLE_IMAGE_REQUIRED)}
+        </span>
+      </label>
+      {styleImageProblem ? (
+        <p className='text-destructive text-xs' role='alert'>
+          {t(styleImageProblem)}
+        </p>
+      ) : null}
+      <label className='grid gap-1.5'>
+        <span className='text-muted-foreground text-xs'>
+          {t('Describe the result')}
+        </span>
+        <Textarea
+          aria-label={t('Describe the result')}
+          disabled={props.busy || props.disabled}
+          onChange={(event) => setPrompt(event.target.value)}
+          placeholder={t(
+            CANVAS_IMAGE_TOOL_MESSAGES.STYLE_REFERENCE_PROMPT_REQUIRED
+          )}
+          value={prompt}
+        />
+      </label>
+      {modelField}
+      <label className='grid gap-1.5'>
+        <span className='text-muted-foreground text-xs'>{t('Size')}</span>
+        <NativeSelect
+          disabled={props.busy || props.disabled}
+          onChange={(event) => setSize(event.target.value)}
+          value={size}
+        >
+          <NativeSelectOption value=''>
+            {t('Channel default')}
+          </NativeSelectOption>
+          {PLAYGROUND_IMAGE_SIZES.map((option) => (
+            <NativeSelectOption key={option} value={option}>
+              {CANVAS_WORKFLOW_IMAGE_SIZE_RATIOS[option]
+                ? `${option} · ${CANVAS_WORKFLOW_IMAGE_SIZE_RATIOS[option]}`
+                : option}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+      </label>
+    </div>
+  )
+
   return (
     <Dialog
       description={t('The result is added as a new node linked to this image.')}
@@ -581,6 +817,50 @@ export function CanvasImageToolsDialog(props: CanvasImageToolsDialogProps) {
                 {t('Apply upscale')}
               </Button>
             ) : null}
+            {tool === 'outpaint' ? (
+              <Button
+                disabled={
+                  props.busy || props.disabled || outpaintProblem !== null
+                }
+                onClick={() => void handleOutpaint()}
+                type='button'
+              >
+                {props.busy ? (
+                  <Loader2 aria-hidden='true' className='animate-spin' />
+                ) : null}
+                {t('Apply outpaint')}
+              </Button>
+            ) : null}
+            {tool === 'backgroundRemoval' ? (
+              <Button
+                disabled={
+                  props.busy ||
+                  props.disabled ||
+                  backgroundRemovalProblem !== null
+                }
+                onClick={() => void handleBackgroundRemoval()}
+                type='button'
+              >
+                {props.busy ? (
+                  <Loader2 aria-hidden='true' className='animate-spin' />
+                ) : null}
+                {t('Apply background removal')}
+              </Button>
+            ) : null}
+            {tool === 'styleReference' ? (
+              <Button
+                disabled={
+                  props.busy || props.disabled || styleReferenceProblem !== null
+                }
+                onClick={() => void handleStyleReference()}
+                type='button'
+              >
+                {props.busy ? (
+                  <Loader2 aria-hidden='true' className='animate-spin' />
+                ) : null}
+                {t('Apply style reference')}
+              </Button>
+            ) : null}
           </div>
         ) : null
       }
@@ -596,6 +876,9 @@ export function CanvasImageToolsDialog(props: CanvasImageToolsDialogProps) {
           {tool === 'crop' ? cropBody : null}
           {tool === 'redraw' ? redrawBody : null}
           {tool === 'upscale' ? upscaleBody : null}
+          {tool === 'outpaint' ? outpaintBody : null}
+          {tool === 'backgroundRemoval' ? backgroundRemovalBody : null}
+          {tool === 'styleReference' ? styleReferenceBody : null}
         </div>
       ) : (
         <p className='text-muted-foreground text-sm'>{t('Loading image...')}</p>

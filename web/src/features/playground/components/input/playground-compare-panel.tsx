@@ -46,7 +46,7 @@ import {
   PLAYGROUND_PARALLEL_MESSAGES,
   PLAYGROUND_PARALLEL_MIN_MODELS,
 } from '../../constants'
-import { normalizeParallelModels } from '../../lib'
+import { isChatModelOption, normalizeParallelModels } from '../../lib'
 import type { ModelOption } from '../../types'
 
 type PlaygroundComparePanelProps = {
@@ -69,6 +69,7 @@ type PlaygroundCompareContentProps = PlaygroundComparePanelProps
 export function PlaygroundCompareContent(props: PlaygroundCompareContentProps) {
   const { t } = useTranslation()
   const selectedCount = props.compareModels.length
+  const chatModels = props.models.filter(isChatModelOption)
 
   const handleSelectedChange = (values: string[]) => {
     if (values.length > PLAYGROUND_PARALLEL_MAX_MODELS) {
@@ -91,7 +92,7 @@ export function PlaygroundCompareContent(props: PlaygroundCompareContentProps) {
         id='playground-compare-models'
         maxVisibleChips={2}
         onChange={handleSelectedChange}
-        options={props.models.map((model) => ({
+        options={chatModels.map((model) => ({
           label: model.label,
           value: model.value,
         }))}
@@ -112,7 +113,9 @@ export function PlaygroundComparePanel(props: PlaygroundComparePanelProps) {
   const isMobile = useIsMobile()
   const selectedCount = props.compareModels.length
   const panelDisabled =
-    props.disabled || props.models.length < PLAYGROUND_PARALLEL_MIN_MODELS
+    props.disabled ||
+    props.models.filter(isChatModelOption).length <
+      PLAYGROUND_PARALLEL_MIN_MODELS
 
   const trigger = (
     <PromptInputButton

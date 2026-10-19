@@ -224,14 +224,26 @@ type PlaygroundQuotaPolicy struct {
 	// how many models a single send may fan out to. Each comparison request is
 	// an ordinary /pg call whose own rate limit, channel and billing apply, so
 	// this only caps the group the account may persist and launch.
-	ParallelCompareMaxModels  int   `json:"parallel_compare_max_models"`
-	ToolCallMaxCount          int   `json:"tool_call_max_count"`
-	ToolCallArgumentsMaxBytes int64 `json:"tool_call_arguments_max_bytes"`
-	ToolCallResultMaxBytes    int64 `json:"tool_call_result_max_bytes"`
-	AttachmentMaxCount        int   `json:"attachment_max_count"`
-	AttachmentMaxFileBytes    int64 `json:"attachment_max_file_bytes"`
-	AttachmentUserMaxBytes    int64 `json:"attachment_user_max_bytes"`
-	AttachmentUserMaxCount    int   `json:"attachment_user_max_count"`
+	ParallelCompareMaxModels int `json:"parallel_compare_max_models"`
+	// Compare runs (PG2-04) persist a model x prompt matrix whose cells are
+	// ordinary /pg requests. These limits bound the matrix itself: models,
+	// prompts, one prompt's bytes, one stored result snapshot, and the
+	// account's run count and snapshot bytes. Pricing and the single-run budget
+	// stay on the BL-03 workflow estimate/run endpoints.
+	ComparisonRunMaxModels      int   `json:"comparison_run_max_models"`
+	ComparisonRunMaxConcurrency int   `json:"comparison_run_max_concurrency"`
+	ComparisonRunPromptMaxCount int   `json:"comparison_run_prompt_max_count"`
+	ComparisonRunPromptMaxBytes int64 `json:"comparison_run_prompt_max_bytes"`
+	ComparisonRunMaxBytes       int64 `json:"comparison_run_max_bytes"`
+	ComparisonRunUserMaxCount   int   `json:"comparison_run_user_max_count"`
+	ComparisonRunUserMaxBytes   int64 `json:"comparison_run_user_max_bytes"`
+	ToolCallMaxCount            int   `json:"tool_call_max_count"`
+	ToolCallArgumentsMaxBytes   int64 `json:"tool_call_arguments_max_bytes"`
+	ToolCallResultMaxBytes      int64 `json:"tool_call_result_max_bytes"`
+	AttachmentMaxCount          int   `json:"attachment_max_count"`
+	AttachmentMaxFileBytes      int64 `json:"attachment_max_file_bytes"`
+	AttachmentUserMaxBytes      int64 `json:"attachment_user_max_bytes"`
+	AttachmentUserMaxCount      int   `json:"attachment_user_max_count"`
 	// The extended attachment kinds have their own per-file ceilings: a video is
 	// legitimately much larger than a chat image, while the account byte budgets
 	// above still bound the total an account may store. The classic limit
@@ -445,24 +457,31 @@ func (setting *PlaygroundStorageBillingSetting) EgressDailyLimits(group string) 
 // the policy existed.
 func builtinPlaygroundQuotaPolicy() PlaygroundQuotaPolicy {
 	return PlaygroundQuotaPolicy{
-		SessionMaxCount:           100,
-		PresetUserMaxCount:        50,
-		SystemPromptMaxBytes:      16 << 10,
-		SnippetUserMaxCount:       100,
-		SnippetContentMaxBytes:    8 << 10,
-		MemoryUserMaxCount:        100,
-		MemoryContentMaxBytes:     4 << 10,
-		MessageMaxCount:           100,
-		MessageMaxVersions:        100,
-		MessageMaxBytes:           1 << 20,
-		ParallelCompareMaxModels:  4,
-		ToolCallMaxCount:          16,
-		ToolCallArgumentsMaxBytes: 64 << 10,
-		ToolCallResultMaxBytes:    256 << 10,
-		AttachmentMaxCount:        8,
-		AttachmentMaxFileBytes:    8 << 20,
-		AttachmentUserMaxBytes:    64 << 20,
-		AttachmentUserMaxCount:    500,
+		SessionMaxCount:             100,
+		PresetUserMaxCount:          50,
+		SystemPromptMaxBytes:        16 << 10,
+		SnippetUserMaxCount:         100,
+		SnippetContentMaxBytes:      8 << 10,
+		MemoryUserMaxCount:          100,
+		MemoryContentMaxBytes:       4 << 10,
+		MessageMaxCount:             100,
+		MessageMaxVersions:          100,
+		MessageMaxBytes:             1 << 20,
+		ParallelCompareMaxModels:    4,
+		ComparisonRunMaxModels:      6,
+		ComparisonRunMaxConcurrency: 3,
+		ComparisonRunPromptMaxCount: 10,
+		ComparisonRunPromptMaxBytes: 16 << 10,
+		ComparisonRunMaxBytes:       1 << 20,
+		ComparisonRunUserMaxCount:   50,
+		ComparisonRunUserMaxBytes:   32 << 20,
+		ToolCallMaxCount:            16,
+		ToolCallArgumentsMaxBytes:   64 << 10,
+		ToolCallResultMaxBytes:      256 << 10,
+		AttachmentMaxCount:          8,
+		AttachmentMaxFileBytes:      8 << 20,
+		AttachmentUserMaxBytes:      64 << 20,
+		AttachmentUserMaxCount:      500,
 		// The extended kinds start at the ceilings the upload endpoint already
 		// enforced for generated media: video is capped at 64 MiB, audio and
 		// documents at 16 MiB, and the account byte budgets above still bound
@@ -656,6 +675,27 @@ func applyPlaygroundQuotaOverrides(policy *PlaygroundQuotaPolicy, override *Play
 	}
 	if override.ParallelCompareMaxModels > 0 {
 		policy.ParallelCompareMaxModels = override.ParallelCompareMaxModels
+	}
+	if override.ComparisonRunMaxModels > 0 {
+		policy.ComparisonRunMaxModels = override.ComparisonRunMaxModels
+	}
+	if override.ComparisonRunMaxConcurrency > 0 {
+		policy.ComparisonRunMaxConcurrency = override.ComparisonRunMaxConcurrency
+	}
+	if override.ComparisonRunPromptMaxCount > 0 {
+		policy.ComparisonRunPromptMaxCount = override.ComparisonRunPromptMaxCount
+	}
+	if override.ComparisonRunPromptMaxBytes > 0 {
+		policy.ComparisonRunPromptMaxBytes = override.ComparisonRunPromptMaxBytes
+	}
+	if override.ComparisonRunMaxBytes > 0 {
+		policy.ComparisonRunMaxBytes = override.ComparisonRunMaxBytes
+	}
+	if override.ComparisonRunUserMaxCount > 0 {
+		policy.ComparisonRunUserMaxCount = override.ComparisonRunUserMaxCount
+	}
+	if override.ComparisonRunUserMaxBytes > 0 {
+		policy.ComparisonRunUserMaxBytes = override.ComparisonRunUserMaxBytes
 	}
 	if override.ToolCallMaxCount > 0 {
 		policy.ToolCallMaxCount = override.ToolCallMaxCount

@@ -47,6 +47,7 @@ import {
   getGroupFallback,
   getModelFallback,
   getOptionLoadErrorMessage,
+  isChatModelOption,
   shouldClearModelForGroup,
 } from '../lib'
 import type { GroupOption, ModelOption, PlaygroundConfig } from '../types'
@@ -121,14 +122,15 @@ export function usePlaygroundOptions({
     if (!modelsData) return
 
     setModels(modelsData)
-    const fallback = getModelFallback(modelsData, currentModel)
+    const chatModels = modelsData.filter(isChatModelOption)
+    const fallback = getModelFallback(chatModels, currentModel)
 
     if (fallback) {
       updateConfig('model', fallback)
       return
     }
 
-    if (shouldClearModelForGroup(modelsData, currentModel)) {
+    if (shouldClearModelForGroup(chatModels, currentModel)) {
       updateConfig('model', '')
     }
   }, [modelsData, currentModel, setModels, updateConfig])

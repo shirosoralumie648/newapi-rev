@@ -212,20 +212,29 @@ export interface PlaygroundImageEditInput {
   image: Blob
   imageFilename: string
   /** Mask over the source image, transparent where the edit applies. */
-  mask: Blob
-  maskFilename: string
+  mask?: Blob
+  maskFilename?: string
+  /**
+   * Additional images the edit reads as references (for example a style
+   * image). Providers receive them as the repeated `image[]` field.
+   */
+  references?: { blob: Blob; filename: string }[]
+  /** Requested background handling of the returned image. */
+  background?: 'transparent' | 'opaque' | 'auto'
+  /** Encoded format of the returned image. */
+  outputFormat?: 'png' | 'jpeg' | 'webp'
   /** Workspace group the edit runs in; empty uses the account group. */
   group?: string
   size?: string
 }
 
 /**
- * Submits an image edit (a prompt with the source image and its mask) through
- * the Playground relay route. The body is multipart, so the workspace group
- * travels in the X-Playground-Group header: the server consumes and validates
- * it before the canonical relay request, and it never reaches the upstream
- * provider. Billing, permissions and channel selection stay the ordinary relay
- * pipeline.
+ * Submits an image edit (a prompt with the source image, optional mask and
+ * reference images) through the Playground relay route. The body is multipart,
+ * so the workspace group travels in the X-Playground-Group header: the server
+ * consumes and validates it before the canonical relay request, and it never
+ * reaches the upstream provider. Billing, permissions and channel selection
+ * stay the ordinary relay pipeline.
  */
 export async function submitImageEdit(
   input: PlaygroundImageEditInput,
@@ -234,9 +243,21 @@ export async function submitImageEdit(
   const form = new FormData()
   form.append('model', input.model)
   form.append('prompt', input.prompt)
-  form.append('image', input.image, input.imageFilename)
-  form.append('mask', input.mask, input.maskFilename)
+  const references = input.references ?? []
+  if (references.length > 0) {
+    form.append('image[]', input.image, input.imageFilename)
+    for (const reference of references) {
+      form.append('image[]', reference.blob, reference.filename)
+    }
+  } else {
+    form.append('image', input.image, input.imageFilename)
+  }
+  if (input.mask) {
+    form.append('mask', input.mask, input.maskFilename ?? 'edit-mask.png')
+  }
   if (input.size) form.append('size', input.size)
+  if (input.background) form.append('background', input.background)
+  if (input.outputFormat) form.append('output_format', input.outputFormat)
   const response = await api.post(API_ENDPOINTS.IMAGE_EDITS, form, {
     signal,
     skipErrorHandler: true,

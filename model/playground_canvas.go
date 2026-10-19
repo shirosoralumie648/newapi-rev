@@ -33,6 +33,31 @@ var (
 	ErrPlaygroundCanvasReference = errors.New("Playground canvas references a resource that is not available to this account.")
 )
 
+// The editor a canvas project opens in. Every mode shares the same document
+// column and the same node/edge contract; the mode only selects the layout the
+// workspace presents. `infinite` is the original node board; `image` and
+// `video` open the single-media workbench (CV-09/CV-10).
+const (
+	PlaygroundCanvasModeInfinite = "infinite"
+	PlaygroundCanvasModeImage    = "image"
+	PlaygroundCanvasModeVideo    = "video"
+)
+
+// NormalizePlaygroundCanvasMode resolves a stored or requested mode. An empty
+// or unknown value reads back as the infinite canvas, so rows written before
+// the mode column existed keep loading; callers that accept user input reject
+// the invalid case before calling this.
+func NormalizePlaygroundCanvasMode(mode string) string {
+	switch mode {
+	case PlaygroundCanvasModeImage:
+		return PlaygroundCanvasModeImage
+	case PlaygroundCanvasModeVideo:
+		return PlaygroundCanvasModeVideo
+	default:
+		return PlaygroundCanvasModeInfinite
+	}
+}
+
 // PlaygroundCanvasReference identifies one external resource a canvas node
 // points at by ID. Empty fields are ignored; a message key always requires its
 // session so a cross-user message cannot be reached through an orphan key, and
@@ -217,10 +242,14 @@ func PlaygroundCanvasReferenceOwnership(userID int, references []PlaygroundCanva
 // as a versioned JSON snapshot. The document references conversations,
 // artifacts and attachments by ID; those references never own the rows.
 type PlaygroundCanvasProject struct {
-	ID       string   `gorm:"size:32;primaryKey"`
-	UserID   int      `gorm:"not null;index;uniqueIndex:uk_playground_canvas_client,priority:1"`
-	ClientID *string  `gorm:"size:128;uniqueIndex:uk_playground_canvas_client,priority:2"`
-	Title    string   `gorm:"size:200;not null"`
+	ID       string  `gorm:"size:32;primaryKey"`
+	UserID   int     `gorm:"not null;index;uniqueIndex:uk_playground_canvas_client,priority:1"`
+	ClientID *string `gorm:"size:128;uniqueIndex:uk_playground_canvas_client,priority:2"`
+	Title    string  `gorm:"size:200;not null"`
+	// Mode selects the workspace layout of the project (infinite/image/video).
+	// It is written once at creation; rows created before the column existed
+	// read back as NormalizePlaygroundCanvasMode("") = infinite.
+	Mode     string   `gorm:"size:16"`
 	Document LongText `gorm:"not null"`
 	// DocumentBytes and the node/edge counters let list views and quota sums
 	// avoid parsing every stored document.
@@ -248,6 +277,7 @@ type PlaygroundCanvasSummary struct {
 	ID            string  `json:"id"`
 	ClientID      *string `json:"client_id,omitempty"`
 	Title         string  `json:"title"`
+	Mode          string  `json:"mode"`
 	NodeCount     int     `json:"node_count"`
 	EdgeCount     int     `json:"edge_count"`
 	DocumentBytes int64   `json:"document_bytes"`
@@ -264,6 +294,7 @@ type PlaygroundCanvasResult struct {
 func playgroundCanvasSummary(project *PlaygroundCanvasProject) PlaygroundCanvasSummary {
 	return PlaygroundCanvasSummary{
 		ID: project.ID, ClientID: project.ClientID, Title: project.Title,
+		Mode:      NormalizePlaygroundCanvasMode(project.Mode),
 		NodeCount: project.NodeCount, EdgeCount: project.EdgeCount,
 		DocumentBytes: project.DocumentBytes, Revision: project.Revision,
 		CreatedAt: project.CreatedAt, UpdatedAt: project.UpdatedAt,
@@ -328,6 +359,7 @@ func CreatePlaygroundCanvasProject(userID int, project *PlaygroundCanvasProject,
 	now := common.GetTimestamp()
 	project.ID = "pgc_" + key
 	project.UserID = userID
+	project.Mode = NormalizePlaygroundCanvasMode(project.Mode)
 	project.Revision = 0
 	project.CreatedAt = now
 	project.UpdatedAt = now
@@ -429,6 +461,10 @@ func GetPlaygroundCanvasProject(userID int, id string) (*PlaygroundCanvasProject
 // hydratePlaygroundCanvasProject loads the externalized document of one canvas
 // row so callers always see the real document instead of an empty column.
 func hydratePlaygroundCanvasProject(project *PlaygroundCanvasProject) error {
+	// The mode is normalized on every read path, so a legacy row (or an
+	// imported row with a value this build does not know) presents the
+	// documented default instead of an empty layout selector.
+	project.Mode = NormalizePlaygroundCanvasMode(project.Mode)
 	if project.ObjectKey == "" {
 		return nil
 	}
@@ -467,9 +503,15 @@ func ListPlaygroundCanvasProjects(userID int, offset, limit int) ([]PlaygroundCa
 	if err := query.Count(&count).Error; err != nil {
 		return nil, 0, err
 	}
-	err := query.Select("id, user_id, client_id, title, document_bytes, node_count, edge_count, revision, created_at, updated_at").
+	err := query.Select("id, user_id, client_id, title, mode, document_bytes, node_count, edge_count, revision, created_at, updated_at").
 		Order("updated_at DESC, id DESC").Offset(offset).Limit(limit).Find(&projects).Error
-	return projects, count, err
+	if err != nil {
+		return nil, 0, err
+	}
+	for index := range projects {
+		projects[index].Mode = NormalizePlaygroundCanvasMode(projects[index].Mode)
+	}
+	return projects, count, nil
 }
 
 type UpdatePlaygroundCanvasInput struct {
@@ -587,6 +629,7 @@ func UpdatePlaygroundCanvasProject(userID int, id string, revision int64, input 
 		if err := tx.Where("id = ? AND user_id = ?", id, userID).First(&project).Error; err != nil {
 			return err
 		}
+		project.Mode = NormalizePlaygroundCanvasMode(project.Mode)
 		if input.Document != nil {
 			// History entries are written for the stored revision, and the
 			// policy decides whether this save deserves one.

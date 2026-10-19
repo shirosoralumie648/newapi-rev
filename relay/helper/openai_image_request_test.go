@@ -115,6 +115,38 @@ func TestGetAndValidOpenAIImageRequestMultipartStream(t *testing.T) {
 	})
 }
 
+// TestGetAndValidOpenAIImageRequestMultipartBackground validates the edit
+// options the canvas background-removal and style-reference tools send.
+func TestGetAndValidOpenAIImageRequestMultipartBackground(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	newContext := func(t *testing.T, background string, outputFormat string) *gin.Context {
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		require.NoError(t, writer.WriteField("model", "gpt-image-1"))
+		require.NoError(t, writer.WriteField("prompt", "remove the background"))
+		require.NoError(t, writer.WriteField("background", background))
+		require.NoError(t, writer.WriteField("output_format", outputFormat))
+		require.NoError(t, writer.Close())
+
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", &body)
+		c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+		return c
+	}
+
+	request, err := GetAndValidOpenAIImageRequest(newContext(t, "transparent", "png"), relayconstant.RelayModeImagesEdits)
+	require.NoError(t, err)
+	require.JSONEq(t, `"transparent"`, string(request.Background))
+	require.JSONEq(t, `"png"`, string(request.OutputFormat))
+
+	_, err = GetAndValidOpenAIImageRequest(newContext(t, "checkerboard", "png"), relayconstant.RelayModeImagesEdits)
+	require.ErrorContains(t, err, "background must be transparent, opaque or auto")
+
+	_, err = GetAndValidOpenAIImageRequest(newContext(t, "transparent", "tiff"), relayconstant.RelayModeImagesEdits)
+	require.ErrorContains(t, err, "output_format must be png, jpeg or webp")
+}
+
 // Provider `parameters.n` is still bounded at ingress so a malformed multiplier
 // is a client error, but the billing quantity always follows the top-level n:
 // Ali image requests are served by the alibaba task plugin, which owns the

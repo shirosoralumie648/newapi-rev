@@ -439,6 +439,36 @@ func writePlaygroundError(c *gin.Context, err error) {
 		code = "PLAYGROUND_CONFLICT"
 		err = common.NewMessage(err.Error())
 	}
+	if errors.Is(err, model.ErrPlaygroundComparisonNotFound) {
+		status = http.StatusNotFound
+		code = "PLAYGROUND_COMPARISON_NOT_FOUND"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundComparisonConflict) {
+		status = http.StatusConflict
+		code = "PLAYGROUND_COMPARISON_CONFLICT"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundComparisonInvalid) {
+		status = http.StatusBadRequest
+		code = "PLAYGROUND_COMPARISON_INVALID"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundComparisonLimit) {
+		status = http.StatusUnprocessableEntity
+		code = "PLAYGROUND_COMPARISON_LIMIT_EXCEEDED"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundComparisonStorageLimit) {
+		status = http.StatusUnprocessableEntity
+		code = "PLAYGROUND_COMPARISON_STORAGE_LIMIT_EXCEEDED"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundComparisonUnavailable) {
+		status = http.StatusInternalServerError
+		code = "PLAYGROUND_COMPARISON_UNAVAILABLE"
+		err = common.NewMessage(err.Error())
+	}
 	// The resource quota policy returns stable capacity errors so the client can
 	// tell a full workspace from a malformed request.
 	if errors.Is(err, model.ErrPlaygroundSessionLimit) {

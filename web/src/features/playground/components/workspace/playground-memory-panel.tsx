@@ -56,7 +56,7 @@ import {
   PLAYGROUND_MEMORY_ERRORS,
 } from '../../constants'
 import { usePlaygroundMemories } from '../../hooks'
-import { memoryCategoryLabel } from '../../lib'
+import { isChatModelOption, memoryCategoryLabel } from '../../lib'
 import { playgroundQueryKeys } from '../../lib/query-keys'
 import type {
   ModelOption,
@@ -187,7 +187,7 @@ export function PlaygroundMemoryPanel(props: PlaygroundMemoryPanelProps) {
   const modelItems = [
     { value: '', label: t('Same as summary model') },
     ...props.models
-      .filter((model) => model.value !== '')
+      .filter((model) => model.value !== '' && isChatModelOption(model))
       .map((model) => ({ value: model.value, label: model.label })),
   ]
   if (

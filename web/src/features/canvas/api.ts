@@ -25,6 +25,7 @@ import { requireServerSuccess } from '@/lib/server-error-message'
 import { canvasDocumentSchema } from './lib/canvas-document'
 import type { CanvasWorkflowEstimateStepInput } from './lib/canvas-workflow-budget'
 import type {
+  CanvasProjectMode,
   CanvasProjectSummary,
   CanvasServerProject,
   CanvasSnapshotSummary,
@@ -42,6 +43,9 @@ const canvasProjectSummarySchema = z.object({
   id: z.string().min(1),
   client_id: z.string().optional(),
   title: z.string(),
+  // Optional so a response from a build before the workbench modes reads as
+  // the infinite canvas instead of failing the whole project list.
+  mode: z.enum(['infinite', 'image', 'video']).optional(),
   node_count: z.number().int().nonnegative(),
   edge_count: z.number().int().nonnegative(),
   document_bytes: z.number().int().nonnegative(),
@@ -71,6 +75,7 @@ function mapCanvasSummary(value: unknown): CanvasProjectSummary {
     id: project.id,
     clientId: project.client_id,
     title: project.title,
+    mode: project.mode ?? 'infinite',
     nodeCount: project.node_count,
     edgeCount: project.edge_count,
     documentBytes: project.document_bytes,
@@ -116,6 +121,8 @@ export async function listCanvasProjects(
 export interface CanvasProjectInput {
   clientId?: string
   title?: string
+  /** Workspace layout chosen at creation; absent creates the infinite canvas. */
+  mode?: CanvasProjectMode
   document: unknown
 }
 
@@ -128,6 +135,7 @@ export async function createCanvasProject(
     {
       client_id: input.clientId,
       title: input.title,
+      mode: input.mode,
       document: input.document,
     },
     { signal }

@@ -140,6 +140,106 @@ export interface PlaygroundMessageCost {
   channelName?: string
 }
 
+/** How a compare run sends its cells: one at a time or a bounded batch. */
+export type PlaygroundComparisonStrategy = 'serial' | 'concurrent'
+
+/** Lifecycle of one stored compare run. */
+export type PlaygroundComparisonRunStatus =
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'canceled'
+
+/** Lifecycle of one model x prompt cell of a compare run. */
+export type PlaygroundComparisonCellStatus =
+  | 'pending'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'canceled'
+
+/**
+ * One bounded model x prompt result. Output and error are display summaries
+ * cut to what the store accepts, never an unbounded generation transcript.
+ */
+export interface PlaygroundComparisonCell {
+  promptIndex: number
+  modelIndex: number
+  status: PlaygroundComparisonCellStatus
+  output: string
+  error: string
+  /** Stable server error code of a failed cell, when one was returned. */
+  errorCode: string
+  /** Relay request id whose settle row holds the billed amount. */
+  requestId: string
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  /** Measured round trip of the cell in milliseconds. */
+  latencyMs: number
+}
+
+/** One persisted compare run with its full inputs and result snapshot. */
+export interface PlaygroundComparisonRun {
+  id: string
+  title: string
+  group: string
+  models: string[]
+  prompts: string[]
+  results: PlaygroundComparisonCell[]
+  status: PlaygroundComparisonRunStatus
+  strategy: PlaygroundComparisonStrategy
+  concurrency: number
+  estimateQuota: number
+  budgetCap: number
+  baselineModel: string
+  modelCount: number
+  promptCount: number
+  byteSize: number
+  revision: number
+  createdAt: number
+  updatedAt: number
+}
+
+/** Bounded history projection of a run; it never carries the matrix. */
+export interface PlaygroundComparisonRunSummary {
+  id: string
+  title: string
+  group: string
+  status: PlaygroundComparisonRunStatus
+  strategy: PlaygroundComparisonStrategy
+  concurrency: number
+  estimateQuota: number
+  budgetCap: number
+  baselineModel: string
+  modelCount: number
+  promptCount: number
+  byteSize: number
+  revision: number
+  createdAt: number
+  updatedAt: number
+}
+
+/** Immutable input of one run, sent once before the first cell. */
+export interface PlaygroundComparisonRunCreateInput {
+  title?: string
+  group: string
+  models: string[]
+  prompts: string[]
+  strategy: PlaygroundComparisonStrategy
+  concurrency: number
+  estimateQuota: number
+  budgetCap: number
+}
+
+/** Mutable snapshot of one run, replaced under a revision compare-and-swap. */
+export interface PlaygroundComparisonRunUpdateInput {
+  revision: number
+  status: PlaygroundComparisonRunStatus
+  results: PlaygroundComparisonCell[]
+  baselineModel: string
+}
+
 /**
  * One normalized web-search hit of a turn. The server already bounded every
  * field; the browser only stores and renders it.
@@ -715,6 +815,22 @@ export interface ParameterEnabled {
 export interface ModelOption {
   label: string
   value: string
+  description?: string
+  /** Read-only pricing metadata returned by /api/user/models?details=1. */
+  quotaType?: number
+  modelRatio?: number
+  modelPrice?: number
+  completionRatio?: number
+  cacheRatio?: number | null
+  billingMode?: string
+  billingExpr?: string
+  /** Context window parsed from the model tags, when known. */
+  contextLength?: number
+  /** Capability identifiers: vision, tools, reasoning, structured_output. */
+  capabilities?: string[]
+  /** Chat-style endpoint and no task usage schema. */
+  supportsChat?: boolean
+  isImageGeneration?: boolean
 }
 
 export interface GroupOption {

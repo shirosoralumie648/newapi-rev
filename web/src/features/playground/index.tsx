@@ -39,6 +39,7 @@ import { PlaygroundArtifactSourceSheet } from './components/artifact/playground-
 import { PlaygroundChat } from './components/chat/playground-chat'
 import { PlaygroundRequestViewer } from './components/developer/playground-request-viewer'
 import { PlaygroundContextStatus } from './components/input/playground-context-status'
+import { PlaygroundCostStatus } from './components/input/playground-cost-status'
 import { PlaygroundInput } from './components/input/playground-input'
 import { PlaygroundQuoteBar } from './components/input/playground-quote-bar'
 import { PlaygroundSpeechDialog } from './components/message/playground-speech-dialog'
@@ -85,6 +86,7 @@ import {
   appendParallelMessagePair,
   collectMessageRequestIds,
   createPendingQuote,
+  estimatePlaygroundCost,
   forkPlaygroundSession,
   formatMemoryBlock,
   getCurrentVersion,
@@ -1113,6 +1115,17 @@ function PlaygroundContent(props: {
   if (sync.isLoading) syncLabel = t('Loading conversations...')
   else if (sync.isSaving) syncLabel = t('Saving conversation...')
 
+  // Read-only send estimate: it mirrors the model's pricing but never reserves
+  // quota; the consumption log carries the settled amount.
+  const activeModel = models.find((model) => model.value === config.model)
+  const costEstimate = estimatePlaygroundCost({
+    model: activeModel,
+    promptTokens: contextController.plan.estimatedTokens,
+    completionTokens: parameterEnabled.max_tokens ? config.max_tokens : 0,
+    groupRatio: groups.find((group) => group.value === config.group)?.ratio,
+    contextLength: activeModel?.contextLength,
+  })
+
   return (
     <>
       <PlaygroundWorkspace
@@ -1286,6 +1299,7 @@ function PlaygroundContent(props: {
               plan={contextController.plan}
               settings={context}
             />
+            <PlaygroundCostStatus className='pb-1' estimate={costEstimate} />
             <PlaygroundInput
               config={config}
               contextPlan={contextController.plan}

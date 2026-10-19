@@ -81,13 +81,19 @@ function renderDialog(overrides: Partial<CanvasImageToolsDialogProps> = {}) {
   const onCrop = vi.fn(async () => true)
   const onRedraw = vi.fn(async () => true)
   const onUpscale = vi.fn(async () => true)
+  const onOutpaint = vi.fn(async () => true)
+  const onBackgroundRemoval = vi.fn(async () => true)
+  const onStyleReference = vi.fn(async () => true)
   const view = render(
     <CanvasImageToolsDialog
       busy={false}
       models={[{ label: 'gpt-image-1', value: 'gpt-image-1' }]}
+      onBackgroundRemoval={onBackgroundRemoval}
       onClose={onClose}
       onCrop={onCrop}
+      onOutpaint={onOutpaint}
       onRedraw={onRedraw}
+      onStyleReference={onStyleReference}
       onUpscale={onUpscale}
       source={SOURCE}
       sourceSize={{ width: 1000, height: 500 }}
@@ -99,7 +105,18 @@ function renderDialog(overrides: Partial<CanvasImageToolsDialogProps> = {}) {
   // base element rather than the render container.
   const image = view.baseElement.querySelector('img')
   const surface = image?.parentElement ?? null
-  return { ...view, image, surface, onClose, onCrop, onRedraw, onUpscale }
+  return {
+    ...view,
+    image,
+    surface,
+    onBackgroundRemoval,
+    onClose,
+    onCrop,
+    onOutpaint,
+    onRedraw,
+    onStyleReference,
+    onUpscale,
+  }
 }
 
 afterEach(() => {
@@ -305,4 +322,95 @@ test('the dialog reports a source that is still loading', async () => {
 
   expect(await screen.findByText('Loading image...')).toBeVisible()
   expect(container.querySelector('img')).toBeNull()
+})
+
+test('the outpaint dialog previews the target size and applies the chosen ratio', async () => {
+  const user = userEvent.setup()
+  const { onOutpaint } = renderDialog({ tool: 'outpaint' })
+
+  const ratio = await screen.findByLabelText('Target aspect ratio')
+  expect(ratio).toHaveValue('1:1')
+  expect(screen.getByText('Target size: 1000 × 1000')).toBeVisible()
+
+  await user.selectOptions(ratio, '3:2')
+  expect(screen.getByText('Target size: 1000 × 667')).toBeVisible()
+  await user.click(screen.getByRole('button', { name: 'Apply outpaint' }))
+
+  await waitFor(() =>
+    expect(onOutpaint).toHaveBeenCalledWith({
+      prompt: '',
+      model: 'gpt-image-1',
+      ratio: '3:2',
+    })
+  )
+})
+
+test('background removal applies with the optional prompt', async () => {
+  const user = userEvent.setup()
+  const { onBackgroundRemoval } = renderDialog({ tool: 'backgroundRemoval' })
+
+  const apply = screen.getByRole('button', {
+    name: 'Apply background removal',
+  })
+  expect(apply).toBeEnabled()
+
+  await user.type(
+    screen.getByLabelText('Prompt (optional)'),
+    'keep the edges crisp'
+  )
+  await user.click(apply)
+
+  await waitFor(() =>
+    expect(onBackgroundRemoval).toHaveBeenCalledWith({
+      prompt: 'keep the edges crisp',
+      model: 'gpt-image-1',
+    })
+  )
+})
+
+test('the style reference dialog needs a usable image and a prompt', async () => {
+  const user = userEvent.setup()
+  const { onStyleReference } = renderDialog({ tool: 'styleReference' })
+
+  const apply = screen.getByRole('button', { name: 'Apply style reference' })
+  expect(apply).toBeDisabled()
+
+  await user.upload(
+    screen.getByLabelText('Style image'),
+    new File(['style'], 'style.png', { type: 'image/png' })
+  )
+  expect(apply).toBeDisabled()
+
+  await user.type(screen.getByLabelText('Describe the result'), 'paint it blue')
+  expect(apply).toBeEnabled()
+  await user.click(apply)
+
+  await waitFor(() =>
+    expect(onStyleReference).toHaveBeenCalledWith({
+      prompt: 'paint it blue',
+      model: 'gpt-image-1',
+      styleImage: expect.any(File),
+      styleFilename: 'style.png',
+    })
+  )
+})
+
+test('the style reference dialog rejects an unsupported style file', async () => {
+  const user = userEvent.setup({ applyAccept: false })
+  const { onStyleReference } = renderDialog({ tool: 'styleReference' })
+
+  await user.upload(
+    screen.getByLabelText('Style image'),
+    new File(['vector'], 'style.svg', { type: 'image/svg+xml' })
+  )
+
+  expect(
+    await screen.findByText(
+      'The style image must be a PNG, JPEG, WebP or GIF file.'
+    )
+  ).toBeVisible()
+  expect(
+    screen.getByRole('button', { name: 'Apply style reference' })
+  ).toBeDisabled()
+  expect(onStyleReference).not.toHaveBeenCalled()
 })

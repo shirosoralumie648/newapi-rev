@@ -230,6 +230,12 @@ export const playgroundSessionSchema = z.object({
   /** Absent or null when the conversation sends its full stored history. */
   contextSummary: playgroundContextSummarySchema.nullable().optional(),
   /**
+   * Request-side developer settings stored after the feature existed. Kept
+   * unknown here because normalizeDeveloperOptions tolerates a legacy or
+   * partially written object and degrades it to the disabled defaults.
+   */
+  developerOptions: z.unknown().optional(),
+  /**
    * Organization fields added after the first server sync. They stay optional
    * for older snapshots, and a corrupt value degrades to the neutral state
    * instead of rejecting the whole conversation.
