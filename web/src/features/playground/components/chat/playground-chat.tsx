@@ -35,6 +35,8 @@ import {
 import { Loader } from '@/components/ai-elements/loader'
 import { Message } from '@/components/ai-elements/message'
 
+import type { PlaygroundArtifactSummary } from '../../artifact-api'
+import { MESSAGE_ROLES } from '../../constants'
 import {
   getActiveVersionIndex,
   getChatMessageRenderState,
@@ -45,18 +47,17 @@ import {
   isMessageTruncated,
   isParallelMessage,
 } from '../../lib'
-import type { PlaygroundArtifactSummary } from '../../artifact-api'
 import type {
   Message as MessageType,
   PlaygroundContextSummary,
   PlaygroundMessageCost,
   PlaygroundMessageLayoutMode,
 } from '../../types'
-import { PlaygroundArtifactLinks } from './playground-artifact-links'
 import { MessageActions } from '../message/message-actions'
 import { MessageErrorActions } from '../message/message-error-actions'
 import { PlaygroundMessageContent } from '../message/playground-message-content'
 import { PlaygroundMessageEditor } from '../message/playground-message-editor'
+import { PlaygroundArtifactLinks } from './playground-artifact-links'
 import { PlaygroundContextNode } from './playground-context-node'
 import { PlaygroundEmptyState } from './playground-empty-state'
 import { PlaygroundParallelCompare } from './playground-parallel-compare'
@@ -184,9 +185,13 @@ export function PlaygroundChat({
       editingKey
     )
     const isError = isErrorMessage(message)
-    const previousUserMessage = isError
-      ? getPreviousUserMessage(messages, messageIndex)
-      : null
+    const previousUserMessage = getPreviousUserMessage(messages, messageIndex)
+    // A reply answers the nearest user turn; when that turn retrieved
+    // knowledge, its stored snapshot is the citation list of every version.
+    const knowledge =
+      message.from === MESSAGE_ROLES.ASSISTANT
+        ? (previousUserMessage?.knowledge ?? null)
+        : null
     const alignment = getMessageAlignment(message, messageLayoutMode)
     const isSourceVisible = sourceMessageKeys.has(message.key)
     const isLastMessage = messageIndex === messages.length - 1
@@ -232,6 +237,7 @@ export function PlaygroundChat({
         costs={costs}
         isGenerating={isGenerating}
         isLastMessage={isLastMessage}
+        knowledge={knowledge}
         message={message}
         onContinueToolCalls={onContinueToolCalls}
         onDenyToolCall={onDenyToolCall}
@@ -260,6 +266,7 @@ export function PlaygroundChat({
               isLastMessage={isLastMessage}
               isSourceVisible={isSourceVisible}
               key={`${version.id}-${versionIndex}`}
+              knowledge={knowledge}
               message={message}
               onContinueToolCalls={onContinueToolCalls}
               onDenyToolCall={onDenyToolCall}

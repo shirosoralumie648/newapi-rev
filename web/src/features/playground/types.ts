@@ -144,6 +144,36 @@ export interface MessageSearchSnapshot {
   results: MessageSearchResult[]
 }
 
+/** One ranked knowledge chunk injected into a user turn. */
+export interface MessageKnowledgeResult {
+  knowledgeBaseId: string
+  knowledgeBaseName: string
+  documentId: string
+  filename: string
+  chunkId: string
+  chunkIndex: number
+  score: number
+  text: string
+  truncated?: boolean
+}
+
+/**
+ * Knowledge retrieval snapshot of one user turn. Results are ordered: the
+ * assistant cites the first hit as [1]. The snapshot is the source of truth for
+ * replay and for deriving the assistant's citation list after a reload.
+ */
+export interface MessageKnowledgeSnapshot {
+  query: string
+  results: MessageKnowledgeResult[]
+}
+
+/** One ready document that retrieval skipped because it needs reindexing. */
+export interface KnowledgeStaleDocument {
+  id: string
+  filename: string
+  embeddingModel: string
+}
+
 export interface Message {
   key: string
   from: MessageRole
@@ -162,6 +192,7 @@ export interface Message {
   durationMs?: number
   sources?: { href: string; title: string }[]
   search?: MessageSearchSnapshot
+  knowledge?: MessageKnowledgeSnapshot
   reasoning?: {
     content: string
     duration: number
@@ -226,6 +257,8 @@ export interface PlaygroundSession {
   openingMessage: string
   /** Starter questions shown on the empty state; never sent to the model. */
   suggestedQuestions: string[]
+  /** Up to three knowledge bases retrieved on every send in this conversation. */
+  knowledgeBaseIds: string[]
   /** Context limits, auto-summary flag and summary model of the conversation. */
   context: PlaygroundContextSettings
   /** Persisted compression node, or null when the full history is sent. */

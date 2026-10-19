@@ -29,7 +29,7 @@ import {
 } from '@/components/ui/collapsible'
 import { cn } from '@/lib/utils'
 
-export type SourcesProps = ComponentProps<'div'>
+export type SourcesProps = ComponentProps<typeof Collapsible>
 
 export const Sources = ({ className, ...props }: SourcesProps) => (
   <Collapsible

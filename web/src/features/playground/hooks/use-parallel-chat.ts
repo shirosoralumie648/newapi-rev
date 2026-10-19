@@ -60,6 +60,11 @@ interface UseParallelChatOptions {
   prepareContextSummary?: (
     messages: Message[]
   ) => Promise<PlaygroundContextSummary | null>
+  /**
+   * Retrieves knowledge-base context for the newest user turn and returns the
+   * conversation with the snapshot attached, exactly like the ordinary send.
+   */
+  prepareKnowledge?: (messages: Message[]) => Promise<Message[]>
   onMessageUpdate: (
     updater: (prev: Message[]) => Message[],
     sessionId?: string | null
@@ -230,23 +235,43 @@ export function useParallelChat(options: UseParallelChatOptions) {
         .filter((entry) => entry.model !== '')
       if (entries.length < PLAYGROUND_PARALLEL_MIN_MODELS) return
 
-      const promptMessages = messages.slice(0, -1)
       activeGroupKeyRef.current = group.key
       sessionRef.current = optionsRef.current.sessionId
 
       void (async () => {
+        const initialPrompt = messages.slice(0, -1)
         await Promise.all([
-          ensurePlaygroundMessageAttachments(promptMessages),
-          ensurePlaygroundDocumentTexts(promptMessages),
+          ensurePlaygroundMessageAttachments(initialPrompt),
+          ensurePlaygroundDocumentTexts(initialPrompt),
         ])
+        let prepared = messages
+        const prepareKnowledge = optionsRef.current.prepareKnowledge
+        if (prepareKnowledge) {
+          try {
+            prepared = await prepareKnowledge(messages)
+          } catch {
+            prepared = messages
+          }
+          if (prepared !== messages) {
+            optionsRef.current.onMessageUpdate(
+              () => prepared,
+              sessionRef.current
+            )
+          }
+        }
         let contextSummary: PlaygroundContextSummary | null = null
         try {
           contextSummary =
-            (await optionsRef.current.prepareContextSummary?.(messages)) ?? null
+            (await optionsRef.current.prepareContextSummary?.(prepared)) ?? null
         } catch {
           contextSummary = null
         }
-        await runComparison(promptMessages, group.key, entries, contextSummary)
+        await runComparison(
+          prepared.slice(0, -1),
+          group.key,
+          entries,
+          contextSummary
+        )
       })()
     },
     [runComparison]

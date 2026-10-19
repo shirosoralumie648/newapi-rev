@@ -32,6 +32,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 
+import type { KnowledgeBase } from '../../knowledge-api'
 import { getSearchActionNotice } from '../../lib'
 import type { PlaygroundContextPlan } from '../../lib'
 import type {
@@ -45,7 +46,10 @@ import { PlaygroundAssetPicker } from './playground-asset-picker'
 import { PlaygroundAutoReadControl } from './playground-auto-read-control'
 import { PlaygroundAutoTitleControl } from './playground-auto-title-control'
 import { PlaygroundComparePanel } from './playground-compare-panel'
-import { PlaygroundContextPanel } from './playground-context-panel'
+import {
+  PlaygroundContextPanel,
+  type PlaygroundKnowledgeDiagnostics,
+} from './playground-context-panel'
 import { PlaygroundDictationPanel } from './playground-dictation-panel'
 import { PlaygroundParameterPanel } from './playground-parameter-panel'
 import { PlaygroundSnippetPanel } from './playground-snippet-panel'
@@ -82,6 +86,12 @@ type PlaygroundInputToolsProps = {
   onContextSettingsChange: (settings: PlaygroundContextSettings) => void
   onRemoveContextSummary: () => void
   onSummarizeContext: () => void
+  /** Knowledge bases the account may bind to the conversation. */
+  knowledgeBases?: KnowledgeBase[]
+  knowledgeBaseIds?: string[]
+  onKnowledgeBaseIdsChange?: (knowledgeBaseIds: string[]) => void
+  knowledgeDiagnostics?: PlaygroundKnowledgeDiagnostics | null
+  knowledgeLoading?: boolean
   /** Effective auto read-aloud state of the active conversation. */
   autoReadEnabled: boolean
   /** Account default applied to conversations without an override. */
@@ -124,6 +134,11 @@ export function PlaygroundInputTools({
   onContextSettingsChange,
   onRemoveContextSummary,
   onSummarizeContext,
+  knowledgeBases,
+  knowledgeBaseIds,
+  onKnowledgeBaseIdsChange,
+  knowledgeDiagnostics,
+  knowledgeLoading,
   autoReadEnabled,
   autoReadDefaultEnabled,
   autoReadHasOverride,
@@ -237,7 +252,12 @@ export function PlaygroundInputTools({
           currentModel={config.model}
           disabled={disabled}
           isSummarizing={isSummarizing}
+          knowledgeBaseIds={knowledgeBaseIds}
+          knowledgeBases={knowledgeBases}
+          knowledgeDiagnostics={knowledgeDiagnostics}
+          knowledgeLoading={knowledgeLoading}
           models={models}
+          onKnowledgeBaseIdsChange={onKnowledgeBaseIdsChange}
           onRemoveSummary={onRemoveContextSummary}
           onSettingsChange={onContextSettingsChange}
           onSummarizeNow={onSummarizeContext}

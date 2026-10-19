@@ -114,6 +114,10 @@ type PlaygroundSession struct {
 	// of strings. They are display-only prompts the user may send; the column
 	// stays nullable so an existing installation can add it on every dialect.
 	SuggestedQuestions string `json:"-" gorm:"type:text"`
+	// KnowledgeBaseIDs stores the conversation's bound knowledge bases as a
+	// JSON array of ids. Retrieval happens per send, so changing a base's
+	// documents affects the next turn without rewriting the conversation.
+	KnowledgeBaseIDs string `json:"-" gorm:"type:text"`
 	// DeletedAt is the trash tombstone: 0 means the conversation is active, and
 	// a positive value is the timestamp it was soft-deleted. A trashed
 	// conversation keeps its messages, attachments and artifacts — and its

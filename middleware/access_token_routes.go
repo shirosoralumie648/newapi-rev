@@ -93,6 +93,7 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"PATCH /api/playground/knowledge-bases/:kbId":                                accessTokenSessionRule,
 	"DELETE /api/playground/knowledge-bases/:kbId":                               accessTokenSessionRule,
 	"GET /api/playground/knowledge-bases/:kbId/documents":                        accessTokenSessionRule,
+	"POST /api/playground/knowledge-bases/:kbId/search":                          accessTokenSessionRule,
 	"POST /api/playground/knowledge-bases/:kbId/documents":                       accessTokenSessionRule,
 	"GET /api/playground/knowledge-bases/:kbId/documents/:documentId":            accessTokenSessionRule,
 	"DELETE /api/playground/knowledge-bases/:kbId/documents/:documentId":         accessTokenSessionRule,
