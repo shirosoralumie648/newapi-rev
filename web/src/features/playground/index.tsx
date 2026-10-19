@@ -25,10 +25,7 @@ import { ErrorState } from '@/components/error-state'
 import { Button } from '@/components/ui/button'
 import { restoreCanvasProject } from '@/features/canvas/api'
 import { CanvasSendDialog } from '@/features/canvas/components/canvas-send-dialog'
-import type {
-  CanvasGenerationSearch,
-  CanvasRouteSearch,
-} from '@/features/canvas/lib/canvas-navigation'
+import type { CanvasRouteSearch } from '@/features/canvas/lib/canvas-navigation'
 import {
   buildMessageCanvasSeeds,
   type CanvasSendSeed,
@@ -51,10 +48,13 @@ import {
   type PlaygroundInspectorView,
 } from './components/workspace/playground-workspace'
 import {
+  PLAYGROUND_IMPORT_ERRORS,
+  PLAYGROUND_IMPORT_MAX_FILE_BYTES,
   PLAYGROUND_PARALLEL_MIN_MODELS,
   PLAYGROUND_SPEECH_ERRORS,
 } from './constants'
 import {
+  useAutoReadAloud,
   useChatHandler,
   useParallelChat,
   usePlaygroundContext,
@@ -64,6 +64,7 @@ import {
   usePlaygroundMemoryExtraction,
   usePlaygroundOptions,
   usePlaygroundArtifacts,
+  usePlaygroundPreferences,
   usePlaygroundState,
   usePlaygroundServer,
 } from './hooks'
@@ -76,7 +77,9 @@ import {
   getMessageContent,
   getMessageContentState,
   hasPendingToolCalls,
+  importPlaygroundSessionDocument,
   loadMemoryExtractionSettings,
+  parsePlaygroundSessionExport,
   PLAYGROUND_ATTACHMENT_ERRORS,
   presetSessionSettings,
   saveMemoryExtractionSettings,
@@ -200,16 +203,29 @@ function PlaygroundContent(props: {
     onSummaryChange: updateContextSummary,
   })
 
-  const { sendChat, stopGeneration, isGenerating } = useChatHandler({
-    config,
-    parameterEnabled,
-    systemPrompt,
-    memoryBlock,
-    contextSettings: context,
-    prepareContextSummary: contextController.prepareForSend,
-    onMessageUpdate: updateMessages,
+  const preferences = usePlaygroundPreferences(userId)
+  // Automatic read-aloud runs after a reply completes. It is fire-and-forget:
+  // the composer is never disabled and a late take from another conversation is
+  // discarded by the hook's sequence guard.
+  const autoRead = useAutoReadAloud({
+    enabled: preferences.isAutoReadEnabled(activeSessionId),
     sessionId: activeSessionId,
+    model: models[0]?.value ?? '',
+    group: config.group,
   })
+
+  const { sendChat, continueChat, stopGeneration, isGenerating } =
+    useChatHandler({
+      config,
+      parameterEnabled,
+      systemPrompt,
+      memoryBlock,
+      contextSettings: context,
+      prepareContextSummary: contextController.prepareForSend,
+      onMessageUpdate: updateMessages,
+      onResponseComplete: (result) => autoRead.read(result.content),
+      sessionId: activeSessionId,
+    })
 
   const {
     sendParallelChat,
@@ -288,10 +304,12 @@ function PlaygroundContent(props: {
     handleProvideToolResult,
     handleDenyToolCall,
     handleContinueToolCalls,
+    handleContinueMessage,
   } = usePlaygroundConversation({
     messages,
     updateMessages,
     sendChat,
+    continueChat,
   })
 
   const pendingToolCalls = hasPendingToolCalls(messages)
@@ -361,14 +379,65 @@ function PlaygroundContent(props: {
   }, [isComparing, isGenerating, stopComparison, stopGeneration])
 
   const handleWorkspaceTransition = useCallback(
-    (action: () => void) => {
+    <Result,>(action: () => Result): Result | undefined => {
       if (artifactController.state.dirty) {
         artifactController.store.getState().requestDiscard(action)
-        return
+        return undefined
       }
-      action()
+      return action()
     },
     [artifactController.state.dirty, artifactController.store]
+  )
+
+  // Rebuild one exported conversation: the parser validates the JSON, the
+  // import helper recreates the session and every message through the ordinary
+  // create/upload chain (so quotas apply), and the workspace adopts the result.
+  // Attachments from another account are unreachable and stay placeholders.
+  const performImportConversation = useCallback(
+    async (file: File) => {
+      if (file.size > PLAYGROUND_IMPORT_MAX_FILE_BYTES) {
+        toast.error(t(PLAYGROUND_IMPORT_ERRORS.TOO_LARGE))
+        return
+      }
+      let document: ReturnType<typeof parsePlaygroundSessionExport>
+      try {
+        document = parsePlaygroundSessionExport(JSON.parse(await file.text()))
+      } catch {
+        toast.error(t(PLAYGROUND_IMPORT_ERRORS.INVALID_FILE))
+        return
+      }
+
+      try {
+        const result = await importPlaygroundSessionDocument(document)
+        stopBeforeSessionChange()
+        handleEditOpenChange(false)
+        setArtifactSource(null)
+        setSpeechSource(null)
+        sync.adoptImportedSession(result.session)
+        toast.success(t('Conversation imported'))
+        if (result.unavailableAttachments > 0) {
+          toast.info(
+            t(
+              '{{count}} attachments could not be restored and were kept as placeholders.',
+              { count: result.unavailableAttachments }
+            )
+          )
+        }
+      } catch (error) {
+        handleServerError(error, t(PLAYGROUND_IMPORT_ERRORS.FAILED))
+      }
+    },
+    [handleEditOpenChange, stopBeforeSessionChange, sync, t]
+  )
+
+  // Importing activates a new conversation, so an unsaved artifact draft must
+  // be confirmed before any server-side import starts (no orphan copy when the
+  // user keeps the draft). The immediate path returns the import promise so the
+  // session-list button keeps its busy state until the rebuild finishes.
+  const handleImportConversation = useCallback(
+    (file: File) =>
+      handleWorkspaceTransition(() => performImportConversation(file)),
+    [handleWorkspaceTransition, performImportConversation]
   )
 
   // The settings a preset contributes to a conversation: its model, sampling
@@ -590,7 +659,7 @@ function PlaygroundContent(props: {
         )
         .slice(0, 4)
         .map((attachment) => attachment.id)
-      const search: CanvasGenerationSearch = {
+      const search: CanvasRouteSearch = {
         prompt: visibleContent.slice(0, 4000),
         generate: kind,
         session: canonicalSessionId,
@@ -813,6 +882,7 @@ function PlaygroundContent(props: {
         activeSessionId={activeSessionId}
         onCreate={handleCreateSession}
         onDelete={handleDeleteSession}
+        onImportFile={handleImportConversation}
         onOpenPresets={handleOpenPresets}
         onOpenTrash={handleOpenTrash}
         onRename={renameSession}
@@ -907,6 +977,7 @@ function PlaygroundContent(props: {
               costs={messageCosts}
               isLoadingMessages={isLoadingMessages || sync.isLoading}
               onRegenerateMessage={handleRegenerateMessage}
+              onContinueMessage={handleContinueMessage}
               onReadAloud={activeSession ? handleReadAloud : undefined}
               onEditMessage={handleEditMessage}
               onDeleteMessage={handleDeleteMessage}
@@ -964,6 +1035,18 @@ function PlaygroundContent(props: {
               contextSettings={context}
               contextSummary={contextSummary}
               sessionId={activeSession?.id}
+              autoReadDefaultEnabled={preferences.autoReadDefault}
+              autoReadEnabled={preferences.isAutoReadEnabled(activeSessionId)}
+              autoReadHasOverride={preferences.hasSessionAutoReadOverride(
+                activeSessionId
+              )}
+              onAutoReadChange={(value) =>
+                preferences.setSessionAutoRead(activeSessionId, value)
+              }
+              onAutoReadDefaultChange={preferences.setAutoReadDefault}
+              onAutoReadUseDefault={() =>
+                preferences.setSessionAutoRead(activeSessionId, null)
+              }
               disabled={
                 isGenerating ||
                 isComparing ||

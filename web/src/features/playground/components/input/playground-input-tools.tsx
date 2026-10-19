@@ -42,6 +42,7 @@ import type {
   PlaygroundContextSummary,
 } from '../../types'
 import { PlaygroundAssetPicker } from './playground-asset-picker'
+import { PlaygroundAutoReadControl } from './playground-auto-read-control'
 import { PlaygroundComparePanel } from './playground-compare-panel'
 import { PlaygroundContextPanel } from './playground-context-panel'
 import { PlaygroundDictationPanel } from './playground-dictation-panel'
@@ -80,6 +81,15 @@ type PlaygroundInputToolsProps = {
   onContextSettingsChange: (settings: PlaygroundContextSettings) => void
   onRemoveContextSummary: () => void
   onSummarizeContext: () => void
+  /** Effective auto read-aloud state of the active conversation. */
+  autoReadEnabled: boolean
+  /** Account default applied to conversations without an override. */
+  autoReadDefaultEnabled: boolean
+  /** Whether the active conversation carries an explicit choice. */
+  autoReadHasOverride: boolean
+  onAutoReadChange: (value: boolean) => void
+  onAutoReadUseDefault: () => void
+  onAutoReadDefaultChange: (value: boolean) => void
 }
 
 export function PlaygroundInputTools({
@@ -104,6 +114,12 @@ export function PlaygroundInputTools({
   onContextSettingsChange,
   onRemoveContextSummary,
   onSummarizeContext,
+  autoReadEnabled,
+  autoReadDefaultEnabled,
+  autoReadHasOverride,
+  onAutoReadChange,
+  onAutoReadUseDefault,
+  onAutoReadDefaultChange,
 }: PlaygroundInputToolsProps) {
   const { t } = useTranslation()
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
@@ -154,6 +170,16 @@ export function PlaygroundInputTools({
             onTranscript={onDictateTranscript}
           />
         ) : null}
+
+        <PlaygroundAutoReadControl
+          defaultEnabled={autoReadDefaultEnabled}
+          disabled={disabled}
+          enabled={autoReadEnabled}
+          hasOverride={autoReadHasOverride}
+          onDefaultChange={onAutoReadDefaultChange}
+          onEnabledChange={onAutoReadChange}
+          onUseDefault={onAutoReadUseDefault}
+        />
 
         <PlaygroundComparePanel
           compareModels={compareModels}

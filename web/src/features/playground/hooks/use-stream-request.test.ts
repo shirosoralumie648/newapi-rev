@@ -322,6 +322,40 @@ describe('latest-wins stream request coordination', () => {
     expect(completed).toEqual([1])
   })
 
+  test('reports the provider finish reason of the final data frame', async () => {
+    const source = new FakeStreamSource()
+    const finishReasons: string[] = []
+    const controller = createStreamRequestController({
+      getHeaders: () => Promise.resolve({ Authorization: 'Bearer test' }),
+      createSource: () => source,
+      setStreaming: () => undefined,
+    })
+
+    await controller.send(payload, {
+      onUpdate: () => undefined,
+      onToolCalls: () => undefined,
+      onRequestId: () => undefined,
+      onUsage: () => undefined,
+      onFinishReason: (finishReason) => finishReasons.push(finishReason),
+      onComplete: () => undefined,
+      onError: () => undefined,
+    })
+    source.emit(
+      'message',
+      JSON.stringify({
+        choices: [
+          {
+            delta: { content: 'The answer was cut' },
+            finish_reason: 'length',
+          },
+        ],
+      })
+    )
+    source.emit('message', '[DONE]')
+
+    expect(finishReasons).toEqual(['length'])
+  })
+
   test('captures the request id from the done frame when no state change fired', async () => {
     const source = new FakeStreamSource()
     source.xhr = {

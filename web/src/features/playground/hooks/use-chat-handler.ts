@@ -22,7 +22,7 @@ import { useTranslation } from 'react-i18next'
 import { handleServerError } from '@/lib/handle-server-error'
 
 import { sendChatCompletion } from '../api'
-import { ERROR_MESSAGES } from '../constants'
+import { ERROR_MESSAGES, MESSAGE_STATUS } from '../constants'
 import {
   applyStreamingChunk,
   applyToolCallDelta,
@@ -30,8 +30,12 @@ import {
   buildChatCompletionPayload,
   ensurePlaygroundDocumentTexts,
   ensurePlaygroundMessageAttachments,
+  getCurrentVersion,
+  MESSAGE_FINISH_REASON,
+  setCurrentVersionFinishReason,
   toMessageUsage,
   updateAssistantMessageWithError,
+  updateCurrentVersionContent,
   updateLastAssistantMessage,
   parseRequestErrorDetails,
   applyChatCompletionResponse,
@@ -73,6 +77,17 @@ interface UseChatHandlerOptions {
     updater: (prev: Message[]) => Message[],
     sessionId?: string | null
   ) => void
+  /**
+   * A reply that finished generating successfully. The workspace uses it for
+   * side effects that must not block the next input, like automatic
+   * read-aloud; failures and user stops are not reported here.
+   */
+  onResponseComplete?: (result: {
+    messageKey: string
+    versionId: string
+    content: string
+    finishReason?: string
+  }) => void
   sessionId: string | null
 }
 
@@ -108,6 +123,7 @@ export function useChatHandler({
   contextSettings,
   prepareContextSummary,
   onMessageUpdate,
+  onResponseComplete,
   sessionId,
 }: UseChatHandlerOptions) {
   const { t } = useTranslation()
@@ -127,6 +143,26 @@ export function useChatHandler({
   // finished message so the conversation can show usage and look up the cost.
   const pendingRequestIdRef = useRef<string | null>(null)
   const pendingUsageRef = useRef<MessageUsage | null>(null)
+  // Provider finish reason of the final stream frame (for example `length`).
+  const pendingFinishReasonRef = useRef<string | null>(null)
+  // One continuation in flight: the prefill form is tried first and a channel
+  // that rejects it retries once with a user continue instruction. The pending
+  // record travels with that retry so an ordinary request is never rerouted.
+  const continuationRef = useRef<{
+    fallbackMessages: Message[]
+    contextSummary: PlaygroundContextSummary | null
+    prefix: string
+  } | null>(null)
+  // Deliver a prepared payload through the configured transport. It is a ref
+  // so the stream error handler can start the continuation fallback without a
+  // circular hook dependency.
+  const deliverPayloadRef = useRef<
+    (
+      messages: Message[],
+      summary: PlaygroundContextSummary | null,
+      prefix?: string
+    ) => void
+  >(() => undefined)
 
   const discardPendingStreamUpdates = useCallback((generation: number) => {
     if (streamFlushTimerRef.current !== null) {
@@ -286,35 +322,110 @@ export function useChatHandler({
     []
   )
 
+  // The finish reason arrives with the final data frame; it labels the reply
+  // so a truncated answer can offer "continue generation".
+  const handleStreamFinishReason = useCallback(
+    (generation: number, finishReason: string) => {
+      if (generation !== requestGenerationRef.current) return
+      pendingFinishReasonRef.current = finishReason
+    },
+    []
+  )
+
   // Handle stream complete
   const handleStreamComplete = useCallback(
     (generation: number) => {
       if (generation !== requestGenerationRef.current) return
       flushStreamUpdates(generation)
       setIsRequesting(false)
+      continuationRef.current = null
       const generationRecord = {
         requestId: pendingRequestIdRef.current ?? undefined,
         usage: pendingUsageRef.current ?? undefined,
       }
+      const finishReason = pendingFinishReasonRef.current ?? undefined
+      const completion: {
+        result: {
+          messageKey: string
+          versionId: string
+          content: string
+          finishReason?: string
+        } | null
+      } = { result: null }
       onMessageUpdate((prev) => {
         if (generation !== requestGenerationRef.current) return prev
-        return updateLastAssistantMessage(prev, (message) =>
-          attachMessageVersionUsage(
-            isAssistantMessageFinal(message)
-              ? message
-              : completeAssistantMessage(message),
+        return updateLastAssistantMessage(prev, (message) => {
+          const completed = attachMessageVersionUsage(
+            setCurrentVersionFinishReason(
+              isAssistantMessageFinal(message)
+                ? message
+                : completeAssistantMessage(message),
+              finishReason
+            ),
             generationRecord
           )
-        )
+          const version = getCurrentVersion(completed)
+          completion.result = {
+            messageKey: completed.key,
+            versionId: version.id,
+            content: version.content,
+            finishReason: version.finishReason,
+          }
+          return completed
+        })
       }, requestSessionIdRef.current)
+      if (completion.result) onResponseComplete?.(completion.result)
     },
-    [flushStreamUpdates, onMessageUpdate]
+    [flushStreamUpdates, onMessageUpdate, onResponseComplete]
   )
 
   // Handle stream error
   const handleStreamError = useCallback(
     (generation: number, error: string, errorCode?: string) => {
       if (generation !== requestGenerationRef.current) return
+      // A continuation prefers the assistant prefill form. When the channel
+      // rejects it, retry once with one user continue instruction instead of
+      // showing the failed prefill attempt as an error.
+      const continuation = continuationRef.current
+      if (continuation) {
+        continuationRef.current = null
+        flushStreamUpdates(generation)
+        const fallbackGeneration = generation + 1
+        requestGenerationRef.current = fallbackGeneration
+        discardPendingStreamUpdates(fallbackGeneration)
+        stopStream()
+        abortControllerRef.current?.abort()
+        abortControllerRef.current = null
+        pendingRequestIdRef.current = null
+        pendingUsageRef.current = null
+        pendingFinishReasonRef.current = null
+        setIsRequesting(false)
+        // The prefill attempt may have produced a few chunks before the
+        // channel rejected it. The user-instruction retry starts a fresh
+        // answer, so the half-written branch is cleared first.
+        onMessageUpdate(
+          (prev) =>
+            updateLastAssistantMessage(prev, (message) => ({
+              ...updateCurrentVersionContent(message, continuation.prefix),
+              startedAt: Date.now(),
+              completedAt: undefined,
+              durationMs: undefined,
+              reasoning: undefined,
+              isReasoningStreaming: false,
+              isReasoningComplete: false,
+              isContentComplete: false,
+              status: MESSAGE_STATUS.LOADING,
+              errorCode: null,
+            })),
+          requestSessionIdRef.current
+        )
+        deliverPayloadRef.current(
+          continuation.fallbackMessages,
+          continuation.contextSummary,
+          continuation.prefix
+        )
+        return
+      }
       flushStreamUpdates(generation)
       setIsRequesting(false)
       const displayError = getDisplayError(error)
@@ -337,7 +448,14 @@ export function useChatHandler({
         )
       }, requestSessionIdRef.current)
     },
-    [flushStreamUpdates, getDisplayError, onMessageUpdate, t]
+    [
+      flushStreamUpdates,
+      discardPendingStreamUpdates,
+      stopStream,
+      getDisplayError,
+      onMessageUpdate,
+      t,
+    ]
   )
 
   // Send streaming chat request
@@ -350,6 +468,7 @@ export function useChatHandler({
       abortControllerRef.current = null
       pendingRequestIdRef.current = null
       pendingUsageRef.current = null
+      pendingFinishReasonRef.current = null
       discardPendingStreamUpdates(generation)
       setIsRequesting(true)
       const payload = buildChatCompletionPayload(
@@ -366,6 +485,8 @@ export function useChatHandler({
         onRequestId: (requestId) =>
           handleStreamRequestId(generation, requestId),
         onUsage: (usage) => handleStreamUsage(generation, usage),
+        onFinishReason: (finishReason) =>
+          handleStreamFinishReason(generation, finishReason),
         onComplete: () => handleStreamComplete(generation),
         onError: (error, errorCode) =>
           handleStreamError(generation, error, errorCode),
@@ -383,6 +504,7 @@ export function useChatHandler({
       handleToolCallDeltas,
       handleStreamRequestId,
       handleStreamUsage,
+      handleStreamFinishReason,
       handleStreamComplete,
       handleStreamError,
       sessionId,
@@ -393,7 +515,13 @@ export function useChatHandler({
   const sendNonStreamingChat = useCallback(
     async (
       messages: Message[],
-      contextSummary: PlaygroundContextSummary | null
+      contextSummary: PlaygroundContextSummary | null,
+      /**
+       * Text the continuation branch starts from. A complete answer replaces
+       * the branch content, so a response that only carries the continuation
+       * is prefixed with it.
+       */
+      prefix?: string
     ) => {
       const payload = buildChatCompletionPayload(
         messages,
@@ -411,6 +539,7 @@ export function useChatHandler({
       stopStream()
       pendingRequestIdRef.current = null
       pendingUsageRef.current = null
+      pendingFinishReasonRef.current = null
       discardPendingStreamUpdates(generation)
       abortControllerRef.current?.abort()
       abortControllerRef.current = abortController
@@ -438,6 +567,14 @@ export function useChatHandler({
         }
 
         const usage = toMessageUsage(response.usage)
+        const completion: {
+          result: {
+            messageKey: string
+            versionId: string
+            content: string
+            finishReason?: string
+          } | null
+        } = { result: null }
         onMessageUpdate((prev) => {
           if (requestGenerationRef.current !== generation) return prev
           return updateLastAssistantMessage(prev, (message) => {
@@ -448,12 +585,35 @@ export function useChatHandler({
 
             if (!updatedMessage) return message
 
-            return attachMessageVersionUsage(updatedMessage, {
+            // A non-streaming continuation may return only the new text; keep
+            // the truncated prefix so the branch holds the complete answer.
+            let completedMessage = updatedMessage
+            if (prefix) {
+              const version = getCurrentVersion(updatedMessage)
+              if (!version.content.startsWith(prefix)) {
+                completedMessage = updateCurrentVersionContent(
+                  updatedMessage,
+                  prefix + version.content
+                )
+              }
+            }
+
+            const completed = attachMessageVersionUsage(completedMessage, {
               requestId,
               usage,
             })
+            const version = getCurrentVersion(completed)
+            completion.result = {
+              messageKey: completed.key,
+              versionId: version.id,
+              content: version.content,
+              finishReason: version.finishReason,
+            }
+            return completed
           })
         }, requestSessionIdRef.current)
+        continuationRef.current = null
+        if (completion.result) onResponseComplete?.(completion.result)
       } catch (error: unknown) {
         if (
           abortController.signal.aborted ||
@@ -481,6 +641,7 @@ export function useChatHandler({
       discardPendingStreamUpdates,
       onMessageUpdate,
       handleStreamError,
+      onResponseComplete,
       sessionId,
     ]
   )
@@ -493,6 +654,7 @@ export function useChatHandler({
   // the node the plan then uses.
   const sendChat = useCallback(
     (messages: Message[]) => {
+      continuationRef.current = null
       void Promise.all([
         ensurePlaygroundMessageAttachments(messages),
         ensurePlaygroundDocumentTexts(messages),
@@ -518,6 +680,54 @@ export function useChatHandler({
     ]
   )
 
+  /**
+   * Continue a truncated reply. The request carries the truncated reply as the
+   * last assistant turn (assistant prefill semantics); a channel that rejects
+   * that shape is retried once with `fallbackMessages`, which appends one user
+   * continue instruction. The caller already appended the empty continuation
+   * version, so the stream writes into it and the truncated version stays a
+   * selectable branch.
+   */
+  const continueChat = useCallback(
+    (
+      prefillMessages: Message[],
+      fallbackMessages: Message[],
+      prefix: string
+    ) => {
+      continuationRef.current = {
+        fallbackMessages,
+        contextSummary: null,
+        prefix,
+      }
+      void Promise.all([
+        ensurePlaygroundMessageAttachments(prefillMessages),
+        ensurePlaygroundDocumentTexts(prefillMessages),
+      ]).then(async () => {
+        let contextSummary: PlaygroundContextSummary | null = null
+        try {
+          contextSummary =
+            (await prepareContextSummary?.(prefillMessages)) ?? null
+        } catch {
+          contextSummary = null
+        }
+        const pending = continuationRef.current
+        if (!pending) return
+        pending.contextSummary = contextSummary
+        if (config.stream) {
+          sendStreamingChat(prefillMessages, contextSummary)
+        } else {
+          void sendNonStreamingChat(prefillMessages, contextSummary, prefix)
+        }
+      })
+    },
+    [
+      config.stream,
+      prepareContextSummary,
+      sendStreamingChat,
+      sendNonStreamingChat,
+    ]
+  )
+
   // Stop generation
   const stopGeneration = useCallback(() => {
     const stoppedGeneration = requestGenerationRef.current
@@ -525,12 +735,15 @@ export function useChatHandler({
     const idleGeneration = stoppedGeneration + 1
     requestGenerationRef.current = idleGeneration
     discardPendingStreamUpdates(idleGeneration)
+    continuationRef.current = null
     stopStream()
     abortControllerRef.current?.abort()
     abortControllerRef.current = null
     setIsRequesting(false)
     // A stopped stream was still billed for what it produced, so whatever
-    // usage and request id arrived before the abort is kept.
+    // usage and request id arrived before the abort is kept. The reply keeps
+    // the produced text and is labelled interrupted so "continue generation"
+    // can pick it up.
     const generationRecord = {
       requestId: pendingRequestIdRef.current ?? undefined,
       usage: pendingUsageRef.current ?? undefined,
@@ -540,7 +753,12 @@ export function useChatHandler({
       return updateLastAssistantMessage(prev, (message) =>
         isAssistantMessagePending(message)
           ? attachMessageVersionUsage(
-              completeAssistantMessage(message),
+              completeAssistantMessage(
+                setCurrentVersionFinishReason(
+                  message,
+                  MESSAGE_FINISH_REASON.INTERRUPTED
+                )
+              ),
               generationRecord
             )
           : message
@@ -553,8 +771,19 @@ export function useChatHandler({
     onMessageUpdate,
   ])
 
+  // The error handler reaches the transport through this ref so a failed
+  // prefill can start the user-instruction retry without a dependency cycle.
+  deliverPayloadRef.current = (messages, contextSummary, prefix) => {
+    if (config.stream) {
+      sendStreamingChat(messages, contextSummary)
+      return
+    }
+    void sendNonStreamingChat(messages, contextSummary, prefix)
+  }
+
   return {
     sendChat,
+    continueChat,
     stopGeneration,
     isGenerating: isStreaming || isRequesting,
   }

@@ -8348,6 +8348,17 @@
     "Grace": "宽限期",
     "Playground storage billing for {{date}}: {{quota}} quota charged, {{bytes}} bytes billed": "{{date}} 的 Playground 存储计费：已扣 {{quota}} 额度，计费 {{bytes}} 字节",
     "You have reached the daily Playground storage download limit. It resets with the next storage day.": "你已达到 Playground 存储的每日下载上限，将在下一个存储日重置。",
-    "Playground storage settlement left {{count}} accounts read-only with {{quota}} quota uncovered; see the playground_storage_settle system task result": "Playground 存储结算有 {{count}} 个账户因 {{quota}} 额度未结清而保持只读；详见 playground_storage_settle 系统任务结果"
+    "Playground storage settlement left {{count}} accounts read-only with {{quota}} quota uncovered; see the playground_storage_settle system task result": "Playground 存储结算有 {{count}} 个账户因 {{quota}} 额度未结清而保持只读；详见 playground_storage_settle 系统任务结果",
+    "Read replies aloud": "朗读回复",
+    "Read each completed reply aloud automatically.": "每条回复完成后自动朗读。",
+    "Use account default": "使用账号默认值",
+    "New conversations read replies aloud": "新会话自动朗读回复",
+    "This default also applies to conversations without a choice.": "该默认值也适用于未单独设置的会话。",
+    "Import conversation": "导入会话",
+    "Conversation imported": "会话已导入",
+    "Invalid conversation export.": "会话导出文件无效。",
+    "The conversation export is too large.": "会话导出文件过大。",
+    "Unable to import the conversation.": "无法导入该会话。",
+    "{{count}} attachments could not be restored and were kept as placeholders.": "有 {{count}} 个附件无法恢复，已保留为占位标注。"
   }
 }

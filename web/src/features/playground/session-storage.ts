@@ -247,9 +247,23 @@ export function loadSessionsState(
     parameterEnabled: ParameterEnabled
     messages: Message[]
   },
-  userId: number | null = getCurrentUserId()
+  userId: number | null = getCurrentUserId(),
+  /**
+   * Account-level new-conversation defaults. They only seed the initial
+   * conversation when this browser has never stored one for the account;
+   * stored conversations always win.
+   */
+  newSessionDefaults?: {
+    config: PlaygroundConfig
+    parameterEnabled: ParameterEnabled
+    systemPrompt: string
+  } | null
 ): PlaygroundSessionsState {
-  const migratedSession = createSession(legacy.config, legacy.parameterEnabled)
+  const migratedSession = createSession(
+    newSessionDefaults?.config ?? legacy.config,
+    newSessionDefaults?.parameterEnabled ?? legacy.parameterEnabled,
+    newSessionDefaults?.systemPrompt ?? ''
+  )
   migratedSession.messages = normalizeMessagesForStorage(legacy.messages)
   const fallbackState: PlaygroundSessionsState = {
     activeSessionId: migratedSession.id,

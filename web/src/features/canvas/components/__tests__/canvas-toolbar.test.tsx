@@ -149,9 +149,9 @@ test('toggles the assistant view and reports its pressed state', async () => {
   expect(toggle).toHaveAttribute('aria-pressed', 'false')
 
   await user.click(toggle)
-  expect(props.onToggleAssistant).toHaveBeenCalledTimes(1)
+  expect(props.onToggleInspectorView).toHaveBeenCalledWith('assistant')
 
-  rerender(<CanvasToolbar {...props} assistantOpen />)
+  rerender(<CanvasToolbar {...props} inspectorView='assistant' />)
   expect(screen.getByRole('button', { name: 'Assistant' })).toHaveAttribute(
     'aria-pressed',
     'true'

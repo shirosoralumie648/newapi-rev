@@ -34,7 +34,6 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/service/documenttext"
 	"github.com/QuantumNous/new-api/service/objectstore"
-	"github.com/QuantumNous/new-api/setting/playground_setting"
 
 	"gorm.io/gorm"
 )

@@ -87,7 +87,7 @@ const STATUS_LABELS: Record<KnowledgeDocument['status'], string> = {
 function KnowledgeDocumentRow(props: {
   busy: boolean
   document: KnowledgeDocument
-  locale: string
+  locale?: string
   onDelete: (document: KnowledgeDocument) => void
   onRetry: (document: KnowledgeDocument) => void
 }) {

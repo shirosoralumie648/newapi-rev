@@ -89,6 +89,15 @@ interface PlaygroundInputProps {
   onContextSettingsChange: (settings: PlaygroundContextSettings) => void
   onRemoveContextSummary: () => void
   onSummarizeContext: () => void
+  /** Effective auto read-aloud state of the active conversation. */
+  autoReadEnabled: boolean
+  /** Account default applied to conversations without an override. */
+  autoReadDefaultEnabled: boolean
+  /** Whether the active conversation carries an explicit choice. */
+  autoReadHasOverride: boolean
+  onAutoReadChange: (value: boolean) => void
+  onAutoReadUseDefault: () => void
+  onAutoReadDefaultChange: (value: boolean) => void
 }
 
 export function PlaygroundInput({
@@ -121,6 +130,12 @@ export function PlaygroundInput({
   onContextSettingsChange,
   onRemoveContextSummary,
   onSummarizeContext,
+  autoReadEnabled,
+  autoReadDefaultEnabled,
+  autoReadHasOverride,
+  onAutoReadChange,
+  onAutoReadUseDefault,
+  onAutoReadDefaultChange,
 }: PlaygroundInputProps) {
   const { t } = useTranslation()
   const { text, updateText, appendText, handleKeyDown, rememberSubmittedText } =
@@ -190,6 +205,9 @@ export function PlaygroundInput({
             text={text}
             tools={
               <PlaygroundInputTools
+                autoReadDefaultEnabled={autoReadDefaultEnabled}
+                autoReadEnabled={autoReadEnabled}
+                autoReadHasOverride={autoReadHasOverride}
                 config={config}
                 contextPlan={contextPlan}
                 contextSettings={contextSettings}
@@ -198,6 +216,9 @@ export function PlaygroundInput({
                 hasMessages={hasMessages}
                 isSummarizing={isSummarizing}
                 models={models}
+                onAutoReadChange={onAutoReadChange}
+                onAutoReadDefaultChange={onAutoReadDefaultChange}
+                onAutoReadUseDefault={onAutoReadUseDefault}
                 compareModels={compareModels}
                 onCompareModelsChange={onCompareModelsChange}
                 onClearMessages={onClearMessages}
