@@ -34,6 +34,7 @@ import { useCanvasWorkflowOptions } from '@/features/canvas/hooks/use-canvas-wor
 import { useCanvasWorkflowRunner } from '@/features/canvas/hooks/use-canvas-workflow-runner'
 import { canvasDropEntries } from '@/features/canvas/lib/canvas-drop'
 import { CANVAS_IMAGE_WORKBENCH_AFFIX_GAP } from '@/features/canvas/lib/canvas-image-workbench'
+import { CANVAS_WORKFLOW_MESSAGES } from '@/features/canvas/lib/canvas-workflow'
 import type {
   CanvasFlowEdge,
   CanvasFlowNode,
@@ -194,9 +195,12 @@ function makeEditor(nodes: CanvasFlowNode[], edges: CanvasFlowEdge[]) {
   return editor
 }
 
-function makeRunner(results: Record<string, string[]> = {}) {
+function makeRunner(
+  results: Record<string, string[]> = {},
+  phase: 'idle' | 'running' = 'idle'
+) {
   vi.mocked(useCanvasWorkflowRunner).mockReturnValue({
-    phase: 'idle',
+    phase,
     results,
     message: null,
     clearMessage: vi.fn(),
@@ -240,6 +244,7 @@ beforeEach(() => {
     backgroundRemoval: vi.fn(async () => true),
     styleReference: vi.fn(async () => true),
   } as unknown as ReturnType<typeof useCanvasImageTools>)
+  makeRunner()
 })
 
 test('adds the first image step from the empty workbench', async () => {
@@ -292,6 +297,15 @@ test('shows the preferred image, versions, parameters and zoom toolbar', async (
   expect(screen.getByRole('button', { name: 'Reset zoom' })).toHaveTextContent(
     '125%'
   )
+})
+
+test('locks the version strip while a run is in flight', () => {
+  const fixture = bloodline()
+  makeRunner({ step: [PREVIEW_A, PREVIEW_B] }, 'running')
+  renderWorkbench(fixture.nodes, fixture.edges)
+
+  expect(screen.getByRole('button', { name: 'Draft A · 22' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: 'Draft B · 11' })).toBeDisabled()
 })
 
 test('pins the focused bloodline to the canvas board in one action', async () => {
@@ -387,4 +401,32 @@ test('uploads a reference image and wires it to the focused step', async () => {
     targetHandle: null,
   })
   expect(toast.success).toHaveBeenCalledWith('Reference image added.')
+})
+
+test('refuses references beyond the step image limit before uploading', async () => {
+  const step = imageStep()
+  const mounted = Array.from({ length: 3 }, (_, index) =>
+    flowNode(`ref${index}`, 'attachment', -340, index * 220, {
+      label: `ref${index}.png`,
+      mediaType: 'image/png',
+      ref: { sessionId: 's1', attachmentId: `a${index}` },
+    })
+  )
+  const edges = mounted.map((node) => flowEdge(node.id, 'step'))
+  vi.mocked(canvasDropEntries).mockClear()
+  const { container } = renderWorkbench([step, ...mounted], edges)
+
+  const input = container.querySelector('input[type="file"]')
+  expect(input).not.toBeNull()
+  await userEvent
+    .setup()
+    .upload(input as HTMLInputElement, [
+      new File(['one'], 'one.png', { type: 'image/png' }),
+      new File(['two'], 'two.png', { type: 'image/png' }),
+    ])
+
+  expect(canvasDropEntries).not.toHaveBeenCalled()
+  expect(toast.error).toHaveBeenCalledWith(
+    CANVAS_WORKFLOW_MESSAGES.IMAGE_INPUT_LIMIT
+  )
 })

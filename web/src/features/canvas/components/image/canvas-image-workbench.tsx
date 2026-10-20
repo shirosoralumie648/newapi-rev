@@ -55,6 +55,7 @@ import {
   CANVAS_DROP_MESSAGES,
   CANVAS_IMAGE_TOOL_TITLES,
   CANVAS_LINKED_NODE_OFFSET_X,
+  CANVAS_WORKFLOW_IMAGE_INPUT_MAX_COUNT,
   CANVAS_WORKFLOW_RESULT_NODE_OFFSET_Y,
 } from '../../constants'
 import {
@@ -87,6 +88,7 @@ import {
   canvasImageWorkbenchVariants,
 } from '../../lib/canvas-image-workbench'
 import {
+  CANVAS_WORKFLOW_MESSAGES,
   canvasWorkflowMentions,
   canvasWorkflowNodeHasImage,
   canvasWorkflowPreferredSibling,
@@ -317,6 +319,13 @@ export function CanvasImageWorkbench(props: CanvasImageWorkbenchProps) {
   const handleReferenceFiles = useCallback(
     async (files: File[]) => {
       if (!step || props.disabled || files.length === 0) return
+      // A step consumes at most four images. Refuse the whole selection before
+      // uploading any bytes instead of mounting references the run would reject.
+      const room = CANVAS_WORKFLOW_IMAGE_INPUT_MAX_COUNT - references.length
+      if (files.length > Math.max(room, 0)) {
+        toast.error(t(CANVAS_WORKFLOW_MESSAGES.IMAGE_INPUT_LIMIT))
+        return
+      }
       setUploadingReference(true)
       try {
         let entries: CanvasAddedNode[]
@@ -365,7 +374,7 @@ export function CanvasImageWorkbench(props: CanvasImageWorkbenchProps) {
         setUploadingReference(false)
       }
     },
-    [editor, props.disabled, props.project.id, step, t]
+    [editor, props.disabled, props.project.id, references, step, t]
   )
 
   const header = (
@@ -631,7 +640,7 @@ export function CanvasImageWorkbench(props: CanvasImageWorkbenchProps) {
       {preview}
       <CanvasImageWorkbenchVariants
         activeNodeId={activeNodeId}
-        disabled={props.disabled}
+        disabled={props.disabled || workflow.phase === 'running'}
         onPrefer={handlePrefer}
         previews={previews}
         variants={variants}
