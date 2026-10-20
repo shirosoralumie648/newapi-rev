@@ -27,7 +27,7 @@ import {
   deleteCanvasProject,
   updateCanvasProject,
 } from '../api'
-import { CANVAS_NODE_ADD_BASE } from '../constants'
+import { CANVAS_LINKED_NODE_OFFSET_X, CANVAS_NODE_ADD_BASE } from '../constants'
 import type { CanvasServerDocument } from '../types'
 
 interface CanvasVideoFrameActionsOptions {
@@ -69,10 +69,16 @@ export function useCanvasVideoFrameActions(
           { canvasId: project.id },
           file
         )
+        // The workbench is organized around a generation step, so the frame
+        // lands as the connected reference image of a fresh image step.
+        // Opening the project shows that step with the frame in its reference
+        // strip, ready for an img2img or video-edit chain.
+        const frameNodeId = nanoid()
+        const stepNodeId = nanoid()
         const document: CanvasServerDocument = {
           nodes: [
             {
-              id: nanoid(),
+              id: frameNodeId,
               type: 'image',
               position: {
                 x: CANVAS_NODE_ADD_BASE,
@@ -88,8 +94,26 @@ export function useCanvasVideoFrameActions(
                 },
               },
             },
+            {
+              id: stepNodeId,
+              type: 'task',
+              position: {
+                x: CANVAS_NODE_ADD_BASE + CANVAS_LINKED_NODE_OFFSET_X,
+                y: CANVAS_NODE_ADD_BASE,
+              },
+              data: {
+                kind: 'task',
+                workflow: { generation: 'image' },
+              },
+            },
           ],
-          edges: [],
+          edges: [
+            {
+              id: nanoid(),
+              source: frameNodeId,
+              target: stepNodeId,
+            },
+          ],
         }
         await updateCanvasProject(project.id, {
           revision: project.revision,

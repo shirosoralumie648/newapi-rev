@@ -27,7 +27,11 @@ import {
   deleteCanvasProject,
   updateCanvasProject,
 } from '../../api'
-import type { CanvasServerProject } from '../../types'
+import {
+  CANVAS_LINKED_NODE_OFFSET_X,
+  CANVAS_NODE_ADD_BASE,
+} from '../../constants'
+import type { CanvasServerDocument, CanvasServerProject } from '../../types'
 import { useCanvasVideoFrameActions } from '../use-canvas-video-frame-actions'
 
 vi.mock('../../api', () => ({
@@ -80,7 +84,7 @@ beforeEach(() => {
   vi.mocked(deleteCanvasProject).mockResolvedValue(undefined)
 })
 
-test('creates an image workbench with the frame in its own attachment partition', async () => {
+test('creates an image workbench whose step consumes the frame as a reference', async () => {
   const onOpenProject = vi.fn(async () => undefined)
   const { result } = renderHook(() =>
     useCanvasVideoFrameActions({ sourceTitle: 'Ocean', onOpenProject })
@@ -102,24 +106,37 @@ test('creates an image workbench with the frame in its own attachment partition'
   )
   const update = vi.mocked(updateCanvasProject).mock.calls[0]
   expect(update?.[0]).toBe('pc1')
-  expect(update?.[1]).toMatchObject({
-    revision: 1,
-    document: {
-      edges: [],
-      nodes: [
-        {
-          id: expect.any(String),
-          type: 'image',
-          data: {
-            kind: 'image',
-            label: 'video-frame-12.3s.jpg',
-            mediaType: 'image/jpeg',
-            ref: { sessionId: 'pc1', attachmentId: 'a1' },
-          },
-        },
-      ],
+  expect(update?.[1].revision).toBe(1)
+  const document = update?.[1].document as CanvasServerDocument | undefined
+  const frameNode = document?.nodes.find((node) => node.type === 'image')
+  const stepNode = document?.nodes.find((node) => node.type === 'task')
+  expect(frameNode).toMatchObject({
+    id: expect.any(String),
+    type: 'image',
+    position: { x: CANVAS_NODE_ADD_BASE, y: CANVAS_NODE_ADD_BASE },
+    data: {
+      kind: 'image',
+      label: 'video-frame-12.3s.jpg',
+      mediaType: 'image/jpeg',
+      ref: { sessionId: 'pc1', attachmentId: 'a1' },
     },
   })
+  expect(stepNode).toMatchObject({
+    id: expect.any(String),
+    type: 'task',
+    position: {
+      x: CANVAS_NODE_ADD_BASE + CANVAS_LINKED_NODE_OFFSET_X,
+      y: CANVAS_NODE_ADD_BASE,
+    },
+    data: { kind: 'task', workflow: { generation: 'image' } },
+  })
+  expect(document?.edges).toEqual([
+    {
+      id: expect.any(String),
+      source: frameNode?.id,
+      target: stepNode?.id,
+    },
+  ])
   expect(onOpenProject).toHaveBeenCalledWith('pc1')
 })
 
