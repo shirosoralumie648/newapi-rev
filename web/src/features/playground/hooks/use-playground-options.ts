@@ -35,19 +35,21 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { handleServerError } from '@/lib/handle-server-error'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { getUserGroups, getUserModels } from '../api'
+import { getPlaygroundModelCatalog, getUserGroups, getUserModels } from '../api'
 import {
+  EMPTY_PLAYGROUND_MODEL_CATALOG,
   getGroupFallback,
   getModelFallback,
   getOptionLoadErrorMessage,
   isChatModelOption,
+  mergePlaygroundModelCatalog,
   shouldClearModelForGroup,
 } from '../lib'
 import type { GroupOption, ModelOption, PlaygroundConfig } from '../types'
@@ -94,6 +96,25 @@ export function usePlaygroundOptions({
     queryFn: async () => requireServerSuccess(await getUserGroups()),
   })
 
+  // The catalog only decorates the raw model list. A failed read must never
+  // block the Playground, so an unavailable catalog degrades to the flat list.
+  const { data: catalogData } = useQuery({
+    queryKey: ['playground-model-catalog', userId],
+    queryFn: async () => {
+      try {
+        return await getPlaygroundModelCatalog()
+      } catch {
+        return EMPTY_PLAYGROUND_MODEL_CATALOG
+      }
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const effectiveModels = useMemo(
+    () => mergePlaygroundModelCatalog(modelsData ?? [], catalogData),
+    [modelsData, catalogData]
+  )
+
   useEffect(() => {
     if (!isModelsError) return
 
@@ -121,8 +142,8 @@ export function usePlaygroundOptions({
   useEffect(() => {
     if (!modelsData) return
 
-    setModels(modelsData)
-    const chatModels = modelsData.filter(isChatModelOption)
+    setModels(effectiveModels)
+    const chatModels = effectiveModels.filter(isChatModelOption)
     const fallback = getModelFallback(chatModels, currentModel)
 
     if (fallback) {
@@ -133,7 +154,7 @@ export function usePlaygroundOptions({
     if (shouldClearModelForGroup(chatModels, currentModel)) {
       updateConfig('model', '')
     }
-  }, [modelsData, currentModel, setModels, updateConfig])
+  }, [modelsData, effectiveModels, currentModel, setModels, updateConfig])
 
   useEffect(() => {
     if (!groupsData) return

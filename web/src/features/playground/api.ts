@@ -46,6 +46,10 @@ import {
   parameterEnabledSchema,
 } from './lib/storage/storage-schema'
 import type {
+  PlaygroundUsageAnalytics,
+  PlaygroundUsageAnalyticsBucket,
+} from './lib/usage/playground-usage-analytics'
+import type {
   AssistantPreset,
   ChatCompletionRequest,
   ChatCompletionResponse,
@@ -57,6 +61,7 @@ import type {
   PlaygroundContextSettings,
   PlaygroundContextSummary,
   PlaygroundExportFormat,
+  PlaygroundModelCatalog,
   PlaygroundMessageCost,
   PlaygroundMemory,
   PlaygroundServerSession,
@@ -238,6 +243,118 @@ export async function getUserGroups(): Promise<GroupOption[]> {
     ratio: info.ratio,
     desc: info.desc,
   }))
+}
+
+const serverModelCatalogDefaultsSchema = z.object({
+  temperature: z.number().finite().optional(),
+  top_p: z.number().finite().optional(),
+  max_tokens: z.number().int().optional(),
+  frequency_penalty: z.number().finite().optional(),
+  presence_penalty: z.number().finite().optional(),
+  seed: z.number().int().optional(),
+  reasoning_effort: z.string().optional(),
+})
+
+const serverModelCatalogEntrySchema = z.object({
+  model: z.string().min(1).max(256),
+  display_name: z.string().max(128).optional(),
+  description: z.string().max(2000).optional(),
+  icon: z.string().max(1024).optional(),
+  group: z.string().max(64).optional(),
+  capabilities: z.array(z.string().max(64)).optional(),
+  hidden: z.boolean().optional(),
+  defaults: serverModelCatalogDefaultsSchema.optional(),
+  limits: z
+    .object({
+      context_length: z.number().int().positive().optional(),
+      max_output_tokens: z.number().int().positive().optional(),
+    })
+    .optional(),
+})
+
+const serverPlaygroundModelCatalogSchema = z.object({
+  groups: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(64),
+        label: z.string().min(1).max(128),
+        description: z.string().max(2000).optional(),
+      })
+    )
+    .optional(),
+  models: z.array(serverModelCatalogEntrySchema).optional(),
+})
+
+/**
+ * Reads the administrator-curated catalog the server resolved for this
+ * account's user group. A missing or empty catalog is a valid answer: the
+ * Playground then keeps its flat, uncategorized model list.
+ */
+export async function getPlaygroundModelCatalog(
+  signal?: AbortSignal
+): Promise<PlaygroundModelCatalog> {
+  const response = await api.get(API_ENDPOINTS.PLAYGROUND_MODEL_CATALOG, {
+    signal,
+  })
+  requireServerSuccess(response.data)
+  const catalog = serverPlaygroundModelCatalogSchema.parse(response.data.data)
+  return {
+    groups: (catalog.groups ?? []).map((group) => ({
+      id: group.id,
+      label: group.label,
+      ...(group.description ? { description: group.description } : {}),
+    })),
+    models: (catalog.models ?? []).map((entry) => ({
+      model: entry.model,
+      ...(entry.display_name ? { displayName: entry.display_name } : {}),
+      ...(entry.description ? { description: entry.description } : {}),
+      ...(entry.icon ? { icon: entry.icon } : {}),
+      ...(entry.group ? { group: entry.group } : {}),
+      ...(entry.capabilities?.length
+        ? { capabilities: entry.capabilities }
+        : {}),
+      ...(entry.hidden ? { hidden: true } : {}),
+      ...(entry.defaults
+        ? {
+            defaults: {
+              ...(entry.defaults.temperature !== undefined
+                ? { temperature: entry.defaults.temperature }
+                : {}),
+              ...(entry.defaults.top_p !== undefined
+                ? { topP: entry.defaults.top_p }
+                : {}),
+              ...(entry.defaults.max_tokens !== undefined
+                ? { maxTokens: entry.defaults.max_tokens }
+                : {}),
+              ...(entry.defaults.frequency_penalty !== undefined
+                ? { frequencyPenalty: entry.defaults.frequency_penalty }
+                : {}),
+              ...(entry.defaults.presence_penalty !== undefined
+                ? { presencePenalty: entry.defaults.presence_penalty }
+                : {}),
+              ...(entry.defaults.seed !== undefined
+                ? { seed: entry.defaults.seed }
+                : {}),
+              ...(entry.defaults.reasoning_effort
+                ? { reasoningEffort: entry.defaults.reasoning_effort }
+                : {}),
+            },
+          }
+        : {}),
+      ...(entry.limits
+        ? {
+            limits: {
+              ...(entry.limits.context_length !== undefined
+                ? { contextLength: entry.limits.context_length }
+                : {}),
+              ...(entry.limits.max_output_tokens !== undefined
+                ? { maxOutputTokens: entry.limits.max_output_tokens }
+                : {}),
+            },
+          }
+        : {}),
+    })),
+  }
 }
 
 // Wire shapes of the session context fields. The server speaks snake_case; the
@@ -1265,6 +1382,65 @@ export async function getPlaygroundUsage(
     tasks: toMetric(metrics.tasks),
     comparisonRuns: toMetric(metrics.comparison_runs),
     workflowRuns: toMetric(metrics.workflow_runs),
+  }
+}
+
+const playgroundUsageAnalyticsBucketSchema = z.object({
+  day_start: z.number().int().nonnegative(),
+  model_name: z.string(),
+  origin: z.enum(['playground', 'api']),
+  quota: z.number().int(),
+  prompt_tokens: z.number().int().nonnegative(),
+  completion_tokens: z.number().int().nonnegative(),
+  cache_tokens: z.number().int().nonnegative(),
+  requests: z.number().int().nonnegative(),
+  errors: z.number().int().nonnegative(),
+  avg_time_seconds: z.number().int().nonnegative(),
+  avg_first_token_ms: z.number().int().nonnegative(),
+})
+
+const playgroundUsageAnalyticsSchema = z.object({
+  enabled: z.boolean(),
+  start_timestamp: z.number().int().nonnegative(),
+  end_timestamp: z.number().int().nonnegative(),
+  buckets: z.array(playgroundUsageAnalyticsBucketSchema),
+})
+
+/**
+ * Reads the caller's own settled usage grouped by day, model and origin over
+ * the last `days` days. It is strictly read-only: the query reserves, settles
+ * and recalculates nothing, and the figures are the sums the gateway already
+ * logged. Timestamps are mapped to milliseconds for display.
+ */
+export async function getPlaygroundUsageAnalytics(
+  days: number,
+  signal?: AbortSignal
+): Promise<PlaygroundUsageAnalytics> {
+  const response = await api.get(API_ENDPOINTS.PLAYGROUND_USAGE_ANALYTICS, {
+    params: { days },
+    signal,
+  })
+  requireServerSuccess(response.data)
+  const analytics = playgroundUsageAnalyticsSchema.parse(response.data.data)
+  return {
+    enabled: analytics.enabled,
+    startTimestamp: analytics.start_timestamp * 1000,
+    endTimestamp: analytics.end_timestamp * 1000,
+    buckets: analytics.buckets.map((bucket): PlaygroundUsageAnalyticsBucket => {
+      return {
+        dayStart: bucket.day_start * 1000,
+        modelName: bucket.model_name,
+        origin: bucket.origin,
+        quota: bucket.quota,
+        promptTokens: bucket.prompt_tokens,
+        completionTokens: bucket.completion_tokens,
+        cacheTokens: bucket.cache_tokens,
+        requests: bucket.requests,
+        errors: bucket.errors,
+        avgTimeSeconds: bucket.avg_time_seconds,
+        avgFirstTokenMs: bucket.avg_first_token_ms,
+      }
+    }),
   }
 }
 

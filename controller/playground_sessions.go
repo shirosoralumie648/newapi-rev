@@ -26,6 +26,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -81,6 +82,16 @@ const (
 	// playgroundParallelMinVersions is the smallest group that actually
 	// compares models: a single reply already has the ordinary message path.
 	playgroundParallelMinVersions = 2
+	// playgroundArenaVersionCount is the fixed size of an anonymous A/B
+	// comparison. The arena hides which model produced each reply, so it only
+	// accepts exactly two replies; a larger group stays an ordinary comparison.
+	playgroundArenaVersionCount = 2
+	// playgroundArenaModelLabels are the display labels stored in an anonymous
+	// group. Model names stay on the versions for retry and continuation, but
+	// stored reply text is scrubbed so an error or self-identifying answer does
+	// not reveal them.
+	playgroundArenaModelLabelA = "Model A"
+	playgroundArenaModelLabelB = "Model B"
 	// playgroundContextHistoryLimitMax and playgroundContextTokenBudgetMax bound
 	// the caller-supplied context management settings. They are request-shape
 	// limits, not resource quotas: staying inside them never changes what the
@@ -219,7 +230,11 @@ type playgroundMessagePayload struct {
 	// is stored as one message so the conversation can keep every compared
 	// reply and continue from the one the user selects.
 	Parallel *bool `json:"parallel,omitempty"`
-	Versions []struct {
+	// Anonymous marks a parallel group as one anonymous A/B arena round. It
+	// always has exactly two versions; the stored models stay available for
+	// retry and continuation, while the UI and persisted reply text hide them.
+	Anonymous *bool `json:"anonymous,omitempty"`
+	Versions  []struct {
 		ID      string `json:"id"`
 		Content string `json:"content"`
 		// Model is the model that produced this version. It is required on
@@ -528,6 +543,16 @@ func writePlaygroundError(c *gin.Context, err error) {
 		status = http.StatusUnprocessableEntity
 		code = "PLAYGROUND_PARALLEL_LIMIT_EXCEEDED"
 		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundArenaVoteInvalid) {
+		status = http.StatusBadRequest
+		code = "PLAYGROUND_ARENA_VOTE_INVALID"
+		err = common.NewMessage(err.Error())
+	}
+	if errors.Is(err, model.ErrPlaygroundArenaMessageNotFound) {
+		status = http.StatusNotFound
+		code = "PLAYGROUND_NOT_FOUND"
+		err = common.NewMessage("Playground message not found.")
 	}
 	if errors.Is(err, model.ErrPlaygroundPresetLimit) {
 		status = http.StatusUnprocessableEntity
@@ -1310,6 +1335,11 @@ func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroun
 					return nil, common.NewMessage("Invalid Playground message.")
 				}
 			}
+			if payload.Anonymous != nil && *payload.Anonymous && len(payload.Versions) != playgroundArenaVersionCount {
+				return nil, common.NewMessage("Invalid Playground message.")
+			}
+		} else if payload.Anonymous != nil && *payload.Anonymous {
+			return nil, common.NewMessage("Invalid Playground message.")
 		}
 		for versionIndex := range payload.Versions {
 			version := &payload.Versions[versionIndex]
@@ -1420,6 +1450,22 @@ func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroun
 				version.Speech.ByteSize = stored.ByteSize
 			}
 		}
+		if payload.Anonymous != nil && *payload.Anonymous {
+			// The model names stay on the versions for retry and continuation,
+			// but every stored reply text is scrubbed so an anonymous group never
+			// carries a model name through an error or a self-identifying answer.
+			models := make([]string, len(payload.Versions))
+			for versionIndex := range payload.Versions {
+				models[versionIndex] = *payload.Versions[versionIndex].Model
+			}
+			for versionIndex := range payload.Versions {
+				version := &payload.Versions[versionIndex]
+				version.Content = redactPlaygroundArenaModelNames(version.Content, models)
+			}
+			if payload.Reasoning != nil {
+				payload.Reasoning.Content = redactPlaygroundArenaModelNames(payload.Reasoning.Content, models)
+			}
+		}
 		// Only the message contract is persisted; unknown credential/provider fields are discarded.
 		encoded, err := common.Marshal(payload)
 		if err != nil {
@@ -1432,6 +1478,42 @@ func validatePlaygroundMessages(userID int, sessionID string, inputs []playgroun
 		messages = append(messages, model.PlaygroundMessage{ClientKey: payload.Key, Payload: model.LongText(encoded)})
 	}
 	return messages, nil
+}
+
+// redactPlaygroundArenaModelNames replaces the two compared model names in
+// stored reply text with their anonymous labels. The replacement is
+// case-insensitive because provider errors do not preserve the configured
+// casing. Only text is rewritten; the version's model field keeps the real name
+// so retry and continuation still know where to send the request.
+func redactPlaygroundArenaModelNames(content string, models []string) string {
+	labels := []string{playgroundArenaModelLabelA, playgroundArenaModelLabelB}
+	expressions := make([]string, 0, len(models))
+	labelByModel := make(map[string]string, len(models))
+	for index, model := range models {
+		if index >= len(labels) {
+			break
+		}
+		model = strings.TrimSpace(model)
+		if model == "" {
+			continue
+		}
+		key := strings.ToLower(model)
+		if _, exists := labelByModel[key]; exists {
+			continue
+		}
+		labelByModel[key] = labels[index]
+		expressions = append(expressions, regexp.QuoteMeta(model))
+	}
+	if len(expressions) == 0 {
+		return content
+	}
+	// Longer names match first so one model name that is a prefix of another
+	// cannot steal the shorter match before the full name is labelled.
+	slices.SortFunc(expressions, func(a, b string) int { return len(b) - len(a) })
+	pattern := regexp.MustCompile("(?i)(?:" + strings.Join(expressions, "|") + ")")
+	return pattern.ReplaceAllStringFunc(content, func(match string) string {
+		return labelByModel[strings.ToLower(match)]
+	})
 }
 
 // validatePlaygroundMessageSearch bounds the search snapshot a stored message

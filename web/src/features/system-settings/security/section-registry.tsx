@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { PlaygroundMCPSection } from '../playground/playground-mcp-section'
+import { PlaygroundModelCatalogSection } from '../playground/playground-model-catalog-section'
 import { PlaygroundQuotaSection } from '../playground/playground-quota-section'
 import { PlaygroundStorageBillingSection } from '../playground/playground-storage-billing-section'
 import { PlaygroundWebSearchSection } from '../playground/playground-web-search-section'
@@ -92,6 +93,15 @@ const SECURITY_SECTIONS = [
           settings['playground_setting.sandbox_preview_enabled']
         }
         taskQueueEnabled={settings['playground_setting.task_queue_enabled']}
+      />
+    ),
+  },
+  {
+    id: 'playground-model-catalog',
+    titleKey: 'Playground Model Catalog',
+    build: (settings: SecuritySettings) => (
+      <PlaygroundModelCatalogSection
+        catalogJson={settings['playground_setting.model_catalog']}
       />
     ),
   },

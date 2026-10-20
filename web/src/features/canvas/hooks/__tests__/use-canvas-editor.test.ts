@@ -641,6 +641,210 @@ test('distributeSelection spaces three selected nodes evenly', () => {
   expect(onChange).toHaveBeenCalledTimes(1)
 })
 
+test('frame and sticky nodes are added, edited and deleted as undoable steps', () => {
+  const onChange = vi.fn()
+  const hook = renderHook(() => useCanvasEditor(EMPTY_DOCUMENT, onChange))
+
+  act(() => {
+    expect(hook.result.current.addNode('frame')).toBe(true)
+    expect(hook.result.current.addNode('sticky')).toBe(true)
+  })
+  const frame = hook.result.current.nodes.find(
+    (node) => node.data.kind === 'frame'
+  )
+  const sticky = hook.result.current.nodes.find(
+    (node) => node.data.kind === 'sticky'
+  )
+  expect(frame?.width ?? 0).toBeGreaterThan(0)
+  expect(sticky?.height ?? 0).toBeGreaterThan(0)
+  expect(onChange).toHaveBeenCalledTimes(2)
+
+  act(() =>
+    hook.result.current.updateNodeData(
+      sticky?.id ?? '',
+      { text: 'Draft' },
+      { mergeKey: `text:${sticky?.id}` }
+    )
+  )
+  expect(
+    hook.result.current.nodes.find((node) => node.id === sticky?.id)?.data.text
+  ).toBe('Draft')
+  expect(onChange).toHaveBeenCalledTimes(3)
+
+  act(() => hook.result.current.deleteNode(frame?.id ?? ''))
+  expect(hook.result.current.nodes.map((node) => node.id)).toEqual([sticky?.id])
+
+  act(() => hook.result.current.undo())
+  expect(hook.result.current.nodes.map((node) => node.id)).toEqual([
+    frame?.id,
+    sticky?.id,
+  ])
+
+  act(() => hook.result.current.undo())
+  expect(
+    hook.result.current.nodes.find((node) => node.id === sticky?.id)?.data.text
+  ).toBeUndefined()
+
+  act(() => hook.result.current.redo())
+  expect(
+    hook.result.current.nodes.find((node) => node.id === sticky?.id)?.data.text
+  ).toBe('Draft')
+
+  act(() => hook.result.current.redo())
+  expect(hook.result.current.nodes.map((node) => node.id)).toEqual([sticky?.id])
+})
+
+test('align and auto layout move positions without touching edges or data', () => {
+  const onChange = vi.fn()
+  const hook = renderHook(() =>
+    useCanvasEditor(
+      {
+        nodes: [
+          {
+            id: 'a',
+            type: 'prompt',
+            position: { x: 0, y: 0 },
+            data: { kind: 'prompt', text: 'hero' },
+          },
+          {
+            id: 'b',
+            type: 'model',
+            position: { x: 200, y: 40 },
+            data: { kind: 'model', workflow: { model: 'gpt-4o' } },
+          },
+          {
+            id: 'c',
+            type: 'task-result',
+            position: { x: 500, y: 90 },
+            data: { kind: 'task-result' },
+          },
+        ],
+        edges: [
+          { id: 'a-b', source: 'a', target: 'b' },
+          { id: 'b-c', source: 'b', target: 'c' },
+        ],
+      },
+      onChange
+    )
+  )
+  act(() =>
+    hook.result.current.handleNodesChange([
+      { id: 'a', type: 'select', selected: true },
+      { id: 'b', type: 'select', selected: true },
+      { id: 'c', type: 'select', selected: true },
+    ])
+  )
+  const dataBefore = new Map(
+    hook.result.current.nodes.map((node) => [node.id, node.data])
+  )
+  const edgesBefore = hook.result.current.edges
+
+  act(() => expect(hook.result.current.alignSelection('left')).toBe(true))
+  expect(hook.result.current.nodes.map((node) => node.position.x)).toEqual([
+    0, 0, 0,
+  ])
+  expect(hook.result.current.edges).toEqual(edgesBefore)
+  for (const node of hook.result.current.nodes) {
+    expect(node.data).toBe(dataBefore.get(node.id))
+  }
+
+  act(() => hook.result.current.undo())
+  expect(hook.result.current.nodes.map((node) => node.position.x)).toEqual([
+    0, 200, 500,
+  ])
+  act(() => hook.result.current.redo())
+  expect(hook.result.current.nodes.map((node) => node.position.x)).toEqual([
+    0, 0, 0,
+  ])
+
+  act(() => expect(hook.result.current.autoLayout('horizontal')).toBe(true))
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 'b')?.position
+  ).toEqual({ x: 352, y: 0 })
+  expect(hook.result.current.edges).toEqual(edgesBefore)
+  for (const node of hook.result.current.nodes) {
+    expect(node.data).toBe(dataBefore.get(node.id))
+  }
+
+  act(() => hook.result.current.undo())
+  expect(hook.result.current.nodes.map((node) => node.position.x)).toEqual([
+    0, 0, 0,
+  ])
+})
+
+test('collapse selection folds a group and expand restores it undoably', () => {
+  const onChange = vi.fn()
+  const hook = renderHook(() =>
+    useCanvasEditor(
+      {
+        nodes: [
+          {
+            id: 'a',
+            type: 'prompt',
+            position: { x: 0, y: 0 },
+            data: { kind: 'prompt', text: 'hero' },
+          },
+          {
+            id: 'b',
+            type: 'model',
+            position: { x: 320, y: 0 },
+            data: { kind: 'model' },
+          },
+        ],
+        edges: [{ id: 'a-b', source: 'a', target: 'b' }],
+      },
+      onChange
+    )
+  )
+  act(() =>
+    hook.result.current.handleNodesChange([
+      { id: 'a', type: 'select', selected: true },
+      { id: 'b', type: 'select', selected: true },
+    ])
+  )
+
+  act(() => expect(hook.result.current.collapseSelection()).toBe(true))
+  const group = hook.result.current.nodes.find(
+    (node) => node.data.kind === 'group'
+  )
+  expect(group?.data.collapsed).toBe(true)
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 'a')?.hidden
+  ).toBe(true)
+  expect(hook.result.current.edges[0]?.hidden).toBe(true)
+  expect(onChange).toHaveBeenCalled()
+
+  act(() => hook.result.current.undo())
+  expect(
+    hook.result.current.nodes.some((node) => node.data.kind === 'group')
+  ).toBe(false)
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 'a')?.hidden
+  ).not.toBe(true)
+  expect(hook.result.current.edges[0]?.hidden).not.toBe(true)
+
+  act(() => hook.result.current.redo())
+  expect(
+    hook.result.current.nodes.find((node) => node.data.kind === 'group')?.data
+      .collapsed
+  ).toBe(true)
+
+  act(() => expect(hook.result.current.expandSelection()).toBe(true))
+  expect(
+    hook.result.current.nodes.find((node) => node.data.kind === 'group')?.data
+      .collapsed
+  ).toBeUndefined()
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 'a')?.hidden
+  ).toBe(false)
+
+  act(() => hook.result.current.undo())
+  expect(
+    hook.result.current.nodes.find((node) => node.data.kind === 'group')?.data
+      .collapsed
+  ).toBe(true)
+})
+
 test('dragging snaps to a nearby edge and records one history entry', () => {
   const onChange = vi.fn()
   const hook = renderHook(() => useCanvasEditor(LINKED_DOCUMENT, onChange))

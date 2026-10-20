@@ -49,6 +49,7 @@ import { PlaygroundMessageSearch } from './components/workspace/playground-messa
 import { PlaygroundPresetPanel } from './components/workspace/playground-preset-panel'
 import { PlaygroundSessionUsage } from './components/workspace/playground-session-usage'
 import { PlaygroundTrashPanel } from './components/workspace/playground-trash-panel'
+import { PlaygroundUsageAnalyticsPanel } from './components/workspace/playground-usage-analytics'
 import { PlaygroundUsagePopover } from './components/workspace/playground-usage-popover'
 import {
   PlaygroundWorkspace,
@@ -165,6 +166,7 @@ function PlaygroundContent(props: {
   const [presetsOpen, setPresetsOpen] = useState(false)
   const [trashOpen, setTrashOpen] = useState(false)
   const [memoryOpen, setMemoryOpen] = useState(false)
+  const [usageOpen, setUsageOpen] = useState(false)
   // Inspector sheet of the last captured request payload. Opening it never
   // builds a request; it only shows what the last send already built.
   const [requestViewerOpen, setRequestViewerOpen] = useState(false)
@@ -685,6 +687,12 @@ function PlaygroundContent(props: {
     [config, parameterEnabled]
   )
 
+  const modelDefaultsFor = useCallback(
+    (modelValue: string) =>
+      models.find((model) => model.value === modelValue)?.catalogDefaults,
+    [models]
+  )
+
   const handleCreateSession = useCallback(() => {
     if (sync.isLoading) return
     handleWorkspaceTransition(() => {
@@ -694,15 +702,49 @@ function PlaygroundContent(props: {
       setSpeechSource(null)
       setPendingQuote(null)
       setHighlightedMessageKey(null)
-      createSession()
+      createSession({
+        model: config.model,
+        modelDefaults: modelDefaultsFor(config.model),
+      })
     })
   }, [
+    config.model,
     createSession,
+    modelDefaultsFor,
     sync.isLoading,
     stopBeforeSessionChange,
     handleEditOpenChange,
     handleWorkspaceTransition,
   ])
+
+  // Starts a fresh conversation directly with a model picked in the selector.
+  // Only the new conversation receives the catalog defaults; the previous one
+  // and later model switches keep their own values.
+  const handleCreateSessionWithModel = useCallback(
+    (modelValue: string) => {
+      if (sync.isLoading) return
+      handleWorkspaceTransition(() => {
+        stopBeforeSessionChange()
+        handleEditOpenChange(false)
+        setArtifactSource(null)
+        setSpeechSource(null)
+        setPendingQuote(null)
+        setHighlightedMessageKey(null)
+        createSession({
+          model: modelValue,
+          modelDefaults: modelDefaultsFor(modelValue),
+        })
+      })
+    },
+    [
+      createSession,
+      modelDefaultsFor,
+      sync.isLoading,
+      stopBeforeSessionChange,
+      handleEditOpenChange,
+      handleWorkspaceTransition,
+    ]
+  )
 
   const handleCreateSessionWithPreset = useCallback(
     (preset: AssistantPreset) => {
@@ -1097,22 +1139,33 @@ function PlaygroundContent(props: {
   if (memoryOpen) inspectorView = 'memory'
   else if (presetsOpen) inspectorView = 'presets'
   else if (trashOpen) inspectorView = 'trash'
+  else if (usageOpen) inspectorView = 'usage'
 
   const handleToggleInspector = useCallback((view: PlaygroundInspectorView) => {
     if (view === 'presets') {
       setMemoryOpen(false)
       setTrashOpen(false)
+      setUsageOpen(false)
       setPresetsOpen((current) => !current)
       return
     }
     if (view === 'memory') {
       setPresetsOpen(false)
       setTrashOpen(false)
+      setUsageOpen(false)
       setMemoryOpen((current) => !current)
+      return
+    }
+    if (view === 'usage') {
+      setPresetsOpen(false)
+      setMemoryOpen(false)
+      setTrashOpen(false)
+      setUsageOpen((current) => !current)
       return
     }
     setPresetsOpen(false)
     setMemoryOpen(false)
+    setUsageOpen(false)
     setTrashOpen((current) => !current)
   }, [])
 
@@ -1120,6 +1173,7 @@ function PlaygroundContent(props: {
     setPresetsOpen(false)
     setTrashOpen(false)
     setMemoryOpen(false)
+    setUsageOpen(false)
   }, [])
 
   const handleOpenPresets = useCallback(
@@ -1318,6 +1372,8 @@ function PlaygroundContent(props: {
               onRestoreCanvas={handleRestoreTrashedCanvas}
               onRestoreSession={restoreSession}
             />
+          ) : inspectorView === 'usage' ? (
+            <PlaygroundUsageAnalyticsPanel active userId={userId} />
           ) : null
         }
       >
@@ -1515,6 +1571,7 @@ function PlaygroundContent(props: {
               onConfigChange={updateConfig}
               onClearMessages={handleClearMessages}
               onModelChange={(value) => updateConfig('model', value)}
+              onStartNewSession={handleCreateSessionWithModel}
               onParameterEnabledChange={updateParameterEnabled}
               onRemoveContextSummary={handleRemoveContextSummary}
               onStop={handleStop}

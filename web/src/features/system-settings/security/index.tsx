@@ -49,6 +49,7 @@ const defaultSecuritySettings: SecuritySettings = {
   'playground_setting.web_search':
     '{"enabled":false,"provider":"tavily","base_url":"","price_usd_per_call":0,"group_price_usd_per_call":{}}',
   'playground_setting.mcp': '{"enabled":false,"servers":[]}',
+  'playground_setting.model_catalog': '{"groups":[],"models":[]}',
   'playground_setting.sandbox_preview_enabled': false,
   'playground_setting.task_queue_enabled': false,
 }

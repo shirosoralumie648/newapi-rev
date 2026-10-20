@@ -337,6 +337,66 @@ test('frames and sticky notes round-trip sizes and collapsed visibility', () => 
   expect(restored.edges[0]?.hidden).toBe(true)
 })
 
+test('frame and sticky nodes survive the export/import envelope', () => {
+  const nodes: CanvasFlowNode[] = [
+    {
+      id: 'frame',
+      type: 'frame',
+      position: { x: 20, y: 30 },
+      width: 480,
+      height: 320,
+      data: { kind: 'frame', text: 'Scene', color: 'blue' },
+    },
+    {
+      id: 'sticky',
+      type: 'sticky',
+      position: { x: 60, y: 80 },
+      width: 224,
+      height: 160,
+      data: { kind: 'sticky', text: 'Draft' },
+    },
+    {
+      id: 'group',
+      type: 'group',
+      position: { x: 600, y: 0 },
+      width: 240,
+      height: 160,
+      data: { kind: 'group', collapsed: true },
+    },
+    {
+      id: 'child',
+      type: 'text',
+      position: { x: 20, y: 20 },
+      parentId: 'group',
+      data: { kind: 'text', text: 'hidden' },
+    },
+  ]
+  const document = toServerDocument(nodes, [])
+  const imported = parseCanvasImport(
+    serializeCanvasExport('Scene board', document)
+  )
+
+  expect(imported.title).toBe('Scene board')
+  expect(imported.document.nodes.find((node) => node.id === 'frame')).toEqual({
+    id: 'frame',
+    type: 'frame',
+    position: { x: 20, y: 30 },
+    width: 480,
+    height: 320,
+    data: { kind: 'frame', text: 'Scene', color: 'blue' },
+  })
+  expect(
+    imported.document.nodes.find((node) => node.id === 'sticky')
+  ).toMatchObject({ type: 'sticky', width: 224, height: 160 })
+  expect(
+    imported.document.nodes.find((node) => node.id === 'group')?.data
+  ).toMatchObject({ collapsed: true })
+
+  const restored = fromServerDocument(imported.document)
+  expect(restored.nodes.find((node) => node.id === 'frame')?.zIndex).toBe(0)
+  expect(restored.nodes.find((node) => node.id === 'child')?.hidden).toBe(true)
+})
+
 test('normalizes node color and tags when a document is read back', () => {
   const document = toServerDocument(
     [

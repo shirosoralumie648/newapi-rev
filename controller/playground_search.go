@@ -28,6 +28,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/playground_setting"
@@ -136,6 +137,11 @@ func PlaygroundWebSearch(c *gin.Context) {
 		model.RecordWalletConsumeDelta(userID, -int64(quota))
 	}
 
+	// The search is started from the Playground workspace, so its consume row
+	// belongs to the Playground origin even though this route lives under
+	// /api/playground. The usage analytics uses the same marker as the relay
+	// routes to split workspace spend from direct API spend.
+	c.Set(string(constant.ContextKeyPlaygroundOrigin), true)
 	other := model.NewLogOther()
 	other.SetPublic("web_search_provider", result.Provider)
 	other.SetPublic("web_search_results", len(result.Results))

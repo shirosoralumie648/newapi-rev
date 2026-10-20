@@ -1530,4 +1530,11 @@ export const STATIC_I18N_KEYS = [
   'Embedding requests accept up to 64 inputs of 16,000 characters each.',
   'Rerank requests accept a query of up to 16,000 characters and up to 32 candidates of 16,000 characters each.',
   'Moderation requests accept up to 64 inputs of 16,000 characters each.',
+  // Playground curated model catalog (PG2-14): the admin section passes the
+  // save label and the client-side validation messages to t() as values, so
+  // the literal scan cannot see them.
+  'Save model catalog',
+  'Enter a valid JSON object for the model catalog.',
+  'The model catalog groups and models must be arrays.',
+  'The model catalog group overrides must be an object.',
 ] as const

@@ -129,6 +129,7 @@ const exportedMessageSchema = z.object({
     .min(1)
     .max(EXPORTED_VERSION_MAX_COUNT),
   parallel: z.boolean().optional(),
+  anonymous: z.boolean().optional(),
   activeVersionIndex: z.number().int().nonnegative().optional(),
   createdAt: z.number().optional(),
   startedAt: z.number().optional(),
@@ -290,6 +291,10 @@ function normalizeExportedMessage(value: unknown): Message | null {
     versions.every((version) => Boolean(version.model))
       ? true
       : undefined
+  const anonymous =
+    parallel === true && data.anonymous === true && versions.length === 2
+      ? true
+      : undefined
   let status: Message['status']
   if (data.status === 'error' || data.status === 'complete') {
     status = data.status
@@ -303,6 +308,7 @@ function normalizeExportedMessage(value: unknown): Message | null {
     from: data.from,
     versions,
     ...(parallel ? { parallel } : {}),
+    ...(anonymous ? { anonymous: true } : {}),
     ...(activeVersionIndex !== undefined ? { activeVersionIndex } : {}),
     ...(data.createdAt !== undefined ? { createdAt: data.createdAt } : {}),
     ...(data.startedAt !== undefined ? { startedAt: data.startedAt } : {}),

@@ -50,6 +50,9 @@ import {
 } from '../../lib'
 import type {
   Message as MessageType,
+  PlaygroundArenaChoice,
+  PlaygroundArenaVote,
+  PlaygroundArenaVoteSummary,
   PlaygroundContextSummary,
   PlaygroundDeveloperResponseFormat,
   PlaygroundMessageCost,
@@ -101,6 +104,17 @@ interface PlaygroundChatProps {
   onContinueToolCalls?: (message: MessageType) => void
   /** Retry one failed model of a parallel comparison message. */
   onRetryParallelVersion?: (message: MessageType, versionIndex: number) => void
+  /** The caller's raw arena votes of this conversation, by message group. */
+  arenaVotes?: ReadonlyMap<string, PlaygroundArenaVote>
+  /** Read-only personal arena totals shown by anonymous groups. */
+  arenaPersonalSummary?: PlaygroundArenaVoteSummary
+  /** Administrator-only instance arena totals. */
+  arenaInstanceSummary?: PlaygroundArenaVoteSummary
+  onArenaVote?: (
+    messageKey: string,
+    choice: PlaygroundArenaChoice,
+    note: string
+  ) => Promise<void> | void
   isGenerating?: boolean
   isLoadingMessages?: boolean
   editingKey?: string | null
@@ -149,6 +163,10 @@ export function PlaygroundChat({
   onDenyToolCall,
   onContinueToolCalls,
   onRetryParallelVersion,
+  arenaVotes,
+  arenaPersonalSummary,
+  arenaInstanceSummary,
+  onArenaVote,
   isGenerating = false,
   isLoadingMessages = false,
   editingKey,
@@ -284,6 +302,9 @@ export function PlaygroundChat({
     // reply keeps the ordinary branch renderer.
     const answerView = isParallelMessage(message) ? (
       <PlaygroundParallelCompare
+        arenaInstanceSummary={arenaInstanceSummary}
+        arenaPersonalSummary={arenaPersonalSummary}
+        arenaVote={arenaVotes?.get(message.key)}
         autoFilledToolCallKeys={autoFilledToolCallKeys}
         costs={costs}
         executingToolCallKeys={executingToolCallKeys}
@@ -291,6 +312,7 @@ export function PlaygroundChat({
         isLastMessage={isLastMessage}
         knowledge={knowledge}
         message={message}
+        onArenaVote={onArenaVote}
         onContinueToolCalls={onContinueToolCalls}
         onDenyToolCall={onDenyToolCall}
         onProvideToolResult={onProvideToolResult}

@@ -121,14 +121,14 @@ func playgroundTestDB(t *testing.T, dialect string) *gorm.DB {
 	common.SetDatabaseTypes(common.DatabaseType(dialect), previousLog)
 	model.DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundTaskQueueEntry{}, &model.PlaygroundKnowledgeChunk{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasTemplateAsset{}, &model.PlaygroundCanvasTemplate{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundComparisonRun{}, &model.PlaygroundWorkflowRun{}, &model.PlaygroundUserUsage{}, &model.PlaygroundUpload{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippetVersion{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundMessage{}, &model.PlaygroundSessionShare{}, &model.PlaygroundSession{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundTaskQueueEntry{}, &model.PlaygroundKnowledgeChunk{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasTemplateAsset{}, &model.PlaygroundCanvasTemplate{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundComparisonRun{}, &model.PlaygroundWorkflowRun{}, &model.PlaygroundUserUsage{}, &model.PlaygroundUpload{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippetVersion{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundArenaVote{}, &model.PlaygroundMessage{}, &model.PlaygroundSessionShare{}, &model.PlaygroundSession{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
 		model.DB = previous
 		common.SetDatabaseTypes(previousMain, previousLog)
 	})
-	require.NoError(t, db.AutoMigrate(&model.PlaygroundTaskQueueEntry{}, &model.PlaygroundSession{}, &model.PlaygroundSessionShare{}, &model.PlaygroundMessage{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundSnippetVersion{}, &model.PlaygroundMemory{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUpload{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasTemplate{}, &model.PlaygroundCanvasTemplateAsset{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeChunk{}, &model.PlaygroundComparisonRun{}, &model.PlaygroundWorkflowRun{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.PlaygroundTaskQueueEntry{}, &model.PlaygroundSession{}, &model.PlaygroundSessionShare{}, &model.PlaygroundMessage{}, &model.PlaygroundArenaVote{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundSnippetVersion{}, &model.PlaygroundMemory{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUpload{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasTemplate{}, &model.PlaygroundCanvasTemplateAsset{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeChunk{}, &model.PlaygroundComparisonRun{}, &model.PlaygroundWorkflowRun{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -215,6 +215,9 @@ func playgroundRequest(t *testing.T, user int, method, path string, body any, ha
 			} else {
 				c.Params = append(c.Params, gin.Param{Key: "taskId", Value: parts[4]})
 			}
+		}
+		if parts[3] == "sessions" && len(parts) > 7 && parts[5] == "arena" && parts[6] == "votes" {
+			c.Params = append(c.Params, gin.Param{Key: "messageKey", Value: parts[7]})
 		}
 		if parts[3] == "comparisons" {
 			c.Params = append(c.Params, gin.Param{Key: "runId", Value: parts[4]})
@@ -741,6 +744,12 @@ func TestPlaygroundParallelCompareGroups(t *testing.T) {
 				}
 				return entry
 			}
+			anonymousGroup := func(parallel bool, from string, versions []any) map[string]any {
+				body := group(parallel, from, versions)
+				payload := body["messages"].([]any)[0].(map[string]any)["payload"].(map[string]any)
+				payload["anonymous"] = true
+				return body
+			}
 
 			accepted := map[string]any{"revision": 0, "messages": []any{map[string]any{
 				"client_key": "assistant-compare",
@@ -786,6 +795,9 @@ func TestPlaygroundParallelCompareGroups(t *testing.T) {
 				body map[string]any
 			}{
 				{"parallel group on a user message", group(true, "user", []any{version("v1", "model-one", ""), version("v2", "model-two", "")})},
+				{"anonymous group on a user message", anonymousGroup(true, "user", []any{version("v1", "model-one", ""), version("v2", "model-two", "")})},
+				{"anonymous group without parallel", anonymousGroup(false, "assistant", []any{version("v1", "model-one", ""), version("v2", "model-two", "")})},
+				{"anonymous group with three models", anonymousGroup(true, "assistant", []any{version("v1", "model-one", ""), version("v2", "model-two", ""), version("v3", "model-three", "")})},
 				{"single-version comparison", group(true, "assistant", []any{version("v1", "model-one", "")})},
 				{"version without a model", group(true, "assistant", []any{version("v1", "model-one", ""), map[string]any{"id": "v2", "content": "Reply"}})},
 				{"unknown version status", group(true, "assistant", []any{version("v1", "model-one", "running"), version("v2", "model-two", "")})},
@@ -836,6 +848,200 @@ func TestPlaygroundParallelCompareGroups(t *testing.T) {
 			_, revision, err = model.ListPlaygroundMessages(7, session["id"].(string))
 			require.NoError(t, err)
 			assert.EqualValues(t, 2, revision)
+		})
+	}
+}
+
+// An anonymous arena group stores exactly two replies under Model A/B labels.
+// Its raw preference vote is owner scoped, idempotent, changeable, and only
+// aggregated for administrators at instance scope.
+func TestPlaygroundArenaVotes(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			session := createPlayground(t, 7, "arena-session")
+			sessionID := session["id"].(string)
+			messagesPath := "/api/playground/sessions/" + sessionID + "/messages"
+			versions := []any{
+				map[string]any{"id": "a1", "content": "GPT-4O answered first.", "model": "gpt-4o", "status": "complete"},
+				map[string]any{"id": "a2", "content": "gpt-4 failed with gpt-4o visible.", "model": "gpt-4", "status": "error", "errorCode": "model_price_error"},
+			}
+			snapshot := map[string]any{"revision": 0, "messages": []any{
+				map[string]any{
+					"client_key": "arena-group",
+					"payload": map[string]any{
+						"key": "arena-group", "from": "assistant", "parallel": true, "anonymous": true,
+						"status": "complete", "activeVersionIndex": 0, "versions": versions,
+					},
+				},
+				map[string]any{
+					"client_key": "plain-group",
+					"payload": map[string]any{
+						"key": "plain-group", "from": "assistant", "parallel": true,
+						"status": "complete", "activeVersionIndex": 0,
+						"versions": []any{
+							map[string]any{"id": "p1", "content": "plain one", "model": "plain-model-one"},
+							map[string]any{"id": "p2", "content": "plain two", "model": "plain-model-two"},
+						},
+					},
+				},
+			}}
+			response := playgroundRequest(t, 7, http.MethodPut, messagesPath, snapshot, controller.ReplacePlaygroundMessages)
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+
+			messages, _, err := model.ListPlaygroundMessages(7, sessionID)
+			require.NoError(t, err)
+			require.Len(t, messages, 2)
+			var storedAnonymous struct {
+				Anonymous *bool `json:"anonymous"`
+				Versions  []struct {
+					Model   *string `json:"model"`
+					Content string  `json:"content"`
+				} `json:"versions"`
+			}
+			require.NoError(t, common.UnmarshalJsonStr(string(messages[0].Payload), &storedAnonymous))
+			require.NotNil(t, storedAnonymous.Anonymous)
+			assert.True(t, *storedAnonymous.Anonymous)
+			require.Len(t, storedAnonymous.Versions, 2)
+			require.NotNil(t, storedAnonymous.Versions[0].Model)
+			require.NotNil(t, storedAnonymous.Versions[1].Model)
+			// The real models stay on the versions so retry and continuation
+			// still work, while every stored reply text hides them.
+			assert.Equal(t, "gpt-4o", *storedAnonymous.Versions[0].Model)
+			assert.Equal(t, "gpt-4", *storedAnonymous.Versions[1].Model)
+			assert.Contains(t, storedAnonymous.Versions[0].Content, "Model A")
+			assert.NotContains(t, strings.ToLower(storedAnonymous.Versions[0].Content), "gpt-4o")
+			assert.Contains(t, storedAnonymous.Versions[1].Content, "Model B")
+			assert.Contains(t, storedAnonymous.Versions[1].Content, "Model A")
+			assert.NotContains(t, strings.ToLower(storedAnonymous.Versions[1].Content), "gpt-4")
+
+			voteURL := "/api/playground/sessions/" + sessionID + "/arena/votes/arena-group"
+			var firstVote struct {
+				Success bool
+				Data    struct {
+					ID         int64  `json:"id"`
+					Choice     string `json:"choice"`
+					Note       string `json:"note"`
+					MessageKey string `json:"message_key"`
+				}
+			}
+			response = playgroundRequest(t, 7, http.MethodPut, voteURL, map[string]any{"choice": "a", "note": "Model A is more precise."}, controller.UpsertPlaygroundArenaVote)
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			require.NoError(t, common.Unmarshal(response.Body.Bytes(), &firstVote))
+			require.True(t, firstVote.Success)
+			require.Positive(t, firstVote.Data.ID)
+			assert.Equal(t, "a", firstVote.Data.Choice)
+			assert.Equal(t, "arena-group", firstVote.Data.MessageKey)
+
+			// Repeating the same vote is idempotent: it updates the same row
+			// instead of counting a second preference.
+			response = playgroundRequest(t, 7, http.MethodPut, voteURL, map[string]any{"choice": "a", "note": "Model A is more precise."}, controller.UpsertPlaygroundArenaVote)
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			var repeatedVote struct {
+				Data struct {
+					ID     int64  `json:"id"`
+					Choice string `json:"choice"`
+				}
+			}
+			require.NoError(t, common.Unmarshal(response.Body.Bytes(), &repeatedVote))
+			assert.Equal(t, firstVote.Data.ID, repeatedVote.Data.ID)
+			assert.Equal(t, "a", repeatedVote.Data.Choice)
+			var voteCount int64
+			require.NoError(t, db.Model(&model.PlaygroundArenaVote{}).Count(&voteCount).Error)
+			assert.EqualValues(t, 1, voteCount)
+
+			// Changing a vote rewrites the same row.
+			response = playgroundRequest(t, 7, http.MethodPut, voteURL, map[string]any{"choice": "tie", "note": ""}, controller.UpsertPlaygroundArenaVote)
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			var changedVote struct {
+				Data struct {
+					ID     int64  `json:"id"`
+					Choice string `json:"choice"`
+					Note   string `json:"note"`
+				}
+			}
+			require.NoError(t, common.Unmarshal(response.Body.Bytes(), &changedVote))
+			assert.Equal(t, firstVote.Data.ID, changedVote.Data.ID)
+			assert.Equal(t, "tie", changedVote.Data.Choice)
+			assert.Empty(t, changedVote.Data.Note)
+			require.NoError(t, db.Model(&model.PlaygroundArenaVote{}).Count(&voteCount).Error)
+			assert.EqualValues(t, 1, voteCount)
+
+			// Invalid choices, oversized notes, non-anonymous groups, unknown
+			// groups, and other accounts are all rejected without storing a row.
+			invalidVotes := []struct {
+				name   string
+				path   string
+				body   map[string]any
+				status int
+			}{
+				{"unsupported choice", voteURL, map[string]any{"choice": "c"}, http.StatusBadRequest},
+				{"oversized note", voteURL, map[string]any{"choice": "a", "note": strings.Repeat("n", model.PlaygroundArenaNoteMaxRunes+1)}, http.StatusBadRequest},
+				{"non-anonymous group", "/api/playground/sessions/" + sessionID + "/arena/votes/plain-group", map[string]any{"choice": "a"}, http.StatusBadRequest},
+				{"unknown group", "/api/playground/sessions/" + sessionID + "/arena/votes/missing-group", map[string]any{"choice": "a"}, http.StatusNotFound},
+				{"other account", voteURL, map[string]any{"choice": "b"}, http.StatusNotFound},
+			}
+			for _, test := range invalidVotes {
+				t.Run(test.name, func(t *testing.T) {
+					userID := 7
+					if test.name == "other account" {
+						userID = 8
+					}
+					response := playgroundRequest(t, userID, http.MethodPut, test.path, test.body, controller.UpsertPlaygroundArenaVote)
+					assert.Equal(t, test.status, response.Code, response.Body.String())
+				})
+			}
+
+			// The owner's list contains only their own votes; another account
+			// sees the standard not-found response, never the votes.
+			response = playgroundRequest(t, 8, http.MethodGet, "/api/playground/sessions/"+sessionID+"/arena/votes", nil, controller.ListPlaygroundArenaVotes)
+			assert.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
+			response = playgroundRequest(t, 7, http.MethodGet, "/api/playground/sessions/"+sessionID+"/arena/votes", nil, controller.ListPlaygroundArenaVotes)
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			var listedVotes struct {
+				Data struct {
+					Votes []struct {
+						ID     int64  `json:"id"`
+						Choice string `json:"choice"`
+					} `json:"votes"`
+				}
+			}
+			require.NoError(t, common.Unmarshal(response.Body.Bytes(), &listedVotes))
+			require.Len(t, listedVotes.Data.Votes, 1)
+			assert.Equal(t, firstVote.Data.ID, listedVotes.Data.Votes[0].ID)
+			assert.Equal(t, "tie", listedVotes.Data.Votes[0].Choice)
+
+			parseSummary := func(response *httptest.ResponseRecorder) model.PlaygroundArenaVoteSummary {
+				t.Helper()
+				require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+				var envelope struct {
+					Data model.PlaygroundArenaVoteSummary
+				}
+				require.NoError(t, common.Unmarshal(response.Body.Bytes(), &envelope))
+				return envelope.Data
+			}
+			personal := parseSummary(playgroundRequest(t, 7, http.MethodGet, "/api/playground/arena/summary?scope=personal", nil, controller.GetPlaygroundArenaVoteSummary))
+			assert.Equal(t, model.PlaygroundArenaScopePersonal, personal.Scope)
+			assert.EqualValues(t, 1, personal.Total)
+			assert.EqualValues(t, 1, personal.Choices.Tie)
+			assert.Zero(t, personal.Choices.A)
+			assert.Zero(t, personal.Notes)
+			otherPersonal := parseSummary(playgroundRequest(t, 8, http.MethodGet, "/api/playground/arena/summary", nil, controller.GetPlaygroundArenaVoteSummary))
+			assert.EqualValues(t, 0, otherPersonal.Total)
+
+			instance := "/api/playground/arena/summary?scope=instance"
+			forbidden := playgroundRequest(t, 8, http.MethodGet, instance, nil, controller.GetPlaygroundArenaVoteSummary)
+			require.Equal(t, http.StatusForbidden, forbidden.Code, forbidden.Body.String())
+			assert.Contains(t, forbidden.Body.String(), "PLAYGROUND_ARENA_SUMMARY_FORBIDDEN")
+
+			adminHandler := gin.HandlerFunc(func(c *gin.Context) {
+				c.Set("role", common.RoleAdminUser)
+				controller.GetPlaygroundArenaVoteSummary(c)
+			})
+			instanceSummary := parseSummary(playgroundRequest(t, 7, http.MethodGet, instance, nil, adminHandler))
+			assert.Equal(t, model.PlaygroundArenaScopeInstance, instanceSummary.Scope)
+			assert.EqualValues(t, 1, instanceSummary.Total)
+			assert.EqualValues(t, 1, instanceSummary.Choices.Tie)
 		})
 	}
 }
@@ -2527,7 +2733,7 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	t.Cleanup(func() {
 		model.LOG_DB, common.RedisEnabled, common.SessionSecret, common.GlobalApiRateLimitEnable = oldLog, oldRedis, oldSecret, oldLimit
 	})
-	user := model.User{Id: 990087, Username: "artifact-owner", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1}
+	user := model.User{Id: 990087, Username: "artifact-owner", AffCode: "pg-aff-990087", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1}
 	require.NoError(t, db.Create(&user).Error)
 	now := time.Now().Unix()
 	key, err := common.GenerateRandomCharsKey(32)
@@ -2541,6 +2747,18 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	pat := model.UserAccessToken{Name: "artifact route denial", TokenHash: model.AccessTokenFingerprint(patRaw), TokenHint: model.AccessTokenHint(patRaw)}
 	require.NoError(t, pat.SetScopes([]string{"profile:read"}))
 	require.NoError(t, model.CreateUserAccessToken(user.Id, &pat, service.AccessTokenMaxPerUser))
+	admin := model.User{Id: 990088, Username: "catalog-admin", AffCode: "pg-aff-990088", Role: common.RoleAdminUser, Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1}
+	require.NoError(t, db.Create(&admin).Error)
+	adminKey, err := common.GenerateRandomCharsKey(32)
+	require.NoError(t, err)
+	adminSession := model.UserSession{SID: adminKey, UserID: admin.Id, Version: 1, UserAuthVersion: 1, Status: model.UserSessionStatusActive,
+		RefreshHash: "unused-test-refresh-hash", LoginMethod: "password", LastActiveAt: now, ExpiresAt: now + 3600}
+	require.NoError(t, model.CreateUserSession(&adminSession))
+	adminToken, _, err := service.IssueAccessToken(service.AuthIdentity{UserID: admin.Id, SessionID: adminSession.SID, UserAuthVersion: 1, SessionVersion: 1})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = model.UpdateOption("playground_setting.model_catalog", `{"groups":[],"models":[]}`)
+	})
 	engine := gin.New()
 	router.SetApiRouter(engine)
 	router.SetRelayRouter(engine)
@@ -2551,6 +2769,8 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodGet, "/api/playground/usage/analytics"},
 		{http.MethodGet, "/api/playground/settings"},
 		{http.MethodGet, "/api/playground/message-costs?request_ids=route-cost"},
+		{http.MethodGet, "/api/playground/arena/summary?scope=personal"},
+		{http.MethodGet, "/api/playground/arena/summary?scope=instance"},
 		{http.MethodGet, "/api/playground/logs/route-cost/replay"},
 		{http.MethodDelete, "/api/playground/logs/route-cost/capture"},
 		{http.MethodGet, "/api/playground/assets?kind=attachment"},
@@ -2558,6 +2778,8 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodPost, "/api/playground/mcp/missing/call"},
 		{http.MethodGet, "/api/playground/trash"},
 		{http.MethodGet, "/api/playground/sessions/" + sessionID + "/export"},
+		{http.MethodGet, "/api/playground/sessions/" + sessionID + "/arena/votes"},
+		{http.MethodPut, "/api/playground/sessions/" + sessionID + "/arena/votes/missing"},
 		{http.MethodPost, "/api/playground/sessions/" + sessionID + "/share"},
 		{http.MethodDelete, "/api/playground/sessions/" + sessionID + "/share"},
 		{http.MethodPost, "/api/playground/canvases/missing/share"},
@@ -2626,6 +2848,7 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodPatch, "/api/playground/workflows/history/missing"},
 		{http.MethodDelete, "/api/playground/workflows/history/missing"},
 		{http.MethodPost, "/api/playground/workflows/node-cache"},
+		{http.MethodGet, "/api/playground/model-catalog"},
 	} {
 		response := playgroundAuthenticatedRequest(t, engine, "", route.method, route.path, input)
 		assert.Equal(t, 401, response.Code, response.Body.String())
@@ -2634,6 +2857,53 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		assert.Equal(t, 403, response.Code, response.Body.String())
 		assert.Contains(t, response.Body.String(), "AUTH_SESSION_REQUIRED")
 	}
+
+	// The catalog is readable by a normal account, writable only by an
+	// administrator, and the read path hides entries the admin withdrew.
+	catalogPath := "/api/playground/model-catalog"
+	catalogRead := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, catalogPath, nil)
+	require.Equal(t, 200, catalogRead.Code, catalogRead.Body.String())
+	assert.Contains(t, catalogRead.Body.String(), `"success":true`)
+	catalogDenied := playgroundAuthenticatedRequest(t, engine, token, http.MethodPut, catalogPath, map[string]any{"catalog": map[string]any{}})
+	assert.Equal(t, 403, catalogDenied.Code, catalogDenied.Body.String())
+	catalogSaved := playgroundAuthenticatedRequest(t, engine, adminToken, http.MethodPut, catalogPath, map[string]any{
+		"catalog": map[string]any{
+			"groups": []any{map[string]any{"id": "recommended", "label": "Recommended"}},
+			"models": []any{
+				map[string]any{"model": "gpt-4o", "display_name": "GPT-4o", "group": "recommended"},
+				map[string]any{"model": "hidden-model", "hidden": true},
+			},
+		},
+	})
+	require.Equal(t, 200, catalogSaved.Code, catalogSaved.Body.String())
+	catalogRead = playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, catalogPath, nil)
+	require.Equal(t, 200, catalogRead.Code, catalogRead.Body.String())
+	assert.Contains(t, catalogRead.Body.String(), `"display_name":"GPT-4o"`)
+	assert.NotContains(t, catalogRead.Body.String(), "hidden-model")
+
+	// A malformed catalog is rejected before it can replace the saved one.
+	catalogRejected := playgroundAuthenticatedRequest(t, engine, adminToken, http.MethodPut, catalogPath, map[string]any{
+		"catalog": map[string]any{
+			"groups": []any{},
+			"models": []any{
+				map[string]any{"model": "duplicate-model"},
+				map[string]any{"model": "duplicate-model"},
+			},
+		},
+	})
+	assert.Contains(t, catalogRejected.Body.String(), `"success":false`)
+	catalogRead = playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, catalogPath, nil)
+	require.Equal(t, 200, catalogRead.Code, catalogRead.Body.String())
+	assert.Contains(t, catalogRead.Body.String(), `"display_name":"GPT-4o"`)
+
+	// The arena routes resolve the account from the real session middleware.
+	// Personal scope is available to the owner, while instance scope keeps the
+	// stable forbidden code for a common user.
+	arenaPersonal := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, "/api/playground/arena/summary?scope=personal", nil)
+	require.Equal(t, 200, arenaPersonal.Code, arenaPersonal.Body.String())
+	arenaInstance := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, "/api/playground/arena/summary?scope=instance", nil)
+	require.Equal(t, 403, arenaInstance.Code, arenaInstance.Body.String())
+	assert.Contains(t, arenaInstance.Body.String(), "PLAYGROUND_ARENA_SUMMARY_FORBIDDEN")
 
 	// A share link is readable anonymously through the real router, while an
 	// unknown token uses the same non-enumerable 404 contract.
@@ -4735,6 +5005,18 @@ func TestPlaygroundSnippetPersistenceAndOwnership(t *testing.T) {
 			beforeExport := playgroundRequest(t, 7, http.MethodPost, "/api/playground/snippets/"+id+"/rollback", map[string]any{"version": 2}, controller.RollbackPlaygroundSnippet)
 			require.Equal(t, http.StatusOK, beforeExport.Code, beforeExport.Body.String())
 
+			// Give the stored revisions distinct historical timestamps. Importing
+			// a moment later would otherwise stamp every row with the same
+			// current second and hide whether the file times were preserved.
+			require.NoError(t, db.Where("snippet_id = ?", id).Order("version").Find(&versions).Error)
+			require.Len(t, versions, 3)
+			versionCreatedAt := make([]int64, len(versions))
+			for index := range versions {
+				versionCreatedAt[index] = 1_700_000_000 + int64(index)
+				require.NoError(t, db.Model(&model.PlaygroundSnippetVersion{}).Where("id = ?", versions[index].ID).
+					Update("created_at", versionCreatedAt[index]).Error)
+			}
+
 			// Export renders the full history, and importing the document
 			// restores it for the same account as a new template.
 			exported := playgroundRequest(t, 7, http.MethodGet, "/api/playground/snippets/"+id+"/export", nil, controller.ExportPlaygroundSnippet)
@@ -4773,6 +5055,9 @@ func TestPlaygroundSnippetPersistenceAndOwnership(t *testing.T) {
 			assert.Equal(t, "Check every endpoint for owner scoping.", document.Template.Versions[0].Content)
 			assert.Equal(t, second, document.Template.Versions[1].Content)
 			assert.Equal(t, third, document.Template.Versions[2].Content)
+			for index := range document.Template.Versions {
+				assert.Equal(t, versionCreatedAt[index], document.Template.Versions[index].CreatedAt)
+			}
 
 			imported := playgroundRequest(t, 7, http.MethodPost, "/api/playground/snippets/import", []byte(exportEnvelope.Data.Content), controller.ImportPlaygroundSnippet)
 			require.Equal(t, http.StatusOK, imported.Code, imported.Body.String())
@@ -4787,7 +5072,40 @@ func TestPlaygroundSnippetPersistenceAndOwnership(t *testing.T) {
 			assert.Equal(t, 3, importedEnvelope.Data.VersionCount)
 			assert.Equal(t, 2, importedEnvelope.Data.ProductionVersion)
 			assert.Equal(t, second, importedEnvelope.Data.Content)
+			assert.Equal(t, versionCreatedAt[0], importedEnvelope.Data.CreatedAt, "the template keeps its first revision's time")
 			require.Len(t, importedEnvelope.Data.Versions, 3)
+			for index := range importedEnvelope.Data.Versions {
+				assert.Equal(t, versionCreatedAt[index], importedEnvelope.Data.Versions[index].CreatedAt)
+			}
+			var importedVersions []model.PlaygroundSnippetVersion
+			require.NoError(t, db.Where("snippet_id = ?", importedEnvelope.Data.ID).Order("version").Find(&importedVersions).Error)
+			require.Len(t, importedVersions, 3)
+			for index := range importedVersions {
+				assert.Equal(t, versionCreatedAt[index], importedVersions[index].CreatedAt)
+			}
+			// Exporting the imported template produces the same portable history,
+			// timestamps included: the round trip is stable, not just lossless in
+			// content.
+			reexported := playgroundRequest(t, 7, http.MethodGet, "/api/playground/snippets/"+importedEnvelope.Data.ID+"/export", nil, controller.ExportPlaygroundSnippet)
+			require.Equal(t, http.StatusOK, reexported.Code, reexported.Body.String())
+			var reexportEnvelope struct {
+				Success bool
+				Data    struct {
+					Content string `json:"content"`
+				}
+			}
+			require.NoError(t, common.Unmarshal(reexported.Body.Bytes(), &reexportEnvelope))
+			var reexportDocument struct {
+				Template struct {
+					Name              string                  `json:"name"`
+					ProductionVersion int                     `json:"production_version"`
+					Versions          []snippetVersionPayload `json:"versions"`
+				} `json:"template"`
+			}
+			require.NoError(t, common.UnmarshalJsonStr(reexportEnvelope.Data.Content, &reexportDocument))
+			assert.Equal(t, document.Template.Name, reexportDocument.Template.Name)
+			assert.Equal(t, document.Template.ProductionVersion, reexportDocument.Template.ProductionVersion)
+			assert.Equal(t, document.Template.Versions, reexportDocument.Template.Versions)
 			require.NoError(t, db.Where("user_id = ?", 7).First(&usage).Error)
 			assert.EqualValues(t, 2, usage.Snippets)
 			assert.EqualValues(t, 6, usage.SnippetVersions)
@@ -4857,6 +5175,22 @@ func TestPlaygroundSnippetPersistenceAndOwnership(t *testing.T) {
 			countOverflow := playgroundRequest(t, 7, http.MethodPost, "/api/playground/snippets", map[string]any{"name": "One too many", "content": "x"}, controller.CreatePlaygroundSnippet)
 			assert.Equal(t, http.StatusUnprocessableEntity, countOverflow.Code, countOverflow.Body.String())
 			assert.Contains(t, countOverflow.Body.String(), "PLAYGROUND_SNIPPET_LIMIT_EXCEEDED")
+			// A positive group override replaces the global default for the
+			// owner's whole snippet budget, and both the listing and the write
+			// path resolve it through the same policy.
+			usePlaygroundGroupQuota(t, "default", playground_setting.PlaygroundQuotaPolicy{SnippetUserMaxCount: 2})
+			var groupListing struct {
+				Success bool
+				Data    struct {
+					Limit int `json:"limit"`
+				}
+			}
+			groupLimited := playgroundRequest(t, 7, http.MethodGet, "/api/playground/snippets", nil, controller.ListPlaygroundSnippets)
+			require.NoError(t, common.Unmarshal(groupLimited.Body.Bytes(), &groupListing))
+			assert.Equal(t, 2, groupListing.Data.Limit, "the group override wins over the tighter global default")
+			groupOverflow := playgroundRequest(t, 7, http.MethodPost, "/api/playground/snippets", map[string]any{"name": "Group overflow", "content": "x"}, controller.CreatePlaygroundSnippet)
+			assert.Equal(t, http.StatusUnprocessableEntity, groupOverflow.Code, groupOverflow.Body.String())
+			assert.Contains(t, groupOverflow.Body.String(), "PLAYGROUND_SNIPPET_LIMIT_EXCEEDED")
 
 			// Deleting the template releases its versions and both counters.
 			deleted := playgroundRequest(t, 7, http.MethodDelete, "/api/playground/snippets/"+id, nil, controller.DeletePlaygroundSnippet)
@@ -6634,6 +6968,9 @@ func TestPlaygroundStorageBillingSettlement(t *testing.T) {
 			assert.Equal(t, model.PlaygroundStorageBillingModelName, logs[0].ModelName)
 			assert.Equal(t, 750_000, logs[0].Quota)
 			assert.Contains(t, logs[0].Other, "storage_date")
+			// The settlement has no request context; the row itself carries the
+			// Playground origin so the usage view does not count it as API spend.
+			assert.Contains(t, logs[0].Other, `"playground_origin":true`)
 
 			// Replaying the pass charges nothing again.
 			replay, err := model.SettlePlaygroundStorageLedgers(now, 10)

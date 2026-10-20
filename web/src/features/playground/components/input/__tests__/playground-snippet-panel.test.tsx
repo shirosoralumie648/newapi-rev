@@ -350,6 +350,15 @@ test('importing an exported template posts the document and lists the copy', asy
     ...snippetWire,
     id: 'pgs_imported',
     name: 'Imported checklist',
+    content: 'Imported body.',
+    versions: [
+      {
+        version: 1,
+        content: 'Imported body.',
+        byte_size: 14,
+        created_at: 10,
+      },
+    ],
   }
   const post = vi.spyOn(api, 'post').mockResolvedValue({
     data: { success: true, data: imported },

@@ -300,15 +300,12 @@ test('toggling or expanding a collapsed group restores its children', () => {
   expect(toggled?.nodes.find((item) => item.id === 'b')?.hidden).toBe(false)
 
   const recollapsed = canvasToggleGroupCollapsed(
-    collapsed!.nodes,
-    collapsed!.edges,
+    toggled!.nodes,
+    toggled!.edges,
     collapsed!.groupId
   )
   expect(recollapsed?.nodes.find((item) => item.id === 'a')?.hidden).toBe(true)
-  const expanded = canvasExpandSelection(
-    collapsed!.nodes,
-    collapsed!.edges
-  )
+  const expanded = canvasExpandSelection(recollapsed!.nodes, recollapsed!.edges)
   expect(expanded?.nodes.find((item) => item.id === 'a')?.hidden).toBe(false)
 })
 

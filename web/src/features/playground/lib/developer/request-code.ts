@@ -320,7 +320,12 @@ function renderLiteral(
   if (value === null || value === undefined) {
     return options.language === 'python' ? 'None' : 'null'
   }
-  if (typeof value === 'string') return JSON.stringify(value)
+  if (typeof value === 'string') {
+    const attachment = options.attachments.get(value)
+    return attachment
+      ? options.attachmentExpression(attachment)
+      : JSON.stringify(value)
+  }
   if (typeof value === 'number') {
     return Number.isFinite(value) ? String(value) : '0'
   }

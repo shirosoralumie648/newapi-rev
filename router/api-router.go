@@ -103,10 +103,18 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.PATCH("/comparisons/:runId", controller.UpdatePlaygroundComparisonRun)
 			playgroundRoute.DELETE("/comparisons/:runId", controller.DeletePlaygroundComparisonRun)
 			playgroundRoute.GET("/settings", controller.GetPlaygroundSettings)
+			// The curated catalog is readable by every signed-in account and
+			// writable only by an administrator; it decorates the selector and
+			// never changes model routing or billing.
+			playgroundRoute.GET("/model-catalog", controller.GetPlaygroundModelCatalog)
+			playgroundRoute.PUT("/model-catalog", middleware.AdminAuth(), controller.UpdatePlaygroundModelCatalog)
 			playgroundRoute.GET("/mcp/servers", controller.ListPlaygroundMCPServers)
 			playgroundRoute.POST("/mcp/:serverId/call", controller.CallPlaygroundMCPTool)
 			playgroundRoute.POST("/search", middleware.SearchRateLimit(), controller.PlaygroundWebSearch)
 			playgroundRoute.GET("/message-costs", controller.GetPlaygroundMessageCosts)
+			// The arena summary is read-only: personal totals belong to the
+			// account, while the instance projection is admin-only.
+			playgroundRoute.GET("/arena/summary", controller.GetPlaygroundArenaVoteSummary)
 			playgroundRoute.GET("/logs/:logRef/replay", controller.GetPlaygroundLogReplay)
 			playgroundRoute.DELETE("/logs/:logRef/capture", controller.DeletePlaygroundLogCapture)
 			playgroundRoute.GET("/trash", controller.ListPlaygroundTrash)
@@ -178,6 +186,8 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.GET("/sessions/:id/export", controller.ExportPlaygroundSession)
 			playgroundRoute.GET("/sessions/:id/messages", controller.ListPlaygroundMessages)
 			playgroundRoute.PATCH("/sessions/:id/messages", controller.ApplyPlaygroundMessagesDelta)
+			playgroundRoute.GET("/sessions/:id/arena/votes", controller.ListPlaygroundArenaVotes)
+			playgroundRoute.PUT("/sessions/:id/arena/votes/:messageKey", controller.UpsertPlaygroundArenaVote)
 			// Deprecated compatibility shim: the full snapshot endpoint is kept for
 			// one release and translated into incremental writes server-side.
 			playgroundRoute.PUT("/sessions/:id/messages", controller.ReplacePlaygroundMessages)

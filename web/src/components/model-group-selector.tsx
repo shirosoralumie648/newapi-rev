@@ -16,7 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { ChevronsUpDown, Check, CpuIcon, LayersIcon } from 'lucide-react'
+import {
+  ChevronsUpDown,
+  Check,
+  CpuIcon,
+  LayersIcon,
+  PlusIcon,
+} from 'lucide-react'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -74,6 +80,10 @@ interface ModelOption {
   label: string
   value: string
   category?: string
+  /** Description of the curated catalog section named by `category`. */
+  categoryDescription?: string
+  /** Emoji or HTTP(S) image URL supplied by the administrator catalog. */
+  icon?: string
   description?: string
   /** Preformatted price summary shown under the model name. */
   priceLabel?: string
@@ -556,6 +566,8 @@ export interface ModelGroupSelectorProps {
   selectedModel: string
   models: ModelOption[]
   onModelChange: (value: string) => void
+  /** Starts a new conversation with the chosen model; omitted hides the action. */
+  onStartNewSession?: (model: string) => void
   // Group props
   selectedGroup: string
   groups: GroupOption[]
@@ -573,6 +585,7 @@ export const ModelGroupSelector: React.FC<ModelGroupSelectorProps> = ({
   selectedModel,
   models,
   onModelChange,
+  onStartNewSession,
   selectedGroup,
   groups,
   onGroupChange,
@@ -615,6 +628,30 @@ export const ModelGroupSelector: React.FC<ModelGroupSelectorProps> = ({
       return searchableText.includes(query)
     })
   }, [models, searchQuery])
+
+  // Catalog sections are optional: a deployment without them keeps the
+  // original flat list and never shows an empty "Other" header.
+  const categoryGroups = useMemo(() => {
+    if (!filteredModels.some((model) => model.category)) return null
+    const groups = new Map<
+      string,
+      { label: string; description?: string; models: ModelOption[] }
+    >()
+    for (const model of filteredModels) {
+      const label = model.category?.trim() || t('Other')
+      const existing = groups.get(label)
+      if (existing) {
+        existing.models.push(model)
+        continue
+      }
+      groups.set(label, {
+        label,
+        description: model.categoryDescription,
+        models: [model],
+      })
+    }
+    return [...groups.values()]
+  }, [filteredModels, t])
 
   const handleModelChange = useCallback(
     (value: string) => {
@@ -729,6 +766,108 @@ export const ModelGroupSelector: React.FC<ModelGroupSelectorProps> = ({
     </div>
   )
 
+  const renderModelItem = (model: ModelOption) => {
+    const contextLength = model.contextLength ?? 0
+    const hasMeta = Boolean(
+      model.priceLabel || contextLength > 0 || model.capabilityLabels?.length
+    )
+    return (
+      <CommandItem
+        className={cn(
+          modelGroupSelectorLayoutClasses.modelItem,
+          hasMeta && 'items-start',
+          selectedModel === model.value
+            ? modelGroupSelectorLayoutClasses.selectedModelItem
+            : modelGroupSelectorLayoutClasses.unselectedModelItem
+        )}
+        key={model.value}
+        onSelect={handleModelChange}
+        ref={selectedModel === model.value ? selectedModelOptionRef : undefined}
+        value={model.value}
+      >
+        <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
+          <span
+            className={cn(
+              'flex min-w-0 items-center gap-1.5',
+              selectedModel === model.value
+                ? modelGroupSelectorLayoutClasses.selectedModelText
+                : modelGroupSelectorLayoutClasses.unselectedModelText
+            )}
+          >
+            {model.icon &&
+              (/^https?:\/\//i.test(model.icon) ? (
+                <img
+                  alt=''
+                  className='size-4 shrink-0 rounded-sm object-cover'
+                  loading='lazy'
+                  src={model.icon}
+                />
+              ) : (
+                <span
+                  aria-hidden='true'
+                  className='shrink-0 text-sm leading-none'
+                >
+                  {model.icon}
+                </span>
+              ))}
+            <span className='truncate'>{model.label}</span>
+          </span>
+          {hasMeta && (
+            <span className='text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] leading-4'>
+              {model.priceLabel && (
+                <span className='truncate'>{model.priceLabel}</span>
+              )}
+              {contextLength > 0 && (
+                <span className='shrink-0'>
+                  {t('{{tokens}} context', {
+                    tokens: formatCompactNumber(contextLength, locale),
+                  })}
+                </span>
+              )}
+              {model.capabilityLabels?.map((capability) => (
+                <span
+                  className='bg-muted shrink-0 rounded px-1 py-px'
+                  key={capability}
+                >
+                  {capability}
+                </span>
+              ))}
+            </span>
+          )}
+        </div>
+        <div className='ml-1 flex shrink-0 items-center gap-0.5'>
+          {onStartNewSession && (
+            <Button
+              aria-label={t('Start a new session with this model')}
+              className='text-muted-foreground hover:text-foreground size-6'
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                setOpen(false)
+                setSearchQuery('')
+                onStartNewSession(model.value)
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+              size='icon-sm'
+              title={t('Start a new session with this model')}
+              type='button'
+              variant='ghost'
+            >
+              <PlusIcon className='size-3.5' />
+            </Button>
+          )}
+          <Check
+            className={cn(
+              'size-3.5 shrink-0',
+              selectedModel === model.value ? 'opacity-100' : 'opacity-0',
+              hasMeta && 'mt-0.5'
+            )}
+          />
+        </div>
+      </CommandItem>
+    )
+  }
+
   const renderModelList = () => (
     <Command
       className={cn(
@@ -753,82 +892,30 @@ export const ModelGroupSelector: React.FC<ModelGroupSelectorProps> = ({
           <div className='text-muted-foreground px-3 py-8 text-center text-[12px] leading-5'>
             {t('No model found.')}
           </div>
+        ) : categoryGroups ? (
+          categoryGroups.map((group, index) => (
+            <CommandGroup className='p-1' key={group.label}>
+              <div
+                className={cn(
+                  'px-2 pb-1',
+                  index > 0 && 'border-border mt-2 border-t pt-2'
+                )}
+              >
+                <div className='text-muted-foreground text-[10px] leading-4 font-medium'>
+                  {group.label}
+                </div>
+                {group.description && (
+                  <div className='text-muted-foreground/80 truncate text-[9px] leading-4'>
+                    {group.description}
+                  </div>
+                )}
+              </div>
+              {group.models.map(renderModelItem)}
+            </CommandGroup>
+          ))
         ) : (
           <CommandGroup className='p-1'>
-            {filteredModels.map((model) => {
-              const contextLength = model.contextLength ?? 0
-              const hasMeta = Boolean(
-                model.priceLabel ||
-                contextLength > 0 ||
-                model.capabilityLabels?.length
-              )
-              return (
-                <CommandItem
-                  className={cn(
-                    modelGroupSelectorLayoutClasses.modelItem,
-                    hasMeta && 'items-start',
-                    selectedModel === model.value
-                      ? modelGroupSelectorLayoutClasses.selectedModelItem
-                      : modelGroupSelectorLayoutClasses.unselectedModelItem
-                  )}
-                  key={model.value}
-                  onSelect={handleModelChange}
-                  ref={
-                    selectedModel === model.value
-                      ? selectedModelOptionRef
-                      : undefined
-                  }
-                  value={model.value}
-                >
-                  <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
-                    <span
-                      className={cn(
-                        'min-w-0 truncate',
-                        selectedModel === model.value
-                          ? modelGroupSelectorLayoutClasses.selectedModelText
-                          : modelGroupSelectorLayoutClasses.unselectedModelText
-                      )}
-                    >
-                      {model.label}
-                    </span>
-                    {hasMeta && (
-                      <span className='text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] leading-4'>
-                        {model.priceLabel && (
-                          <span className='truncate'>{model.priceLabel}</span>
-                        )}
-                        {contextLength > 0 && (
-                          <span className='shrink-0'>
-                            {t('{{tokens}} context', {
-                              tokens: formatCompactNumber(
-                                contextLength,
-                                locale
-                              ),
-                            })}
-                          </span>
-                        )}
-                        {model.capabilityLabels?.map((capability) => (
-                          <span
-                            className='bg-muted shrink-0 rounded px-1 py-px'
-                            key={capability}
-                          >
-                            {capability}
-                          </span>
-                        ))}
-                      </span>
-                    )}
-                  </div>
-                  <Check
-                    className={cn(
-                      'size-3.5 shrink-0',
-                      selectedModel === model.value
-                        ? 'opacity-100'
-                        : 'opacity-0',
-                      hasMeta && 'mt-0.5'
-                    )}
-                  />
-                </CommandItem>
-              )
-            })}
+            {filteredModels.map(renderModelItem)}
           </CommandGroup>
         )}
       </CommandList>

@@ -133,7 +133,11 @@ function responsesImagePart(part: ContentPart): ResponsesInputItem {
 }
 
 function responsesMessageContent(message: ChatCompletionMessage): unknown {
-  if (typeof message.content === 'string') return message.content
+  if (typeof message.content === 'string') {
+    return message.role === 'assistant' && message.content !== ''
+      ? [{ type: 'output_text', text: message.content }]
+      : message.content
+  }
   return message.content.map((part) =>
     part.type === 'text'
       ? {

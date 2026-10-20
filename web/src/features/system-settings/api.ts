@@ -23,6 +23,7 @@ import type {
   FetchUpstreamRatiosRequest,
   LogCleanupTask,
   PlaygroundMCPSettingsRequest,
+  PlaygroundModelCatalogSettingsRequest,
   PlaygroundWebSearchSettingsRequest,
   SystemOptionsResponse,
   SystemTaskListResponse,
@@ -61,6 +62,16 @@ export async function updatePlaygroundMCP(
 ) {
   const res = await api.put<UpdateOptionResponse>(
     '/api/option/playground/mcp',
+    request
+  )
+  return res.data
+}
+
+export async function updatePlaygroundModelCatalog(
+  request: PlaygroundModelCatalogSettingsRequest
+) {
+  const res = await api.put<UpdateOptionResponse>(
+    '/api/playground/model-catalog',
     request
   )
   return res.data

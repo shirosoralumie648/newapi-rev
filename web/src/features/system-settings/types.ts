@@ -50,6 +50,15 @@ export type PlaygroundMCPSettingsRequest = {
   mcp: string
 }
 
+export type PlaygroundModelCatalogSettingsRequest = {
+  /**
+   * Curated Playground catalog and its user-group overrides. The editor keeps
+   * the document as text, but the endpoint receives the parsed object so the
+   * server validates the same structure it persists.
+   */
+  catalog: Record<string, unknown>
+}
+
 export interface PasskeyDomainChange {
   rp_id: string
   legacy_rp_ids: string
@@ -449,6 +458,7 @@ export type SecuritySettings = {
   'playground_setting.storage_billing': string
   'playground_setting.web_search': string
   'playground_setting.mcp': string
+  'playground_setting.model_catalog': string
   'playground_setting.sandbox_preview_enabled': boolean
   'playground_setting.task_queue_enabled': boolean
 }

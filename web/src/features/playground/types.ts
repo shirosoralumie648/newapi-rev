@@ -303,6 +303,12 @@ export interface Message {
    * continues the conversation. Messages from ordinary sends leave it unset.
    */
   parallel?: boolean
+  /**
+   * Anonymous A/B arena group: exactly two versions whose model names and
+   * channels stay hidden while the reader votes on the replies. The names
+   * remain on the versions for retry and continuation.
+   */
+  anonymous?: boolean
   /** Index of the active version in `versions`; defaults to 0 for legacy data. */
   activeVersionIndex?: number
   createdAt?: number
@@ -324,6 +330,36 @@ export interface Message {
   isContentComplete?: boolean
   status?: MessageStatus
   errorCode?: string | null
+}
+
+/** One raw preference vote of an anonymous A/B comparison. */
+export type PlaygroundArenaChoice = 'a' | 'b' | 'tie' | 'both_bad'
+
+export interface PlaygroundArenaVote {
+  id: number
+  messageKey: string
+  choice: PlaygroundArenaChoice
+  note: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface PlaygroundArenaVoteCounts {
+  a: number
+  b: number
+  tie: number
+  bothBad: number
+}
+
+/**
+ * Read-only choice totals. Personal scope counts only the caller's votes;
+ * instance scope counts every account and is only available to administrators.
+ */
+export interface PlaygroundArenaVoteSummary {
+  scope: 'personal' | 'instance'
+  total: number
+  choices: PlaygroundArenaVoteCounts
+  notes: number
 }
 
 /**
@@ -856,6 +892,54 @@ export interface ParameterEnabled {
   reasoning_effort: boolean
 }
 
+/**
+ * Sampling values an administrator attached to one curated model. The server
+ * stores absent values as omitted fields, so an explicit 0 (temperature) stays
+ * a real default while an omitted field means "keep the account value".
+ */
+export interface PlaygroundModelCatalogDefaults {
+  temperature?: number
+  topP?: number
+  maxTokens?: number
+  frequencyPenalty?: number
+  presencePenalty?: number
+  seed?: number
+  reasoningEffort?: string
+}
+
+export interface PlaygroundModelCatalogLimits {
+  contextLength?: number
+  maxOutputTokens?: number
+}
+
+export interface PlaygroundModelCatalogGroup {
+  id: string
+  label: string
+  description?: string
+}
+
+export interface PlaygroundModelCatalogEntry {
+  model: string
+  displayName?: string
+  description?: string
+  icon?: string
+  group?: string
+  capabilities?: string[]
+  hidden?: boolean
+  defaults?: PlaygroundModelCatalogDefaults
+  limits?: PlaygroundModelCatalogLimits
+}
+
+/**
+ * Effective catalog the server resolved for the signed-in account's group.
+ * An administrator can replace the global list per user group; hidden entries
+ * never reach this shape.
+ */
+export interface PlaygroundModelCatalog {
+  groups: PlaygroundModelCatalogGroup[]
+  models: PlaygroundModelCatalogEntry[]
+}
+
 // Model and group options
 export interface ModelOption {
   label: string
@@ -876,6 +960,14 @@ export interface ModelOption {
   /** Chat-style endpoint and no task usage schema. */
   supportsChat?: boolean
   isImageGeneration?: boolean
+  /** Curated catalog section this model belongs to, when the catalog groups it. */
+  category?: string
+  /** Description of the curated catalog section. */
+  categoryDescription?: string
+  /** Emoji or HTTP(S) image URL supplied by the model catalog. */
+  icon?: string
+  /** Sampling values of a new conversation that starts with this model. */
+  catalogDefaults?: PlaygroundModelCatalogDefaults
 }
 
 export interface GroupOption {

@@ -70,6 +70,8 @@ interface PlaygroundInputProps {
   models: ModelOption[]
   modelValue: string
   onModelChange: (value: string) => void
+  /** Starts a new conversation with the model chosen in the selector. */
+  onStartNewSession?: (model: string) => void
   isModelLoading?: boolean
   groups: GroupOption[]
   groupValue: string
@@ -158,6 +160,7 @@ export function PlaygroundInput({
   models,
   modelValue,
   onModelChange,
+  onStartNewSession,
   isModelLoading = false,
   groups,
   groupValue,
@@ -282,6 +285,7 @@ export function PlaygroundInput({
             modelValue={modelValue}
             onGroupChange={onGroupChange}
             onModelChange={onModelChange}
+            onStartNewSession={onStartNewSession}
             onStop={onStop}
             text={text}
             tools={

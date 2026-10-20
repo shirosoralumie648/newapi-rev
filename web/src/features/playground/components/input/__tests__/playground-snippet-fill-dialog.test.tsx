@@ -69,7 +69,7 @@ test('defaults are prefilled and required variables block insertion until filled
 
   expect(await screen.findByDisplayValue('general')).toBeVisible()
   expect(screen.getByLabelText('Preview')).toHaveTextContent(
-    'Summarize general for  in bullet points.'
+    'Summarize general for {{audience}} in bullet points.'
   )
   const insert = screen.getByRole('button', { name: 'Insert' })
   expect(insert).toBeDisabled()

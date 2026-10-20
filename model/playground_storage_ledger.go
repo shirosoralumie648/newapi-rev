@@ -527,6 +527,11 @@ func SettlePlaygroundStorageLedgers(timestamp int64, batchLimit int) (*Playgroun
 // admin_info so the anomaly stays auditable for administrators only.
 func recordPlaygroundStorageSettlementLog(row *PlaygroundStorageLedger, settlement *playgroundStorageSettlement) {
 	other := NewLogOther()
+	// The daily storage settlement is Playground spend. The settlement runs
+	// without a request context, so the marker is written on the row itself
+	// and the read-only usage analytics attributes the charge to the
+	// workspace instead of to a direct API call.
+	other.SetPublic(PlaygroundOriginLogOtherKey, true)
 	other.SetPublic("storage_date", row.Date)
 	if settlement.Clamp != nil {
 		other.SetAdmin("quota_saturation", settlement.Clamp.AuditMap())

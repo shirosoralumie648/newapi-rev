@@ -23,6 +23,8 @@ export const playgroundQueryKeys = {
   memories: (userId: number | null) =>
     ['playground', userId, 'memories'] as const,
   usage: (userId: number | null) => ['playground', userId, 'usage'] as const,
+  usageAnalytics: (userId: number | null, days: number) =>
+    ['playground', userId, 'usage-analytics', days] as const,
   storageBilling: (userId: number | null) =>
     ['playground', userId, 'storage-billing'] as const,
   settings: (userId: number | null) =>
@@ -31,6 +33,10 @@ export const playgroundQueryKeys = {
     ['playground', userId, 'mcp-servers'] as const,
   messageCosts: (userId: number | null, requestIds: string) =>
     ['playground', userId, 'message-costs', requestIds] as const,
+  arenaVotes: (userId: number | null, sessionId: string | null) =>
+    ['playground', userId, 'arena', 'votes', sessionId] as const,
+  arenaSummary: (userId: number | null, scope: 'personal' | 'instance') =>
+    ['playground', userId, 'arena', 'summary', scope] as const,
   tasksAll: () => ['playground', 'tasks'] as const,
   tasks: (filtersKey = 'list') => ['playground', 'tasks', filtersKey] as const,
   taskQueue: () => ['playground', 'tasks', 'queue'] as const,
