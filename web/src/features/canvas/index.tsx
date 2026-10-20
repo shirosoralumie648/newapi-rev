@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useNavigate } from '@tanstack/react-router'
 import {
   BookOpen,
+  Clapperboard,
   History,
   Image as ImageIcon,
   LayoutGrid,
@@ -57,11 +58,13 @@ import { CanvasProjectList } from './components/canvas-project-list'
 import { CanvasShareDialog } from './components/canvas-share-dialog'
 import { CanvasSnapshotHistory } from './components/canvas-snapshot-history'
 import { CanvasImageWorkbench } from './components/image/canvas-image-workbench'
+import { CanvasVideoWorkbench } from './components/video/canvas-video-workbench'
 import { CANVAS_DEFAULT_TITLE } from './constants'
 import {
   useCanvasProject,
   type CanvasSaveStatus,
 } from './hooks/use-canvas-project'
+import { useCanvasVideoFrameActions } from './hooks/use-canvas-video-frame-actions'
 import {
   canvasSourceSearch,
   type CanvasArtifactTarget,
@@ -120,9 +123,10 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
   const [historyOpen, setHistoryOpen] = useState(false)
   const [knowledgeOpen, setKnowledgeOpen] = useState(false)
   const [epoch, setEpoch] = useState(0)
-  // The layout a project opens in: images open in the single-image workbench,
-  // everything else on the node board. A manual toggle is kept while the same
-  // project stays open and resets when another project is selected.
+  // The layout a project opens in: image and video projects open in their
+  // focused workbench, everything else on the node board. A manual toggle is
+  // kept while the same project stays open and resets when another project is
+  // selected.
   const [viewChoice, setViewChoice] = useState<'workbench' | 'board' | null>(
     null
   )
@@ -151,9 +155,11 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
 
   const projectId = project?.id ?? ''
   const projectMode = project?.mode ?? 'infinite'
-  const view: 'workbench' | 'board' =
-    viewChoice ?? (projectMode === 'image' ? 'workbench' : 'board')
-  const workbenchView = view === 'workbench' && projectMode === 'image'
+  const defaultView: 'workbench' | 'board' =
+    projectMode === 'image' || projectMode === 'video' ? 'workbench' : 'board'
+  const view: 'workbench' | 'board' = viewChoice ?? defaultView
+  const workbenchView =
+    view === 'workbench' && (projectMode === 'image' || projectMode === 'video')
   useEffect(() => {
     setViewChoice(null)
   }, [projectId, projectMode])
@@ -187,6 +193,19 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
       }
     },
     [controller, reportError]
+  )
+
+  // A captured video frame becomes a new image project with the frame already
+  // in its own attachment partition; selecting it opens the image workbench.
+  const { createImageWorkbenchFromFrame } = useCanvasVideoFrameActions({
+    sourceTitle: project?.title ?? '',
+    onOpenProject: handleSelect,
+  })
+  const handleOpenFrameInImageWorkbench = useCallback(
+    async (file: File) => {
+      await createImageWorkbenchFromFrame(file)
+    },
+    [createImageWorkbenchFromFrame]
   )
 
   // The restored canvas becomes the active project, so the editor remounts on
@@ -329,14 +348,23 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
   if (status === 'loading' && !project) {
     body = <LoadingState message={t('Loading canvas...')} />
   } else if (project && activeProject && workbenchView) {
-    body = (
-      <CanvasImageWorkbench
-        key={`${project.id}:${epoch}:workbench`}
-        disabled={status === 'loading'}
-        onChange={handleDocumentChange}
-        project={activeProject}
-      />
-    )
+    body =
+      projectMode === 'video' ? (
+        <CanvasVideoWorkbench
+          key={`${project.id}:${epoch}:video-workbench`}
+          disabled={status === 'loading'}
+          onChange={handleDocumentChange}
+          onOpenImageWorkbench={handleOpenFrameInImageWorkbench}
+          project={activeProject}
+        />
+      ) : (
+        <CanvasImageWorkbench
+          key={`${project.id}:${epoch}:workbench`}
+          disabled={status === 'loading'}
+          onChange={handleDocumentChange}
+          project={activeProject}
+        />
+      )
   } else if (project && activeProject) {
     body = (
       <CanvasEditor
@@ -411,26 +439,33 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
             <span className='truncate text-sm font-medium'>{displayTitle}</span>
           </div>
           <div className='flex shrink-0 items-center gap-1'>
-            {project?.mode === 'image' && (
-              <Button
-                aria-label={
-                  workbenchView ? t('Canvas board') : t('Image workbench')
-                }
-                aria-pressed={!workbenchView}
-                onClick={() =>
-                  setViewChoice(workbenchView ? 'board' : 'workbench')
-                }
-                size='icon-sm'
-                type='button'
-                variant='ghost'
-              >
-                {workbenchView ? (
-                  <LayoutGrid aria-hidden='true' />
-                ) : (
-                  <ImageIcon aria-hidden='true' />
-                )}
-              </Button>
-            )}
+            {project &&
+              (project.mode === 'image' || project.mode === 'video') && (
+                <Button
+                  aria-label={
+                    workbenchView
+                      ? t('Canvas board')
+                      : projectMode === 'video'
+                        ? t('Video workbench')
+                        : t('Image workbench')
+                  }
+                  aria-pressed={!workbenchView}
+                  onClick={() =>
+                    setViewChoice(workbenchView ? 'board' : 'workbench')
+                  }
+                  size='icon-sm'
+                  type='button'
+                  variant='ghost'
+                >
+                  {workbenchView ? (
+                    <LayoutGrid aria-hidden='true' />
+                  ) : projectMode === 'video' ? (
+                    <Clapperboard aria-hidden='true' />
+                  ) : (
+                    <ImageIcon aria-hidden='true' />
+                  )}
+                </Button>
+              )}
             <Button
               aria-label={t('Knowledge bases')}
               onClick={() => setKnowledgeOpen(true)}

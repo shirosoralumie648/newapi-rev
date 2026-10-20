@@ -56,11 +56,14 @@ import {
 
 interface CanvasTaskListProps {
   active: boolean
-  onSendToCanvas: (seeds: CanvasSendSeed[]) => void
+  /** Omitted by the workbench queue, which never sends results to the board. */
+  onSendToCanvas?: (seeds: CanvasSendSeed[]) => void
   /** Case-insensitive client-side filter used by the asset library. */
   search?: string
   /** Show the server-side generation metadata filters of the result gallery. */
   showFilters?: boolean
+  /** Keep only tasks that have not reached a terminal state. */
+  onlyActive?: boolean
 }
 
 /**
@@ -144,7 +147,7 @@ export function CanvasTaskList(props: CanvasTaskListProps) {
     setPendingTaskId(task.task_id)
     try {
       const artifacts = await loadArtifacts(task)
-      props.onSendToCanvas(
+      props.onSendToCanvas?.(
         buildTaskResultCanvasSeeds({
           taskId: task.task_id,
           label:
@@ -321,47 +324,52 @@ export function CanvasTaskList(props: CanvasTaskListProps) {
       ) ||
       validSeed !== undefined ||
       validCount !== undefined
-    const tasks = (tasksQuery.data ?? []).filter((task) => {
-      if (!term) return true
-      return [
-        task.task_id,
-        task.action,
-        task.platform,
-        task.properties?.origin_model_name,
-        task.generation?.prompt,
-        task.generation?.model,
-        task.generation?.size,
-        task.generation?.quality,
-        task.generation?.seed,
-        task.generation?.count,
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase()
-        .includes(term)
-    })
+    const tasks = (tasksQuery.data ?? [])
+      .filter((task) => {
+        if (!term) return true
+        return [
+          task.task_id,
+          task.action,
+          task.platform,
+          task.properties?.origin_model_name,
+          task.generation?.prompt,
+          task.generation?.model,
+          task.generation?.size,
+          task.generation?.quality,
+          task.generation?.seed,
+          task.generation?.count,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(term)
+      })
+      .filter(
+        (task) =>
+          !props.onlyActive ||
+          !PLAYGROUND_TASK_TERMINAL_STATUSES.includes(task.status)
+      )
 
-    if (tasksQuery.data && tasksQuery.data.length === 0) {
+    if (tasks.length === 0) {
+      const filtered = serverFilterActive || term !== ''
+      let title = t('No generation tasks')
+      if (filtered) {
+        title = t('No results found')
+      } else if (props.onlyActive) {
+        title = t('No generations are running.')
+      }
       content = (
         <EmptyState
-          className='min-h-40'
+          className={filtered ? 'min-h-32' : 'min-h-40'}
           description={
-            serverFilterActive
+            filtered
               ? undefined
-              : t('Start a generation and its status appears here.')
+              : props.onlyActive
+                ? t('Running and waiting generations appear here.')
+                : t('Start a generation and its status appears here.')
           }
           icon={Sparkles}
-          title={t(
-            serverFilterActive ? 'No results found' : 'No generation tasks'
-          )}
-        />
-      )
-    } else if (tasks.length === 0) {
-      content = (
-        <EmptyState
-          className='min-h-32'
-          icon={Sparkles}
-          title={t('No results found')}
+          title={title}
         />
       )
     } else {
@@ -463,7 +471,7 @@ export function CanvasTaskList(props: CanvasTaskListProps) {
                     {translateServerText(t, failure)}
                   </p>
                 ) : null}
-                {isSuccessful ? (
+                {isSuccessful && props.onSendToCanvas ? (
                   <div className='mt-2 flex flex-wrap items-center gap-1.5'>
                     <TaskArtifactsCell
                       log={task}
