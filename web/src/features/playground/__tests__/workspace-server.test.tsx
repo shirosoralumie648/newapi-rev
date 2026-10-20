@@ -27,6 +27,11 @@ import { useAuthStore } from '@/stores/auth-store'
 import { DEFAULT_CONFIG, DEFAULT_PARAMETER_ENABLED } from '../constants'
 import { Playground } from '../index'
 
+vi.mock('@visactor/react-vchart', () => ({ VChart: () => null }))
+vi.mock('@visactor/vchart', () => ({
+  ThemeManager: { setCurrentTheme: vi.fn() },
+}))
+
 const originalAnimations = Object.getOwnPropertyDescriptor(
   HTMLElement.prototype,
   'getAnimations'

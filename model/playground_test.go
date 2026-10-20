@@ -2729,9 +2729,16 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	db := playgroundTestDB(t, "sqlite")
 	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.UserAccessToken{}, &model.AuditLog{}, &model.Option{}))
 	oldLog, oldRedis, oldSecret, oldLimit := model.LOG_DB, common.RedisEnabled, common.SessionSecret, common.GlobalApiRateLimitEnable
+	common.OptionMapRWMutex.Lock()
+	oldOptionMap := common.OptionMap
+	common.OptionMap = make(map[string]string)
+	common.OptionMapRWMutex.Unlock()
 	model.LOG_DB, common.RedisEnabled, common.SessionSecret, common.GlobalApiRateLimitEnable = db, false, "playground-artifact-auth-test", false
 	t.Cleanup(func() {
 		model.LOG_DB, common.RedisEnabled, common.SessionSecret, common.GlobalApiRateLimitEnable = oldLog, oldRedis, oldSecret, oldLimit
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = oldOptionMap
+		common.OptionMapRWMutex.Unlock()
 	})
 	user := model.User{Id: 990087, Username: "artifact-owner", AffCode: "pg-aff-990087", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1}
 	require.NoError(t, db.Create(&user).Error)
