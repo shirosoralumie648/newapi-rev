@@ -1335,6 +1335,139 @@ Step 进度：
 - **撤回**此前（按 👍 排序轮次）对 #5209（Responses→ChatCompletions 降级）的吸收建议：上游 2026-05~07 已 closed 一批协议转换 issue（#4754 Responses→OpenAI 兼容、#6162 Responses→Anthropic、#5514 OpenAI→Claude 兼容、#5392 多协议渠道 👍8），fork 随上游合并即得。
 - 确认已覆盖、无需采纳：#1730（channel_admission 并发/RPM/TPM/排队预留）、#2845（订阅兑换码 `SubscriptionSourceRedemption`）、#4896（affinity KeySource `request_header`）、#4882（token `PeriodQuota`）、#6722（`status_code_ranges.go` 可配置重试区间）、#7799（PG2「渠道可见粒度」决策 + RF-08 分组定价）、#5599（请求体留存 = PG2-08 已规划）。
 
+## 18. Markdown 渲染能力补齐（MD = Render 对齐包，2026-10-20 源码级审计）
+
+> 来源：2026-10-20 对 `lobehub/lobe-ui@master`（v6.5.1，`src/Markdown`、`src/hooks/useMarkdown`、`src/CodeBlock`、`src/Mermaid`）与 `lobehub/lobehub@main`（`src/features/Conversation`）的源码级盘点，以及本仓库 `web/src/components/ai-elements/response*`、`web/src/features/playground/components/**` 的全量对照。审计粒度到插件链与文件行号，结论见 18.1–18.4。目标：让 Playground（含画布助手侧栏，二者共用 `Response` 渲染器）的 Markdown 呈现达到 LobeChat 同档，**不引入 LobeHub 的 agent 生态概念**。
+
+### 18.1 审计结论：真实缺口清单
+
+**A. 核心 Markdown（必须补齐，用户高频可见）**
+
+| # | 缺口 | 当前实现（源码位置） | LobeHub 做法 |
+| --- | --- | --- | --- |
+| A1 | 数学公式 | `renderMathBlock` 输出原生 `<pre>` TeX、`renderMathInline` 输出 `<code>` 药丸（`response-renderer-blocks.tsx:192-213`）；`katex@^0.18.2` 已是直接依赖，但仅 `web/src/components/ui/markdown.tsx` 使用，Playground 渲染器未接入 | `remark-math` + 内置 fork 的 `rehype-katex`（KaTeX 0.18），`rehypeKatexDir` 补 `dir=ltr`，ConfigProvider 注入 KaTeX CSS |
+| A2 | 货币符号被吞 / 表格内公式断裂 | 无任何预处理；实测 `costs $20 and $100` 被解析为 `math_inline` 节点 `20 and `，两个 `$` 消失；表格单元格 `\| $a\|b$ \|` 被拆成两个单元格 | `preprocessLaTeX`：`\[..\]`/`\(..\)` 归一、转义货币 `$`、转义 mhchem `\ce`/`\pu`、转义公式内 `\|`；且 `remark-math` 排在 `remark-gfm` 之前 |
+| A3 | Mermaid 图表 | 全仓无引用；```mermaid 围栏落入普通代码块，无高亮 | 默认 `enableMermaid=true`，`code.lang==='mermaid'` 路由到 Mermaid 组件；本地渲染（`pele`）；15 种主题预设；150ms 节流流式重渲染并保留最后一张成功 SVG；失败回退显示源码；点击放大 |
+| A4 | 代码高亮语言覆盖 | CodeMirror 6 仅配置 `markdown` 与 `javascript`（JS/TS/JSX/TSX）语法（`code-block.tsx:22-24,225`）；python/go/sql/yaml/json/bash 等无高亮 | Shiki 4 全量语言，语言列表可切换 |
+| A5 | 代码高亮主题 | 固定十六进制 `HighlightStyle`（`code-block.tsx:190` 附近），不随暗色模式变化，无主题切换 | 全量主题列表 + 用户选择 + 设置页实时预览 |
+| A6 | 原始 HTML 与行内标签 | `html_block`/`html_inline` 输出为字面文本 span（`response-renderer.tsx:241-247`），仅 `<details>/<summary>` 特判；实测 `<kbd>Ctrl</kbd>` 显示为标签原文 | `rehype-raw`+`rehype-sanitize`（开关控制）；即使关闭 raw，仍由 `remarkGfmPlus` 渲染 sub/sup/ins/kbd/mark、`remarkVideo` 渲染 `<video>` |
+
+**B. 渲染质量与流式体验（应当补齐）**
+
+| # | 缺口 | 当前实现 | LobeHub 做法 |
+| --- | --- | --- | --- |
+| B1 | 流式半成品块 | 解析器已给未闭合围栏/公式标记 `loading:true`，但无渲染器读取；半截代码块/公式按最终样式闪现 | Streamdown 补全开放尾部、按块揭示；`latexGuard` 隐藏半截公式 |
+| B2 | 超长内容不解析 | `MAX_PARSED_MARKDOWN_CHARS = 20_000`，超出直接输出原始字符串（`response.tsx:40,61`），长报告标题/表格/代码全部丢失 | 无此上限，消息列表虚拟化 |
+| B3 | 流式重渲染开销 | `Response` 仅顶层 memo；`getNodeKey` 为 `` `${type}-${index}-${raw.slice(0,24)}` ``（`response-content.ts:167-170`），短块每个 token 换 key，CodeMirror 子树反复重挂、滚动位置丢失 | `MarkdownProvider` + `useStableValue` 深比较，避免流式期间重挂代码块子树（含 iframe） |
+| B4 | 图片查看 | `ResponseImage` 为普通懒加载 `<img>` + alt 兜底 + `max-h-96`（`response-renderer-image.tsx`），无点击放大/下载/画廊 | 图片灯箱（缩放/平移/旋转/实际尺寸/下载/复制）；`enableImageGallery` 注册消息内全部图片支持前后切换 |
+| B5 | 表格复制 | `response-renderer-table.tsx` 仅展示，无操作 | 每个表格浮动「复制为 Markdown」，保留对齐、转义管道、`<br>` 与行内代码围栏 |
+| B6 | 代码块细节 | 已有语言标签/复制/下载/折叠/行号（行号与下载**优于** LobeHub），但无换行开关、无语言切换器、无文件类型图标、单行 fence 也占整块 | 换行开关、可搜索语言切换器、文件类型图标、自定义文件名、≤32 字符单行 fence 收缩为 Snippet 芯片 |
+| B7 | 内联 HTML 文档预览 | ```html 围栏仅能手动「创建 Artifact」后查看，无沙箱内联预览 | `enableHtmlPreview` 对含 `<!doctype html>`/`<html>` 的围栏提供沙箱 iframe 预览 + 源码切换 + 复制/下载/展开抽屉 |
+
+**C. 低优先级 / 细节对齐**
+
+| # | 项 | 说明 |
+| --- | --- | --- |
+| C1 | `:::` 容器语法 | 解析器产出 admonition 节点但渲染器无 case，落在普通 children，丢失边框与标题；`> [!NOTE]` 引用块已有样式 |
+| C2 | 单波浪线语义 | 现渲染器把 `~text~` 作下标；散文 `~5 minutes~` 意外变形。LobeHub 设 `singleTilde:false` 保持字面量 |
+| C3 | 代码 notation 变换器 | 无 `// [!code ++]` `[!code highlight]` `[!code focus]` `[!code error]` 支持 |
+| C4 | 流式节奏平滑 | 无字符队列/`requestAnimationFrame` 排空；快速渠道 SSE 观感跳跃。LobeHub 提供 none/fadeIn/smooth 三档并可实时预览 |
+| C5 | 行内引用与脚注增强 | 已有 `[n]` 引用链接与 GFM 脚注；LobeHub 额外提供引用 popover 与搜索结果卡片，按需评估 |
+
+### 18.2 新增 Step（MD = Markdown Render 对齐包）
+
+| ID | 标题 | 依赖 | 优先级 | 量级 |
+| --- | --- | --- | --- | --- |
+| MD-01 | LaTeX/货币预处理与 KaTeX 数学渲染（A1+A2） | 无 | P0 | 中 |
+| MD-02 | 代码高亮换 Shiki：全量语言、暗色适配与主题选择（A4+A5） | 无 | P0 | 中 |
+| MD-03 | Mermaid 图表渲染：懒加载、主题、流式节流与错误回退（A3） | 无 | P0 | 中 |
+| MD-04 | 原始 HTML 与行内标签安全渲染（A6） | MD-01 | P1 | 中 |
+| MD-05 | 流式稳健性：loading 标志、解析上限与稳定节点 key（B1+B2+B3） | 无 | P1 | 中 |
+| MD-06 | 富媒体与代码块细节：图片灯箱、表格复制、代码块工具栏（B4+B5+B6） | 无 | P2 | 中 |
+| MD-07 | 细节对齐：`:::` 容器、单波浪线、notation 变换器（C1+C2+C3） | MD-02 | P2 | 小 |
+| MD-08 | 内联 HTML 文档预览（沙箱）（B7） | MD-04 | P2 | 大 |
+| MD-09 | 流式节奏与过渡设置（C4，可选） | MD-05 | P3 | 中 |
+
+执行顺序建议：MD-01 → MD-02 → MD-03（三项合起来覆盖用户可见差距的绝大部分）→ MD-05 → MD-04 → MD-06 → MD-07 → MD-08 → MD-09。
+
+### 18.3 已定决策（2026-10-20）
+
+1. **不移植 LobeHub agent 生态插件**：`<lobeArtifact>`、`<skill>`、`<scmEvent>`、`<mention>`、`<task>`、`<goalTurn>`、`<user_feedback>`、`<lobeThinking>` 等标签插件依赖 agent/topic/SCM 实体，本仓库无对应数据来源，明确不做。`<think>` 等推理标签已由既有 `response-content.ts` 剥离 + 推理面板覆盖。
+2. **不移植消息级生态动作**：翻译、表情回应、多选转发、评论、截图/PDF 分享依赖 LobeHub 的 topic/agent 概念；本仓库已有只读分享页与 Markdown/JSON 导出，维持现状。
+3. **渲染器归属**：所有改动落在 `web/src/components/ai-elements/response*` 与 `code-block.tsx`，Playground、并行对比、画布助手侧栏、共享只读页自动共享，不新增第二套渲染器。
+4. **依赖策略**：`katex`、`shiki`、`dompurify` 已是直接依赖，复用；Mermaid 当前仅为 `overrides` 中的传递依赖版本钉（`web/package.json` overrides `mermaid: 11.15.0`），MD-03 实施时需改为**直接依赖**并走 `bun install`。
+5. **安全边界**：HTML 渲染必须经 `dompurify` 净化，默认关闭、管理员可开；Mermaid 输出按 SVG 净化并在沙箱内渲染；内联 HTML 预览沿用既有沙箱策略（独立 origin + sandbox iframe，禁止 `allow-same-origin`）。
+6. **性能边界**：Mermaid/KaTeX 走动态 import，不得进入首屏包；代码高亮语言按需加载，避免 Shiki 全量语法打包进主 chunk。
+7. **渲染一致性**：画布助手、并行对比、共享只读页与主对话共用同一渲染器，不得出现两套 Markdown 行为。
+
+### 18.4 各步范围与验收
+
+- **MD-01 LaTeX/货币预处理与 KaTeX 数学渲染**：
+  - [ ] 新增 `web/src/components/ai-elements/response-latex.ts`：`preprocessLaTeX`（`\[..\]`→`$$..$$`、`\(..\)`→`$..$`、货币 `$` 转义、mhchem `\ce`/`\pu`、公式内 `|` 转义、`\text{}` 内 `_` 转义），纯函数、可单测；
+  - [ ] `renderMathBlock`/`renderMathInline` 改为 KaTeX 渲染（`katex.renderToString`，`throwOnError:false` + `strict:'ignore'` 降级），块级公式外层补 `dir='ltr'` 与横向滚动；
+  - [ ] `katex/dist/katex.min.css` 按路由/组件懒加载，不进入首屏；
+  - [ ] 修复 A2：货币文本不再被吞，表格内 `| $a|b$ |` 单元格不被拆分；
+  - [ ] 测试：`response-latex.test.ts`（货币、区间 `$5–$10`、`\[ \]`、mhchem、表格管道、`\text{a_b}`）、`response-renderer-math.test.tsx`（行内/块级渲染为 `.katex`、错误降级）；
+  - [ ] i18n：若新增「公式渲染失败」提示键，补七语言并 `i18n:sync` 全 0。
+
+- **MD-02 代码高亮换 Shiki**：
+  - [ ] `code-block.tsx` 的高亮引擎从 CodeMirror `HighlightStyle` 切到 Shiki（`shiki@^4.3.0` 已是直接依赖），保留现有复制/下载/折叠/行号能力；
+  - [ ] 语言覆盖：至少 python/go/java/rust/sql/yaml/json/bash/diff/html/css/jsx/tsx/markdown；未知语言降级 plaintext 且不报错；
+  - [ ] 主题随明暗模式切换（复用现有主题 store），移除固定十六进制调色板；
+  - [ ] 按需加载语言包，控制首屏体积；
+  - [ ] 测试：`code-block.test.tsx` 覆盖多语言高亮、未知语言降级、暗色主题切换、复制/下载行为不回归。
+
+- **MD-03 Mermaid 图表渲染**：
+  - [ ] `mermaid` 由 overrides 提升为**直接依赖**（`bun install` 更新 `bun.lock`）；
+  - [ ] 新增 `web/src/components/ai-elements/mermaid.tsx`：动态 import、`securityLevel:'strict'`、SVG 净化、主题跟随；
+  - [ ] `renderCodeBlock` 在 `lang==='mermaid'` 时路由到 Mermaid 组件，提供「源码 / 渲染」切换；
+  - [ ] 流式：150ms 节流重渲染，失败时保留最后一次成功 SVG，完全失败回退显示源码与错误提示；
+  - [ ] 点击放大（复用 MD-06 的灯箱或独立 Dialog）；
+  - [ ] 测试：`mermaid.test.tsx`（合法/非法语法、源码切换、流式部分输入不崩溃、主题切换）；`bun run build` 确认首屏 chunk 不包含 mermaid。
+
+- **MD-04 原始 HTML 与行内标签**：
+  - [ ] `html_block`/`html_inline` 经 `dompurify` 净化后渲染（`dompurify@3.4.16` 已是直接依赖与 override），白名单标签/属性，禁止脚本、事件属性、`javascript:` URL；
+  - [ ] 管理员开关控制是否允许原始 HTML（默认关闭）；关闭时行为回退为当前字面文本；
+  - [ ] 即使关闭 raw，也支持 `kbd`/`mark`/`ins`/`sub`/`sup` 与 `<video>` 的受控渲染；
+  - [ ] 安全测试：XSS 载荷矩阵（`<script>`、`onerror=`、`javascript:`、`<iframe>`、SVG `onload`）、开关关闭时的降级断言。
+
+- **MD-05 流式稳健性**：
+  - [ ] 渲染器读取解析器的 `loading` 标志：未闭合代码块显示骨架/加载态，未闭合公式按纯文本显示并在闭合后切换为 KaTeX；
+  - [ ] `MAX_PARSED_MARKDOWN_CHARS` 策略调整：超限时改为分段解析（按顶层块切分）而非整体放弃，保证长报告仍有格式；
+  - [ ] `getNodeKey` 改为稳定 key（`type-index` + 结构性哈希，不含原始文本前缀），代码块在流式期间不重挂、滚动位置保留；
+  - [ ] 测试：流式增量快照测试（半个围栏→闭合）、长文本（>20k）仍渲染表格/标题、代码块 key 在追加 token 时保持不变。
+
+- **MD-06 富媒体与代码块细节**：
+  - [ ] 图片灯箱：点击放大、缩放/平移、实际尺寸、下载；消息内图片支持前后切换（画廊）；
+  - [ ] 表格浮动「复制为 Markdown」按钮（保留对齐、转义管道、`<br>`、行内代码围栏）；
+  - [ ] 代码块：换行开关、可搜索语言切换器、文件类型图标、≤32 字符单行 fence 收缩为 Snippet 芯片；
+  - [ ] 全部复用现有 `Dialog`/`Toolbar`/`CopyButton`/`Button` 共享组件，不新建重复交互；
+  - [ ] 测试：灯箱开关与键盘可达性、表格复制内容往返一致、换行开关与语言切换、Snippet 收缩阈值。
+
+- **MD-07 细节对齐**：
+  - [ ] `:::` 容器节点渲染为与 `> [!NOTE]` 一致的 callout 样式（note/tip/important/warning/caution）；
+  - [ ] 单波浪线：与 LobeHub 对齐为字面量（若保留下标语义，需在文档中说明并加显式语法）；
+  - [ ] 代码 notation 变换器：`[!code ++/--/highlight/focus/error]`（可用 `@shikijs/transformers` 或自研轻量实现）；
+  - [ ] 测试：callout 五种类型、单波浪线回归、notation 渲染快照。
+
+- **MD-08 内联 HTML 文档预览**：
+  - [ ] 含 `<!doctype html>`/`<html>` 的 ```html 围栏提供沙箱 iframe 预览（沿用 Artifact 的沙箱策略），支持源码/预览切换、复制、下载、展开抽屉；
+  - [ ] 管理员开关控制，默认关闭；
+  - [ ] 安全测试：脚本执行隔离、同源隔离、postMessage 白名单、沙箱逃逸用例。
+
+- **MD-09 流式节奏与过渡设置（可选）**：
+  - [ ] 外观设置新增 none/fadeIn/smooth 三档，带实时预览；
+  - [ ] smooth 模式以字符队列 + `requestAnimationFrame` 排空，按队列长度自适应速度；`prefers-reduced-motion` 时强制 none；
+  - [ ] 测试：设置持久化、节奏队列不丢字符、减少动效适配。
+
+### 18.5 验收口径
+
+- 所有 Step 完成后，用同一组 Markdown 样例（标题/表格/代码/公式/Mermaid/HTML/图片/脚注/callout/长文本）在**主对话、画布助手侧栏、并行对比、共享只读页**四处逐一核对渲染一致；
+- 首屏 JS 体积相较基线不得显著增加（Mermaid/KaTeX/Shiki 语法包必须按需加载）；
+- XSS 载荷矩阵全部被拦截（MD-04/MD-08）；
+- 暗色/亮色、桌面/移动、`prefers-reduced-motion` 三种条件下视觉核对；
+- 三数据库与本包无关，但涉及前端构建的改动须通过 `bun run typecheck`、`bun run lint`、`bun run build` 与既有前端测试。
+
 ## 8. 变更记录
 
 | 日期 | 变更 |
@@ -1485,3 +1618,4 @@ Step 进度：
 | 2026-10-20 | 上游同步（CI-only，本地未运行完整测试）：并入 `32e587406` Resend 邮件服务商接口（#7880）与 `25372e30b` Claude 流式请求保活修复（#7857）。行为变化：① 发信设置新增 SMTP/Resend 双模式，`EmailProvider` 只接受 `smtp`/`resend`，Resend 生效时校验 API Key 与发件地址，`ResendKeyConfigured` 为只读派生项；② SSE 心跳前移到请求准备阶段（`relay/helper.StartStreamKeepAlive`），流式阶段响应头已提交后的错误改为在流内返回（`writeRelayStreamError`），不再尝试改写 HTTP 状态码。冲突：`model/option.go` 校验分支取并集，`common/log_text.zh-CN.json` 与 7 个前端语言包按 key 并集并用 `i18n:sync` 规范化（missing/extras 全 0）。另修复 LB-13 遗留的未使用 `Sparkles` 导入（前端 typecheck TS6133）。已知既有失败：`TestResponsesStreamOutcomesPreserveAccounting` 在同步前后均失败，与本次同步无关。 |
 | 2026-10-20 | CV-10：视频工作台收尾（CI-only，本地未运行测试/typecheck/lint/build）——复用 CV-09 项目模式与既有受控任务产物内容流：`video` 项目默认进入工作台，按首选版本播放/切换版本，参数侧栏复用 CV-07 的模型/时长/尺寸档位，活动任务队列复用 `CanvasTaskList onlyActive` 与既有取消/退款确认；抽帧经 `<video>` seek + 离屏 canvas 生成 JPEG，可创建独立 `image` 图片工作台项目（帧重新上传到新项目附件分区，失败删除半成品）。本次补齐画布落点连线：节点先分配 id 再插入并连到视频步骤，步骤已有 4 张图片输入时在读取字节前拒绝；新增 `use-canvas-video-frame-actions.test.tsx`，扩展视频工作台、项目列表与活动队列测试；21 个新键七语言与 4 个 `static-keys.ts` 动态键（`i18n:sync` missingCount=0、extrasCount=0，untranslated 基线 zh 11/ja 12/ru 12）；无新依赖、无数据库/路由/Relay/计费改动。 |
 | 2026-10-20 | CV-10 复核补强：抽帧送图片工作台落点（CI-only，本地未运行测试/typecheck/lint/build）——修复帧送入图片工作台后只生成孤立 `image` 节点、图片工作台没有可聚焦生成步骤而显示空态的问题：新建的 `image` 项目现在同时写入一个 `image` 生成步骤，并把重新上传的帧作为其参考图连到步骤左侧；打开项目即聚焦该步骤，参考图条可直接用于 img2img 或视频改图链，失败仍删除半成品项目。扩展 `use-canvas-video-frame-actions.test.tsx` 断言帧/步骤节点、`frame → step` 边、位置与所有权附件分区；无新增翻译键（`node scripts/sync-i18n.mjs` missingCount=0、extrasCount=0，untranslated 基线 zh 11/ja 12/ru 12）、无新依赖、无数据库/路由/Relay/计费改动。 |
+| 2026-10-20 | 新增第 18 节「Markdown 渲染能力补齐（MD 对齐包）」：基于对 `lobehub/lobe-ui@master`（v6.5.1）与 `lobehub/lobehub@main` 的源码级审计（remark/rehype 插件链、CodeBlock、Mermaid、Conversation 插件与消息动作），对照本仓库 `web/src/components/ai-elements/response*` 形成 18 项缺口清单，拆为 MD-01～MD-09 九个 Step（KaTeX 与货币预处理、Shiki 全量语言与主题、Mermaid、HTML 净化、流式稳健性、图片灯箱/表格复制/代码块细节、`:::` 容器与 notation、内联 HTML 预览、流式节奏）。明确不移植 LobeHub 的 agent 生态标签插件（artifact/skill/scmEvent/mention/task/goalTurn）与消息级生态动作（翻译/表情/转发/截图分享）。本记录仅更新计划，未改动代码。 |
