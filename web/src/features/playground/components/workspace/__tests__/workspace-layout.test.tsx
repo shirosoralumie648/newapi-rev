@@ -109,6 +109,28 @@ test('the top bar opens the memory inspector', async () => {
   expect(onToggleInspector).toHaveBeenCalledWith('memory')
 })
 
+test('the top bar replays the guide and marks the memory tour anchor', async () => {
+  const user = userEvent.setup()
+  const onOpenHelp = vi.fn()
+  render(
+    <PlaygroundWorkspace
+      {...baseProps}
+      onOpenHelp={onOpenHelp}
+      onToggleInspector={vi.fn()}
+    >
+      <div>Chat body</div>
+    </PlaygroundWorkspace>
+  )
+
+  await user.click(screen.getByRole('button', { name: 'Help and guide' }))
+
+  expect(onOpenHelp).toHaveBeenCalledTimes(1)
+  expect(screen.getByRole('button', { name: 'Memory' })).toHaveAttribute(
+    'data-tour',
+    'workspace-memory'
+  )
+})
+
 test('desktop marks the active memory inspector view', () => {
   render(
     <PlaygroundWorkspace

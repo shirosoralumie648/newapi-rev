@@ -102,6 +102,9 @@ interface PlaygroundInputProps {
     value: boolean
   ) => void
   parameterEnabled: ParameterEnabled
+  /** Controlled parameter panel opened by an empty-state entry. */
+  parameterPanelOpen?: boolean
+  onParameterPanelOpenChange?: (open: boolean) => void
   systemPrompt: string
   onSystemPromptChange: (value: string) => void
   contextSettings: PlaygroundContextSettings
@@ -190,6 +193,8 @@ export function PlaygroundInput({
   onClearMessages,
   onParameterEnabledChange,
   parameterEnabled,
+  parameterPanelOpen,
+  onParameterPanelOpenChange,
   systemPrompt,
   onSystemPromptChange,
   contextSettings,
@@ -262,7 +267,7 @@ export function PlaygroundInput({
   }
 
   return (
-    <div className='grid shrink-0 gap-4 px-1 md:pb-4'>
+    <div className='grid shrink-0 gap-4 px-1 md:pb-4' data-tour='composer'>
       <PromptInput
         accept={PLAYGROUND_CHAT_ATTACHMENT_ACCEPT}
         className='relative'
@@ -354,6 +359,7 @@ export function PlaygroundInput({
                 onKnowledgeBaseIdsChange={onKnowledgeBaseIdsChange}
                 onOpenRequestViewer={onOpenRequestViewer}
                 onParameterEnabledChange={onParameterEnabledChange}
+                onParameterPanelOpenChange={onParameterPanelOpenChange}
                 onRemoveContextSummary={onRemoveContextSummary}
                 onSummarizeContext={onSummarizeContext}
                 onSystemPromptChange={onSystemPromptChange}
@@ -361,6 +367,7 @@ export function PlaygroundInput({
                 onToolExecutionMaxRoundsChange={onToolExecutionMaxRoundsChange}
                 onWebSearchChange={onWebSearchChange}
                 parameterEnabled={parameterEnabled}
+                parameterPanelOpen={parameterPanelOpen}
                 systemPrompt={systemPrompt}
                 toolExecutionEnabled={toolExecutionEnabled}
                 toolExecutionMaxRounds={toolExecutionMaxRounds}

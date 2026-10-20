@@ -4,6 +4,18 @@ export const E2E_USERNAME = 'e2e-root'
 export const E2E_PASSWORD = 'E2e!Passw0rd123'
 
 export async function signIn(page: Page) {
+  // The first Playground visit opens the onboarding welcome card. Existing
+  // workspace tests exercise the workspace itself, so seed the completed
+  // record for the fixed first account before any page script runs.
+  await page.addInitScript(() => {
+    window.localStorage.setItem(
+      'playground_onboarding:1',
+      JSON.stringify({
+        version: 1,
+        data: { welcomeSeen: true, tourCompleted: true },
+      })
+    )
+  })
   await page.goto('/sign-in')
   await page.getByLabel('Username or Email', { exact: true }).fill(E2E_USERNAME)
   await page.getByLabel('Password', { exact: true }).fill(E2E_PASSWORD)

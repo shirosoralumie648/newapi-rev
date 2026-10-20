@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useNavigate } from '@tanstack/react-router'
 import {
   BookOpen,
+  CircleHelp,
   Clapperboard,
   History,
   Image as ImageIcon,
@@ -48,6 +49,11 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
+import { usePlaygroundTour } from '@/features/playground/hooks'
+import {
+  consumeCanvasTourHandoff,
+  markPlaygroundTourCompleted,
+} from '@/features/playground/lib'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { getServerMessage } from '@/lib/server-error-message'
 import { useAuthStore } from '@/stores/auth-store'
@@ -119,10 +125,12 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
   const navigate = useNavigate()
   const userId = useAuthStore((state) => state.auth.user?.id ?? null)
   const controller = useCanvasProject(userId, props.initialProjectId)
+  const { startTour } = usePlaygroundTour()
   const [listOpen, setListOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [knowledgeOpen, setKnowledgeOpen] = useState(false)
   const [epoch, setEpoch] = useState(0)
+  const canvasTourHandoffRef = useRef(false)
   // The layout a project opens in: image and video projects open in their
   // focused workbench, everything else on the node board. A manual toggle is
   // kept while the same project stays open and resets when another project is
@@ -163,6 +171,28 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
   useEffect(() => {
     setViewChoice(null)
   }, [projectId, projectMode])
+
+  const handleStartCanvasTour = useCallback(() => {
+    startTour('canvas', {
+      onComplete: () => markPlaygroundTourCompleted(userId),
+    })
+  }, [startTour, userId])
+
+  // The conversation tour ends on an offer to continue in the canvas. Once the
+  // board is mounted, consume that one-shot request and start the canvas tour.
+  useEffect(() => {
+    if (
+      canvasTourHandoffRef.current ||
+      !project ||
+      status === 'loading' ||
+      workbenchView
+    ) {
+      return
+    }
+    if (!consumeCanvasTourHandoff()) return
+    canvasTourHandoffRef.current = true
+    handleStartCanvasTour()
+  }, [handleStartCanvasTour, project, status, workbenchView])
 
   const reportError = useCallback(
     (error: unknown) => {
@@ -475,6 +505,17 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
             >
               <BookOpen aria-hidden='true' />
             </Button>
+            {project && !workbenchView && (
+              <Button
+                aria-label={t('Replay canvas guide')}
+                onClick={handleStartCanvasTour}
+                size='icon-sm'
+                type='button'
+                variant='ghost'
+              >
+                <CircleHelp aria-hidden='true' />
+              </Button>
+            )}
             {project && (
               <CanvasShareDialog
                 canvasId={project.id}

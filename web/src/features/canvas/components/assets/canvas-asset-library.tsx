@@ -189,7 +189,10 @@ export function CanvasAssetLibrary(props: CanvasAssetLibraryProps) {
   }
 
   return (
-    <div className='flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-3'>
+    <div
+      className='flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-3'
+      data-tour='canvas-asset-library'
+    >
       <div className='flex flex-col gap-2'>
         <div
           aria-label={t('Asset kind')}

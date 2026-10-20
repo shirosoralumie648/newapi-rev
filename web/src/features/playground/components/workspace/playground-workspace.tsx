@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import {
   Brain,
   ChartColumn,
+  CircleHelp,
   Command,
   Keyboard,
   Menu,
@@ -81,6 +82,8 @@ interface PlaygroundWorkspaceProps {
   onOpenCommandPalette?: () => void
   /** Opens the keyboard shortcut reference. */
   onOpenShortcuts?: () => void
+  /** Reopens the first-visit welcome card and the guided tour entry. */
+  onOpenHelp?: () => void
   onToggleInspector?: (view: PlaygroundInspectorView) => void
 }
 
@@ -159,6 +162,7 @@ export function PlaygroundWorkspace(props: PlaygroundWorkspaceProps) {
               <>
                 <Button
                   aria-label={t('Open conversations')}
+                  data-tour='workspace-sessions'
                   onClick={() => setIsSessionListOpen(true)}
                   size='icon-sm'
                   type='button'
@@ -204,6 +208,18 @@ export function PlaygroundWorkspace(props: PlaygroundWorkspaceProps) {
                 <Keyboard aria-hidden='true' />
               </Button>
             )}
+            {props.onOpenHelp && (
+              <Button
+                aria-label={t('Help and guide')}
+                disabled={props.disabled}
+                onClick={props.onOpenHelp}
+                size='icon-sm'
+                type='button'
+                variant='ghost'
+              >
+                <CircleHelp aria-hidden='true' />
+              </Button>
+            )}
             {props.onToggleInspector && (
               <>
                 <Button
@@ -221,6 +237,7 @@ export function PlaygroundWorkspace(props: PlaygroundWorkspaceProps) {
                 </Button>
                 <Button
                   aria-pressed={props.inspectorView === 'memory'}
+                  data-tour='workspace-memory'
                   disabled={props.disabled}
                   onClick={() => props.onToggleInspector?.('memory')}
                   size='sm'

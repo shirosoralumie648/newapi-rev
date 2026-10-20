@@ -148,7 +148,10 @@ export function PlaygroundSessionList(props: PlaygroundSessionListProps) {
   )
 
   return (
-    <div className='flex min-h-0 flex-1 flex-col gap-3'>
+    <div
+      className='flex min-h-0 flex-1 flex-col gap-3'
+      data-tour='workspace-sessions'
+    >
       <div className='flex items-center gap-2'>
         <div className='relative min-w-0 flex-1'>
           <Search
@@ -326,6 +329,7 @@ export function PlaygroundSessionList(props: PlaygroundSessionListProps) {
       {props.onOpenPresets && (
         <Button
           className='w-full justify-start'
+          data-tour='workspace-presets'
           onClick={() => {
             props.onOpenPresets?.()
             props.onAction?.()

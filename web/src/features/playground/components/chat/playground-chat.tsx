@@ -149,6 +149,14 @@ interface PlaygroundChatProps {
   /** Saved artifacts of the conversation, shown as lightweight canvas links. */
   artifacts?: PlaygroundArtifactSummary[]
   onOpenArtifact?: (artifact: PlaygroundArtifactSummary) => void
+  /** Show first-visit capability entries beside the empty-state prompts. */
+  showFeatureCards?: boolean
+  /** The current group has no chat model to send a request to. */
+  noAvailableModels?: boolean
+  onOpenParameters?: () => void
+  onOpenPresets?: () => void
+  onOpenMemory?: () => void
+  onOpenCanvas?: () => void
 }
 
 export function PlaygroundChat({
@@ -199,6 +207,12 @@ export function PlaygroundChat({
   onRemoveContextSummary,
   artifacts,
   onOpenArtifact,
+  showFeatureCards = false,
+  noAvailableModels = false,
+  onOpenParameters,
+  onOpenPresets,
+  onOpenMemory,
+  onOpenCanvas,
 }: PlaygroundChatProps) {
   const { t } = useTranslation()
   const [editText, setEditText] = useState('')
@@ -425,6 +439,12 @@ export function PlaygroundChat({
         onSelectPrompt={onSelectPrompt}
         openingMessage={openingMessage}
         suggestedQuestions={suggestedQuestions}
+        showFeatureCards={showFeatureCards}
+        noAvailableModels={noAvailableModels}
+        onOpenParameters={onOpenParameters}
+        onOpenPresets={onOpenPresets}
+        onOpenMemory={onOpenMemory}
+        onOpenCanvas={onOpenCanvas}
       />,
     ]
   }
