@@ -45,6 +45,7 @@ describe('playground error catalog', () => {
       'protocol-mismatch',
       ['use-chat-protocol', 'change-model'],
     ],
+    ['invalid_request', 'invalid-request', ['retry', 'open-context']],
     [
       'channel:no_available_key',
       'service-unavailable',
@@ -116,10 +117,19 @@ describe('playground error catalog', () => {
     ).toBeNull()
   })
 
-  test('a generic code with an unrecognized message falls back to raw text', () => {
+  test('a generic code without a recognizable message keeps its generic catalog entry', () => {
     expect(
       getPlaygroundErrorCatalogEntry(
         'invalid_request_error',
+        'The provider returned a custom refusal.'
+      )?.category
+    ).toBe('invalid-request')
+  })
+
+  test('an uncatalogued generic code with no recognizable message falls back to raw text', () => {
+    expect(
+      getPlaygroundErrorCatalogEntry(
+        'error',
         'The provider returned a custom refusal.'
       )
     ).toBeNull()

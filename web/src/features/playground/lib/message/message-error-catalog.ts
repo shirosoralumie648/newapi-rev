@@ -332,6 +332,9 @@ const CATEGORY_CODES: Record<PlaygroundErrorCategory, readonly string[]> = {
     'task_protocol_not_available',
   ],
   'invalid-request': [
+    'invalid_request',
+    'invalid_request_error',
+    'bad_request',
     'bad_request_body',
     'invalid_parameter',
     'invalid_argument',
@@ -603,15 +606,24 @@ export function getPlaygroundErrorCatalogEntry(
   message?: string | null
 ): PlaygroundErrorCatalogEntry | null {
   const normalizedCode = normalizePlaygroundErrorCode(code)
-  if (normalizedCode) {
-    const template = CATALOG_BY_CODE.get(normalizedCode)
-    if (template) {
-      return { ...template, code: normalizedCode }
+  const template = normalizedCode
+    ? CATALOG_BY_CODE.get(normalizedCode)
+    : undefined
+
+  // Generic upstream codes describe a class, not a reason: try the message
+  // first, then keep the generic catalog entry when the text is unrecognized.
+  if (normalizedCode && GENERIC_ERROR_CODES.has(normalizedCode)) {
+    const category = findCategoryByMessage(message)
+    if (category) {
+      return { ...CATALOG_TEMPLATES[category], code: normalizedCode }
     }
-    if (!GENERIC_ERROR_CODES.has(normalizedCode)) {
-      return null
-    }
+    return template ? { ...template, code: normalizedCode } : null
   }
+
+  if (template) {
+    return { ...template, code: normalizedCode }
+  }
+  if (normalizedCode) return null
 
   const category = findCategoryByMessage(message)
   if (!category) return null
