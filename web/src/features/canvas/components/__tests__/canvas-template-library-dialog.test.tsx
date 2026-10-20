@@ -24,8 +24,13 @@ import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
 import {
+  copyCanvasTemplateFromMarket,
+  createCanvasTemplate,
   createGlobalCanvasTemplate,
+  deleteCanvasTemplate,
+  exportCanvasTemplate,
   getCanvasTemplate,
+  importCanvasTemplate,
   listCanvasTemplateMarket,
   listCanvasTemplates,
   listGlobalCanvasTemplates,
@@ -79,6 +84,21 @@ const detail: CanvasTemplateDetail = {
     edges: [],
   },
   assets: [],
+}
+
+if (typeof URL.createObjectURL !== 'function') {
+  Object.defineProperty(URL, 'createObjectURL', {
+    configurable: true,
+    value: vi.fn(() => 'blob:template'),
+    writable: true,
+  })
+}
+if (typeof URL.revokeObjectURL !== 'function') {
+  Object.defineProperty(URL, 'revokeObjectURL', {
+    configurable: true,
+    value: vi.fn(),
+    writable: true,
+  })
 }
 
 function renderDialog() {
@@ -166,4 +186,139 @@ test('an administrator saves the current canvas as a global template', async () 
   )
   expect(callbacks.onFlush).toHaveBeenCalledTimes(1)
   await waitFor(() => expect(listGlobalCanvasTemplates).toHaveBeenCalled())
+})
+
+test('applies a template to a new canvas', async () => {
+  const user = userEvent.setup()
+  const callbacks = renderDialog()
+
+  await user.click(await screen.findByRole('button', { name: 'New canvas' }))
+
+  await waitFor(() =>
+    expect(callbacks.onCreateFromTemplate).toHaveBeenCalledWith(detail)
+  )
+  expect(callbacks.onApplyToCurrent).not.toHaveBeenCalled()
+  expect(callbacks.onOpenChange).toHaveBeenCalledWith(false)
+})
+
+test('saves the current canvas as a personal template with inline assets', async () => {
+  const user = userEvent.setup()
+  const callbacks = renderDialog()
+  vi.mocked(createCanvasTemplate).mockResolvedValue({
+    template: summary,
+    assetsInlined: 1,
+    resourcesMissing: 0,
+    referencesDropped: 0,
+  })
+
+  const name = await screen.findByLabelText('Template name')
+  await user.clear(name)
+  await user.type(name, 'Personal chain')
+  await user.click(screen.getByRole('switch'))
+  await user.click(screen.getByRole('button', { name: 'Save as template' }))
+
+  await waitFor(() =>
+    expect(createCanvasTemplate).toHaveBeenCalledWith({
+      canvasId: 'pgc_canvas',
+      name: 'Personal chain',
+      description: undefined,
+      category: undefined,
+      inlineAssets: true,
+    })
+  )
+  expect(callbacks.onFlush).toHaveBeenCalledTimes(1)
+  await waitFor(() => expect(listCanvasTemplates).toHaveBeenCalledTimes(2))
+})
+
+test('imports a template archive and reloads the personal library', async () => {
+  const user = userEvent.setup()
+  renderDialog()
+  vi.mocked(importCanvasTemplate).mockResolvedValue({
+    template: summary,
+    assetsInlined: 0,
+    resourcesMissing: 0,
+    referencesDropped: 0,
+  })
+  const file = new File(['zip'], 'chain.zip', { type: 'application/zip' })
+
+  await screen.findByText('Translation chain')
+  await user.upload(screen.getByLabelText('Template archive file'), file)
+
+  await waitFor(() =>
+    expect(importCanvasTemplate).toHaveBeenCalledWith(file, false)
+  )
+  await waitFor(() => expect(listCanvasTemplates).toHaveBeenCalledTimes(2))
+})
+
+test('exports a template through the item menu', async () => {
+  const user = userEvent.setup()
+  renderDialog()
+  vi.mocked(exportCanvasTemplate).mockResolvedValue({
+    filename: 'translation-chain.zip',
+    blob: new Blob(['zip'], { type: 'application/zip' }),
+  })
+  const click = vi
+    .spyOn(HTMLAnchorElement.prototype, 'click')
+    .mockImplementation(() => undefined)
+  const createObjectURL = vi.spyOn(URL, 'createObjectURL')
+
+  try {
+    await screen.findByText('Translation chain')
+    await user.click(screen.getByRole('button', { name: 'Template actions' }))
+    await user.click(
+      await screen.findByRole('menuitem', { name: 'Export template' })
+    )
+
+    await waitFor(() =>
+      expect(exportCanvasTemplate).toHaveBeenCalledWith('pgct_1')
+    )
+    await waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(1))
+    expect(click).toHaveBeenCalledTimes(1)
+  } finally {
+    click.mockRestore()
+    createObjectURL.mockRestore()
+  }
+})
+
+test('copies an official template into the personal library', async () => {
+  const user = userEvent.setup()
+  renderDialog()
+  const official = {
+    ...summary,
+    id: 'pgct_official',
+    name: 'Official chain',
+    visibility: 'global' as const,
+  }
+  vi.mocked(listCanvasTemplateMarket).mockResolvedValue([official])
+  vi.mocked(copyCanvasTemplateFromMarket).mockResolvedValue(summary)
+
+  await user.click(screen.getByRole('tab', { name: 'Official templates' }))
+  await screen.findByText('Official chain')
+  await user.click(screen.getByRole('button', { name: 'Template actions' }))
+  await user.click(
+    await screen.findByRole('menuitem', { name: 'Copy to my templates' })
+  )
+
+  await waitFor(() =>
+    expect(copyCanvasTemplateFromMarket).toHaveBeenCalledWith('pgct_official')
+  )
+  await waitFor(() => expect(listCanvasTemplateMarket).toHaveBeenCalledTimes(2))
+})
+
+test('deletes a personal template after confirmation', async () => {
+  const user = userEvent.setup()
+  renderDialog()
+  vi.mocked(deleteCanvasTemplate).mockResolvedValue(undefined)
+
+  await screen.findByText('Translation chain')
+  await user.click(screen.getByRole('button', { name: 'Template actions' }))
+  await user.click(
+    await screen.findByRole('menuitem', { name: 'Delete template' })
+  )
+  await user.click(await screen.findByRole('button', { name: 'Continue' }))
+
+  await waitFor(() =>
+    expect(deleteCanvasTemplate).toHaveBeenCalledWith('pgct_1')
+  )
+  await waitFor(() => expect(listCanvasTemplates).toHaveBeenCalledTimes(2))
 })

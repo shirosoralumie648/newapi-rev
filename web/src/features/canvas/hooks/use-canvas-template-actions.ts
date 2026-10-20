@@ -26,7 +26,6 @@ import {
   getCanvasTemplateAssetBlob,
   updateCanvasProject,
 } from '../api'
-import type { CanvasAddedNode } from './use-canvas-editor'
 import {
   CANVAS_TEMPLATE_ERRORS,
   canvasTemplateAssetSource,
@@ -35,13 +34,14 @@ import {
   canvasTemplateReferencedAttachments,
 } from '../lib/canvas-template'
 import type { CanvasFlowNode, CanvasTemplateDetail } from '../types'
+import type { CanvasAddedLink, CanvasAddedNode } from './use-canvas-editor'
 
 interface CanvasTemplateActionsOptions {
   projectId: string
   nodes: CanvasFlowNode[]
   addGraph: (
     entries: CanvasAddedNode[],
-    links: { source: number; target: number }[]
+    links: CanvasAddedLink[]
   ) => string[] | null
   selectNode: (nodeId: string | null) => void
   onOpenProject: (projectId: string) => void

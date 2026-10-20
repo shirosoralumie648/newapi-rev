@@ -893,7 +893,15 @@ test('addGraph adds nodes and their links in one undoable step', () => {
           },
         },
       ],
-      [{ source: 1, target: 0 }]
+      [
+        {
+          source: 1,
+          target: 0,
+          sourceHandle: 'right',
+          targetHandle: 'left',
+          label: 'reference',
+        },
+      ]
     )
   })
 
@@ -906,6 +914,11 @@ test('addGraph adds nodes and their links in one undoable step', () => {
   expect(hook.result.current.edges[0].target).toBe(
     hook.result.current.nodes[0].id
   )
+  expect(hook.result.current.edges[0]).toMatchObject({
+    sourceHandle: 'right',
+    targetHandle: 'left',
+    label: 'reference',
+  })
 
   act(() => hook.result.current.undo())
   expect(hook.result.current.nodes).toHaveLength(0)

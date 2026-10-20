@@ -1784,6 +1784,7 @@ func TestPlaygroundCanvasTemplateLibrary(t *testing.T) {
 						"status": "succeeded", "output": "leaked output", "inputText": "leaked input",
 						"resultImageCount": float64(1), "error": "leaked error", "attempts": float64(2),
 						"lastSeed": float64(1234), "preferredResultNodeId": "m1-result-1",
+						"cacheHit": true,
 					},
 				},
 			}
@@ -1851,7 +1852,7 @@ func TestPlaygroundCanvasTemplateLibrary(t *testing.T) {
 			assert.Equal(t, "1024x1024", workflow["size"])
 			for _, key := range []string{
 				"status", "output", "inputText", "resultImageCount", "error", "attempts",
-				"lastSeed", "preferredResultNodeId",
+				"lastSeed", "preferredResultNodeId", "cacheHit",
 			} {
 				_, present := workflow[key]
 				assert.False(t, present, key)
@@ -1967,6 +1968,10 @@ func TestPlaygroundCanvasTemplateLibrary(t *testing.T) {
 			content := playgroundRequest(t, 7, http.MethodGet, "/api/playground/canvas-templates/"+inline.Template.ID+"/assets/"+assetID+"/content", nil, controller.GetPlaygroundCanvasTemplateAssetContent)
 			require.Equal(t, http.StatusOK, content.Code, content.Body.String())
 			assert.Equal(t, png, content.Body.Bytes())
+			assert.Equal(t, "private, no-store", content.Header().Get("Cache-Control"))
+			assert.Equal(t, "nosniff", content.Header().Get("X-Content-Type-Options"))
+			assert.Equal(t, "sandbox; default-src 'none'", content.Header().Get("Content-Security-Policy"))
+			assert.Equal(t, "no-referrer", content.Header().Get("Referrer-Policy"))
 			assert.Equal(t, http.StatusNotFound, playgroundRequest(t, 8, http.MethodGet, "/api/playground/canvas-templates/"+inline.Template.ID+"/assets/"+assetID+"/content", nil, controller.GetPlaygroundCanvasTemplateAssetContent).Code)
 
 			// The market copy is an independent private row that consumes the

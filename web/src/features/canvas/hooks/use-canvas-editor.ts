@@ -127,6 +127,16 @@ export interface CanvasAddedNode {
   data?: Partial<CanvasNodeData>
 }
 
+/** One edge a graph caller adds between two entries of the same graph. */
+export interface CanvasAddedLink {
+  source: number
+  target: number
+  /** Stored port ids and the display label of a saved canvas edge. */
+  sourceHandle?: string
+  targetHandle?: string
+  label?: string
+}
+
 /** One node an affix action moves and patches in the same undo entry. */
 export interface CanvasAffixedNode {
   id: string
@@ -348,10 +358,7 @@ export function useCanvasEditor(
    * than the remaining node room is refused for the same reason.
    */
   const addGraph = useCallback(
-    (
-      entries: CanvasAddedNode[],
-      links: { source: number; target: number }[]
-    ): string[] | null => {
+    (entries: CanvasAddedNode[], links: CanvasAddedLink[]): string[] | null => {
       if (entries.length === 0) return null
       if (
         nodesRef.current.length + entries.length > CANVAS_MAX_NODES ||
@@ -366,7 +373,13 @@ export function useCanvasEditor(
         const source = created[link.source]
         const target = created[link.target]
         if (!source || !target || source.id === target.id) return []
-        return [createCanvasEdge(source.id, target.id)]
+        return [
+          createCanvasEdge(source.id, target.id, {
+            ...(link.sourceHandle ? { sourceHandle: link.sourceHandle } : {}),
+            ...(link.targetHandle ? { targetHandle: link.targetHandle } : {}),
+            ...(link.label ? { label: link.label } : {}),
+          }),
+        ]
       })
       commit(
         [...nodesRef.current, ...created],

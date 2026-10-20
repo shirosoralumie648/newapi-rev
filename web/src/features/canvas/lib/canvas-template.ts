@@ -66,6 +66,10 @@ export type CanvasTemplateGraphEntry = {
 export type CanvasTemplateGraphLink = {
   source: number
   target: number
+  /** Port ids and label keep a stored edge's wiring when inserted one step. */
+  sourceHandle?: string
+  targetHandle?: string
+  label?: string
 }
 
 export type CanvasTemplateMaterialization = {
@@ -178,7 +182,13 @@ export function canvasTemplateMaterialization(
       ...(edge.label !== undefined ? { label: edge.label } : {}),
     }
     edges.push(next)
-    links.push({ source: sourceIndex, target: targetIndex })
+    links.push({
+      source: sourceIndex,
+      target: targetIndex,
+      ...(next.source_handle ? { sourceHandle: next.source_handle } : {}),
+      ...(next.target_handle ? { targetHandle: next.target_handle } : {}),
+      ...(next.label ? { label: next.label } : {}),
+    })
   }
 
   const result: CanvasServerDocument = { nodes, edges }

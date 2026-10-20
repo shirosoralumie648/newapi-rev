@@ -137,7 +137,9 @@ test('materializes fresh ids, remaps the ref and keeps only valid edges', () => 
       label: 'reference',
     },
   ])
-  expect(result.links).toEqual([{ source: 0, target: 1 }])
+  expect(result.links).toEqual([
+    { source: 0, target: 1, sourceHandle: 'out', label: 'reference' },
+  ])
   expect(result.entries[1]).toEqual({
     id: attachment.id,
     kind: 'attachment',

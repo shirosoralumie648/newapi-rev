@@ -87,7 +87,15 @@ const template: CanvasTemplateDetail = {
         },
       },
     ],
-    edges: [{ id: 'edge', source: 'prompt', target: 'image' }],
+    edges: [
+      {
+        id: 'edge',
+        source: 'prompt',
+        target: 'image',
+        source_handle: 'out',
+        label: 'reference',
+      },
+    ],
   },
   assets: [
     {
@@ -150,14 +158,21 @@ test('apply uploads only referenced assets and inserts the remapped graph', asyn
   expect(addGraph).toHaveBeenCalledTimes(1)
   const [entries, links] = addGraph.mock.calls[0] as [
     Array<{ id: string; data: { ref?: unknown } }>,
-    Array<{ source: number; target: number }>,
+    Array<{
+      source: number
+      target: number
+      sourceHandle?: string
+      label?: string
+    }>,
   ]
   expect(entries).toHaveLength(2)
   expect(entries[1].data.ref).toEqual({
     sessionId: 'canvas-1',
     attachmentId: 'att-new',
   })
-  expect(links).toEqual([{ source: 0, target: 1 }])
+  expect(links).toEqual([
+    { source: 0, target: 1, sourceHandle: 'out', label: 'reference' },
+  ])
   expect(selectNode).toHaveBeenCalledWith('node-new')
 })
 

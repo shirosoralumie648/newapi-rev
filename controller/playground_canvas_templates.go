@@ -231,7 +231,7 @@ func playgroundCanvasTemplateAttachmentID(raw json.RawMessage) string {
 var playgroundCanvasTemplateVolatileWorkflowKeys = []string{
 	"status", "inputText", "inputImageCount", "output", "resultImageCount",
 	"taskId", "sourceNodeId", "error", "attempts", "updatedAt",
-	"lastSeed", "preferredResultNodeId",
+	"lastSeed", "preferredResultNodeId", "cacheHit",
 }
 
 // playgroundCanvasTemplateVolatileDataKeys is the rest of the per-canvas state
@@ -686,6 +686,11 @@ func GetPlaygroundCanvasTemplateAssetContent(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "private, no-store")
 	c.Header("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": asset.Filename}))
+	// Template assets are owner content served inline, so the browser must not
+	// sniff a different type or let a crafted file run script in this origin.
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("Content-Security-Policy", "sandbox; default-src 'none'")
+	c.Header("Referrer-Policy", "no-referrer")
 	c.Data(http.StatusOK, asset.MediaType, data)
 }
 

@@ -252,9 +252,12 @@ export function orderCanvasNodesForFlow(
 
 export function createCanvasEdge(
   source: string,
-  target: string
+  target: string,
+  metadata: Partial<
+    Pick<CanvasFlowEdge, 'sourceHandle' | 'targetHandle' | 'label'>
+  > = {}
 ): CanvasFlowEdge {
-  return { id: nanoid(), source, target }
+  return { id: nanoid(), source, target, ...metadata }
 }
 
 // ReactFlow node objects carry runtime fields; the stored document keeps only
