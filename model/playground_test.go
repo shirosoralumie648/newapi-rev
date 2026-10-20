@@ -2847,6 +2847,29 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	assert.Contains(t, catalogRead.Body.String(), `"display_name":"GPT-4o"`)
 	assert.NotContains(t, catalogRead.Body.String(), "hidden-model")
 
+	// A stored group override replaces the global catalog for exactly that
+	// group. The read path resolves the override through the stable group id,
+	// so switching the account's group is enough to change the visible list.
+	catalogOverrideSaved := playgroundAuthenticatedRequest(t, engine, adminToken, http.MethodPut, catalogPath, map[string]any{
+		"catalog": map[string]any{
+			"groups": []any{map[string]any{"id": "recommended", "label": "Recommended"}},
+			"models": []any{map[string]any{"model": "gpt-4o", "display_name": "GPT-4o", "group": "recommended"}},
+			"group_overrides": map[string]any{
+				"vip": map[string]any{
+					"groups": []any{map[string]any{"id": "vip-choice", "label": "VIP choice"}},
+					"models": []any{map[string]any{"model": "vip-model", "display_name": "VIP model", "group": "vip-choice"}},
+				},
+			},
+		},
+	})
+	require.Equal(t, 200, catalogOverrideSaved.Code, catalogOverrideSaved.Body.String())
+	require.NoError(t, db.Model(&model.User{}).Where("id = ?", user.Id).Update("group", "vip").Error)
+	vipCatalog := playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, catalogPath, nil)
+	require.Equal(t, 200, vipCatalog.Code, vipCatalog.Body.String())
+	assert.Contains(t, vipCatalog.Body.String(), `"display_name":"VIP model"`)
+	assert.NotContains(t, vipCatalog.Body.String(), `"display_name":"GPT-4o"`)
+	require.NoError(t, db.Model(&model.User{}).Where("id = ?", user.Id).Update("group", "default").Error)
+
 	// A malformed catalog is rejected before it can replace the saved one.
 	catalogRejected := playgroundAuthenticatedRequest(t, engine, adminToken, http.MethodPut, catalogPath, map[string]any{
 		"catalog": map[string]any{

@@ -955,6 +955,8 @@ export interface ModelOption {
   billingExpr?: string
   /** Context window parsed from the model tags, when known. */
   contextLength?: number
+  /** Recommended output ceiling of the curated catalog entry. */
+  maxOutputTokens?: number
   /** Capability identifiers: vision, tools, reasoning, structured_output. */
   capabilities?: string[]
   /** Chat-style endpoint and no task usage schema. */
