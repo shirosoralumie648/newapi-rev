@@ -53,7 +53,7 @@ export function ShortcutsHelpDialog(props: ShortcutsHelpDialogProps) {
       description={
         props.description ?? t('Shortcuts available in this workspace.')
       }
-      onOpenChange={props.onOpenChange}
+      onOpenChange={(open) => props.onOpenChange(open)}
       open={props.open}
       title={props.title ?? t('Keyboard shortcuts')}
     >
