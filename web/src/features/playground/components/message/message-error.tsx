@@ -85,6 +85,11 @@ export function MessageError({
         <AlertTitle>{t('Model Price Not Configured')}</AlertTitle>
         <AlertDescription className='space-y-2'>
           <p>{content}</p>
+          {errorState.catalog && (
+            <p className='text-muted-foreground'>
+              {t(errorState.catalog.descriptionKey)}
+            </p>
+          )}
           {errorState.showSettingsLink && (
             <Button
               variant='outline'
@@ -101,16 +106,26 @@ export function MessageError({
     )
   }
 
+  // A catalog entry replaces the raw upstream text with a stable, translatable
+  // explanation. Unknown codes keep the original text so the reader still sees
+  // the provider's own wording.
+  const title = errorState.catalog ? t(errorState.catalog.titleKey) : t('Error')
+  const description = errorState.catalog ? (
+    <p>{t(errorState.catalog.descriptionKey)}</p>
+  ) : (
+    <p>
+      {errorState.content === FALLBACK_ERROR_CONTENT
+        ? t(FALLBACK_ERROR_CONTENT)
+        : errorState.content}
+    </p>
+  )
+
   return (
     <Alert variant='destructive' className={className}>
       <AlertCircle />
-      <AlertTitle>{t('Error')}</AlertTitle>
+      <AlertTitle>{title}</AlertTitle>
       <AlertDescription className='space-y-2'>
-        <p>
-          {errorState.content === FALLBACK_ERROR_CONTENT
-            ? t(FALLBACK_ERROR_CONTENT)
-            : errorState.content}
-        </p>
+        {description}
         {actions}
       </AlertDescription>
     </Alert>

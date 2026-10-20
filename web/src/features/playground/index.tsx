@@ -193,6 +193,12 @@ function PlaygroundContent(props: {
   // preference per message group. It never computes a ranking.
   const [anonymousCompare, setAnonymousCompare] = useState(false)
   const [compareRunsOpen, setCompareRunsOpen] = useState(false)
+  // Error actions open the composer's selector or context panel without
+  // changing the conversation state, so the controls stay the single owner of
+  // their settings.
+  const [modelSelectorOpen, setModelSelectorOpen] = useState(false)
+  const [contextPanelOpen, setContextPanelOpen] = useState(false)
+  const [contextPanelSuggestion, setContextPanelSuggestion] = useState(false)
   const comparisonRunner = usePlaygroundComparisonRunner()
   const local = usePlaygroundState()
   const {
@@ -461,6 +467,7 @@ function PlaygroundContent(props: {
     editingMessageKey,
     handleSendMessage,
     handleRegenerateMessage,
+    handleRetryWithoutImages,
     handleEditMessage,
     handleEditOpenChange,
     applyEdit,
@@ -964,6 +971,22 @@ function PlaygroundContent(props: {
     void contextController.summarizeNow()
   }, [contextController.summarizeNow])
 
+  // "Manage context" of an error opens the existing CH-02 panel and marks the
+  // compression suggestion until the reader closes it.
+  const handleOpenContextFromError = useCallback(() => {
+    setContextPanelSuggestion(true)
+    setContextPanelOpen(true)
+  }, [])
+
+  const handleContextPanelOpenChange = useCallback((open: boolean) => {
+    setContextPanelOpen(open)
+    if (!open) setContextPanelSuggestion(false)
+  }, [])
+
+  const handleOpenModelSelector = useCallback(() => {
+    setModelSelectorOpen(true)
+  }, [])
+
   const openArtifactSource = useCallback(
     (message: Message) => {
       if (
@@ -1322,6 +1345,10 @@ function PlaygroundContent(props: {
     [sync.isLoading, updateConfig]
   )
 
+  const handleUseChatProtocol = useCallback(() => {
+    updateLoadedConfig('protocol', 'chat')
+  }, [updateLoadedConfig])
+
   const { isLoadingModels } = usePlaygroundOptions({
     currentGroup: config.group,
     currentModel: config.model,
@@ -1453,6 +1480,12 @@ function PlaygroundContent(props: {
               executingToolCallKeys={toolExecution.executingKeys}
               isLoadingMessages={isLoadingMessages || sync.isLoading}
               onRegenerateMessage={handleRegenerateMessage}
+              onRetryWithoutImages={handleRetryWithoutImages}
+              onOpenContext={handleOpenContextFromError}
+              onChangeModel={handleOpenModelSelector}
+              onSwitchGroup={handleOpenModelSelector}
+              onOpenWallet={props.onOpenUpgrade}
+              onUseChatProtocol={handleUseChatProtocol}
               onContinueMessage={handleContinueMessage}
               onQuoteMessage={handleQuoteMessage}
               onForkMessage={handleForkMessage}
@@ -1582,6 +1615,11 @@ function PlaygroundContent(props: {
               }
               groups={groups}
               groupValue={config.group}
+              modelSelectorOpen={modelSelectorOpen}
+              onModelSelectorOpenChange={setModelSelectorOpen}
+              contextPanelOpen={contextPanelOpen}
+              onContextPanelOpenChange={handleContextPanelOpenChange}
+              contextPanelSuggestion={contextPanelSuggestion}
               isGenerating={
                 isGenerating || isComparing || toolExecution.isExecuting
               }

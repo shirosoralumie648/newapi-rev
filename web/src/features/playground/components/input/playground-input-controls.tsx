@@ -25,6 +25,7 @@ import {
   usePromptInputAttachments,
 } from '@/components/ai-elements/prompt-input'
 import { ModelGroupSelector } from '@/components/model-group-selector'
+import { useIsMobile } from '@/hooks/use-mobile'
 
 import {
   describeModelCapabilities,
@@ -43,6 +44,9 @@ type PlaygroundInputControlsProps = {
   isModelLoading?: boolean
   models: ModelOption[]
   modelValue: string
+  /** Controlled selector opened by an error action. */
+  modelSelectorOpen?: boolean
+  onModelSelectorOpenChange?: (open: boolean) => void
   onGroupChange: (value: string) => void
   onModelChange: (value: string) => void
   onStartNewSession?: (model: string) => void
@@ -59,6 +63,8 @@ export function PlaygroundInputControls({
   isModelLoading = false,
   models,
   modelValue,
+  modelSelectorOpen,
+  onModelSelectorOpenChange,
   onGroupChange,
   onModelChange,
   onStartNewSession,
@@ -68,6 +74,7 @@ export function PlaygroundInputControls({
 }: PlaygroundInputControlsProps) {
   const { t } = useTranslation()
   const attachments = usePromptInputAttachments()
+  const isMobile = useIsMobile()
   const groupRatio = groups.find((group) => group.value === groupValue)?.ratio
   // Prices and capability tags travel with the model options so the shared
   // selector stays display-only.
@@ -103,7 +110,9 @@ export function PlaygroundInputControls({
       selectedGroup={groupValue}
       groups={groups}
       onGroupChange={onGroupChange}
+      onOpenChange={onModelSelectorOpenChange}
       onStartNewSession={onStartNewSession}
+      open={modelSelectorOpen}
       disabled={isSelectorDisabled}
     />
   )
@@ -135,7 +144,7 @@ export function PlaygroundInputControls({
   return (
     <div className='flex w-full flex-col gap-2.5 md:flex-row md:items-center md:justify-between'>
       <div className='flex min-w-0 items-center justify-end md:hidden'>
-        {renderSelector()}
+        {isMobile ? renderSelector() : null}
       </div>
 
       <div className='flex items-center justify-between gap-2 md:justify-start'>
@@ -146,7 +155,7 @@ export function PlaygroundInputControls({
       </div>
 
       <div className='hidden min-w-0 items-center gap-2 md:flex'>
-        {renderSelector()}
+        {isMobile ? null : renderSelector()}
         {renderSubmitButton()}
       </div>
     </div>

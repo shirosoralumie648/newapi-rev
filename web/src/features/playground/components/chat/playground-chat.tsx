@@ -43,6 +43,7 @@ import {
   getChatMessageRenderState,
   getEditingMessageContent,
   getMessageAlignment,
+  getMessageErrorState,
   getPreviousUserMessage,
   isErrorMessage,
   isMessageTruncated,
@@ -86,6 +87,14 @@ interface PlaygroundChatProps {
   highlightedMessageKey?: string | null
   onReadAloud?: (message: MessageType) => void
   onRegenerateMessage?: (message: MessageType) => void
+  /** Retry after removing the images of the user turn the error named. */
+  onRetryWithoutImages?: (message: MessageType) => void
+  /** Open context management with a compression suggestion. */
+  onOpenContext?: (message: MessageType) => void
+  onChangeModel?: () => void
+  onSwitchGroup?: () => void
+  onOpenWallet?: () => void
+  onUseChatProtocol?: () => void
   /** Continue the last reply when it was cut short by the token cap or a stop. */
   onContinueMessage?: (message: MessageType) => void
   onEditMessage?: (message: MessageType) => void
@@ -151,6 +160,12 @@ export function PlaygroundChat({
   highlightedMessageKey,
   onReadAloud,
   onRegenerateMessage,
+  onRetryWithoutImages,
+  onOpenContext,
+  onChangeModel,
+  onSwitchGroup,
+  onOpenWallet,
+  onUseChatProtocol,
   onContinueMessage,
   onEditMessage,
   onDeleteMessage,
@@ -250,6 +265,7 @@ export function PlaygroundChat({
       editingKey
     )
     const isError = isErrorMessage(message)
+    const errorState = isError ? getMessageErrorState(message, false) : null
     const previousUserMessage = getPreviousUserMessage(messages, messageIndex)
     // A reply answers the nearest user turn; when that turn retrieved
     // knowledge, its stored snapshot is the citation list of every version.
@@ -285,16 +301,25 @@ export function PlaygroundChat({
     )
     const errorActions = isError ? (
       <MessageErrorActions
+        catalog={errorState?.catalog}
         disabled={isGenerating}
-        onRetry={
-          onRegenerateMessage ? () => onRegenerateMessage(message) : undefined
-        }
+        onChangeModel={onChangeModel}
+        onDelete={onDeleteMessage ? () => onDeleteMessage(message) : undefined}
         onEditPrompt={
           onEditMessage && previousUserMessage
             ? () => onEditMessage(previousUserMessage)
             : undefined
         }
-        onDelete={onDeleteMessage ? () => onDeleteMessage(message) : undefined}
+        onOpenContext={onOpenContext ? () => onOpenContext(message) : undefined}
+        onOpenWallet={onOpenWallet}
+        onRemoveImages={
+          onRetryWithoutImages ? () => onRetryWithoutImages(message) : undefined
+        }
+        onRetry={
+          onRegenerateMessage ? () => onRegenerateMessage(message) : undefined
+        }
+        onSwitchGroup={onSwitchGroup}
+        onUseChatProtocol={onUseChatProtocol}
       />
     ) : undefined
 

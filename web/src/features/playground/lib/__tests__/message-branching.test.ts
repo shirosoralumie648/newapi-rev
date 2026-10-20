@@ -22,6 +22,7 @@ import type { Message } from '../../types'
 import {
   applyMessageEdit,
   createRegeneratedMessages,
+  createRegeneratedMessagesWithoutImages,
 } from '../message/conversation-message-utils'
 import {
   appendMessageVersion,
@@ -224,6 +225,76 @@ describe('edit and regenerate branch history', () => {
     expect(regenerated.versions).toHaveLength(2)
     expect(regenerated.versions[0].content).toBe('Original answer')
     expect(regenerated.activeVersionIndex).toBe(1)
+  })
+
+  test('retrying without images removes only images from the answered turn', () => {
+    const image = {
+      id: 'image-1',
+      url: '/api/playground/attachments/image-1/content',
+      mediaType: 'image/png',
+    }
+    const document = {
+      id: 'document-1',
+      url: '/api/playground/attachments/document-1/content',
+      mediaType: 'application/pdf',
+      filename: 'brief.pdf',
+    }
+    const user = userMessage({
+      versions: [
+        {
+          id: 'u1',
+          content: 'Compare this',
+          attachments: [image, document],
+        },
+      ],
+    })
+    const failed = assistantMessage({
+      status: 'error',
+      errorCode: 'vision_not_supported',
+    })
+
+    const next = createRegeneratedMessagesWithoutImages(
+      [user, failed],
+      'assistant-1'
+    )
+
+    expect(next).not.toBeNull()
+    expect(next?.[0].versions).toHaveLength(2)
+    expect(next?.[0].versions[0].attachments).toEqual([image, document])
+    expect(next?.[0].versions[1].attachments).toEqual([document])
+    expect(next?.[0].versions[1].content).toBe('Compare this')
+    expect(next?.[0].activeVersionIndex).toBe(1)
+    expect(next?.[1].status).toBe('loading')
+    expect(next?.[1].errorCode).toBeNull()
+    expect(next?.[1].versions.map((version) => version.content)).toEqual([
+      'Original answer',
+      '',
+    ])
+  })
+
+  test('retrying without images declines when no image can be removed', () => {
+    const image = {
+      id: 'image-1',
+      url: '/api/playground/attachments/image-1/content',
+      mediaType: 'image/png',
+    }
+    const textOnly = userMessage()
+    const imageOnly = userMessage({
+      versions: [{ id: 'u1', content: '   ', attachments: [image] }],
+    })
+
+    expect(
+      createRegeneratedMessagesWithoutImages(
+        [textOnly, assistantMessage({ status: 'error' })],
+        'assistant-1'
+      )
+    ).toBeNull()
+    expect(
+      createRegeneratedMessagesWithoutImages(
+        [imageOnly, assistantMessage({ status: 'error' })],
+        'assistant-1'
+      )
+    ).toBeNull()
   })
 })
 

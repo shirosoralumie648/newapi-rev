@@ -99,9 +99,17 @@ type PlaygroundContextPanelProps = {
   /** Last retrieval result: stale documents the merge skipped. */
   knowledgeDiagnostics?: PlaygroundKnowledgeDiagnostics | null
   knowledgeLoading?: boolean
+  /** Controlled open state; omit to keep the panel's own state. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  /** Highlight the compression controls after an error suggested it. */
+  suggestion?: boolean
 }
 
-type PlaygroundContextContentProps = PlaygroundContextPanelProps & {
+type PlaygroundContextContentProps = Omit<
+  PlaygroundContextPanelProps,
+  'open' | 'onOpenChange'
+> & {
   open: boolean
   compact?: boolean
 }
@@ -152,6 +160,17 @@ function PlaygroundContextContent(props: PlaygroundContextContentProps) {
 
   return (
     <div className='grid gap-3 p-1'>
+      {props.suggestion && (
+        <p
+          className='rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-xs leading-4 text-amber-700 dark:text-amber-300'
+          role='status'
+        >
+          {t(
+            'Compress older messages or lower the history limit, then try again.'
+          )}
+        </p>
+      )}
+
       <div className='space-y-1 px-1'>
         <p className='text-muted-foreground text-xs leading-4'>
           {t(
@@ -466,7 +485,12 @@ function PlaygroundContextContent(props: PlaygroundContextContentProps) {
 export function PlaygroundContextPanel(props: PlaygroundContextPanelProps) {
   const { t } = useTranslation()
   const isMobile = useIsMobile()
-  const [open, setOpen] = useState(false)
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = props.open ?? internalOpen
+  const setOpen = (nextOpen: boolean) => {
+    if (props.open === undefined) setInternalOpen(nextOpen)
+    props.onOpenChange?.(nextOpen)
+  }
   const isActive =
     props.settings.historyLimit > 0 ||
     props.settings.tokenBudget > 0 ||

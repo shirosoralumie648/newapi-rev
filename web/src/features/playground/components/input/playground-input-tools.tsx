@@ -104,6 +104,11 @@ type PlaygroundInputToolsProps = {
   onContextSettingsChange: (settings: PlaygroundContextSettings) => void
   onRemoveContextSummary: () => void
   onSummarizeContext: () => void
+  /** Controlled context panel opened by an error action. */
+  contextPanelOpen?: boolean
+  onContextPanelOpenChange?: (open: boolean) => void
+  /** Shows the compression suggestion inside the context panel. */
+  contextPanelSuggestion?: boolean
   /** Request-side developer settings of the active conversation. */
   developerOptions?: PlaygroundDeveloperOptions
   /** Stores changed developer settings on the active conversation. */
@@ -174,6 +179,9 @@ export function PlaygroundInputTools({
   onContextSettingsChange,
   onRemoveContextSummary,
   onSummarizeContext,
+  contextPanelOpen,
+  onContextPanelOpenChange,
+  contextPanelSuggestion,
   developerOptions = DEFAULT_DEVELOPER_OPTIONS,
   onDeveloperOptionsChange,
   knowledgeBases,
@@ -375,11 +383,14 @@ export function PlaygroundInputTools({
           knowledgeLoading={knowledgeLoading}
           models={models}
           onKnowledgeBaseIdsChange={onKnowledgeBaseIdsChange}
+          onOpenChange={onContextPanelOpenChange}
           onRemoveSummary={onRemoveContextSummary}
           onSettingsChange={onContextSettingsChange}
           onSummarizeNow={onSummarizeContext}
+          open={contextPanelOpen}
           plan={contextPlan}
           settings={contextSettings}
+          suggestion={contextPanelSuggestion}
           summary={contextSummary}
         />
 
