@@ -78,6 +78,9 @@ type PlaygroundParameterPanelProps = {
     value: boolean
   ) => void
   parameterEnabled: ParameterEnabled
+  /** Controlled open state, so an empty-state entry can reveal the controls. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
 type PlaygroundParameterContentProps = PlaygroundParameterPanelProps & {
@@ -304,6 +307,7 @@ export function PlaygroundParameterPanel(props: PlaygroundParameterPanelProps) {
     <PromptInputButton
       aria-label={t('Parameters')}
       className='text-muted-foreground hover:text-foreground hover:bg-muted/70 relative font-medium'
+      data-tour='composer-parameters'
       disabled={props.disabled}
       variant='ghost'
     >
@@ -316,7 +320,7 @@ export function PlaygroundParameterPanel(props: PlaygroundParameterPanelProps) {
 
   if (isMobile) {
     return (
-      <Sheet>
+      <Sheet onOpenChange={props.onOpenChange} open={props.open}>
         <Tooltip>
           <TooltipTrigger render={<SheetTrigger render={trigger} />} />
           <TooltipContent>
@@ -337,7 +341,7 @@ export function PlaygroundParameterPanel(props: PlaygroundParameterPanelProps) {
   }
 
   return (
-    <Popover>
+    <Popover onOpenChange={props.onOpenChange} open={props.open}>
       <Tooltip>
         <TooltipTrigger render={<PopoverTrigger render={trigger} />} />
         <TooltipContent>

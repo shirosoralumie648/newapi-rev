@@ -478,7 +478,10 @@ export function CanvasGenerationPanel(props: CanvasGenerationPanelProps) {
   }
 
   return (
-    <div className='flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-3'>
+    <div
+      className='flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-3'
+      data-tour='canvas-generation-panel'
+    >
       <section className='grid gap-2'>
         <div className='flex items-center gap-2'>
           <Sparkles aria-hidden='true' className='size-4' />

@@ -103,18 +103,20 @@ export function PlaygroundInputControls({
     })
 
   const renderSelector = () => (
-    <ModelGroupSelector
-      selectedModel={modelValue}
-      models={selectorModels}
-      onModelChange={onModelChange}
-      selectedGroup={groupValue}
-      groups={groups}
-      onGroupChange={onGroupChange}
-      onOpenChange={onModelSelectorOpenChange}
-      onStartNewSession={onStartNewSession}
-      open={modelSelectorOpen}
-      disabled={isSelectorDisabled}
-    />
+    <div className='min-w-0' data-tour='composer-model'>
+      <ModelGroupSelector
+        selectedModel={modelValue}
+        models={selectorModels}
+        onModelChange={onModelChange}
+        selectedGroup={groupValue}
+        groups={groups}
+        onGroupChange={onGroupChange}
+        onOpenChange={onModelSelectorOpenChange}
+        onStartNewSession={onStartNewSession}
+        open={modelSelectorOpen}
+        disabled={isSelectorDisabled}
+      />
+    </div>
   )
 
   const renderSubmitButton = () =>

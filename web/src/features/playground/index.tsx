@@ -53,6 +53,7 @@ import { PlaygroundCostStatus } from './components/input/playground-cost-status'
 import { PlaygroundInput } from './components/input/playground-input'
 import { PlaygroundQuoteBar } from './components/input/playground-quote-bar'
 import { PlaygroundSpeechDialog } from './components/message/playground-speech-dialog'
+import { PlaygroundWelcome } from './components/onboarding/playground-welcome'
 import { PlaygroundCommandPalette } from './components/workspace/playground-command-palette'
 import { PlaygroundMemoryPanel } from './components/workspace/playground-memory-panel'
 import { PlaygroundMessageJump } from './components/workspace/playground-message-jump'
@@ -93,11 +94,13 @@ import {
   usePlaygroundOptions,
   usePlaygroundArena,
   usePlaygroundArtifacts,
+  usePlaygroundOnboarding,
   usePlaygroundPreferences,
   usePlaygroundSandboxSettings,
   usePlaygroundState,
   usePlaygroundServer,
   usePlaygroundToolExecution,
+  usePlaygroundTour,
 } from './hooks'
 import type { CapturedArtifactSource } from './hooks/use-playground-artifacts'
 import {
@@ -115,10 +118,12 @@ import {
   getMessageContentState,
   hasPendingToolCalls,
   importPlaygroundSessionDocument,
+  isChatModelOption,
   loadMemoryExtractionSettings,
   parsePlaygroundSessionExport,
   PLAYGROUND_ATTACHMENT_ERRORS,
   presetSessionSettings,
+  requestCanvasTourHandoff,
   saveMemoryExtractionSettings,
   uploadPlaygroundAttachments,
   uploadPlaygroundSpeechAttachment,
@@ -172,6 +177,8 @@ function PlaygroundContent(props: {
   const userId = useAuthStore((state) => state.auth.user?.id ?? null)
   const role = useAuthStore((state) => state.auth.user?.role ?? ROLE.USER)
   const isAdmin = role >= ROLE.ADMIN
+  const onboarding = usePlaygroundOnboarding(userId)
+  const { startTour } = usePlaygroundTour()
   const [artifactSource, setArtifactSource] = useState<{
     message: Message
     source: CapturedArtifactSource
@@ -221,6 +228,7 @@ function PlaygroundContent(props: {
   // changing the conversation state, so the controls stay the single owner of
   // their settings.
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false)
+  const [parameterPanelOpen, setParameterPanelOpen] = useState(false)
   const [contextPanelOpen, setContextPanelOpen] = useState(false)
   const [contextPanelSuggestion, setContextPanelSuggestion] = useState(false)
   const comparisonRunner = usePlaygroundComparisonRunner()
@@ -1502,6 +1510,23 @@ function PlaygroundContent(props: {
     updateConfig: updateLoadedConfig,
   })
 
+  // The empty state and welcome card point at the same condition: a loaded
+  // group with no chat-capable model. Image-only models cannot start a chat.
+  const noAvailableModels =
+    !isLoadingModels && groups.length > 0 && !models.some(isChatModelOption)
+
+  const handleStartOnboardingTour = () => {
+    onboarding.dismissWelcome()
+    startTour('conversation', {
+      onComplete: () => {
+        onboarding.completeTour()
+        if (!props.onOpenCanvas) return
+        requestCanvasTourHandoff()
+        props.onOpenCanvas({ view: 'generate' })
+      },
+    })
+  }
+
   let syncLabel = t('Playground')
   if (sync.isLoading) syncLabel = t('Loading conversations...')
   else if (sync.isSaving) syncLabel = t('Saving conversation...')
@@ -1527,6 +1552,7 @@ function PlaygroundContent(props: {
         onOpenMessageSearch={() => setMessageSearchOpen(true)}
         onOpenCommandPalette={() => setCommandPaletteOpen(true)}
         onOpenShortcuts={() => setShortcutsOpen(true)}
+        onOpenHelp={onboarding.replayWelcome}
         onOpenPresets={handleOpenPresets}
         onOpenTrash={handleOpenTrash}
         onOrganize={handleOrganizeSession}
@@ -1643,6 +1669,16 @@ function PlaygroundContent(props: {
               onDeleteMessage={handleDeleteMessage}
               onSelectVersion={handleSelectMessageVersion}
               onSelectPrompt={handleSelectPrompt}
+              showFeatureCards={onboarding.isNewcomer}
+              noAvailableModels={noAvailableModels}
+              onOpenParameters={() => setParameterPanelOpen(true)}
+              onOpenPresets={handleOpenPresets}
+              onOpenMemory={() => handleToggleInspector('memory')}
+              onOpenCanvas={
+                props.onOpenCanvas
+                  ? () => props.onOpenCanvas?.({ view: 'generate' })
+                  : undefined
+              }
               onProvideToolResult={handleProvideToolResult}
               onDenyToolCall={handleDenyToolCall}
               onContinueToolCalls={handleContinueToolCalls}
@@ -1805,6 +1841,8 @@ function PlaygroundContent(props: {
                 preferences.setToolExecutionMaxRounds
               }
               parameterEnabled={parameterEnabled}
+              parameterPanelOpen={parameterPanelOpen}
+              onParameterPanelOpenChange={setParameterPanelOpen}
               systemPrompt={systemPrompt}
               toolExecutionEnabled={preferences.toolExecutionEnabled}
               toolExecutionMaxRounds={preferences.toolExecutionMaxRounds}
@@ -1817,6 +1855,12 @@ function PlaygroundContent(props: {
           </div>
         </div>
       </PlaygroundWorkspace>
+      <PlaygroundWelcome
+        noAvailableModels={noAvailableModels}
+        onOpenChange={onboarding.handleWelcomeOpenChange}
+        onStartTour={handleStartOnboardingTour}
+        open={onboarding.welcomeOpen}
+      />
       <PlaygroundArtifactSourceSheet
         source={artifactSource?.source ?? null}
         isSaving={artifactController.isSaving}

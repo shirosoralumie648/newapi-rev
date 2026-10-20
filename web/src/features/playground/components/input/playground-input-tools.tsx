@@ -93,6 +93,9 @@ type PlaygroundInputToolsProps = {
     value: boolean
   ) => void
   parameterEnabled: ParameterEnabled
+  /** Controlled parameter panel opened by an empty-state entry. */
+  parameterPanelOpen?: boolean
+  onParameterPanelOpenChange?: (open: boolean) => void
   systemPrompt: string
   onSystemPromptChange: (value: string) => void
   /** Appends a prompt snippet to the composer draft. */
@@ -169,6 +172,8 @@ export function PlaygroundInputTools({
   onConfigChange,
   onParameterEnabledChange,
   parameterEnabled,
+  parameterPanelOpen,
+  onParameterPanelOpenChange,
   systemPrompt,
   onSystemPromptChange,
   onInsertText,
@@ -259,6 +264,7 @@ export function PlaygroundInputTools({
                       ? 'bg-primary/10 text-primary hover:bg-primary/15 font-medium'
                       : 'text-muted-foreground hover:text-foreground hover:bg-muted/70 font-medium'
                   }
+                  data-tour='composer-web-search'
                   disabled={disabled || !onWebSearchChange}
                   onClick={() => onWebSearchChange?.(!webSearchEnabled)}
                   variant='ghost'
@@ -356,7 +362,9 @@ export function PlaygroundInputTools({
           config={config}
           disabled={disabled}
           onConfigChange={onConfigChange}
+          onOpenChange={onParameterPanelOpenChange}
           onParameterEnabledChange={onParameterEnabledChange}
+          open={parameterPanelOpen}
           parameterEnabled={parameterEnabled}
         />
 

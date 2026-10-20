@@ -147,9 +147,19 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
     { view: 'history', label: t('Run history'), icon: History },
     { view: 'assistant', label: t('Assistant'), icon: Bot },
   ]
+  const inspectorTourAnchors: Partial<
+    Record<CanvasToolbarInspectorView, string>
+  > = {
+    generate: 'canvas-generate',
+    library: 'canvas-library',
+    artifacts: 'canvas-artifacts',
+  }
 
   return (
-    <div className='flex flex-wrap items-center gap-1'>
+    <div
+      className='flex flex-wrap items-center gap-1'
+      data-tour='canvas-toolbar'
+    >
       <DropdownMenu modal={false}>
         <DropdownMenuTrigger
           render={<Button size='sm' type='button' variant='outline' />}
@@ -332,6 +342,7 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
         return (
           <Button
             aria-pressed={active}
+            data-tour={inspectorTourAnchors[entry.view]}
             disabled={props.disabled}
             key={entry.view}
             onClick={() => props.onToggleInspectorView(entry.view)}

@@ -129,7 +129,10 @@ export function CanvasArtifactBrowser(props: CanvasArtifactBrowserProps) {
   }
 
   return (
-    <div className='flex h-full min-h-0 flex-col'>
+    <div
+      className='flex h-full min-h-0 flex-col'
+      data-tour='canvas-artifact-browser'
+    >
       <div className='grid shrink-0 gap-1 border-b px-3 py-2'>
         <Label
           className='text-muted-foreground text-xs'

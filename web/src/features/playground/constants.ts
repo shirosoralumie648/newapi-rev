@@ -440,6 +440,7 @@ export const STORAGE_KEYS = {
   AUTO_TITLE: 'playground_auto_title',
   TOOL_EXECUTION: 'playground_tool_execution',
   MCP: 'playground_mcp',
+  ONBOARDING: 'playground_onboarding',
 } as const
 
 // The new-conversation defaults are a client-side preference, not a store: the
