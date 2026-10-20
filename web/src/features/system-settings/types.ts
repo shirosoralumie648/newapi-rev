@@ -51,8 +51,12 @@ export type PlaygroundMCPSettingsRequest = {
 }
 
 export type PlaygroundModelCatalogSettingsRequest = {
-  /** Serialized curated Playground catalog and its user-group overrides. */
-  catalog: string
+  /**
+   * Curated Playground catalog and its user-group overrides. The editor keeps
+   * the document as text, but the endpoint receives the parsed object so the
+   * server validates the same structure it persists.
+   */
+  catalog: Record<string, unknown>
 }
 
 export interface PasskeyDomainChange {

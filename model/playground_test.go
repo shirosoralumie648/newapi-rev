@@ -2847,6 +2847,21 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 	assert.Contains(t, catalogRead.Body.String(), `"display_name":"GPT-4o"`)
 	assert.NotContains(t, catalogRead.Body.String(), "hidden-model")
 
+	// A malformed catalog is rejected before it can replace the saved one.
+	catalogRejected := playgroundAuthenticatedRequest(t, engine, adminToken, http.MethodPut, catalogPath, map[string]any{
+		"catalog": map[string]any{
+			"groups": []any{},
+			"models": []any{
+				map[string]any{"model": "duplicate-model"},
+				map[string]any{"model": "duplicate-model"},
+			},
+		},
+	})
+	assert.Contains(t, catalogRejected.Body.String(), `"success":false`)
+	catalogRead = playgroundAuthenticatedRequest(t, engine, token, http.MethodGet, catalogPath, nil)
+	require.Equal(t, 200, catalogRead.Code, catalogRead.Body.String())
+	assert.Contains(t, catalogRead.Body.String(), `"display_name":"GPT-4o"`)
+
 	// The arena routes resolve the account from the real session middleware.
 	// Personal scope is available to the owner, while instance scope keeps the
 	// stable forbidden code for a common user.

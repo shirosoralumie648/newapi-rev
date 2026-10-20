@@ -26,6 +26,7 @@ import {
   exportPlaygroundSession,
   getPlaygroundMCPServers,
   getPlaygroundMessageCosts,
+  getPlaygroundModelCatalog,
   getPlaygroundSessions,
   getPlaygroundTrash,
   getPlaygroundMessages,
@@ -95,6 +96,73 @@ test('business failure does not return an empty successful session list', async 
     data: { success: false, message: 'Database unavailable' },
   })
   await expect(getPlaygroundSessions()).rejects.toThrow('Database unavailable')
+})
+
+test('the curated catalog maps group sections and keeps explicit default zeros', async () => {
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        groups: [
+          {
+            id: 'recommended',
+            label: 'Recommended',
+            description: 'Everyday use',
+          },
+        ],
+        models: [
+          {
+            model: 'gpt-4o',
+            display_name: 'GPT-4o Display',
+            description: 'Curated description',
+            icon: '✨',
+            group: 'recommended',
+            capabilities: ['vision', 'tools'],
+            defaults: {
+              temperature: 0,
+              top_p: 1,
+              max_tokens: 2048,
+              frequency_penalty: 0,
+              presence_penalty: 0.5,
+              seed: 0,
+              reasoning_effort: 'high',
+            },
+            limits: { context_length: 128000, max_output_tokens: 16384 },
+          },
+        ],
+      },
+    },
+  })
+
+  await expect(getPlaygroundModelCatalog()).resolves.toEqual({
+    groups: [
+      {
+        id: 'recommended',
+        label: 'Recommended',
+        description: 'Everyday use',
+      },
+    ],
+    models: [
+      {
+        model: 'gpt-4o',
+        displayName: 'GPT-4o Display',
+        description: 'Curated description',
+        icon: '✨',
+        group: 'recommended',
+        capabilities: ['vision', 'tools'],
+        defaults: {
+          temperature: 0,
+          topP: 1,
+          maxTokens: 2048,
+          frequencyPenalty: 0,
+          presencePenalty: 0.5,
+          seed: 0,
+          reasoningEffort: 'high',
+        },
+        limits: { contextLength: 128000, maxOutputTokens: 16384 },
+      },
+    ],
+  })
 })
 
 test('context settings and the compression node map from the wire shape', async () => {
