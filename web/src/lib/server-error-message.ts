@@ -105,6 +105,8 @@ const serverErrorMessageKeys = {
     'Cannot pin an archived Playground conversation.',
   PLAYGROUND_PARALLEL_LIMIT_EXCEEDED:
     'Playground parallel comparison limit exceeded.',
+  PLAYGROUND_ARENA_VOTE_INVALID: 'Invalid Playground arena vote.',
+  PLAYGROUND_ARENA_SUMMARY_FORBIDDEN: 'Administrator access is required.',
   PLAYGROUND_MEMORY_LIMIT_EXCEEDED:
     'Playground memory limit reached. Delete an old memory or ask your administrator for a larger limit.',
   PLAYGROUND_MEMORY_CONTENT_LIMIT_EXCEEDED:

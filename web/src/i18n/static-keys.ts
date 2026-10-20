@@ -62,6 +62,12 @@ export const STATIC_I18N_KEYS = [
   'Unable to cancel the task.',
   'Playground task result storage limit reached. Wait for old task results to expire.',
   'Unable to update result retention.',
+  // Optional generation queue status labels selected by entry.status.
+  'Waiting',
+  'Starting',
+  'Submitted',
+  'Failed',
+  'Canceled',
   // Playground batch generation (PG2-06): the plan builder and the capability
   // mapper return these strings as i18n keys, so the literal scan cannot see
   // them. Their values live in PLAYGROUND_GENERATION_BATCH_MESSAGES,
@@ -113,6 +119,16 @@ export const STATIC_I18N_KEYS = [
   'Workflow run not found.',
   'Unable to settle the run budget.',
   'This workflow run has reached its budget cap; the remaining steps were not started.',
+  // Anonymous A/B arena (PG2-15): the four raw choice labels are selected from
+  // a constant map, and the server answers votes with these messages.
+  'A better',
+  'B better',
+  'Tie',
+  'Both bad',
+  'Invalid Playground arena vote.',
+  'Administrator access is required.',
+  'Invalid Playground arena summary scope.',
+  'Playground message not found.',
   // Wallet overdraft settings and administrative debt views.
   'Wallet Overdraft',
   'Wallet overdraft limit (USD)',
@@ -1524,4 +1540,11 @@ export const STATIC_I18N_KEYS = [
   'Embedding requests accept up to 64 inputs of 16,000 characters each.',
   'Rerank requests accept a query of up to 16,000 characters and up to 32 candidates of 16,000 characters each.',
   'Moderation requests accept up to 64 inputs of 16,000 characters each.',
+  // Playground curated model catalog (PG2-14): the admin section passes the
+  // save label and the client-side validation messages to t() as values, so
+  // the literal scan cannot see them.
+  'Save model catalog',
+  'Enter a valid JSON object for the model catalog.',
+  'The model catalog groups and models must be arrays.',
+  'The model catalog group overrides must be an object.',
 ] as const

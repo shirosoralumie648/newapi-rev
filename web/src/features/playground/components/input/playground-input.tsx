@@ -79,6 +79,9 @@ interface PlaygroundInputProps {
   /** Models of the next comparison; fewer than two means an ordinary send. */
   compareModels: string[]
   onCompareModelsChange: (models: string[]) => void
+  /** Hide model names and record a raw preference for the next comparison. */
+  anonymousCompare: boolean
+  onAnonymousCompareChange: (anonymous: boolean) => void
   /** Opens the batch compare-runs workbench. */
   onOpenCompareRuns?: () => void
   hasMessages?: boolean
@@ -167,6 +170,8 @@ export function PlaygroundInput({
   onGroupChange,
   compareModels,
   onCompareModelsChange,
+  anonymousCompare,
+  onAnonymousCompareChange,
   onOpenCompareRuns,
   hasMessages = false,
   hasCapturedRequest = false,
@@ -317,7 +322,9 @@ export function PlaygroundInput({
                 onAutoTitleChange={onAutoTitleChange}
                 onAutoTitleDefaultChange={onAutoTitleDefaultChange}
                 onAutoTitleUseDefault={onAutoTitleUseDefault}
+                anonymousCompare={anonymousCompare}
                 compareModels={compareModels}
+                onAnonymousCompareChange={onAnonymousCompareChange}
                 onCompareModelsChange={onCompareModelsChange}
                 onOpenCompareRuns={onOpenCompareRuns}
                 onClearMessages={onClearMessages}

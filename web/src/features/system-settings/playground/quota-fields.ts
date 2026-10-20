@@ -90,6 +90,7 @@ export const PLAYGROUND_QUOTA_FIELD_KEYS = [
   'object_user_max_bytes',
   'task_max_concurrency',
   'task_user_result_max_bytes',
+  'task_queue_max_count',
 ] as const
 
 export type PlaygroundQuotaFieldKey =
@@ -508,6 +509,11 @@ export const PLAYGROUND_QUOTA_FIELDS: readonly PlaygroundQuotaField[] = [
     group: 'tasks',
     labelKey: 'Task result storage per user',
     bytes: true,
+  },
+  {
+    key: 'task_queue_max_count',
+    group: 'tasks',
+    labelKey: 'Queued generations per user',
   },
 ]
 

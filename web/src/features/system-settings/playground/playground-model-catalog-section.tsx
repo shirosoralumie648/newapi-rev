@@ -73,7 +73,11 @@ export function PlaygroundModelCatalogSection(
       return
     }
     try {
-      await updateCatalog.mutateAsync({ catalog: serialized })
+      // The structural check above already proved this parses; the endpoint
+      // validates bounds and references on the same object it stores.
+      await updateCatalog.mutateAsync({
+        catalog: JSON.parse(serialized) as Record<string, unknown>,
+      })
     } catch {
       // The mutation already surfaced the failure; keep the draft for retry.
     }

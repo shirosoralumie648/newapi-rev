@@ -29,6 +29,7 @@ import (
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/playground_setting"
 
 	"github.com/gin-gonic/gin"
 )
@@ -109,6 +110,12 @@ func playgroundTaskCreatesTask(c *gin.Context) bool {
 // re-read from the database on every poll, so a small race between two
 // concurrent submits never bypasses quota in a compounding way, and the
 // settled billing of an already accepted task is never touched here.
+//
+// Result storage is checked first because an exhausted result budget is not
+// queueable: waiting does not free stored bytes, so the submission always keeps
+// the existing storage rejection. A concurrency rejection becomes an accepted
+// queue entry only when the administrator enabled the queue and the request is
+// one of the queueable JSON generation shapes.
 func enforcePlaygroundTaskBudget(c *gin.Context) bool {
 	if !playgroundTaskCreatesTask(c) {
 		return true
@@ -119,17 +126,6 @@ func enforcePlaygroundTaskBudget(c *gin.Context) bool {
 		writePlaygroundGenerationError(c, http.StatusInternalServerError, "PLAYGROUND_TASK_LIMIT_UNAVAILABLE", "Unable to check the account task budget.")
 		return false
 	}
-	if policy.TaskMaxConcurrency > 0 {
-		active, err := model.CountActivePlaygroundTasks(userID)
-		if err != nil {
-			writePlaygroundGenerationError(c, http.StatusInternalServerError, "PLAYGROUND_TASK_LIMIT_UNAVAILABLE", "Unable to check the account task budget.")
-			return false
-		}
-		if active >= int64(policy.TaskMaxConcurrency) {
-			writePlaygroundGenerationError(c, http.StatusTooManyRequests, PlaygroundTaskLimitErrorCode, "Playground task concurrency limit reached. Wait for a running task to finish.")
-			return false
-		}
-	}
 	if policy.TaskUserResultMaxBytes > 0 {
 		stored, err := model.PlaygroundTaskResultStorageBytes(userID)
 		if err != nil {
@@ -138,6 +134,25 @@ func enforcePlaygroundTaskBudget(c *gin.Context) bool {
 		}
 		if stored >= policy.TaskUserResultMaxBytes {
 			writePlaygroundGenerationError(c, http.StatusTooManyRequests, PlaygroundTaskStorageLimitErrorCode, "Playground task result storage limit reached. Wait for old task results to expire.")
+			return false
+		}
+	}
+	if policy.TaskMaxConcurrency > 0 {
+		active, err := model.CountActivePlaygroundTasks(userID)
+		if err != nil {
+			writePlaygroundGenerationError(c, http.StatusInternalServerError, "PLAYGROUND_TASK_LIMIT_UNAVAILABLE", "Unable to check the account task budget.")
+			return false
+		}
+		if active >= int64(policy.TaskMaxConcurrency) {
+			// The replay flag prevents a worker whose slot was taken between
+			// selection and replay from enqueueing a duplicate. The worker then
+			// releases the original entry.
+			if !common.GetContextKeyBool(c, constant.ContextKeyPlaygroundTaskQueueReplay) &&
+				playground_setting.IsTaskQueueEnabled() &&
+				tryEnqueuePlaygroundTaskQueue(c, userID, policy) {
+				return false
+			}
+			writePlaygroundGenerationError(c, http.StatusTooManyRequests, PlaygroundTaskLimitErrorCode, "Playground task concurrency limit reached. Wait for a running task to finish.")
 			return false
 		}
 	}
