@@ -97,14 +97,16 @@ export function WorkspaceInspector(props: WorkspaceInspectorProps) {
         defaultSize={props.mainDefaultSize ?? '62'}
         minSize={props.mainMinSize ?? '35'}
       >
-        {props.main}
+        <div className='flex h-full min-h-0 flex-col'>{props.main}</div>
       </ResizablePanel>
       <ResizableHandle withHandle />
       <ResizablePanel
         defaultSize={props.panelDefaultSize ?? '38'}
         minSize={props.panelMinSize ?? '28'}
       >
-        {props.children}
+        <div className='flex h-full min-h-0 flex-col overflow-hidden'>
+          {props.children}
+        </div>
       </ResizablePanel>
     </ResizablePanelGroup>
   )
