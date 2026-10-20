@@ -1397,6 +1397,8 @@ const playgroundUsageAnalyticsBucketSchema = z.object({
   errors: z.number().int().nonnegative(),
   avg_time_seconds: z.number().int().nonnegative(),
   avg_first_token_ms: z.number().int().nonnegative(),
+  timed_requests: z.number().int().nonnegative().default(0),
+  first_token_samples: z.number().int().nonnegative().default(0),
 })
 
 const playgroundUsageAnalyticsSchema = z.object({
@@ -1441,6 +1443,8 @@ export async function getPlaygroundUsageAnalytics(
         errors: bucket.errors,
         avgTimeSeconds: bucket.avg_time_seconds,
         avgFirstTokenMs: bucket.avg_first_token_ms,
+        timedRequests: bucket.timed_requests,
+        firstTokenSamples: bucket.first_token_samples,
       }
     }),
   }

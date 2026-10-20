@@ -43,6 +43,8 @@ function bucket(
     errors: 0,
     avgTimeSeconds: 0,
     avgFirstTokenMs: 0,
+    timedRequests: 0,
+    firstTokenSamples: 0,
     ...overrides,
   }
 }
@@ -77,19 +79,27 @@ describe('summarizePlaygroundUsage', () => {
     expect(totals.cacheHitRate).toBe(20)
   })
 
-  it('weights the averages by the request count of each bucket', () => {
+  it('weights the averages by the measured request count, not every request', () => {
     const totals = summarizePlaygroundUsage([
-      bucket({ requests: 3, avgTimeSeconds: 4, avgFirstTokenMs: 300 }),
+      bucket({
+        requests: 5,
+        timedRequests: 1,
+        avgTimeSeconds: 10,
+        firstTokenSamples: 1,
+        avgFirstTokenMs: 100,
+      }),
       bucket({
         origin: 'api',
         requests: 1,
-        avgTimeSeconds: 8,
-        avgFirstTokenMs: 700,
+        timedRequests: 1,
+        avgTimeSeconds: 2,
+        firstTokenSamples: 1,
+        avgFirstTokenMs: 200,
       }),
     ])
 
-    expect(totals.avgTimeSeconds).toBe(5)
-    expect(totals.avgFirstTokenMs).toBe(400)
+    expect(totals.avgTimeSeconds).toBe(6)
+    expect(totals.avgFirstTokenMs).toBe(150)
   })
 
   it('computes the error rate over every recorded row', () => {
