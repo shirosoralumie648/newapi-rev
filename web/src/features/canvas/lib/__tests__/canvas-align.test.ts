@@ -192,6 +192,33 @@ test('lays connected cards out in ranked rows in vertical mode', () => {
   })
 })
 
+test('auto layout ranks a group by edges attached to its children', () => {
+  const nodes = [
+    node('group', 500, 500, 300, 200, { kind: 'group' }),
+    node('child', 10, 10, 100, 50, { kind: 'prompt', parentId: 'group' }),
+    node('result', 0, 0, 100, 50, { kind: 'model' }),
+  ]
+
+  const next = canvasAutoLayout(
+    nodes,
+    [{ source: 'child', target: 'result' }],
+    'horizontal'
+  )
+
+  expect(next?.find((entry) => entry.id === 'group')?.position).toEqual({
+    x: 0,
+    y: 0,
+  })
+  expect(next?.find((entry) => entry.id === 'result')?.position).toEqual({
+    x: 396,
+    y: 0,
+  })
+  expect(next?.find((entry) => entry.id === 'child')?.position).toEqual({
+    x: 10,
+    y: 10,
+  })
+})
+
 test('auto layout never rewrites edges or node data', () => {
   const nodes = [
     {

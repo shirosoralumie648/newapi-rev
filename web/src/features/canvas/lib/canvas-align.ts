@@ -25,6 +25,7 @@ import {
   CANVAS_FRAME_MIN_HEIGHT,
   CANVAS_FRAME_MIN_WIDTH,
   CANVAS_FRAME_PADDING,
+  CANVAS_GROUP_MAX_DEPTH,
   CANVAS_NODE_ESTIMATED_HEIGHT,
   CANVAS_NODE_ESTIMATED_WIDTH,
 } from '../constants'
@@ -577,11 +578,35 @@ interface AutoLayoutUnit {
 }
 
 /**
+ * Resolves an edge endpoint to the top-level unit the layout moves. A grouped
+ * node is not ranked on its own: its outermost group travels with it, so an
+ * edge attached to any descendant still connects the group's layer to the
+ * other endpoint.
+ */
+function autoLayoutUnitId(
+  node: CanvasFlowNode,
+  byId: Map<string, CanvasFlowNode>
+): string {
+  let unit = node
+  for (
+    let depth = 0;
+    unit.parentId && depth < CANVAS_GROUP_MAX_DEPTH;
+    depth++
+  ) {
+    const parent = byId.get(unit.parentId)
+    if (!parent) break
+    unit = parent
+  }
+  return unit.id
+}
+
+/**
  * Layered auto layout along the existing edges. The graph is a DAG by contract,
  * but an imported board may contain a cycle: nodes in an unresolved cycle keep
  * their existing order and share one layer instead of making layout fail.
- * Groups are single units (their children keep relative coordinates), frames
- * are excluded from the ranking and re-fitted around their members afterwards.
+ * Groups are single units (their children keep relative coordinates), edges on
+ * a group descendant rank the whole group, and frames are excluded from the
+ * ranking and re-fitted around their members afterwards.
  */
 export function canvasAutoLayout(
   nodes: CanvasFlowNode[],
@@ -610,10 +635,15 @@ export function canvasAutoLayout(
     indegree.set(id, 0)
   }
   for (const edge of edges) {
-    if (!unitById.has(edge.source) || !unitById.has(edge.target)) continue
-    if (edge.source === edge.target) continue
-    outgoing.get(edge.source)?.push(edge.target)
-    indegree.set(edge.target, (indegree.get(edge.target) ?? 0) + 1)
+    const sourceNode = byId.get(edge.source)
+    const targetNode = byId.get(edge.target)
+    if (!sourceNode || !targetNode) continue
+    const source = autoLayoutUnitId(sourceNode, byId)
+    const target = autoLayoutUnitId(targetNode, byId)
+    if (!unitById.has(source) || !unitById.has(target)) continue
+    if (source === target) continue
+    outgoing.get(source)?.push(target)
+    indegree.set(target, (indegree.get(target) ?? 0) + 1)
   }
   const crossAxis = direction === 'horizontal' ? 'y' : 'x'
   const orderByCross = (a: string, b: string) =>
