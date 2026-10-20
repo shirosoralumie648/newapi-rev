@@ -78,6 +78,9 @@ type PlaygroundInputToolsProps = {
   /** Models of the next comparison; empty or single means an ordinary send. */
   compareModels: string[]
   onCompareModelsChange: (models: string[]) => void
+  /** Hides model names and records a raw preference for the next comparison. */
+  anonymousCompare: boolean
+  onAnonymousCompareChange: (anonymous: boolean) => void
   /** Opens the batch compare-runs workbench. */
   onOpenCompareRuns?: () => void
   onClearMessages?: () => void
@@ -154,6 +157,8 @@ export function PlaygroundInputTools({
   onDictateTranscript,
   compareModels,
   onCompareModelsChange,
+  anonymousCompare,
+  onAnonymousCompareChange,
   onOpenCompareRuns,
   onClearMessages,
   onConfigChange,
@@ -303,9 +308,11 @@ export function PlaygroundInputTools({
         />
 
         <PlaygroundComparePanel
+          anonymous={anonymousCompare}
           compareModels={compareModels}
           disabled={disabled}
           models={models}
+          onAnonymousChange={onAnonymousCompareChange}
           onCompareModelsChange={onCompareModelsChange}
         />
 

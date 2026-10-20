@@ -26,14 +26,33 @@ import { PlaygroundParallelCompare } from '../playground-parallel-compare'
 
 beforeAll(() => {
   i18next.addResourceBundle('en', 'translation', {
+    'A better': 'A better',
+    'Add a one-sentence note (optional)': 'Add a one-sentence note (optional)',
+    'Anonymous comparison': 'Anonymous comparison',
+    'B better': 'B better',
+    'Both bad': 'Both bad',
     'Comparing {{count}} models': 'Comparing {{count}} models',
     'In use': 'In use',
+    'Instance votes': 'Instance votes',
+    'Model A': 'Model A',
+    'Model B': 'Model B',
+    'No votes yet.': 'No votes yet.',
+    Notes: 'Notes',
+    'Preference vote': 'Preference vote',
     'Reply from {{model}}': 'Reply from {{model}}',
     'Responding...': 'Responding...',
     'Retry this reply': 'Retry this reply',
+    'Save note': 'Save note',
     'Select one reply to continue the conversation':
       'Select one reply to continue the conversation',
+    Tie: 'Tie',
+    'Total votes: {{count}}': 'Total votes: {{count}}',
     'Use this reply': 'Use this reply',
+    'Vote note': 'Vote note',
+    'Vote on this comparison': 'Vote on this comparison',
+    'Vote summary': 'Vote summary',
+    'Which reply is better?': 'Which reply is better?',
+    'Your votes': 'Your votes',
   })
 })
 
@@ -169,5 +188,147 @@ describe('PlaygroundParallelCompare', () => {
     )
 
     expect(onRetryVersion).toHaveBeenCalledWith(message, 1)
+  })
+})
+
+function anonymousMessage(overrides: Partial<Message> = {}): Message {
+  return comparisonMessage({
+    anonymous: true,
+    versions: [
+      {
+        id: 'v1',
+        content: 'GPT-4O answered first.',
+        model: 'gpt-4o',
+        status: 'complete',
+      },
+      {
+        id: 'v2',
+        content: 'Request failed for gpt-4.',
+        model: 'gpt-4',
+        status: 'complete',
+      },
+    ],
+    ...overrides,
+  })
+}
+
+describe('PlaygroundParallelCompare anonymous arena', () => {
+  test('replaces model names with A/B labels and never renders the real names', () => {
+    render(
+      <PlaygroundParallelCompare
+        message={anonymousMessage()}
+        onArenaVote={vi.fn()}
+      />
+    )
+
+    expect(
+      screen.getByRole('group', { name: 'Anonymous comparison' })
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('group', { name: 'Comparing 2 models' })
+    ).not.toBeInTheDocument()
+
+    const first = screen.getByRole('region', { name: 'Reply from Model A' })
+    const second = screen.getByRole('region', { name: 'Reply from Model B' })
+    expect(
+      within(first).getByText('Model A answered first.')
+    ).toBeInTheDocument()
+    expect(
+      within(second).getByText('Request failed for Model B.')
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/gpt-4o/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/gpt-4/i)).not.toBeInTheDocument()
+  })
+
+  test('offers the four raw choices and stores the optional note with the vote', async () => {
+    const user = userEvent.setup()
+    const onArenaVote = vi.fn().mockResolvedValue(undefined)
+
+    render(
+      <PlaygroundParallelCompare
+        message={anonymousMessage()}
+        onArenaVote={onArenaVote}
+        arenaVote={{
+          id: 1,
+          messageKey: 'group-1',
+          choice: 'a',
+          note: 'First impression',
+          createdAt: 1,
+          updatedAt: 2,
+        }}
+      />
+    )
+
+    const votes = screen.getByRole('group', {
+      name: 'Vote on this comparison',
+    })
+    for (const label of ['A better', 'B better', 'Tie', 'Both bad']) {
+      expect(within(votes).getByRole('button', { name: label })).toBeEnabled()
+    }
+    expect(
+      within(votes).getByRole('button', { name: 'A better' })
+    ).toHaveAttribute('aria-pressed', 'true')
+
+    await user.click(within(votes).getByRole('button', { name: 'B better' }))
+    expect(onArenaVote).toHaveBeenCalledWith('group-1', 'b', 'First impression')
+
+    const note = screen.getByRole('textbox', { name: 'Vote note' })
+    await user.clear(note)
+    await user.type(note, 'Second look')
+    await user.click(screen.getByRole('button', { name: 'Save note' }))
+    expect(onArenaVote).toHaveBeenLastCalledWith('group-1', 'a', 'Second look')
+  })
+
+  test('shows personal totals and adds the instance scope for administrators', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <PlaygroundParallelCompare
+        message={anonymousMessage()}
+        onArenaVote={vi.fn()}
+        arenaPersonalSummary={{
+          scope: 'personal',
+          total: 3,
+          choices: { a: 1, b: 1, tie: 1, bothBad: 0 },
+          notes: 1,
+        }}
+        arenaInstanceSummary={{
+          scope: 'instance',
+          total: 8,
+          choices: { a: 3, b: 2, tie: 2, bothBad: 1 },
+          notes: 4,
+        }}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Vote summary' }))
+    expect(screen.getByText('Total votes: 3')).toBeInTheDocument()
+    expect(screen.getByText('Your votes')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Instance votes' }))
+    expect(screen.getByText('Total votes: 8')).toBeInTheDocument()
+  })
+
+  test('hides the vote bar without a vote callback and disables it while generating', () => {
+    const { rerender } = render(
+      <PlaygroundParallelCompare message={anonymousMessage()} />
+    )
+    expect(
+      screen.queryByRole('group', { name: 'Vote on this comparison' })
+    ).not.toBeInTheDocument()
+
+    rerender(
+      <PlaygroundParallelCompare
+        isGenerating
+        message={anonymousMessage()}
+        onArenaVote={vi.fn()}
+      />
+    )
+    const votes = screen.getByRole('group', {
+      name: 'Vote on this comparison',
+    })
+    for (const label of ['A better', 'B better', 'Tie', 'Both bad']) {
+      expect(within(votes).getByRole('button', { name: label })).toBeDisabled()
+    }
   })
 })

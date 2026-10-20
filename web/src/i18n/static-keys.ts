@@ -119,6 +119,16 @@ export const STATIC_I18N_KEYS = [
   'Workflow run not found.',
   'Unable to settle the run budget.',
   'This workflow run has reached its budget cap; the remaining steps were not started.',
+  // Anonymous A/B arena (PG2-15): the four raw choice labels are selected from
+  // a constant map, and the server answers votes with these messages.
+  'A better',
+  'B better',
+  'Tie',
+  'Both bad',
+  'Invalid Playground arena vote.',
+  'Administrator access is required.',
+  'Invalid Playground arena summary scope.',
+  'Playground message not found.',
   // Wallet overdraft settings and administrative debt views.
   'Wallet Overdraft',
   'Wallet overdraft limit (USD)',

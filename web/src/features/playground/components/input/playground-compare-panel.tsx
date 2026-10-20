@@ -22,6 +22,7 @@ import { toast } from 'sonner'
 
 import { PromptInputButton } from '@/components/ai-elements/prompt-input'
 import { MultiSelect } from '@/components/multi-select'
+import { Label } from '@/components/ui/label'
 import {
   Popover,
   PopoverContent,
@@ -34,6 +35,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet'
+import { Switch } from '@/components/ui/switch'
 import {
   Tooltip,
   TooltipContent,
@@ -54,6 +56,9 @@ type PlaygroundComparePanelProps = {
   models: ModelOption[]
   onCompareModelsChange: (models: string[]) => void
   compareModels: string[]
+  /** The next comparison hides model names and records a raw preference. */
+  anonymous: boolean
+  onAnonymousChange: (anonymous: boolean) => void
 }
 
 type PlaygroundCompareContentProps = PlaygroundComparePanelProps
@@ -83,6 +88,16 @@ export function PlaygroundCompareContent(props: PlaygroundCompareContentProps) {
     props.onCompareModelsChange(normalizeParallelModels(values))
   }
 
+  const handleAnonymousChange = (anonymous: boolean) => {
+    // The arena compares exactly two replies. Enabling it while more models
+    // are selected trims the selection instead of silently sending a named
+    // comparison the reader expects to be anonymous.
+    if (anonymous && props.compareModels.length > 2) {
+      props.onCompareModelsChange(props.compareModels.slice(0, 2))
+    }
+    props.onAnonymousChange(anonymous)
+  }
+
   return (
     <div className='grid gap-2 p-1'>
       <MultiSelect
@@ -104,6 +119,33 @@ export function PlaygroundCompareContent(props: PlaygroundCompareContentProps) {
           ? t(PLAYGROUND_PARALLEL_MESSAGES.SENDING)
           : t(PLAYGROUND_PARALLEL_MESSAGES.SELECT_MODELS)}
       </p>
+      <div className='border-border/60 flex items-start justify-between gap-3 border-t pt-2'>
+        <div className='min-w-0'>
+          <Label htmlFor='playground-anonymous-arena'>
+            {t('Anonymous A/B arena')}
+          </Label>
+          <p className='text-muted-foreground mt-1 text-xs leading-4'>
+            {t(
+              'Hide model names and channels for exactly two replies, then vote which one is better. This only stores your raw preference; no ranking is computed.'
+            )}
+          </p>
+          {props.anonymous && selectedCount !== 2 ? (
+            <p
+              className='text-xs leading-4 text-amber-600 dark:text-amber-400'
+              role='alert'
+            >
+              {t('Select exactly two models for the anonymous arena.')}
+            </p>
+          ) : null}
+        </div>
+        <Switch
+          checked={props.anonymous}
+          disabled={props.disabled}
+          id='playground-anonymous-arena'
+          onCheckedChange={handleAnonymousChange}
+          size='sm'
+        />
+      </div>
     </div>
   )
 }
