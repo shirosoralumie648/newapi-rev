@@ -70,8 +70,7 @@ export function usePlaygroundTour() {
             kind === 'conversation'
               ? buildConversationTourSteps(t, isMobile)
               : buildCanvasTourSteps(t, isMobile)
-          let tour: Driver
-          tour = createDriver({
+          const tour = createDriver({
             steps,
             animate: true,
             smoothScroll: true,
@@ -87,7 +86,7 @@ export function usePlaygroundTour() {
             closeBtnLabel: t('Close guide'),
             popoverClass: 'playground-tour-popover',
             onDestroyed: (_element, _step, opts) => {
-              if (tourRef.current !== tour) return
+              if (requestId !== requestIdRef.current) return
               tourRef.current = null
               if (opts.reason === 'api' || opts.reason === 'replaced') return
               const completed = opts.reason === 'done'
