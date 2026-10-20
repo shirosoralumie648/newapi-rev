@@ -26,6 +26,7 @@ import {
   Sparkles,
   Square,
 } from 'lucide-react'
+import { nanoid } from 'nanoid'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -50,7 +51,11 @@ import {
   translateServerText,
 } from '@/lib/server-error-message'
 
-import { CANVAS_LINKED_NODE_OFFSET_X } from '../../constants'
+import {
+  CANVAS_LINKED_NODE_OFFSET_X,
+  CANVAS_WORKFLOW_IMAGE_INPUT_MAX_COUNT,
+  CANVAS_WORKFLOW_MESSAGES,
+} from '../../constants'
 import { useCanvasEditor } from '../../hooks/use-canvas-editor'
 import { useCanvasNodeArtifact } from '../../hooks/use-canvas-node-artifact'
 import { useCanvasWorkflowOptions } from '../../hooks/use-canvas-workflow-options'
@@ -277,6 +282,15 @@ export function CanvasVideoWorkbench(props: CanvasVideoWorkbenchProps) {
   const handleAddFrameToCanvas = useCallback(async () => {
     const frame = capturedRef.current
     if (!frame || !step) return
+    // A video step consumes at most four reference images. Refuse the frame
+    // before uploading any bytes instead of mounting input the run would reject.
+    if (
+      mentions.filter((mention) => mention.hasImage).length >=
+      CANVAS_WORKFLOW_IMAGE_INPUT_MAX_COUNT
+    ) {
+      toast.error(t(CANVAS_WORKFLOW_MESSAGES.IMAGE_INPUT_LIMIT))
+      return
+    }
     setFrameAction('canvas')
     try {
       const entries = await canvasDropEntries(props.project.id, step.position, [
@@ -287,10 +301,13 @@ export function CanvasVideoWorkbench(props: CanvasVideoWorkbenchProps) {
         throw new CanvasDropError(CANVAS_VIDEO_FRAME_MESSAGES.ADD_FAILED)
       }
       // The upload chain returns an attachment node; a captured frame lands as
-      // an image node left of the step so it can feed the next i2v run.
+      // an image node left of the step and feeds the next i2v run through the
+      // same edge a mounted reference image uses.
+      const nodeId = nanoid()
       const accepted = editor.addNodes([
         {
           ...entry,
+          id: nodeId,
           kind: 'image',
           position: {
             x: step.position.x - CANVAS_LINKED_NODE_OFFSET_X,
@@ -302,6 +319,12 @@ export function CanvasVideoWorkbench(props: CanvasVideoWorkbenchProps) {
         toast.error(t(CANVAS_ERRORS.TOO_MANY_NODES))
         return
       }
+      editor.handleConnect({
+        source: nodeId,
+        target: step.id,
+        sourceHandle: null,
+        targetHandle: null,
+      })
       toast.success(t('Frame added to the canvas.'))
       closeFrame()
     } catch (error) {
@@ -313,7 +336,7 @@ export function CanvasVideoWorkbench(props: CanvasVideoWorkbenchProps) {
     } finally {
       setFrameAction(null)
     }
-  }, [closeFrame, editor, props.project.id, step, t])
+  }, [closeFrame, editor, mentions, props.project.id, step, t])
 
   const handleSendFrameToImageWorkbench = useCallback(async () => {
     const frame = capturedRef.current

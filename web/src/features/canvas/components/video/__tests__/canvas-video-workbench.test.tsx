@@ -243,6 +243,8 @@ const frameFile = new File(['frame'], 'video-frame-12.3s.jpg', {
 
 beforeEach(() => {
   makeRunner()
+  vi.mocked(captureCanvasVideoFrame).mockReset()
+  vi.mocked(canvasDropEntries).mockReset()
   vi.mocked(useCanvasWorkflowOptions).mockReturnValue({
     group: 'default',
     setGroup: vi.fn(),
@@ -350,6 +352,7 @@ test('captures the current frame and adds it as an image node', async () => {
   )
   expect(editor.addNodes).toHaveBeenCalledWith([
     {
+      id: expect.any(String),
       kind: 'image',
       position: {
         x: step.position.x - CANVAS_LINKED_NODE_OFFSET_X,
@@ -362,7 +365,45 @@ test('captures the current frame and adds it as an image node', async () => {
       },
     },
   ])
+  const added = vi.mocked(editor.addNodes).mock.calls[0]?.[0]?.[0]
+  expect(editor.handleConnect).toHaveBeenCalledWith({
+    source: added?.id,
+    target: step.id,
+    sourceHandle: null,
+    targetHandle: null,
+  })
   expect(toast.success).toHaveBeenCalledWith('Frame added to the canvas.')
+})
+
+test('refuses a frame when the step already consumes four images', async () => {
+  const step = videoStep()
+  const images = Array.from({ length: 4 }, (_, index) =>
+    flowNode(`image-${index}`, 'image', 0, index * 80, {
+      ref: { sessionId: 'c1', attachmentId: `a${index}` },
+    })
+  )
+  vi.mocked(captureCanvasVideoFrame).mockResolvedValue({
+    blob: new Blob(['frame'], { type: 'image/jpeg' }),
+    file: frameFile,
+    seconds: 2,
+  })
+  vi.mocked(canvasDropEntries).mockResolvedValue([])
+  renderWorkbench(
+    [step, ...images],
+    images.map((image) => flowEdge(image.id, step.id))
+  )
+
+  await userEvent
+    .setup()
+    .click(screen.getByRole('button', { name: 'Capture frame' }))
+  await userEvent
+    .setup()
+    .click(screen.getByRole('button', { name: 'Add to canvas' }))
+
+  expect(canvasDropEntries).not.toHaveBeenCalled()
+  expect(toast.error).toHaveBeenCalledWith(
+    'Too many reference images are connected to this step.'
+  )
 })
 
 test('sends the captured frame to a new image workbench', async () => {
