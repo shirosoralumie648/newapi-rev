@@ -1016,6 +1016,75 @@ test('setWorkflowPreferredResult switches a batch preference in one history entr
   ).toBe(true)
 })
 
+test('affixNodes moves and marks the bloodline in one undoable step', () => {
+  const onChange = vi.fn()
+  const hook = renderHook(() =>
+    useCanvasEditor(
+      {
+        nodes: [
+          {
+            id: 't1',
+            type: 'task',
+            position: { x: 0, y: 0 },
+            data: { workflow: { generation: 'image' } },
+          },
+          {
+            id: 'r1',
+            type: 'task-result',
+            position: { x: 340, y: 0 },
+            data: { workflow: { sourceNodeId: 't1' } },
+          },
+          {
+            id: 'other',
+            type: 'task-result',
+            position: { x: 0, y: 500 },
+          },
+        ],
+        edges: [],
+      },
+      onChange
+    )
+  )
+
+  act(() => {
+    expect(
+      hook.result.current.affixNodes([
+        { id: 't1', position: { x: 0, y: 768 }, data: { affixed: true } },
+        { id: 'r1', position: { x: 340, y: 768 }, data: { affixed: true } },
+      ])
+    ).toBe(true)
+  })
+
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 't1')
+  ).toMatchObject({ position: { x: 0, y: 768 }, data: { affixed: true } })
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 'r1')
+  ).toMatchObject({ position: { x: 340, y: 768 }, data: { affixed: true } })
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 'other')?.position
+  ).toEqual({ x: 0, y: 500 })
+  expect(onChange).toHaveBeenCalledTimes(1)
+  expect(hook.result.current.canUndo).toBe(true)
+
+  act(() => hook.result.current.undo())
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 't1')
+  ).toMatchObject({ position: { x: 0, y: 0 }, data: { affixed: undefined } })
+  expect(
+    hook.result.current.nodes.find((node) => node.id === 'r1')?.position
+  ).toEqual({ x: 340, y: 0 })
+
+  act(() => {
+    expect(
+      hook.result.current.affixNodes([
+        { id: 'missing', position: { x: 0, y: 0 }, data: { affixed: true } },
+      ])
+    ).toBe(false)
+  })
+  expect(onChange).toHaveBeenCalledTimes(1)
+})
+
 test('selectNode marks exactly one node and stays out of the undo history', () => {
   const onChange = vi.fn()
   const hook = renderHook(() => useCanvasEditor(LINKED_DOCUMENT, onChange))

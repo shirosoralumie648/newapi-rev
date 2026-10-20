@@ -146,6 +146,25 @@ test('does not mark a running step that still carries a cached flag', () => {
   expect(screen.queryByText('Cached')).not.toBeInTheDocument()
 })
 
+test('marks an affixed workbench node as pinned', () => {
+  renderNode({
+    kind: 'task-result',
+    label: 'Draft',
+    affixed: true,
+  })
+
+  expect(screen.getByText('Pinned')).toBeInTheDocument()
+})
+
+test('does not mark an ordinary node as pinned', () => {
+  renderNode({
+    kind: 'task-result',
+    label: 'Draft',
+  })
+
+  expect(screen.queryByText('Pinned')).not.toBeInTheDocument()
+})
+
 test('shows the durable task id of a generation step', () => {
   renderNode({
     kind: 'task',
