@@ -121,14 +121,14 @@ func playgroundTestDB(t *testing.T, dialect string) *gorm.DB {
 	common.SetDatabaseTypes(common.DatabaseType(dialect), previousLog)
 	model.DB = db
 	t.Cleanup(func() {
-		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundKnowledgeChunk{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasTemplateAsset{}, &model.PlaygroundCanvasTemplate{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundComparisonRun{}, &model.PlaygroundWorkflowRun{}, &model.PlaygroundUserUsage{}, &model.PlaygroundUpload{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippetVersion{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundArenaVote{}, &model.PlaygroundMessage{}, &model.PlaygroundSessionShare{}, &model.PlaygroundSession{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+		require.NoError(t, db.Migrator().DropTable(&model.PlaygroundTaskQueueEntry{}, &model.PlaygroundKnowledgeChunk{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasTemplateAsset{}, &model.PlaygroundCanvasTemplate{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundComparisonRun{}, &model.PlaygroundWorkflowRun{}, &model.PlaygroundUserUsage{}, &model.PlaygroundUpload{}, &model.PlaygroundAttachment{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundArtifact{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippetVersion{}, &model.PlaygroundSnippet{}, &model.PlaygroundMemory{}, &model.PlaygroundArenaVote{}, &model.PlaygroundMessage{}, &model.PlaygroundSessionShare{}, &model.PlaygroundSession{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 		sqlDB, err := db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
 		model.DB = previous
 		common.SetDatabaseTypes(previousMain, previousLog)
 	})
-	require.NoError(t, db.AutoMigrate(&model.PlaygroundSession{}, &model.PlaygroundSessionShare{}, &model.PlaygroundMessage{}, &model.PlaygroundArenaVote{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundSnippetVersion{}, &model.PlaygroundMemory{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUpload{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasTemplate{}, &model.PlaygroundCanvasTemplateAsset{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeChunk{}, &model.PlaygroundComparisonRun{}, &model.PlaygroundWorkflowRun{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.PlaygroundTaskQueueEntry{}, &model.PlaygroundSession{}, &model.PlaygroundSessionShare{}, &model.PlaygroundMessage{}, &model.PlaygroundArenaVote{}, &model.PlaygroundPreset{}, &model.PlaygroundSnippet{}, &model.PlaygroundSnippetVersion{}, &model.PlaygroundMemory{}, &model.PlaygroundArtifact{}, &model.PlaygroundArtifactVersion{}, &model.PlaygroundAttachment{}, &model.PlaygroundUpload{}, &model.PlaygroundUserUsage{}, &model.PlaygroundCanvasProject{}, &model.PlaygroundCanvasSnapshot{}, &model.PlaygroundCanvasAsset{}, &model.PlaygroundCanvasTemplate{}, &model.PlaygroundCanvasTemplateAsset{}, &model.PlaygroundKnowledgeBase{}, &model.PlaygroundKnowledgeDocument{}, &model.PlaygroundKnowledgeChunk{}, &model.PlaygroundComparisonRun{}, &model.PlaygroundWorkflowRun{}, &model.PlaygroundTaskArtifact{}, &model.PlaygroundTaskArtifactPin{}, &model.PlaygroundTaskArtifactSync{}, &model.PlaygroundObjectDeleteOutbox{}, &model.Task{}, &model.PlaygroundStorageLedger{}, &model.WalletDebt{}, &model.WalletLedgerEntry{}, &model.User{}))
 	var version string
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -143,6 +143,24 @@ func playgroundTestDB(t *testing.T, dialect string) *gorm.DB {
 		require.NoError(t, db.Create(&user).Error)
 	}
 	return db
+}
+
+// playgroundJSONRequest runs one handler with a canonical JSON content type so
+// queue eligibility matches a browser submission.
+func playgroundJSONRequest(t *testing.T, user int, path string, body any, handler gin.HandlerFunc, configure ...func(*gin.Context)) *httptest.ResponseRecorder {
+	t.Helper()
+	encoded, err := common.Marshal(body)
+	require.NoError(t, err)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Set("id", user)
+	c.Request = httptest.NewRequest(http.MethodPost, path, bytes.NewReader(encoded))
+	c.Request.Header.Set("Content-Type", "application/json")
+	if len(configure) > 0 {
+		configure[0](c)
+	}
+	handler(c)
+	return recorder
 }
 
 func playgroundRequest(t *testing.T, user int, method, path string, body any, handler gin.HandlerFunc) *httptest.ResponseRecorder {
@@ -192,7 +210,11 @@ func playgroundRequest(t *testing.T, user int, method, path string, body any, ha
 			c.Params = append(c.Params, gin.Param{Key: "memoryId", Value: parts[4]})
 		}
 		if parts[3] == "tasks" {
-			c.Params = append(c.Params, gin.Param{Key: "taskId", Value: parts[4]})
+			if parts[4] == "queue" && len(parts) > 5 {
+				c.Params = append(c.Params, gin.Param{Key: "queueId", Value: parts[5]})
+			} else {
+				c.Params = append(c.Params, gin.Param{Key: "taskId", Value: parts[4]})
+			}
 		}
 		if parts[3] == "sessions" && len(parts) > 7 && parts[5] == "arena" && parts[6] == "votes" {
 			c.Params = append(c.Params, gin.Param{Key: "messageKey", Value: parts[7]})
@@ -1581,6 +1603,15 @@ func usePlaygroundQuotaDefaults(t *testing.T, mutate func(policy *playground_set
 	t.Cleanup(func() { *defaults = previous })
 }
 
+// usePlaygroundTaskQueue toggles the optional generation queue for one test.
+func usePlaygroundTaskQueue(t *testing.T, enabled bool) {
+	t.Helper()
+	setting := playground_setting.GetPlaygroundSetting()
+	previous := setting.TaskQueueEnabled
+	setting.TaskQueueEnabled = enabled
+	t.Cleanup(func() { setting.TaskQueueEnabled = previous })
+}
+
 // usePlaygroundGroupQuota sets one user group's override and restores it.
 func usePlaygroundGroupQuota(t *testing.T, group string, override playground_setting.PlaygroundQuotaPolicy) {
 	t.Helper()
@@ -2755,6 +2786,9 @@ func TestPlaygroundRealRouterAuthentication(t *testing.T) {
 		{http.MethodDelete, "/api/playground/canvases/missing/share"},
 		{http.MethodPost, "/api/playground/sessions/" + sessionID + "/restore"},
 		{http.MethodPost, "/api/playground/tasks/missing/cancel"},
+		{http.MethodGet, "/api/playground/tasks/queue"},
+		{http.MethodDelete, "/api/playground/tasks/queue/missing"},
+		{http.MethodPost, "/api/playground/tasks/queue/missing/priority"},
 		{http.MethodPost, "/pg/embeddings"},
 		{http.MethodPost, "/pg/responses"},
 		{http.MethodPost, "/pg/messages"},
@@ -4142,6 +4176,203 @@ func TestPlaygroundTaskStorageBudget(t *testing.T) {
 			response := playgroundRequest(t, 7, http.MethodPost, "/v1/videos", map[string]any{"model": "kling-v1", "prompt": "fox"}, controller.PlaygroundVideoTask)
 			assert.Equal(t, http.StatusTooManyRequests, response.Code, response.Body.String())
 			assert.Contains(t, response.Body.String(), controller.PlaygroundTaskStorageLimitErrorCode)
+		})
+	}
+}
+
+// The optional queue orders by explicit priority and then submission time,
+// while cancel, claim, release and completion remain owner-scoped CAS
+// transitions. The same assertions run against all three supported databases.
+func TestPlaygroundTaskQueueOrderingAndTransitions(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+
+			entries := []*model.PlaygroundTaskQueueEntry{
+				{UserID: 7, Kind: model.PlaygroundTaskQueueKindVideo, RequestPath: "/v1/videos", Group: "default", ContentType: "application/json", RequestBody: `{"model":"kling-v1","prompt":"first"}`, RequestBytes: 40, Model: "kling-v1"},
+				{UserID: 7, Kind: model.PlaygroundTaskQueueKindImage, RequestPath: "/v1/images/generations", Group: "default", ContentType: "application/json", RequestBody: `{"model":"gpt-image-1","prompt":"second"}`, RequestBytes: 44, Model: "gpt-image-1"},
+				{UserID: 8, Kind: model.PlaygroundTaskQueueKindVideo, RequestPath: "/v1/videos", Group: "default", ContentType: "application/json", RequestBody: `{"model":"kling-v1","prompt":"third"}`, RequestBytes: 40, Model: "kling-v1"},
+			}
+			for index := range entries {
+				_, err := model.EnqueuePlaygroundTaskQueueEntry(entries[index], 10)
+				require.NoError(t, err)
+			}
+
+			queued, err := model.ListQueuedPlaygroundTaskQueueCandidates(10)
+			require.NoError(t, err)
+			require.Len(t, queued, 3)
+			assert.Equal(t, entries[0].QueueID, queued[0].QueueID)
+			assert.Equal(t, entries[1].QueueID, queued[1].QueueID)
+			assert.Equal(t, entries[2].QueueID, queued[2].QueueID, "submission order breaks equal priority")
+
+			position, err := model.PlaygroundTaskQueuePosition(&queued[1])
+			require.NoError(t, err)
+			assert.EqualValues(t, 2, position)
+
+			moved, err := model.PrioritizePlaygroundTaskQueueEntry(8, entries[2].QueueID)
+			require.NoError(t, err)
+			assert.Greater(t, moved.Priority, 0)
+			position, err = model.PlaygroundTaskQueuePosition(moved)
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, position, "move-to-front crosses every other account")
+
+			_, err = model.CancelPlaygroundTaskQueueEntry(8, entries[0].QueueID)
+			assert.ErrorIs(t, err, model.ErrPlaygroundTaskQueueNotFound, "another owner cannot cancel the entry")
+
+			canceled, err := model.CancelPlaygroundTaskQueueEntry(7, entries[1].QueueID)
+			require.NoError(t, err)
+			assert.Equal(t, model.PlaygroundTaskQueueStatusCanceled, canceled.Status)
+			position, err = model.PlaygroundTaskQueuePosition(canceled)
+			require.NoError(t, err)
+			assert.Zero(t, position)
+			_, err = model.CancelPlaygroundTaskQueueEntry(7, entries[1].QueueID)
+			assert.ErrorIs(t, err, model.ErrPlaygroundTaskQueueNotCancelable)
+
+			active, err := model.CountActivePlaygroundTaskQueueEntries(7)
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, active)
+
+			won, err := model.ClaimPlaygroundTaskQueueEntry(entries[0].QueueID)
+			require.NoError(t, err)
+			require.True(t, won)
+			won, err = model.ClaimPlaygroundTaskQueueEntry(entries[0].QueueID)
+			require.NoError(t, err)
+			assert.False(t, won, "claiming is a one-way CAS")
+
+			task := model.Task{TaskID: "pgq-task-first", Platform: "sunoapi", UserId: 7, Status: model.TaskStatusInProgress,
+				SubmitTime: common.GetTimestamp(), PrivateData: model.TaskPrivateData{PlaygroundOrigin: true}}
+			require.NoError(t, db.Create(&task).Error)
+			require.NoError(t, model.CompletePlaygroundTaskQueueEntry(7, entries[0].QueueID, task.TaskID))
+			completed, err := model.GetPlaygroundTaskQueueEntry(7, entries[0].QueueID)
+			require.NoError(t, err)
+			assert.Equal(t, model.PlaygroundTaskQueueStatusSubmitted, completed.Status)
+			assert.Equal(t, task.TaskID, completed.TaskID)
+
+			recent, err := model.ListPlaygroundTaskQueueEntries(7)
+			require.NoError(t, err)
+			recentStatus := make(map[string]string, len(recent))
+			for index := range recent {
+				recentStatus[recent[index].QueueID] = recent[index].Status
+			}
+			assert.Equal(t, model.PlaygroundTaskQueueStatusSubmitted, recentStatus[entries[0].QueueID])
+			assert.NotContains(t, recentStatus, entries[1].QueueID, "the canceled row is not an active queue item")
+
+			// A replay result must point at an owner-scoped Playground task.
+			won, err = model.ClaimPlaygroundTaskQueueEntry(entries[2].QueueID)
+			require.NoError(t, err)
+			require.True(t, won)
+			err = model.CompletePlaygroundTaskQueueEntry(8, entries[2].QueueID, task.TaskID)
+			assert.ErrorIs(t, err, model.ErrPlaygroundTaskQueueTaskMissing)
+			released, err := model.GetPlaygroundTaskQueueEntry(8, entries[2].QueueID)
+			require.NoError(t, err)
+			assert.Equal(t, model.PlaygroundTaskQueueStatusSubmitting, released.Status)
+
+			status, err := model.ReleasePlaygroundTaskQueueEntry(entries[2].QueueID, model.PlaygroundTaskQueueMaxAttempts, model.PlaygroundTaskQueueMaxAttempts,
+				"PLAYGROUND_TASK_QUEUE_NO_TASK", "no task")
+			require.NoError(t, err)
+			assert.Equal(t, model.PlaygroundTaskQueueStatusFailed, status)
+
+			deleted, err := model.DeleteTerminalPlaygroundTaskQueueEntries(common.GetTimestamp()+1, 10)
+			require.NoError(t, err)
+			assert.EqualValues(t, 3, deleted, "canceled, submitted and failed rows are terminal")
+			active, err = model.CountActivePlaygroundTaskQueueEntries(7)
+			require.NoError(t, err)
+			assert.Zero(t, active)
+		})
+	}
+}
+
+// An exceeded concurrency budget is accepted into the optional queue with a
+// 202; disabling the queue restores the stable 429, storage exhaustion always
+// rejects instead of queueing, and a dequeue only becomes submitted together
+// with its durable owner-scoped Playground task row.
+func TestPlaygroundTaskQueueSubmissionAndDequeueConsistency(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := playgroundTestDB(t, dialect)
+			usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+				policy.TaskMaxConcurrency = 1
+				policy.TaskUserResultMaxBytes = 1 << 20
+				policy.TaskQueueMaxCount = 1
+			})
+			usePlaygroundTaskQueue(t, true)
+
+			active := model.Task{TaskID: "pgq-active", Platform: "sunoapi", UserId: 7, Status: model.TaskStatusInProgress,
+				SubmitTime: common.GetTimestamp(), PrivateData: model.TaskPrivateData{PlaygroundOrigin: true}}
+			require.NoError(t, db.Create(&active).Error)
+
+			response := playgroundJSONRequest(t, 7, "/v1/videos", map[string]any{"model": "kling-v1", "prompt": "fox"}, controller.PlaygroundVideoTask)
+			require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+			assert.Contains(t, response.Body.String(), `"status":"queued"`)
+			assert.Contains(t, response.Body.String(), `"position":1`)
+
+			var queued []model.PlaygroundTaskQueueEntry
+			require.NoError(t, db.Find(&queued).Error)
+			require.Len(t, queued, 1)
+			assert.Equal(t, model.PlaygroundTaskQueueKindVideo, queued[0].Kind)
+			assert.Equal(t, "/v1/videos", queued[0].RequestPath)
+			assert.Equal(t, "application/json", queued[0].ContentType)
+			assert.Equal(t, "kling-v1", queued[0].Model)
+			assert.Contains(t, string(queued[0].RequestBody), `"prompt":"fox"`)
+
+			full := playgroundJSONRequest(t, 7, "/v1/videos", map[string]any{"model": "kling-v1", "prompt": "second"}, controller.PlaygroundVideoTask)
+			assert.Equal(t, http.StatusTooManyRequests, full.Code, full.Body.String())
+			assert.Contains(t, full.Body.String(), controller.PlaygroundTaskQueueFullErrorCode)
+
+			// A workflow step owns a live run budget that cannot survive a wait,
+			// so it keeps the existing rejection even when the queue is enabled.
+			workflow := playgroundJSONRequest(t, 7, "/v1/videos", map[string]any{"model": "kling-v1", "prompt": "workflow"}, controller.PlaygroundVideoTask,
+				func(c *gin.Context) {
+					common.SetContextKey(c, constant.ContextKeyPlaygroundWorkflowRun, "pgw_"+strings.Repeat("a", 32))
+				})
+			assert.Equal(t, http.StatusTooManyRequests, workflow.Code, workflow.Body.String())
+			assert.Contains(t, workflow.Body.String(), controller.PlaygroundTaskLimitErrorCode)
+			var queuedCount int64
+			require.NoError(t, db.Model(&model.PlaygroundTaskQueueEntry{}).Count(&queuedCount).Error)
+			assert.EqualValues(t, 1, queuedCount)
+
+			usePlaygroundTaskQueue(t, false)
+			disabled := playgroundJSONRequest(t, 7, "/v1/videos", map[string]any{"model": "kling-v1", "prompt": "third"}, controller.PlaygroundVideoTask)
+			assert.Equal(t, http.StatusTooManyRequests, disabled.Code, disabled.Body.String())
+			assert.Contains(t, disabled.Body.String(), controller.PlaygroundTaskLimitErrorCode)
+			var count int64
+			require.NoError(t, db.Model(&model.PlaygroundTaskQueueEntry{}).Count(&count).Error)
+			assert.EqualValues(t, 1, count)
+
+			// Storage exhaustion takes precedence over queueing: waiting cannot
+			// free a result-storage budget, so it keeps the existing rejection.
+			usePlaygroundTaskQueue(t, true)
+			usePlaygroundQuotaDefaults(t, func(policy *playground_setting.PlaygroundQuotaPolicy) {
+				policy.TaskUserResultMaxBytes = 1024
+			})
+			snapshot := playgroundTaskDataFixture(2048)
+			stored := model.Task{TaskID: "pgq-stored", Platform: "sunoapi", UserId: 7, Status: model.TaskStatusSuccess,
+				SubmitTime: common.GetTimestamp(), FinishTime: common.GetTimestamp(),
+				Data: []byte(snapshot), PrivateData: model.TaskPrivateData{PlaygroundOrigin: true}}
+			require.NoError(t, db.Create(&stored).Error)
+			storage := playgroundJSONRequest(t, 7, "/v1/videos", map[string]any{"model": "kling-v1", "prompt": "fourth"}, controller.PlaygroundVideoTask)
+			assert.Equal(t, http.StatusTooManyRequests, storage.Code, storage.Body.String())
+			assert.Contains(t, storage.Body.String(), controller.PlaygroundTaskStorageLimitErrorCode)
+			require.NoError(t, db.Model(&model.PlaygroundTaskQueueEntry{}).Count(&count).Error)
+			assert.EqualValues(t, 1, count)
+
+			// Replaying the stored entry is a claim followed by the ordinary task
+			// insert; completion is rejected until that durable row exists.
+			won, err := model.ClaimPlaygroundTaskQueueEntry(queued[0].QueueID)
+			require.NoError(t, err)
+			require.True(t, won)
+			replayed := model.Task{TaskID: "pgq-replayed", Platform: "sunoapi", UserId: 7, Status: model.TaskStatusSubmitted,
+				SubmitTime: common.GetTimestamp(), PrivateData: model.TaskPrivateData{PlaygroundOrigin: true}}
+			require.NoError(t, db.Create(&replayed).Error)
+			require.NoError(t, model.CompletePlaygroundTaskQueueEntry(7, queued[0].QueueID, replayed.TaskID))
+			completed, err := model.GetPlaygroundTaskQueueEntry(7, queued[0].QueueID)
+			require.NoError(t, err)
+			assert.Equal(t, model.PlaygroundTaskQueueStatusSubmitted, completed.Status)
+			assert.Equal(t, replayed.TaskID, completed.TaskID)
+			replayedTask, exists, err := model.GetByTaskId(7, replayed.TaskID)
+			require.NoError(t, err)
+			require.True(t, exists)
+			require.NotNil(t, replayedTask)
 		})
 	}
 }

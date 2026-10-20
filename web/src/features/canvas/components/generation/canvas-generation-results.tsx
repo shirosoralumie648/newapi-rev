@@ -134,6 +134,11 @@ export function CanvasGenerationResults(props: CanvasGenerationResultsProps) {
                     {t('Task {{id}}', { id: cell.taskId })}
                   </span>
                 ) : null}
+                {cell.queuedEntryId ? (
+                  <span className='truncate' title={cell.queuedEntryId}>
+                    {t('Queued for later')}
+                  </span>
+                ) : null}
               </div>
               {request.adjustments.map((adjustment) => (
                 <p

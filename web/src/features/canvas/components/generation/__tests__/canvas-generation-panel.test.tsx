@@ -64,7 +64,11 @@ const artifactFixture: TaskArtifact = {
   content_url: `https://gateway.example.com/v1/tasks/t1/artifacts/output-1/content?access=${'a'.repeat(43)}`,
 }
 
-function mockTaskEndpoints(tasks: TaskLog[], artifacts: TaskArtifact[] = []) {
+function mockTaskEndpoints(
+  tasks: TaskLog[],
+  artifacts: TaskArtifact[] = [],
+  queueItems: Array<Record<string, unknown>> = []
+) {
   return vi.spyOn(api, 'get').mockImplementation(async (url) => {
     if (url.startsWith('/api/task/self')) {
       return {
@@ -73,6 +77,19 @@ function mockTaskEndpoints(tasks: TaskLog[], artifacts: TaskArtifact[] = []) {
     }
     if (url.endsWith('/artifacts')) {
       return { data: { success: true, data: { artifacts } } }
+    }
+    if (url.endsWith('/tasks/queue')) {
+      return {
+        data: {
+          success: true,
+          data: {
+            enabled: queueItems.length > 0,
+            items: queueItems,
+            max_queued: 20,
+            max_concurrency: 3,
+          },
+        },
+      }
     }
     throw new Error(`Unexpected GET ${url}`)
   })
@@ -400,6 +417,87 @@ test('comparison shares one seed and maps each model to its own size', async () 
   )
   expect(notices.length).toBeGreaterThan(0)
   expect(notices[0]).toBeVisible()
+})
+
+test('shows the server queue position and lets the owner cancel or jump', async () => {
+  mockTaskEndpoints(
+    [],
+    [],
+    [
+      {
+        id: 'pgq_1',
+        kind: 'video',
+        status: 'queued',
+        priority: 0,
+        position: 2,
+        estimated_wait_seconds: 120,
+        model: 'kling-v1',
+        prompt_preview: 'a queued fox',
+        created_at: 1700000000,
+      },
+    ]
+  )
+  const remove = vi.spyOn(api, 'delete').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        queue: {
+          id: 'pgq_1',
+          kind: 'video',
+          status: 'canceled',
+          priority: 0,
+          position: 0,
+          estimated_wait_seconds: 0,
+          model: 'kling-v1',
+          prompt_preview: 'a queued fox',
+          created_at: 1700000000,
+        },
+      },
+    },
+  })
+  const post = vi.spyOn(api, 'post').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        queue: {
+          id: 'pgq_1',
+          kind: 'video',
+          status: 'queued',
+          priority: 1,
+          position: 1,
+          estimated_wait_seconds: 60,
+          model: 'kling-v1',
+          prompt_preview: 'a queued fox',
+          created_at: 1700000000,
+        },
+      },
+    },
+  })
+  const user = userEvent.setup()
+  renderPanel()
+
+  expect(await screen.findByText('a queued fox')).toBeVisible()
+  expect(screen.getByText('Queue position: 2')).toBeVisible()
+  expect(screen.getByText('Estimated wait: 2m 0s')).toBeVisible()
+
+  await user.click(screen.getByRole('button', { name: 'Move to front' }))
+  await waitFor(() =>
+    expect(post).toHaveBeenCalledWith(
+      '/api/playground/tasks/queue/pgq_1/priority',
+      {},
+      expect.anything()
+    )
+  )
+
+  await user.click(
+    screen.getByRole('button', { name: 'Cancel queued generation' })
+  )
+  await waitFor(() =>
+    expect(remove).toHaveBeenCalledWith(
+      '/api/playground/tasks/queue/pgq_1',
+      expect.anything()
+    )
+  )
 })
 
 test('a model without image capability blocks the comparison before billing', async () => {

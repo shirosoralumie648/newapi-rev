@@ -116,6 +116,12 @@ const (
 	// copies it into the durable task's private metadata so a finished result
 	// can show its prompt, model and generation parameters.
 	ContextKeyPlaygroundGenerationParams ContextKey = "playground_generation_params"
+	// ContextKeyPlaygroundTaskQueueReplay marks a queued request replayed by
+	// the internal worker. If another submission took the last concurrency slot
+	// between selection and replay, the budget check must return the ordinary
+	// rejection instead of enqueueing a duplicate; the worker then releases the
+	// original entry back to the queue.
+	ContextKeyPlaygroundTaskQueueReplay ContextKey = "playground_task_queue_replay"
 
 	// ContextKeyImageTaskAsync marks an image generation request that runs as
 	// a durable task instead of waiting for the images inside the request. The

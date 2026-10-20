@@ -51,6 +51,7 @@ const defaultSecuritySettings: SecuritySettings = {
   'playground_setting.mcp': '{"enabled":false,"servers":[]}',
   'playground_setting.model_catalog': '{"groups":[],"models":[]}',
   'playground_setting.sandbox_preview_enabled': false,
+  'playground_setting.task_queue_enabled': false,
 }
 
 export function SecuritySettings() {
