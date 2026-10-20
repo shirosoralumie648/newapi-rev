@@ -949,6 +949,7 @@
     "Average latency, TTFT, and success rate by group": "Средняя задержка, TTFT и доля успешных запросов по группам",
     "Average latency, TTFT, TPS, and success rate": "Средняя задержка, TTFT, TPS и доля успешных запросов",
     "Average RPM": "Среднее число оборотов в минуту",
+    "Average time": "Average time",
     "Average time-to-first-token (TTFT) by group": "Среднее время до первого токена (TTFT) по группам",
     "Average tokens per second sustained per group": "Средняя устойчивая пропускная способность (токенов/с) по группам",
     "Average TPM": "Среднее число транзакций в минуту",
