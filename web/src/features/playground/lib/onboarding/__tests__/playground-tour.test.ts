@@ -18,7 +18,6 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 import type { TFunction } from 'i18next'
 import { beforeEach, expect, test } from 'vitest'
@@ -32,7 +31,7 @@ import {
 } from '../playground-tour'
 
 const t = ((key: string) => key) as TFunction
-const playgroundRoot = fileURLToPath(new URL('../../../', import.meta.url))
+const playgroundRoot = path.resolve(import.meta.dirname, '../../../')
 
 const selectorSources: Record<keyof typeof PLAYGROUND_TOUR_SELECTORS, string> =
   {
