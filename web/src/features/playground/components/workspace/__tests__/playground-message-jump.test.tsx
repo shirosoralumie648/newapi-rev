@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, test, vi } from 'vitest'
 
@@ -95,6 +95,30 @@ test('searching narrows the index and enter jumps to the message', async () => {
   await userEvent.keyboard('{Enter}')
 
   expect(onSelect).toHaveBeenCalledWith('message-42')
+})
+
+test('typing a new search returns the jump list to the top', async () => {
+  render(
+    <PlaygroundMessageJump
+      messages={manyMessages}
+      onOpenChange={vi.fn()}
+      onSelect={vi.fn()}
+      open
+    />
+  )
+
+  const list = screen.getByRole('listbox', { name: 'Jump to message' })
+  list.scrollTop = 640
+  fireEvent.scroll(list)
+
+  await userEvent.type(
+    screen.getByRole('textbox', {
+      name: 'Search messages in this conversation.',
+    }),
+    'Message'
+  )
+
+  expect(list.scrollTop).toBe(0)
 })
 
 test('an empty conversation explains why there is nothing to jump to', () => {

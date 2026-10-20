@@ -78,6 +78,7 @@ export function PlaygroundMessageJump(props: PlaygroundMessageJumpProps) {
       setQuery('')
       setSelectedIndex(0)
       setScrollTop(0)
+      if (listRef.current) listRef.current.scrollTop = 0
     }
     props.onOpenChange(open)
   }
@@ -142,6 +143,8 @@ export function PlaygroundMessageJump(props: PlaygroundMessageJumpProps) {
             onChange={(event) => {
               setQuery(event.target.value)
               setSelectedIndex(0)
+              setScrollTop(0)
+              if (listRef.current) listRef.current.scrollTop = 0
             }}
             onKeyDown={(event) => {
               if (event.key === 'ArrowDown') {
