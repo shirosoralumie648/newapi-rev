@@ -102,6 +102,9 @@ export function mergePlaygroundModelCatalog(
       ...(entry.limits?.contextLength !== undefined
         ? { contextLength: entry.limits.contextLength }
         : {}),
+      ...(entry.limits?.maxOutputTokens !== undefined
+        ? { maxOutputTokens: entry.limits.maxOutputTokens }
+        : {}),
     })
   }
 
