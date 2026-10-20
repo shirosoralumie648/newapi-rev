@@ -40,6 +40,10 @@ export interface PlaygroundUsageAnalyticsBucket {
   errors: number
   avgTimeSeconds: number
   avgFirstTokenMs: number
+  /** Requests that carried a wall-time measurement. */
+  timedRequests: number
+  /** Requests that carried a first-token measurement. */
+  firstTokenSamples: number
 }
 
 /**
@@ -78,9 +82,9 @@ export interface PlaygroundUsageTotals {
   cacheHitRate: number
   /** Error rows as a share of all recorded rows, in percent. */
   errorRate: number
-  /** Request-weighted average wall time, in seconds. */
+  /** Measurement-weighted average wall time, in seconds. */
   avgTimeSeconds: number
-  /** Request-weighted average first-token wait, in milliseconds. */
+  /** Measurement-weighted average first-token wait, in milliseconds. */
   avgFirstTokenMs: number
 }
 
@@ -126,13 +130,13 @@ export function summarizePlaygroundUsage(
       totals.apiQuota += bucket.quota
       totals.apiRequests += bucket.requests
     }
-    if (bucket.avgTimeSeconds > 0 && bucket.requests > 0) {
-      timeTotal += bucket.avgTimeSeconds * bucket.requests
-      timeWeight += bucket.requests
+    if (bucket.avgTimeSeconds > 0 && bucket.timedRequests > 0) {
+      timeTotal += bucket.avgTimeSeconds * bucket.timedRequests
+      timeWeight += bucket.timedRequests
     }
-    if (bucket.avgFirstTokenMs > 0 && bucket.requests > 0) {
-      firstTokenTotal += bucket.avgFirstTokenMs * bucket.requests
-      firstTokenWeight += bucket.requests
+    if (bucket.avgFirstTokenMs > 0 && bucket.firstTokenSamples > 0) {
+      firstTokenTotal += bucket.avgFirstTokenMs * bucket.firstTokenSamples
+      firstTokenWeight += bucket.firstTokenSamples
     }
   }
   if (totals.promptTokens > 0) {

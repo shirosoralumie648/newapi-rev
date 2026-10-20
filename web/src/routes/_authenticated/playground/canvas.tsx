@@ -28,6 +28,15 @@ import {
 } from '@/features/canvas/lib/canvas-navigation'
 import { isSidebarModuleEnabled } from '@/lib/nav-modules'
 
+const canvasInspectorViews = [
+  'details',
+  'assistant',
+  'generate',
+  'library',
+  'artifacts',
+  'history',
+] as const
+
 const canvasSearchSchema = z.object({
   project: z.string().optional(),
   prompt: z.string().optional(),
@@ -36,6 +45,7 @@ const canvasSearchSchema = z.object({
   message: z.string().optional(),
   attachment: z.string().optional(),
   artifact: z.string().optional(),
+  view: z.enum(canvasInspectorViews).optional(),
 })
 
 export const Route = createFileRoute('/_authenticated/playground/canvas')({
@@ -61,11 +71,15 @@ function CanvasPage() {
       <CanvasWorkspace
         artifactTarget={artifactTarget}
         generationPrefill={prefill}
+        initialInspectorView={search.view}
         initialProjectId={search.project}
         onGenerationPrefillApplied={() => {
           void navigate({
             to: '/playground/canvas',
-            search: search.project ? { project: search.project } : {},
+            search: {
+              ...(search.project ? { project: search.project } : {}),
+              ...(search.view ? { view: search.view } : {}),
+            },
             replace: true,
           })
         }}

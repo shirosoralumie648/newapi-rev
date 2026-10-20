@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { matchesShortcutBinding } from '@/lib/shortcuts'
+
 import {
   CANVAS_NODE_COLORS,
   CANVAS_NODE_KIND_LABELS,
@@ -29,6 +31,7 @@ import type {
   CanvasNodeData,
   CanvasNodeKind,
 } from '../types'
+import { CANVAS_NODE_SEARCH_BINDING } from './canvas-shortcuts'
 
 export type CanvasNodeSearchKind = CanvasNodeKind | 'all'
 
@@ -131,10 +134,5 @@ export function isCanvasNodeSearchShortcut(event: {
   altKey: boolean
   shiftKey: boolean
 }): boolean {
-  return (
-    (event.metaKey || event.ctrlKey) &&
-    !event.altKey &&
-    !event.shiftKey &&
-    event.key.toLowerCase() === 'p'
-  )
+  return matchesShortcutBinding(event, CANVAS_NODE_SEARCH_BINDING)
 }

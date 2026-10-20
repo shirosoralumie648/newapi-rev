@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { ErrorState } from '@/components/error-state'
+import { ShortcutsHelpDialog } from '@/components/shortcuts-help-dialog'
 import { Button } from '@/components/ui/button'
 import { restoreCanvasProject } from '@/features/canvas/api'
 import { CanvasSendDialog } from '@/features/canvas/components/canvas-send-dialog'
@@ -30,9 +31,16 @@ import {
   buildMessageCanvasSeeds,
   type CanvasSendSeed,
 } from '@/features/canvas/lib/canvas-send'
+import type { CanvasInspectorView } from '@/features/canvas/types'
 import { handleServerError } from '@/lib/handle-server-error'
 import { ROLE } from '@/lib/roles'
 import { getServerMessage } from '@/lib/server-error-message'
+import {
+  isEditableShortcutTarget,
+  isShortcutOverlayTarget,
+  isShortcutsHelpShortcut,
+  matchesShortcutBinding,
+} from '@/lib/shortcuts'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { getPlaygroundLogReplay, searchPlaygroundWeb } from './api'
@@ -45,7 +53,9 @@ import { PlaygroundCostStatus } from './components/input/playground-cost-status'
 import { PlaygroundInput } from './components/input/playground-input'
 import { PlaygroundQuoteBar } from './components/input/playground-quote-bar'
 import { PlaygroundSpeechDialog } from './components/message/playground-speech-dialog'
+import { PlaygroundCommandPalette } from './components/workspace/playground-command-palette'
 import { PlaygroundMemoryPanel } from './components/workspace/playground-memory-panel'
+import { PlaygroundMessageJump } from './components/workspace/playground-message-jump'
 import { PlaygroundMessageSearch } from './components/workspace/playground-message-search'
 import { PlaygroundPresetPanel } from './components/workspace/playground-preset-panel'
 import { PlaygroundSessionUsage } from './components/workspace/playground-session-usage'
@@ -97,6 +107,7 @@ import {
   createPendingQuote,
   developerOptionsActive,
   estimatePlaygroundCost,
+  exportPlaygroundSessionFile,
   forkPlaygroundSession,
   formatMemoryBlock,
   getCurrentVersion,
@@ -112,6 +123,13 @@ import {
   uploadPlaygroundAttachments,
   uploadPlaygroundSpeechAttachment,
 } from './lib'
+import { buildPlaygroundCommands } from './lib/command/playground-commands'
+import {
+  PLAYGROUND_COMMAND_PALETTE_BINDING,
+  PLAYGROUND_MESSAGE_JUMP_BINDING,
+  PLAYGROUND_MESSAGE_SEARCH_BINDING,
+  PLAYGROUND_SHORTCUTS,
+} from './lib/shortcuts/playground-shortcuts'
 import {
   buildMCPToolDeclarations,
   buildMCPToolRefs,
@@ -122,6 +140,7 @@ import type {
   Message,
   MessageAttachment,
   MessageSearchSnapshot,
+  PlaygroundExportFormat,
   PlaygroundMemoryExtractionSettings,
   PlaygroundPendingQuote,
   PlaygroundRouteTarget,
@@ -182,7 +201,12 @@ function PlaygroundContent(props: {
   const [highlightedMessageKey, setHighlightedMessageKey] = useState<
     string | null
   >(null)
+  // Bumped on every jump so selecting the same message again re-centers it.
+  const [highlightedMessageNonce, setHighlightedMessageNonce] = useState(0)
   const [messageSearchOpen, setMessageSearchOpen] = useState(false)
+  const [messageJumpOpen, setMessageJumpOpen] = useState(false)
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const appliedSessionRef = useRef<string | null>(null)
   // A replay deep link is applied at most once per log reference.
   const appliedReplayRef = useRef<string | null>(null)
@@ -949,15 +973,25 @@ function PlaygroundContent(props: {
 
   // A search hit switches to its conversation (which clears the previous
   // highlight) and marks the message the chat then scrolls into view.
+  const showHighlightedMessage = useCallback((messageKey: string) => {
+    setHighlightedMessageKey(messageKey)
+    setHighlightedMessageNonce((current) => current + 1)
+  }, [])
+
   const handleSelectSearchHit = useCallback(
     (sessionId: string, messageKey: string) => {
       if (sessionId !== activeSessionId) {
         if (sync.isLoading) return
         handleSwitchSession(sessionId)
       }
-      setHighlightedMessageKey(messageKey)
+      showHighlightedMessage(messageKey)
     },
-    [activeSessionId, handleSwitchSession, sync.isLoading]
+    [
+      activeSessionId,
+      handleSwitchSession,
+      showHighlightedMessage,
+      sync.isLoading,
+    ]
   )
 
   // Undo the compression node. The stored messages were never removed, so the
@@ -1228,6 +1262,117 @@ function PlaygroundContent(props: {
     setUsageOpen(false)
   }, [])
 
+  // Palette commands open a view instead of toggling it: choosing the view that
+  // is already open should leave it open.
+  const handleOpenInspectorView = useCallback(
+    (view: PlaygroundInspectorView) => {
+      setPresetsOpen(view === 'presets')
+      setMemoryOpen(view === 'memory')
+      setTrashOpen(view === 'trash')
+      setUsageOpen(view === 'usage')
+    },
+    []
+  )
+
+  const handleOpenCanvasView = useCallback(
+    (view: CanvasInspectorView) => {
+      props.onOpenCanvas?.({ view })
+    },
+    [props.onOpenCanvas]
+  )
+
+  const handleExportSession = useCallback(
+    async (format: PlaygroundExportFormat) => {
+      if (!canonicalSessionId) return
+      try {
+        await exportPlaygroundSessionFile(canonicalSessionId, format)
+        toast.success(t('Conversation exported'))
+      } catch (error) {
+        handleServerError(error, t('Unable to export the conversation.'))
+      }
+    },
+    [canonicalSessionId, t]
+  )
+
+  const handleSelectMessageJump = useCallback(
+    (messageKey: string) => {
+      setMessageJumpOpen(false)
+      showHighlightedMessage(messageKey)
+    },
+    [showHighlightedMessage]
+  )
+
+  const commands = useMemo(
+    () =>
+      buildPlaygroundCommands({
+        t,
+        sessions,
+        models,
+        activeSessionId,
+        protocol: config.protocol,
+        canExport: canonicalSessionId !== null,
+        actions: {
+          newConversation: handleCreateSession,
+          switchSession: handleSwitchSession,
+          useModel: (model) => updateConfig('model', model),
+          openInspector: handleOpenInspectorView,
+          openCanvas: handleOpenCanvasView,
+          switchProtocol: (protocol) => updateConfig('protocol', protocol),
+          exportSession: (format) => void handleExportSession(format),
+          openMessageSearch: () => setMessageSearchOpen(true),
+          openMessageJump: () => setMessageJumpOpen(true),
+          openShortcuts: () => setShortcutsOpen(true),
+        },
+      }),
+    [
+      activeSessionId,
+      canonicalSessionId,
+      config.protocol,
+      handleCreateSession,
+      handleExportSession,
+      handleOpenCanvasView,
+      handleOpenInspectorView,
+      handleSwitchSession,
+      models,
+      sessions,
+      t,
+      updateConfig,
+    ]
+  )
+
+  // Capture phase so the workspace owns Cmd/Ctrl+K before the global navigation
+  // search. Modifier chords still work while the composer has focus; plain
+  // characters such as `?` stay with the field, and open overlays own every key.
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return
+      if (isShortcutOverlayTarget(event.target)) return
+      if (matchesShortcutBinding(event, PLAYGROUND_COMMAND_PALETTE_BINDING)) {
+        event.preventDefault()
+        setCommandPaletteOpen(true)
+        return
+      }
+      if (matchesShortcutBinding(event, PLAYGROUND_MESSAGE_JUMP_BINDING)) {
+        event.preventDefault()
+        setMessageJumpOpen(true)
+        return
+      }
+      if (matchesShortcutBinding(event, PLAYGROUND_MESSAGE_SEARCH_BINDING)) {
+        event.preventDefault()
+        setMessageSearchOpen(true)
+        return
+      }
+      if (isEditableShortcutTarget(event.target)) return
+      if (isShortcutsHelpShortcut(event)) {
+        event.preventDefault()
+        setShortcutsOpen(true)
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown, { capture: true })
+    return () =>
+      document.removeEventListener('keydown', handleKeyDown, { capture: true })
+  }, [])
+
   const handleOpenPresets = useCallback(
     () => handleToggleInspector('presets'),
     [handleToggleInspector]
@@ -1335,8 +1480,8 @@ function PlaygroundContent(props: {
   const requestedMessage = props.target?.message
   useEffect(() => {
     if (!requestedMessage || sync.isLoading) return
-    setHighlightedMessageKey(requestedMessage)
-  }, [requestedMessage, sync.isLoading])
+    showHighlightedMessage(requestedMessage)
+  }, [requestedMessage, showHighlightedMessage, sync.isLoading])
 
   const updateLoadedConfig = useCallback<typeof updateConfig>(
     (key, value) => {
@@ -1380,6 +1525,8 @@ function PlaygroundContent(props: {
         onDelete={handleDeleteSession}
         onImportFile={handleImportConversation}
         onOpenMessageSearch={() => setMessageSearchOpen(true)}
+        onOpenCommandPalette={() => setCommandPaletteOpen(true)}
+        onOpenShortcuts={() => setShortcutsOpen(true)}
         onOpenPresets={handleOpenPresets}
         onOpenTrash={handleOpenTrash}
         onOrganize={handleOrganizeSession}
@@ -1490,6 +1637,7 @@ function PlaygroundContent(props: {
               onQuoteMessage={handleQuoteMessage}
               onForkMessage={handleForkMessage}
               highlightedMessageKey={highlightedMessageKey}
+              highlightedMessageNonce={highlightedMessageNonce}
               onReadAloud={activeSession ? handleReadAloud : undefined}
               onEditMessage={handleEditMessage}
               onDeleteMessage={handleDeleteMessage}
@@ -1716,6 +1864,22 @@ function PlaygroundContent(props: {
         onSelect={handleSelectSearchHit}
         open={messageSearchOpen}
         sessions={sessions}
+      />
+      <PlaygroundMessageJump
+        messages={messages}
+        onOpenChange={setMessageJumpOpen}
+        onSelect={handleSelectMessageJump}
+        open={messageJumpOpen}
+      />
+      <PlaygroundCommandPalette
+        commands={commands}
+        onOpenChange={setCommandPaletteOpen}
+        open={commandPaletteOpen}
+      />
+      <ShortcutsHelpDialog
+        onOpenChange={setShortcutsOpen}
+        open={shortcutsOpen}
+        shortcuts={PLAYGROUND_SHORTCUTS}
       />
     </>
   )

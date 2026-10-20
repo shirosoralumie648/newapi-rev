@@ -194,6 +194,12 @@ func TestClaudeTokenCountingEndpointRequiresAuthAndAvailableModel(t *testing.T) 
 // is written, and that log carries the Playground origin marker.
 func TestPlaygroundBridgesBillThroughRelayAndMarkOrigin(t *testing.T) {
 	setupRelayRouterTestDB(t)
+	// Production enables request-token estimation in common.Init. The TTS
+	// bridge bills its prompt tokens from that estimate, so the route test must
+	// set the same switch it would have at startup.
+	originalCountToken := constant.CountToken
+	constant.CountToken = true
+	t.Cleanup(func() { constant.CountToken = originalCountToken })
 	require.NoError(t, model.DB.AutoMigrate(
 		&model.Channel{}, &model.Ability{}, &model.Log{}, &model.UserSession{},
 		// The relay bills through the ordinary subscription/wallet pipeline,

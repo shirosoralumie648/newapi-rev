@@ -63,7 +63,7 @@ export function isAnonymousParallelMessage(
 
 /** Stable display label of one anonymous reply; the real model stays hidden. */
 export function anonymousParallelModelLabel(versionIndex: number): string {
-  return versionIndex === 1 ? t('Model B') : t('Model A')
+  return versionIndex % 2 === 1 ? t('Model B') : t('Model A')
 }
 
 /**

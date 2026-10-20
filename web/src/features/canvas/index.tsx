@@ -68,11 +68,17 @@ import {
   type CanvasGenerationPrefill,
 } from './lib/canvas-navigation'
 import type { CanvasSourceTarget } from './lib/canvas-navigation'
-import type { CanvasProjectMode, CanvasServerDocument } from './types'
+import type {
+  CanvasInspectorView,
+  CanvasProjectMode,
+  CanvasServerDocument,
+} from './types'
 
 interface CanvasWorkspaceProps {
   /** Project to open on first load; overrides the last-used selection. */
   initialProjectId?: string
+  /** Inspector view a palette command or deep link opens on the board. */
+  initialInspectorView?: CanvasInspectorView
   /** Task node a conversation message action asked to prefill. */
   generationPrefill?: CanvasGenerationPrefill | null
   /** Saved artifact a conversation creation or canvas link opens. */
@@ -87,6 +93,7 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps) {
     <CanvasWorkspaceContent
       key={userId ?? 'signed-out'}
       initialProjectId={props.initialProjectId}
+      initialInspectorView={props.initialInspectorView}
       generationPrefill={props.generationPrefill}
       artifactTarget={props.artifactTarget}
       onGenerationPrefillApplied={props.onGenerationPrefillApplied}
@@ -337,6 +344,7 @@ function CanvasWorkspaceContent(props: CanvasWorkspaceProps) {
         artifactTarget={props.artifactTarget}
         disabled={status === 'loading'}
         generationPrefill={props.generationPrefill}
+        initialInspectorView={props.initialInspectorView}
         onBeforeExportArchive={controller.flushNow}
         onChange={handleDocumentChange}
         onGenerationPrefillApplied={props.onGenerationPrefillApplied}

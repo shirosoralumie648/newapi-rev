@@ -31,7 +31,10 @@ beforeAll(() => {
     'Anonymous comparison': 'Anonymous comparison',
     'B better': 'B better',
     'Both bad': 'Both bad',
+    Channel: 'Channel',
     'Comparing {{count}} models': 'Comparing {{count}} models',
+    'From the settled consume log': 'From the settled consume log',
+    'Group ratio': 'Group ratio',
     'In use': 'In use',
     'Instance votes': 'Instance votes',
     'Model A': 'Model A',
@@ -40,11 +43,13 @@ beforeAll(() => {
     Notes: 'Notes',
     'Preference vote': 'Preference vote',
     'Reply from {{model}}': 'Reply from {{model}}',
+    'Request diagnostics': 'Request diagnostics',
     'Responding...': 'Responding...',
     'Retry this reply': 'Retry this reply',
     'Save note': 'Save note',
     'Select one reply to continue the conversation':
       'Select one reply to continue the conversation',
+    'Settled quota': 'Settled quota',
     Tie: 'Tie',
     'Total votes: {{count}}': 'Total votes: {{count}}',
     'Use this reply': 'Use this reply',
@@ -238,6 +243,80 @@ describe('PlaygroundParallelCompare anonymous arena', () => {
     ).toBeInTheDocument()
     expect(screen.queryByText(/gpt-4o/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/gpt-4/i)).not.toBeInTheDocument()
+  })
+
+  test('redacts real model names from a failed anonymous reply', () => {
+    const message = anonymousMessage({
+      status: 'error',
+      versions: [
+        {
+          id: 'v1',
+          content: 'Request failed for gpt-4o.',
+          model: 'gpt-4o',
+          status: 'error',
+          errorCode: null,
+        },
+        {
+          id: 'v2',
+          content: 'gpt-4 also failed.',
+          model: 'gpt-4',
+          status: 'error',
+          errorCode: null,
+        },
+      ],
+    })
+
+    render(
+      <PlaygroundParallelCompare message={message} onArenaVote={vi.fn()} />
+    )
+
+    const first = screen.getByRole('region', { name: 'Reply from Model A' })
+    const second = screen.getByRole('region', { name: 'Reply from Model B' })
+    expect(
+      within(first).getByText(/Request failed for Model A/)
+    ).toBeInTheDocument()
+    expect(within(second).getByText(/Model B also failed/)).toBeInTheDocument()
+    expect(screen.queryByText(/gpt-4o/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/gpt-4/i)).not.toBeInTheDocument()
+  })
+
+  test('hides the serving channel from anonymous diagnostics', async () => {
+    const user = userEvent.setup()
+    const message = anonymousMessage()
+    message.versions[0] = { ...message.versions[0], requestId: 'req-a' }
+
+    render(
+      <PlaygroundParallelCompare
+        costs={
+          new Map([
+            [
+              'req-a',
+              {
+                requestId: 'req-a',
+                quota: 1234,
+                promptTokens: 10,
+                completionTokens: 20,
+                totalTokens: 30,
+                modelName: 'gpt-4o',
+                createdAt: 0,
+                channelKey: '#4821',
+                channelName: 'Secret relay',
+                groupRatio: 2,
+              },
+            ],
+          ])
+        }
+        message={message}
+        onArenaVote={vi.fn()}
+      />
+    )
+
+    await user.hover(screen.getByText('Request diagnostics'))
+
+    expect(await screen.findByText('Group ratio')).toBeVisible()
+    expect(screen.queryByText('Channel')).not.toBeInTheDocument()
+    expect(screen.queryByText('Secret relay · #4821')).not.toBeInTheDocument()
+    expect(screen.queryByText(/#4821/)).not.toBeInTheDocument()
   })
 
   test('offers the four raw choices and stores the optional note with the vote', async () => {
