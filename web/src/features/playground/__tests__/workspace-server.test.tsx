@@ -26,6 +26,7 @@ import { useAuthStore } from '@/stores/auth-store'
 
 import { DEFAULT_CONFIG, DEFAULT_PARAMETER_ENABLED } from '../constants'
 import { Playground } from '../index'
+import { savePlaygroundOnboardingState } from '../lib/onboarding/playground-onboarding'
 
 vi.mock('@visactor/react-vchart', () => ({ VChart: () => null }))
 vi.mock('@visactor/vchart', () => ({
@@ -69,6 +70,13 @@ beforeEach(() => {
     value: () => [],
   })
   localStorage.clear()
+  // These tests exercise the workspace, not the first-visit welcome card.
+  for (const userId of [7, 8]) {
+    savePlaygroundOnboardingState(userId, {
+      welcomeSeen: true,
+      tourCompleted: true,
+    })
+  }
   useAuthStore.getState().auth.setUser({ id: 7, username: 'seven', role: 1 })
 })
 afterEach(() => {
