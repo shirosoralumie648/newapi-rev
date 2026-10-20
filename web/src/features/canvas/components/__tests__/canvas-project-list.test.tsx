@@ -116,6 +116,28 @@ test('creates an image workbench project from the list header', async () => {
   expect(onCreate).toHaveBeenCalledWith('image')
 })
 
+test('creates a video workbench project from the list header', async () => {
+  const user = userEvent.setup()
+  const onCreate = vi.fn()
+  render(
+    <CanvasProjectList
+      activeProjectId={null}
+      onCreate={onCreate}
+      onDelete={vi.fn()}
+      onRename={vi.fn()}
+      onSelect={vi.fn()}
+      projects={[]}
+    />
+  )
+
+  await user.click(screen.getByRole('button', { name: 'New canvas' }))
+  await user.click(
+    await screen.findByRole('menuitem', { name: 'Video workbench' })
+  )
+  expect(onCreate).toHaveBeenCalledTimes(1)
+  expect(onCreate).toHaveBeenCalledWith('video')
+})
+
 test('confirms before moving a canvas to the trash', async () => {
   const user = userEvent.setup()
   const onDelete = vi.fn()

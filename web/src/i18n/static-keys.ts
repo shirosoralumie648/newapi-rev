@@ -1615,4 +1615,10 @@ export const STATIC_I18N_KEYS = [
   'Conversations',
   'Protocol',
   'Help',
+  // Video workbench frame capture (CV-10): CANVAS_VIDEO_FRAME_MESSAGES values
+  // travel through CanvasVideoFrameError.messageKey before t(value).
+  'The video frame is not ready yet.',
+  'The frame could not be captured.',
+  'The captured frame is larger than the attachment limit.',
+  'The captured frame could not be added to the canvas.',
 ] as const

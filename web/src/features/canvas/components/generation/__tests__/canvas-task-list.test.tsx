@@ -72,14 +72,20 @@ function mockTaskEndpoint(tasks: TaskLog[]) {
   })
 }
 
-function renderTaskList() {
+function renderTaskList(options: { onlyActive?: boolean } = {}) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   render(
     <I18nextProvider i18n={testI18n}>
       <QueryClientProvider client={client}>
-        <CanvasTaskList active onSendToCanvas={vi.fn()} showFilters search='' />
+        <CanvasTaskList
+          active
+          onSendToCanvas={vi.fn()}
+          onlyActive={options.onlyActive}
+          showFilters
+          search=''
+        />
       </QueryClientProvider>
     </I18nextProvider>
   )
@@ -169,4 +175,40 @@ test('a filter without matching task rows shows the filtered empty state', async
   expect(
     screen.queryByText('Start a generation and its status appears here.')
   ).not.toBeInTheDocument()
+})
+
+const runningTask: TaskLog = {
+  ...generatedTask,
+  id: 22,
+  task_id: 'task-video-running',
+  status: 'IN_PROGRESS',
+  progress: '45%',
+  finish_time: 0,
+  generation: {
+    kind: 'video',
+    prompt: 'a slow ocean pan',
+    model: 'veo-3',
+    size: '1280x720',
+    duration: 5,
+  },
+}
+
+test('the active queue hides settled tasks and keeps progress visible', async () => {
+  mockTaskEndpoint([generatedTask, runningTask])
+  renderTaskList({ onlyActive: true })
+
+  expect(await screen.findByText('a slow ocean pan')).toBeVisible()
+  expect(screen.queryByText('a red fox in snow')).not.toBeInTheDocument()
+  expect(screen.getByText('GENERATE · 45%')).toBeVisible()
+  expect(screen.getByText('Duration 5s')).toBeVisible()
+})
+
+test('the active queue reports when nothing is running', async () => {
+  mockTaskEndpoint([generatedTask])
+  renderTaskList({ onlyActive: true })
+
+  expect(await screen.findByText('No generations are running.')).toBeVisible()
+  expect(
+    screen.getByText('Running and waiting generations appear here.')
+  ).toBeVisible()
 })

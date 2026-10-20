@@ -53,10 +53,11 @@ export function useCanvasVideoFrameActions(
   const createImageWorkbenchFromFrame = useCallback(
     async (file: File): Promise<string> => {
       const suffix = t('Frame')
-      const title = [sourceTitle.trim(), suffix]
-        .filter(Boolean)
-        .join(' · ')
+      const title = Array.from(
+        [sourceTitle.trim(), suffix].filter(Boolean).join(' · ')
+      )
         .slice(0, 200)
+        .join('')
       const project = await createCanvasProject({
         clientId: nanoid(),
         title,
