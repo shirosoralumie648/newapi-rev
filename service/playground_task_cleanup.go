@@ -46,7 +46,14 @@ func (playgroundTaskCleanupHandler) Run(ctx context.Context, task *model.SystemT
 		failSystemTask(task, runnerID, err)
 		return
 	}
-	if err := model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusSucceeded, map[string]any{"deleted_count": deleted}, ""); err != nil {
+	// Terminal queue rows are only an audit and dequeue-transition surface;
+	// queued/submitting rows are never removed because they are accepted work.
+	queueDeleted, err := model.DeleteTerminalPlaygroundTaskQueueEntries(cutoff, playgroundTaskCleanupBatch)
+	if err != nil {
+		failSystemTask(task, runnerID, err)
+		return
+	}
+	if err := model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusSucceeded, map[string]any{"deleted_count": deleted, "queue_deleted_count": queueDeleted}, ""); err != nil {
 		logSystemTaskLockError(ctx, task, err)
 	}
 }

@@ -25,15 +25,19 @@ import {
 } from '../../../constants'
 import type { Message } from '../../../types'
 import {
+  anonymizeParallelMessage,
+  anonymousParallelModelLabel,
   appendParallelMessagePair,
   applyParallelCompletionChoice,
   applyParallelVersionError,
   createParallelReplyMessage,
   getParallelPromptMessages,
   interruptParallelMessage,
+  isAnonymousParallelMessage,
   isParallelMessage,
   isPendingParallelVersion,
   normalizeParallelModels,
+  redactAnonymousParallelContent,
   settleParallelMessage,
   startParallelVersionRetry,
 } from '../parallel-compare-utils'
@@ -230,5 +234,75 @@ describe('one compared reply at a time', () => {
       ERROR_MESSAGES.INTERRUPTED
     )
     expect(interrupted.status).toBe(MESSAGE_STATUS.COMPLETE)
+  })
+})
+
+describe('anonymous A/B arena groups', () => {
+  test('only an exact two-model comparison is anonymous', () => {
+    expect(
+      isAnonymousParallelMessage(
+        createParallelReplyMessage(['gpt-4o', 'claude-3'], 100, undefined, true)
+      )
+    ).toBe(true)
+    expect(
+      isAnonymousParallelMessage(
+        createParallelReplyMessage(['gpt-4o', 'claude-3'], 100)
+      )
+    ).toBe(false)
+
+    const three = createParallelReplyMessage(
+      ['gpt-4o', 'claude-3', 'gemini-pro'],
+      100,
+      undefined,
+      true
+    )
+    expect(three.anonymous).toBeUndefined()
+    expect(isAnonymousParallelMessage(three)).toBe(false)
+  })
+
+  test('stable labels replace the compared model names', () => {
+    expect(anonymousParallelModelLabel(0)).toBe('Model A')
+    expect(anonymousParallelModelLabel(1)).toBe('Model B')
+    expect(anonymousParallelModelLabel(7)).toBe('Model B')
+  })
+
+  test('render copy removes names from replies and reasoning, longest name first', () => {
+    const group = createParallelReplyMessage(
+      ['gpt-4o', 'gpt-4'],
+      100,
+      undefined,
+      true
+    )
+    group.versions[0].content = 'GPT-4O answered first.'
+    group.versions[1].content = 'gpt-4 failed with gpt-4o visible.'
+    group.reasoning = {
+      content: 'Comparing gpt-4 and gpt-4o.',
+      duration: 12,
+    }
+
+    const safe = anonymizeParallelMessage(group)
+
+    expect(safe).not.toBe(group)
+    expect(safe.versions[0].model).toBeUndefined()
+    expect(safe.versions[1].model).toBeUndefined()
+    expect(safe.versions[0].content).toBe('Model A answered first.')
+    expect(safe.versions[1].content).toBe(
+      'Model B failed with Model A visible.'
+    )
+    expect(safe.reasoning?.content).toBe('Comparing Model B and Model A.')
+    // The original message keeps the real models for retry and continuation.
+    expect(group.versions[0].model).toBe('gpt-4o')
+    expect(group.versions[1].model).toBe('gpt-4')
+  })
+
+  test('ordinary comparisons are returned unchanged', () => {
+    const group = comparisonGroup()
+    expect(anonymizeParallelMessage(group)).toBe(group)
+  })
+
+  test('redaction leaves text untouched without a model name', () => {
+    expect(redactAnonymousParallelContent('Plain reply.', ['gpt-4o', ''])).toBe(
+      'Plain reply.'
+    )
   })
 })

@@ -94,9 +94,12 @@ export function useCanvasGenerationBatch(): CanvasGenerationBatchState {
           budgetRunId
         )
         if (outcome.kind === 'task') return { taskId: outcome.taskId }
+        if (outcome.kind === 'queued') {
+          return { queuedEntryId: outcome.entry.id }
+        }
         return { images: outcome.images }
       }
-      const taskId = await submitVideoGeneration(
+      const outcome = await submitVideoGeneration(
         {
           model: request.model,
           prompt: request.prompt,
@@ -108,7 +111,10 @@ export function useCanvasGenerationBatch(): CanvasGenerationBatchState {
         signal,
         budgetRunId
       )
-      return taskId ? { taskId } : {}
+      if (outcome.kind === 'queued') {
+        return { queuedEntryId: outcome.entry.id }
+      }
+      return outcome.taskId ? { taskId: outcome.taskId } : {}
     },
     []
   )
