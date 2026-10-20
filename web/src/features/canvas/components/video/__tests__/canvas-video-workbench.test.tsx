@@ -376,7 +376,8 @@ test('captures the current frame and adds it as an image node', async () => {
 })
 
 test('refuses a frame when the step already consumes four images', async () => {
-  const step = videoStep()
+  const fixture = bloodline()
+  const step = fixture.nodes[0]
   const images = Array.from({ length: 4 }, (_, index) =>
     flowNode(`image-${index}`, 'image', 0, index * 80, {
       ref: { sessionId: 'c1', attachmentId: `a${index}` },
@@ -389,13 +390,14 @@ test('refuses a frame when the step already consumes four images', async () => {
   })
   vi.mocked(canvasDropEntries).mockResolvedValue([])
   renderWorkbench(
-    [step, ...images],
-    images.map((image) => flowEdge(image.id, step.id))
+    [...fixture.nodes, ...images],
+    [...fixture.edges, ...images.map((image) => flowEdge(image.id, step.id))]
   )
 
   await userEvent
     .setup()
     .click(screen.getByRole('button', { name: 'Capture frame' }))
+  expect(await screen.findByText('Captured at 2.0s')).toBeInTheDocument()
   await userEvent
     .setup()
     .click(screen.getByRole('button', { name: 'Add to canvas' }))
