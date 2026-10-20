@@ -89,6 +89,8 @@ interface ModelOption {
   priceLabel?: string
   /** Context window in tokens, shown beside the price. */
   contextLength?: number
+  /** Recommended output ceiling in tokens, shown beside the context window. */
+  maxOutputTokens?: number
   /** Already translated capability tags shown beside the price. */
   capabilityLabels?: string[]
 }
@@ -768,8 +770,12 @@ export const ModelGroupSelector: React.FC<ModelGroupSelectorProps> = ({
 
   const renderModelItem = (model: ModelOption) => {
     const contextLength = model.contextLength ?? 0
+    const maxOutputTokens = model.maxOutputTokens ?? 0
     const hasMeta = Boolean(
-      model.priceLabel || contextLength > 0 || model.capabilityLabels?.length
+      model.priceLabel ||
+      contextLength > 0 ||
+      maxOutputTokens > 0 ||
+      model.capabilityLabels?.length
     )
     return (
       <CommandItem
@@ -812,6 +818,11 @@ export const ModelGroupSelector: React.FC<ModelGroupSelectorProps> = ({
               ))}
             <span className='truncate'>{model.label}</span>
           </span>
+          {model.description && (
+            <span className='text-muted-foreground truncate text-[10px] leading-4'>
+              {model.description}
+            </span>
+          )}
           {hasMeta && (
             <span className='text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] leading-4'>
               {model.priceLabel && (
@@ -821,6 +832,13 @@ export const ModelGroupSelector: React.FC<ModelGroupSelectorProps> = ({
                 <span className='shrink-0'>
                   {t('{{tokens}} context', {
                     tokens: formatCompactNumber(contextLength, locale),
+                  })}
+                </span>
+              )}
+              {maxOutputTokens > 0 && (
+                <span className='shrink-0'>
+                  {t('{{tokens}} max output', {
+                    tokens: formatCompactNumber(maxOutputTokens, locale),
                   })}
                 </span>
               )}

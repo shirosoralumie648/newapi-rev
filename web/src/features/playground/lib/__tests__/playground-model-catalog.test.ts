@@ -81,6 +81,7 @@ describe('mergePlaygroundModelCatalog', () => {
       categoryDescription: 'Everyday use',
       capabilities: ['tools'],
       contextLength: 128000,
+      maxOutputTokens: 16384,
       catalogDefaults: { temperature: 0, topP: 1, maxTokens: 2048 },
     })
     expect(merged[1]).toMatchObject({

@@ -27,8 +27,10 @@ const models = [
     value: 'gpt-4o',
     category: 'Recommended',
     categoryDescription: 'Everyday use',
+    description: 'Curated description',
     icon: '✨',
     priceLabel: '$1 / 1M',
+    maxOutputTokens: 16384,
   },
   { label: 'raw-model', value: 'raw-model' },
 ]
@@ -55,6 +57,8 @@ test('renders catalog sections and starts a session without selecting', () => {
 
   expect(screen.getByText('Recommended')).toBeInTheDocument()
   expect(screen.getByText('Everyday use')).toBeInTheDocument()
+  expect(screen.getByText('Curated description')).toBeInTheDocument()
+  expect(screen.getByText(/max output/)).toBeInTheDocument()
   expect(screen.getByText('Other')).toBeInTheDocument()
   expect(screen.getByText('raw-model')).toBeInTheDocument()
 

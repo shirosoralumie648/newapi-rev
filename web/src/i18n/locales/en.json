@@ -137,6 +137,7 @@
     "{{target}} test failed": "{{target}} test failed",
     "{{target}} test succeeded": "{{target}} test succeeded",
     "{{tokens}} context": "{{tokens}} context",
+    "{{tokens}} max output": "{{tokens}} max output",
     "{{total}} models · {{syncable}} syncable · {{skipped}} skipped this time": "{{total}} models · {{syncable}} syncable · {{skipped}} skipped this time",
     "{{unit}} tokens": "{{unit}} tokens",
     "{{used}} of {{limit}}": "{{used}} of {{limit}}",
