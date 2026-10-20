@@ -26,7 +26,6 @@ import {
   MessageSquarePlusIcon,
   NotepadTextIcon,
   SlidersHorizontal,
-  Sparkles,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
