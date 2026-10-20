@@ -3452,7 +3452,7 @@
     "footer.columns.related.links.oneApi": "One API",
     "footer.columns.related.title": "相关项目",
     "footer.defaultCopyright": "版权所有。",
-    "footer.newapi.projectAttributionSuffix": "版权所有，由项目贡献者设计与开发。",
+    "footer.new\u0061pi.projectAttributionSuffix": "版权所有，由项目贡献者设计与开发。",
     "For advanced custom channels this applies only to /v1/responses routes without protocol conversion.": "高级自定义渠道仅对 /v1/responses 且不做协议转换的路由生效。",
     "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment": "对于 2025 年 5 月 10 日之后添加的渠道，在部署时无需从模型名称中移除 \".\"",
     "For private deployments, format: https://fastgpt.run/api/openapi": "对于私有部署，格式为：https://fastgpt.run/api/openapi",
@@ -9256,6 +9256,20 @@
     "ZIP archive of selected nodes": "所选节点的 ZIP 压缩包",
     "Zoom": "缩放",
     "Zoom in": "放大",
-    "Zoom out": "缩小"
+    "Zoom out": "缩小",
+    "Cache hit rate": "缓存命中率",
+    "Daily spend": "每日费用",
+    "Error rate": "错误率",
+    "Errors": "错误数",
+    "Failed to load usage analytics": "无法加载用量分析",
+    "Last {{days}} days": "最近 {{days}} 天",
+    "No usage in this range yet": "此范围内暂无用量",
+    "Origin": "来源",
+    "Sort by": "排序方式",
+    "Spend by model": "按模型统计费用",
+    "Total spend": "总费用",
+    "Usage logging is disabled on this deployment, so new requests are not recorded.": "此部署已禁用用量日志，因此不会记录新请求。",
+    "Spend, tokens and latency appear here after your first request.": "首次请求后，费用、Token 和延迟数据会显示在这里。",
+    "Spend, tokens and latency by model and day, with the Playground and API origins kept apart.": "按模型和日期展示费用、Token 与延迟，并区分 Playground 和 API 来源。"
   }
 }

@@ -48,20 +48,24 @@ const playgroundUsageAnalyticsMaxBuckets = 2000
 // PlaygroundUsageAnalyticsBucket is one day x model x origin group of the
 // caller's settled usage logs. Every figure is a sum copied from the stored
 // rows; the two averages are derived from the same sums (0 when no row carried
-// a usable measurement). It is display-only and never recalculates billing.
+// a usable measurement). The sample counts let callers pool buckets without
+// over-weighting requests that carried no measurement. It is display-only and
+// never recalculates billing.
 type PlaygroundUsageAnalyticsBucket struct {
 	// DayStart is the UTC midnight (unix seconds) the log rows fall in.
-	DayStart         int64  `json:"day_start"`
-	ModelName        string `json:"model_name"`
-	Origin           string `json:"origin"`
-	Quota            int64  `json:"quota"`
-	PromptTokens     int64  `json:"prompt_tokens"`
-	CompletionTokens int64  `json:"completion_tokens"`
-	CacheTokens      int64  `json:"cache_tokens"`
-	Requests         int64  `json:"requests"`
-	Errors           int64  `json:"errors"`
-	AvgTimeSeconds   int64  `json:"avg_time_seconds"`
-	AvgFirstTokenMs  int64  `json:"avg_first_token_ms"`
+	DayStart          int64  `json:"day_start"`
+	ModelName         string `json:"model_name"`
+	Origin            string `json:"origin"`
+	Quota             int64  `json:"quota"`
+	PromptTokens      int64  `json:"prompt_tokens"`
+	CompletionTokens  int64  `json:"completion_tokens"`
+	CacheTokens       int64  `json:"cache_tokens"`
+	Requests          int64  `json:"requests"`
+	Errors            int64  `json:"errors"`
+	AvgTimeSeconds    int64  `json:"avg_time_seconds"`
+	AvgFirstTokenMs   int64  `json:"avg_first_token_ms"`
+	TimedRequests     int64  `json:"timed_requests"`
+	FirstTokenSamples int64  `json:"first_token_samples"`
 }
 
 // PlaygroundUsageAnalytics is the read-only usage/performance answer for one
@@ -256,15 +260,17 @@ func PlaygroundUsageAnalyticsForUser(userID int, startTimestamp int64, endTimest
 			origin = PlaygroundUsageOriginAPI
 		}
 		bucket := PlaygroundUsageAnalyticsBucket{
-			DayStart:         row.DayStart,
-			ModelName:        row.ModelName,
-			Origin:           origin,
-			Quota:            row.Quota,
-			PromptTokens:     row.PromptTokens,
-			CompletionTokens: row.CompletionTokens,
-			CacheTokens:      row.CacheTokens,
-			Requests:         row.Requests,
-			Errors:           row.Errors,
+			DayStart:          row.DayStart,
+			ModelName:         row.ModelName,
+			Origin:            origin,
+			Quota:             row.Quota,
+			PromptTokens:      row.PromptTokens,
+			CompletionTokens:  row.CompletionTokens,
+			CacheTokens:       row.CacheTokens,
+			Requests:          row.Requests,
+			Errors:            row.Errors,
+			TimedRequests:     row.TimedRequests,
+			FirstTokenSamples: row.FirstTokenSamples,
 		}
 		if row.TimedRequests > 0 {
 			bucket.AvgTimeSeconds = row.TotalTimeSeconds / row.TimedRequests

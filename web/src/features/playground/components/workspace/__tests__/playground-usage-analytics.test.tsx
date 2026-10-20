@@ -76,6 +76,8 @@ const analytics = {
       errors: 0,
       avg_time_seconds: 4,
       avg_first_token_ms: 300,
+      timed_requests: 2,
+      first_token_samples: 2,
     },
     {
       day_start: windowStart,
@@ -89,6 +91,8 @@ const analytics = {
       errors: 1,
       avg_time_seconds: 8,
       avg_first_token_ms: 700,
+      timed_requests: 1,
+      first_token_samples: 1,
     },
   ],
 }
@@ -225,6 +229,8 @@ test('exporting writes the displayed rows as a CSV file', async () => {
         errors: 0,
         avg_time_seconds: 0,
         avg_first_token_ms: 0,
+        timed_requests: 0,
+        first_token_samples: 0,
       },
     ],
   })

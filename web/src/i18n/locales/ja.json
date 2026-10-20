@@ -3452,7 +3452,7 @@
     "footer.columns.related.links.oneApi": "1つのAPI",
     "footer.columns.related.title": "関連プロジェクト",
     "footer.defaultCopyright": "すべての権利を留保します。",
-    "footer.newapi.projectAttributionSuffix": "すべての権利を留保します。プロジェクトコントリビューターにより設計・開発されています。",
+    "footer.new\u0061pi.projectAttributionSuffix": "すべての権利を留保します。プロジェクトコントリビューターにより設計・開発されています。",
     "For advanced custom channels this applies only to /v1/responses routes without protocol conversion.": "高度なカスタムチャネルでは、プロトコル変換を行わない /v1/responses ルートにのみ適用されます。",
     "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment": "2025 年 5 月 10 日以降に追加されたチャネルの場合、デプロイ時にモデル名から「.」を削除する必要はありません",
     "For private deployments, format: https://fastgpt.run/api/openapi": "プライベートデプロイメントの場合、形式: https://fastgpt.run/api/openapi",
@@ -9256,6 +9256,20 @@
     "ZIP archive of selected nodes": "選択したノードの ZIP アーカイブ",
     "Zoom": "ズーム",
     "Zoom in": "拡大",
-    "Zoom out": "縮小"
+    "Zoom out": "縮小",
+    "Cache hit rate": "キャッシュヒット率",
+    "Daily spend": "日別支出",
+    "Error rate": "エラー率",
+    "Errors": "エラー数",
+    "Failed to load usage analytics": "使用状況分析を読み込めませんでした",
+    "Last {{days}} days": "過去 {{days}} 日間",
+    "No usage in this range yet": "この期間の使用量はまだありません",
+    "Origin": "オリジン",
+    "Sort by": "並べ替え",
+    "Spend by model": "モデル別支出",
+    "Total spend": "合計支出",
+    "Usage logging is disabled on this deployment, so new requests are not recorded.": "このデプロイでは使用量ログが無効になっているため、新しいリクエストは記録されません。",
+    "Spend, tokens and latency appear here after your first request.": "最初のリクエストの後、支出、トークン、レイテンシがここに表示されます。",
+    "Spend, tokens and latency by model and day, with the Playground and API origins kept apart.": "モデルと日付ごとの支出、トークン、レイテンシを表示し、Playground と API のオリジンを分けて表示します。"
   }
 }

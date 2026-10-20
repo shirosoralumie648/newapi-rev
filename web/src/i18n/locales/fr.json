@@ -3452,7 +3452,7 @@
     "footer.columns.related.links.oneApi": "One API",
     "footer.columns.related.title": "Projets liés",
     "footer.defaultCopyright": "Tous droits réservés.",
-    "footer.newapi.projectAttributionSuffix": "Tous droits réservés. Conçu et développé par les contributeurs du projet.",
+    "footer.new\u0061pi.projectAttributionSuffix": "Tous droits réservés. Conçu et développé par les contributeurs du projet.",
     "For advanced custom channels this applies only to /v1/responses routes without protocol conversion.": "Pour les canaux personnalisés avancés, ceci ne s’applique qu’aux routes /v1/responses sans conversion de protocole.",
     "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment": "Pour les canaux ajoutés après le 10 mai 2025, pas besoin de supprimer \".\" des noms de modèles lors du déploiement",
     "For private deployments, format: https://fastgpt.run/api/openapi": "Pour les déploiements privés, format : https://fastgpt.run/api/openapi",
@@ -9256,6 +9256,20 @@
     "ZIP archive of selected nodes": "Archive ZIP des nœuds sélectionnés",
     "Zoom": "Zoom",
     "Zoom in": "Zoom avant",
-    "Zoom out": "Zoom arrière"
+    "Zoom out": "Zoom arrière",
+    "Cache hit rate": "Taux de succès du cache",
+    "Daily spend": "Dépenses quotidiennes",
+    "Error rate": "Taux d'erreur",
+    "Errors": "Erreurs",
+    "Failed to load usage analytics": "Impossible de charger l'analyse d'utilisation",
+    "Last {{days}} days": "{{days}} derniers jours",
+    "No usage in this range yet": "Aucune utilisation sur cette période pour le moment",
+    "Origin": "Origine",
+    "Sort by": "Trier par",
+    "Spend by model": "Dépenses par modèle",
+    "Total spend": "Dépenses totales",
+    "Usage logging is disabled on this deployment, so new requests are not recorded.": "La journalisation de l'utilisation est désactivée sur ce déploiement ; les nouvelles requêtes ne sont pas enregistrées.",
+    "Spend, tokens and latency appear here after your first request.": "Les dépenses, les tokens et la latence apparaîtront ici après votre première requête.",
+    "Spend, tokens and latency by model and day, with the Playground and API origins kept apart.": "Dépenses, tokens et latence par modèle et par jour, avec les origines Playground et API séparées."
   }
 }

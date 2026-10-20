@@ -6385,6 +6385,8 @@ func TestPlaygroundUsageAnalytics(t *testing.T) {
 			assert.Zero(t, playgroundToday.Errors)
 			assert.EqualValues(t, 20, playgroundToday.AvgTimeSeconds)
 			assert.EqualValues(t, 600, playgroundToday.AvgFirstTokenMs)
+			assert.EqualValues(t, 2, playgroundToday.TimedRequests)
+			assert.EqualValues(t, 2, playgroundToday.FirstTokenSamples)
 
 			apiYesterday := byKey[bucketKey{yesterday, "alpha", model.PlaygroundUsageOriginAPI}]
 			assert.EqualValues(t, 200, apiYesterday.Quota)
@@ -6393,6 +6395,8 @@ func TestPlaygroundUsageAnalytics(t *testing.T) {
 			assert.EqualValues(t, 1, apiYesterday.Requests)
 			assert.Zero(t, apiYesterday.AvgTimeSeconds)
 			assert.EqualValues(t, 900, apiYesterday.AvgFirstTokenMs)
+			assert.Zero(t, apiYesterday.TimedRequests)
+			assert.EqualValues(t, 1, apiYesterday.FirstTokenSamples)
 
 			apiTodayError := byKey[bucketKey{today, "beta", model.PlaygroundUsageOriginAPI}]
 			assert.Zero(t, apiTodayError.Quota)
@@ -6407,6 +6411,8 @@ func TestPlaygroundUsageAnalytics(t *testing.T) {
 			assert.Zero(t, malformed.CacheTokens)
 			assert.Zero(t, malformed.AvgFirstTokenMs)
 			assert.EqualValues(t, 5, malformed.AvgTimeSeconds)
+			assert.EqualValues(t, 1, malformed.TimedRequests)
+			assert.Zero(t, malformed.FirstTokenSamples)
 
 			for _, bucket := range analytics.Buckets {
 				assert.NotEqual(t, int64(999999), bucket.Quota, "another account's rows must not be aggregated")

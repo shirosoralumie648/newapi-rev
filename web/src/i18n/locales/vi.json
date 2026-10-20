@@ -3452,7 +3452,7 @@
     "footer.columns.related.links.oneApi": "One API",
     "footer.columns.related.title": "Các Dự Án Liên Quan",
     "footer.defaultCopyright": "Bản quyền được bảo lưu.",
-    "footer.newapi.projectAttributionSuffix": "Bản quyền được bảo lưu. Được thiết kế và phát triển bởi các cộng tác viên dự án.",
+    "footer.new\u0061pi.projectAttributionSuffix": "Bản quyền được bảo lưu. Được thiết kế và phát triển bởi các cộng tác viên dự án.",
     "For advanced custom channels this applies only to /v1/responses routes without protocol conversion.": "Với kênh tùy chỉnh nâng cao, thiết lập này chỉ áp dụng cho các route /v1/responses không chuyển đổi giao thức.",
     "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment": "Đối với các kênh được thêm sau ngày 10 tháng 5 năm 2025, không cần loại bỏ \".\" khỏi tên mô hình trong quá trình triển khai",
     "For private deployments, format: https://fastgpt.run/api/openapi": "Đối với các triển khai riêng tư, định dạng: https://fastgpt.run/api/openapi",
@@ -9256,6 +9256,20 @@
     "ZIP archive of selected nodes": "Tệp nén ZIP của các nút đã chọn",
     "Zoom": "Zoom",
     "Zoom in": "Phóng to",
-    "Zoom out": "Thu nhỏ"
+    "Zoom out": "Thu nhỏ",
+    "Cache hit rate": "Tỷ lệ trúng bộ nhớ đệm",
+    "Daily spend": "Chi tiêu theo ngày",
+    "Error rate": "Tỷ lệ lỗi",
+    "Errors": "Lỗi",
+    "Failed to load usage analytics": "Không thể tải phân tích mức sử dụng",
+    "Last {{days}} days": "{{days}} ngày qua",
+    "No usage in this range yet": "Chưa có mức sử dụng trong khoảng thời gian này",
+    "Origin": "Nguồn",
+    "Sort by": "Sắp xếp theo",
+    "Spend by model": "Chi tiêu theo mô hình",
+    "Total spend": "Tổng chi tiêu",
+    "Usage logging is disabled on this deployment, so new requests are not recorded.": "Tính năng ghi nhật ký sử dụng đã bị tắt trên triển khai này, vì vậy các yêu cầu mới sẽ không được ghi lại.",
+    "Spend, tokens and latency appear here after your first request.": "Chi tiêu, token và độ trễ sẽ xuất hiện ở đây sau yêu cầu đầu tiên của bạn.",
+    "Spend, tokens and latency by model and day, with the Playground and API origins kept apart.": "Chi tiêu, token và độ trễ theo mô hình và theo ngày, tách riêng nguồn Playground và API."
   }
 }

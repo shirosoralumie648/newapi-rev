@@ -3452,7 +3452,7 @@
     "footer.columns.related.links.oneApi": "Один API",
     "footer.columns.related.title": "Связанные проекты",
     "footer.defaultCopyright": "Все права защищены.",
-    "footer.newapi.projectAttributionSuffix": "Все права защищены. Разработано участниками проекта.",
+    "footer.new\u0061pi.projectAttributionSuffix": "Все права защищены. Разработано участниками проекта.",
     "For advanced custom channels this applies only to /v1/responses routes without protocol conversion.": "Для расширенных пользовательских каналов это действует только для маршрутов /v1/responses без преобразования протокола.",
     "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment": "Для каналов, добавленных после 10 мая 2025 г., не нужно удалять \".\" из имён моделей при развёртывании",
     "For private deployments, format: https://fastgpt.run/api/openapi": "Для частных развертываний, формат: https://fastgpt.run/api/openapi",
@@ -9256,6 +9256,20 @@
     "ZIP archive of selected nodes": "ZIP-архив выбранных узлов",
     "Zoom": "Zoom",
     "Zoom in": "Увеличить",
-    "Zoom out": "Уменьшить"
+    "Zoom out": "Уменьшить",
+    "Cache hit rate": "Доля попаданий в кэш",
+    "Daily spend": "Расходы по дням",
+    "Error rate": "Доля ошибок",
+    "Errors": "Ошибки",
+    "Failed to load usage analytics": "Не удалось загрузить аналитику использования",
+    "Last {{days}} days": "Последние {{days}} дн.",
+    "No usage in this range yet": "За этот период использования пока нет",
+    "Origin": "Источник",
+    "Sort by": "Сортировать по",
+    "Spend by model": "Расходы по моделям",
+    "Total spend": "Общие расходы",
+    "Usage logging is disabled on this deployment, so new requests are not recorded.": "В этом развёртывании журналирование использования отключено, поэтому новые запросы не записываются.",
+    "Spend, tokens and latency appear here after your first request.": "После первого запроса здесь появятся расходы, токены и задержка.",
+    "Spend, tokens and latency by model and day, with the Playground and API origins kept apart.": "Расходы, токены и задержка по моделям и дням с разделением источников Playground и API."
   }
 }
