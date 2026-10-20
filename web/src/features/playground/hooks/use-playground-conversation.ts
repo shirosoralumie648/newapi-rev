@@ -25,6 +25,7 @@ import {
   canContinueToolCalls,
   createContinuationMessages,
   createRegeneratedMessages,
+  createRegeneratedMessagesWithoutImages,
   createToolContinuationMessages,
   removeMessageByKey,
   setActiveMessageVersion,
@@ -90,6 +91,22 @@ export function usePlaygroundConversation({
   const handleRegenerateMessage = useCallback(
     (message: Message) => {
       const nextMessages = createRegeneratedMessages(messages, message.key)
+      if (!nextMessages) return
+
+      updateMessages(nextMessages)
+      sendChat(nextMessages)
+    },
+    [messages, updateMessages, sendChat]
+  )
+
+  // A vision rejection names the images of the user turn, so the one-click
+  // repair strips exactly those attachments and sends the same prompt again.
+  const handleRetryWithoutImages = useCallback(
+    (message: Message) => {
+      const nextMessages = createRegeneratedMessagesWithoutImages(
+        messages,
+        message.key
+      )
       if (!nextMessages) return
 
       updateMessages(nextMessages)
@@ -210,6 +227,7 @@ export function usePlaygroundConversation({
     editingMessageKey,
     handleSendMessage,
     handleRegenerateMessage,
+    handleRetryWithoutImages,
     handleEditMessage,
     handleEditOpenChange,
     applyEdit,

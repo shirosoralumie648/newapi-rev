@@ -69,6 +69,9 @@ interface PlaygroundInputProps {
   isGenerating?: boolean
   models: ModelOption[]
   modelValue: string
+  /** Controlled selector opened by an error action. */
+  modelSelectorOpen?: boolean
+  onModelSelectorOpenChange?: (open: boolean) => void
   onModelChange: (value: string) => void
   /** Starts a new conversation with the model chosen in the selector. */
   onStartNewSession?: (model: string) => void
@@ -108,6 +111,11 @@ interface PlaygroundInputProps {
   onContextSettingsChange: (settings: PlaygroundContextSettings) => void
   onRemoveContextSummary: () => void
   onSummarizeContext: () => void
+  /** Controlled context panel opened by an error action. */
+  contextPanelOpen?: boolean
+  onContextPanelOpenChange?: (open: boolean) => void
+  /** Shows the compression suggestion inside the context panel. */
+  contextPanelSuggestion?: boolean
   /** Request-side developer settings of the active conversation. */
   developerOptions?: PlaygroundDeveloperOptions
   /** Stores changed developer settings on the active conversation. */
@@ -162,6 +170,8 @@ export function PlaygroundInput({
   isGenerating,
   models,
   modelValue,
+  modelSelectorOpen,
+  onModelSelectorOpenChange,
   onModelChange,
   onStartNewSession,
   isModelLoading = false,
@@ -189,6 +199,9 @@ export function PlaygroundInput({
   onContextSettingsChange,
   onRemoveContextSummary,
   onSummarizeContext,
+  contextPanelOpen,
+  onContextPanelOpenChange,
+  contextPanelSuggestion,
   developerOptions,
   onDeveloperOptionsChange,
   knowledgeBases,
@@ -288,6 +301,8 @@ export function PlaygroundInput({
             isModelLoading={isModelLoading}
             models={models}
             modelValue={modelValue}
+            modelSelectorOpen={modelSelectorOpen}
+            onModelSelectorOpenChange={onModelSelectorOpenChange}
             onGroupChange={onGroupChange}
             onModelChange={onModelChange}
             onStartNewSession={onStartNewSession}
@@ -305,6 +320,8 @@ export function PlaygroundInput({
                 contextPlan={contextPlan}
                 contextSettings={contextSettings}
                 contextSummary={contextSummary}
+                contextPanelOpen={contextPanelOpen}
+                contextPanelSuggestion={contextPanelSuggestion}
                 developerOptions={developerOptions}
                 disabled={disabled}
                 hasCapturedRequest={hasCapturedRequest}
@@ -330,6 +347,7 @@ export function PlaygroundInput({
                 onClearMessages={onClearMessages}
                 onConfigChange={onConfigChange}
                 onContextSettingsChange={onContextSettingsChange}
+                onContextPanelOpenChange={onContextPanelOpenChange}
                 onDeveloperOptionsChange={onDeveloperOptionsChange}
                 onDictateTranscript={appendText}
                 onInsertText={appendText}

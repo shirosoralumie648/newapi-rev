@@ -18,6 +18,10 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { MESSAGE_STATUS } from '../../constants'
 import type { Message } from '../../types'
+import {
+  getPlaygroundErrorCatalogEntry,
+  type PlaygroundErrorCatalogEntry,
+} from './message-error-catalog'
 import { getMessageContent } from './message-utils'
 
 export const MODEL_PRICING_SETTINGS_PATH =
@@ -30,6 +34,8 @@ type MessageErrorState = {
   content: string
   kind: 'generic' | 'model-price'
   showSettingsLink: boolean
+  /** Catalog entry of the stable code; null keeps the raw error text. */
+  catalog: PlaygroundErrorCatalogEntry | null
 }
 
 export function isAdminRole(role?: number | null): boolean {
@@ -55,5 +61,6 @@ export function getMessageErrorState(
     content,
     kind: isModelPriceError ? 'model-price' : 'generic',
     showSettingsLink: isModelPriceError && isAdmin,
+    catalog: getPlaygroundErrorCatalogEntry(message.errorCode, content),
   }
 }

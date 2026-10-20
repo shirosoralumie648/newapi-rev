@@ -13,6 +13,7 @@ import {
   appendMessageVersion,
   createLoadingAssistantMessage,
   createUserMessage,
+  getActiveVersionIndex,
   getMessageContent,
   getMessageSearchSources,
   hasMessageContent,
@@ -201,6 +202,49 @@ export function createRegeneratedMessages(
       messages[messageIndex].sources
     ),
   ]
+}
+
+/**
+ * Retry a failed reply after removing the images that the model rejected. Only
+ * the active version of the user turn is changed; document attachments stay,
+ * and the original version remains available as a branch. Returns null when
+ * there is no image to remove or the turn would become empty.
+ */
+export function createRegeneratedMessagesWithoutImages(
+  messages: Message[],
+  messageKey: string
+): Message[] | null {
+  const messageIndex = messages.findIndex(
+    (message) => message.key === messageKey
+  )
+  if (messageIndex === -1) return null
+
+  const userMessage = getPreviousUserMessage(messages, messageIndex)
+  if (!userMessage) return null
+
+  const activeIndex = getActiveVersionIndex(userMessage)
+  const activeVersion = userMessage.versions[activeIndex]
+  if (!activeVersion) return null
+
+  const attachments = activeVersion.attachments ?? []
+  const remainingAttachments = attachments.filter(
+    (attachment) => !attachment.mediaType.toLowerCase().startsWith('image/')
+  )
+  if (remainingAttachments.length === attachments.length) return null
+  if (!activeVersion.content.trim() && remainingAttachments.length === 0) {
+    return null
+  }
+
+  const updatedUserMessage = appendMessageVersion(
+    userMessage,
+    activeVersion.content,
+    remainingAttachments.length > 0 ? remainingAttachments : undefined
+  )
+  const updatedMessages = messages.map((message) =>
+    message.key === userMessage.key ? updatedUserMessage : message
+  )
+
+  return createRegeneratedMessages(updatedMessages, updatedUserMessage.key)
 }
 
 export function removeMessageByKey(

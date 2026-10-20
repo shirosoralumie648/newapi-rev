@@ -577,6 +577,9 @@ export interface ModelGroupSelectorProps {
   // Common props
   className?: string
   disabled?: boolean
+  /** Controlled open state; omit to keep the selector's own state. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
 /**
@@ -593,12 +596,22 @@ export const ModelGroupSelector: React.FC<ModelGroupSelectorProps> = ({
   onGroupChange,
   className,
   disabled = false,
+  open: controlledOpen,
+  onOpenChange,
 }) => {
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
-  const [open, setOpen] = useState(false)
+  const [internalOpen, setInternalOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const isMobile = useIsMobile()
+  const open = controlledOpen ?? internalOpen
+  const setOpen = useCallback(
+    (nextOpen: boolean) => {
+      if (controlledOpen === undefined) setInternalOpen(nextOpen)
+      onOpenChange?.(nextOpen)
+    },
+    [controlledOpen, onOpenChange]
+  )
   const groupScrollContainerRef = useRef<HTMLDivElement | null>(null)
   const selectedGroupOptionRef = useRef<HTMLButtonElement | null>(null)
   const selectedModelOptionRef = useRef<HTMLDivElement | null>(null)
@@ -661,7 +674,7 @@ export const ModelGroupSelector: React.FC<ModelGroupSelectorProps> = ({
       setOpen(false)
       setSearchQuery('')
     },
-    [onModelChange]
+    [onModelChange, setOpen]
   )
 
   const handleGroupChange = useCallback(
