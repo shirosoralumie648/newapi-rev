@@ -332,9 +332,6 @@ const CATEGORY_CODES: Record<PlaygroundErrorCategory, readonly string[]> = {
     'task_protocol_not_available',
   ],
   'invalid-request': [
-    'invalid_request',
-    'invalid_request_error',
-    'bad_request',
     'bad_request_body',
     'invalid_parameter',
     'invalid_argument',
@@ -467,6 +464,7 @@ const CONTEXT_PATTERNS = [
 const VISION_PATTERNS = [
   /(?:image|vision|multimodal)[^.]{0,80}(?:not supported|unsupported|does not support|doesn't support|cannot|invalid|too large)/i,
   /(?:not supported|unsupported|invalid|too large)[^.]{0,80}(?:image|vision|multimodal)/i,
+  /(?:does not|doesn't|do not|don't|cannot|can't|not)\s+support[^.]{0,80}(?:image|vision|multimodal)/i,
   /(?:图片|图像)[^。]{0,60}(?:不支持|无法|无效|过大)/,
   /(?:不支持|无法处理|无效)[^。]{0,60}(?:图片|图像)/,
 ]
