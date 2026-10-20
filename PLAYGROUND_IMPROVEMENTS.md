@@ -957,7 +957,7 @@ Step 进度：
 - 编辑器手感：**内容级撤销缺失**（仅结构变化入栈）、无对齐/吸附/等距分布、无连线完善交互（拖端口建线/连线删除/替换重连）、无选区与整画布 PNG 导出、键盘手感不完整。
 - 生成域：**CV-07 已补齐 seed 固定/继承/随机、batch 多结果逐结果选优、尺寸档位与自定义、渠道能力揭示、多参考图连线上限**；仍缺扩图/背景移除/风格参考与专门图片/视频工作台。
 - 结构缺口：无专门图片/视频工作台（LB-14 后全部创作汇入无限画布，临时用户被迫节点图思维）。
-- 流程复用：无画布模板（常用链一键铺点、画布存为模板）。
+- 流程复用：**CV-11 已补齐画布模板**：结构级保存（可选内联素材）、个人/全局模板库、四个官方链模板、一键铺到当前/新建画布与 zip 导入导出。
 - 组织：无节点颜色标注/标签、无画布内节点搜索、无批量跑选中子图。
 - 分享：**CV-12 已补齐画布只读分享**，与 LB-05 会话分享共用 share 表、匿名端点、哈希 token 与撤销/过期契约。
 
@@ -970,7 +970,7 @@ Step 进度：
 | CV-08 | 创作工具扩展：扩图 outpaint、背景移除、风格参考——入口按渠道能力显隐，先落地有渠道支持的 | 中（新 relay 工具路由/渠道适配按需） | P0 |
 | CV-09 | 图片工作台：项目模式落地 + 单图聚焦编辑器（大预览/工具栏/参数侧栏/版本变体条/钉回画布） | CV-07、CV-08 | P0 |
 | CV-10 | 视频工作台：播放器 + 参数侧栏 + 版本条 + 抽帧（前端取帧进图片工作台反哺 i2v）+ 队列/取消 | CV-09（复用项目模式） | P1 |
-| CV-11 | 画布模板：画布存为模板（结构级，含是否内联素材选项）+ 模板库（个人/全局，对齐 LB-11 模式）+ 常用链模板一键铺点（翻译/总结/风格平行对比） | 无 | P1 |
+| CV-11 | 画布模板：画布存为模板（结构级，含是否内联素材选项）+ 模板库（个人/全局，对齐 LB-11 模式）+ 常用链模板一键铺点（翻译/总结/风格平行对比）（已完成，见 15.3 CV-11 进展；CI-only） | 无 | P1 |
 | CV-12 | 画布只读分享：对齐 LB-05 token 机制（share 表复用/扩展、匿名只读渲染页、撤销）（已完成，见 15.3 CV-12 进展；CI-only） | LB-05 | P1 |
 | CV-13 | 组织与查找：节点颜色标注/标签、画布内节点搜索（Cmd+P 面板）、批量跑选中子图 | 无 | P1 |
 
@@ -998,6 +998,15 @@ Step 进度：
 - **CV-09 图片工作台**——`playground_canvases` 新增 `mode` 列（infinite/image/video，默认 infinite，AutoMigrate 三库加列验证 + legacy 读回默认）；建项入口按模式选择；图片工作台为单图聚焦布局：大预览 + 工具栏（裁剪/放大/遮罩重绘/CV-08 工具）+ 参数侧栏（CV-07 全量参数含 seed/batch/尺寸）+ **版本/变体条**（同一血线 task 历史，来源于 task-result 节点的重试参数记录，点击切换主图）+ 「钉回画布」（在工作区把当前血线落成 image/task-result 节点 affixed 到无限画布）+ 参考图快速挂载；同一计费/预算/配额链路不变。
 - **CV-10 视频工作台**——同 `mode` 体系：播放器（受控内容流）+ 参数侧栏（时长/尺寸档位/模型）+ 版本条 + 抽帧：前端 `<video>` seek 后离屏截帧并经既有上传链路落为附件，可直接送图片工作台或画布 image 节点（反哺 i2v / 视频改图链）；队列视图（进行中任务 + 进度 + 取消退款沿用既有）。
 - **CV-11 画布模板**——把当前画布存为模板（结构级：节点/边/参数，二选一是否内联素材），模板库个人 + 全局（管理员维护，对齐 LB-11 的 visibility 机制）；常用链模板（翻译/总结/多风格平行对比/图生视频链）以官方模板预置；模板一键铺到当前画布或新建画布；导入导出沿用 zip 归档。
+  **CV-11 进展（2026-10-19，已完成，CI-only，本地未运行测试/typecheck/lint/build）**：
+  - [x] 结构级保存：`POST /api/playground/canvas-templates` 以当前账号已保存画布为源，保留节点/边/布局与模型、生成参数，剥离 `status`/`output`/`inputText`/`resultImageCount`/`error`/`attempts`/`lastSeed`/`preferredResultNodeId`/`cacheHit` 等运行态与消息快照；`inline_assets=false` 丢弃全部附件/制品引用，`true` 仅快照被节点引用且归属当前账号的附件字节（SHA-256/大小校验，按模板与账户字节预算计费）；保存与导入均复用该清洗和 `normalizePlaygroundCanvasDocument` 校验，市场复制的文档来自已清洗的全局行。
+  - [x] 模板库：个人私有行与全局行（`user_id=0`）共用 `visibility` 契约；个人列表/读取/修改/删除保持 owner 过滤，`GET /canvas-templates/market` 全账号可读，管理端 `AdminAuth` 维护全局行并支持全局导入导出；私有路由登记为访问令牌会话级规则，全局路由按 `option:read`/`option:write`；跨账号私有 id 统一 404，删除私有模板释放计数与字节，官方模板删除后由 `SystemKey` 阻止重启复活。
+  - [x] 官方链：启动 seed 幂等写入翻译、总结、三模型平行风格对比、图生视频四条结构模板（无附件/会话引用，模型留空由账号选择），全局目录上限 200 条。
+  - [x] 一键应用：`canvasTemplateMaterialization` 生成全新节点/边 id、重映射 group 父级、按目标画布重新挂载内联附件（经受控内容接口取字节后走既有上传链路），并保留边 `source_handle`/`target_handle`/`label`；应用到当前画布按现有节点右缘偏移并以单条撤销记录插入，应用到新画布先建项目、写入文档后打开，失败删除半成品。
+  - [x] 导入导出：`new-api-canvas-template` v1 zip（`template.json` + `resources/`），导出只包含校验通过的 inline 字节，导入校验格式/版本/名称/分类/条目路径/媒体类型/大小/SHA-256 与总预算；损坏资源计 `resources_missing` 并只丢弃对应引用，不写入半成品模板。
+  - [x] 前端与文案：画布工具栏 Templates 打开三页签模板库（我的/官方/管理全局），支持保存（默认当前画布标题、可内联素材）、应用当前/新建、重命名、删除确认、市场复制与导入导出；模板资产内容响应在既有 no-store 基础上增加 `nosniff`、沙箱 CSP 与 no-referrer；模板相关键七语言齐全（`i18n:sync` missingCount=0、extrasCount=0，untranslated 保持既有基线 zh 11/ja 12/ru 12）。
+  - [x] 测试：`TestPlaygroundCanvasTemplateLibrary`（SQLite/MySQL/PostgreSQL + MySQL 5.7 CI job）覆盖 seed 幂等、owner 隔离、配额、运行态清洗、内联资产字节与 zip 往返、全局维护；`TestPlaygroundRealRouterAuthentication` 覆盖 401/PAT 403；前端扩展 `canvas-template.test.ts`、`use-canvas-template-actions.test.ts`、`use-canvas-editor.test.ts`、`canvas-template-library-dialog.test.tsx`（应用当前/新建、个人/全局保存、导入、导出、市场复制、删除确认）。
+  - [x] 无新依赖、无 `go.mod`/`go.sum`/`package.json`/`bun.lock` 变更，无 Relay/计费改动；本地未运行测试/typecheck/lint/build（CI-only，未运行三数据库矩阵）。
 - **CV-12 画布只读分享**——与 LB-05 对齐：token 哈希存储、匿名只读渲染页（画布文档只读视图 + 节点结果预览，不代理素材）、撤销/过期、CriticalRateLimit 与不可枚举 404；入口在画布菜单。
   **CV-12 进展（2026-10-19，已完成，CI-only，本地未运行测试/typecheck/lint/build）**：
   - [x] share 表复用/扩展：`playground_session_shares` 新增 `canvas_id`（会话链接 `session_id` 非空、画布链接 `canvas_id` 非空；`TestPlaygroundShareCanvasColumnMigration` 覆盖 SQLite/MySQL/PostgreSQL 升级与重复 AutoMigrate 幂等），`CreatePlaygroundCanvasShare`/`RevokePlaygroundCanvasShare` 走 owner 过滤、事务内轮换旧链接、SHA-256 哈希存储与一次性明文 token（`TestPlaygroundCanvasShares`）。
@@ -1441,3 +1450,4 @@ Step 进度：
 | 2026-10-19 | PG2-12：Playground 用量与性能视图（按模型/时间，含来源标记；CI-only，本地未运行测试）——`/pg/chat/completions` 与媒体/非聊天/搜索桥接在 Relay 前设置 `ContextKeyPlaygroundOrigin`，consume/error 日志写入公共 `other.playground_origin=true`，异步图片/视频任务经 `TaskPrivateData.PlaygroundOrigin` 在任务结算日志写同一标记，直接 API 行保持无标记并归为 API 来源；新增 owner 过滤的只读 `GET /api/playground/usage/analytics`（days 1–90，默认 7），在日志库按 UTC 天 × 模型 × 来源聚合 quota、prompt/completion/cache tokens、requests/errors、平均总耗时/TTFT 与测量样本数，最多 2000 桶、超出保留最新并返回 `truncated`，兼容独立日志库与 SQLite/MySQL/PostgreSQL/ClickHouse SQL，不做任何预扣、结算或额度重算。前端 Inspector 新增 Usage 视图：7/30/90 天范围、总/Playground/API 费用、缓存命中率、错误率、平均 TTFT/总耗时、按日堆叠趋势、按模型表（费用/请求/Token 排序）与 CSV 导出，并提供日志关闭、截断、空范围与错误降级；补 14 个七语言文案键（missingCount=0、extrasCount=0，untranslated 基线 zh 11/ja 12/ru 12），恢复 `footer.new\u0061pi.projectAttributionSuffix` 的转义序列化。测试：`TestPlaygroundLogOriginMarker`/`TestPlaygroundUsageAnalytics`（SQLite/MySQL/PostgreSQL）、`TestPlaygroundUsageAnalyticsEndpoint`、`TestPlaygroundUsageAnalyticsDialectSQL`（四库 SQL 形状）与 `TestPlaygroundBridgesBillThroughRelayAndMarkOrigin`，前端纯函数与组件用例覆盖汇总/样本加权/趋势/CSV/空态/范围/降级；已加入 CI 真实数据库与 MySQL 5.7 过滤清单；无新依赖、无 `go.mod`/`go.sum`/`web/package.json`/`bun.lock` 变更，未改动 Relay 计费表达式或结算路径。 |
 | 2026-10-19 | PG2-15 复核补全：竞技场 CI 覆盖与删除/错误脱敏回归（CI-only，本地未运行测试/typecheck/lint/build/三数据库矩阵）——把 `TestPlaygroundArenaVotes` 加入 `.github/workflows/ci.yml` 的 `database` job 真实数据库过滤清单并新增 MySQL 5.7 专项步骤，锁定持久化/幂等/改票/所有权/汇总/清理在 SQLite、MySQL 8.0/5.7、PostgreSQL 上实际执行；扩展测试覆盖消息组删除时 `deletePlaygroundMessageRow` 清除对应票、软删除会话保留票以便恢复、`PurgePlaygroundSession` 清除票；新增前端用例 `redacts real model names from a failed anonymous reply`，断言失败回复正文中的 `gpt-4o`/`gpt-4` 仅以 `Model A`/`Model B` 呈现。无新依赖、无 schema/Relay/计费改动，i18n 键未变（`node scripts/sync-i18n.mjs` 复核 missingCount=0、extrasCount=0）。 |
 | 2026-10-19 | PG2-17 收尾：i18n 同步检查幂等（CI-only，本地未运行测试/typecheck/lint/build/E2E）——把七个 locale 文件中的页脚归属键恢复为 `web/scripts/sync-i18n.mjs` 输出的转义序列，使本 Step 新增的 `node scripts/sync-i18n.mjs` + `git diff --exit-code -- src/i18n/locales` 检查不会因既有序列化差异失败；运行时键与翻译文案不变，未改动 UI、Relay、计费、后端或依赖。另补充 PG2-17 完成情况小节，记录命令面板、共享快捷键注册表、消息跳转窗口化与测试/CI 覆盖。 |
+| 2026-10-19 | CV-11：画布模板（CI-only，本地未运行测试/typecheck/lint/build/三数据库矩阵）——复核并补齐已合入实现：保存画布为结构级模板（可选内联附件字节，SHA-256/大小与模板、账户字节预算），剥离运行态（新增 `cacheHit`）与消息/附件/制品引用；个人与全局（`user_id=0`，`AdminAuth` + `option:read`/`option:write`）模板库、owner/跨账号 404、计数器释放与官方 `SystemKey` 防复活；启动 seed 幂等预置翻译/总结/平行风格对比/图生视频四条链；应用时重挂内联附件、重映射节点与 group，并保留边 handle/label；zip v1 `template.json` + `resources/` 导入导出校验格式/路径/媒体/大小/哈希，损坏资源只丢弃对应引用。本次在既有 no-store 之外补齐模板资产内容响应的 `nosniff`、沙箱 CSP 与 no-referrer，并扩展 `TestPlaygroundCanvasTemplateLibrary`（运行态清洗、资产响应头、SQLite/MySQL/PostgreSQL 与 MySQL 5.7 CI job）及前端模板应用/新建、个人/全局保存、导入、导出、市场复制、删除确认用例；模板键七语言 `i18n:sync` missingCount=0、extrasCount=0（untranslated 基线 zh 11/ja 12/ru 12）；无新依赖、无 `go.mod`/`go.sum`/`package.json`/`bun.lock` 变更，无 Relay/计费改动。 |
