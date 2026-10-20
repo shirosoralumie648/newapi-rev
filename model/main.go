@@ -497,6 +497,7 @@ func migrateDB() error {
 		&PlaygroundTaskArtifact{},
 		&PlaygroundTaskArtifactPin{},
 		&PlaygroundTaskArtifactSync{},
+		&PlaygroundTaskQueueEntry{},
 		&PlaygroundStorageLedger{},
 		&PlaygroundObjectDeleteOutbox{},
 		&PlaygroundLogCapture{},

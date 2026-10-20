@@ -62,6 +62,12 @@ export const STATIC_I18N_KEYS = [
   'Unable to cancel the task.',
   'Playground task result storage limit reached. Wait for old task results to expire.',
   'Unable to update result retention.',
+  // Optional generation queue status labels selected by entry.status.
+  'Waiting',
+  'Starting',
+  'Submitted',
+  'Failed',
+  'Canceled',
   // Playground batch generation (PG2-06): the plan builder and the capability
   // mapper return these strings as i18n keys, so the literal scan cannot see
   // them. Their values live in PLAYGROUND_GENERATION_BATCH_MESSAGES,

@@ -40,6 +40,7 @@ type SectionProps = {
   defaultsJson: string
   groupOverridesJson: string
   sandboxPreviewEnabled: boolean
+  taskQueueEnabled: boolean
 }
 
 function Fixture(props: SectionProps) {
@@ -52,6 +53,7 @@ function Fixture(props: SectionProps) {
           defaultsJson={props.defaultsJson}
           groupOverridesJson={props.groupOverridesJson}
           sandboxPreviewEnabled={props.sandboxPreviewEnabled}
+          taskQueueEnabled={props.taskQueueEnabled}
         />
       </SettingsPageProvider>
     </>
@@ -61,7 +63,8 @@ function Fixture(props: SectionProps) {
 function renderSection(
   defaults: Record<string, number>,
   overrides: Record<string, Record<string, number>> = {},
-  sandboxPreviewEnabled = false
+  sandboxPreviewEnabled = false,
+  taskQueueEnabled = false
 ) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -72,6 +75,7 @@ function renderSection(
         defaultsJson={JSON.stringify(defaults)}
         groupOverridesJson={JSON.stringify(overrides)}
         sandboxPreviewEnabled={sandboxPreviewEnabled}
+        taskQueueEnabled={taskQueueEnabled}
       />
     </QueryClientProvider>
   )
@@ -229,4 +233,29 @@ test('toggling the sandbox preview switch saves only that option', async () => {
   })
   expect(bodyFor('playground_setting.defaults')).toBeUndefined()
   expect(bodyFor('playground_setting.group_overrides')).toBeUndefined()
+})
+
+test('toggling the generation queue switch saves only that option', async () => {
+  const user = userEvent.setup()
+  renderSection({ session_max_count: 100 })
+
+  const toggle = screen.getByRole('switch', {
+    name: 'Enable the generation task queue',
+  })
+  expect(toggle).not.toBeChecked()
+  await user.click(toggle)
+  expect(toggle).toBeChecked()
+
+  await user.click(
+    screen.getByRole('button', { name: 'Save Playground quotas' })
+  )
+
+  await waitFor(() =>
+    expect(bodyFor('playground_setting.task_queue_enabled')).toBeDefined()
+  )
+  expect(bodyFor('playground_setting.task_queue_enabled')).toEqual({
+    key: 'playground_setting.task_queue_enabled',
+    value: 'true',
+  })
+  expect(bodyFor('playground_setting.defaults')).toBeUndefined()
 })

@@ -111,6 +111,12 @@ func SetApiRouter(router *gin.Engine) {
 			playgroundRoute.DELETE("/logs/:logRef/capture", controller.DeletePlaygroundLogCapture)
 			playgroundRoute.GET("/trash", controller.ListPlaygroundTrash)
 			playgroundRoute.GET("/assets", controller.ListPlaygroundAssets)
+			// The optional generation queue is owner-scoped and independent of
+			// the durable task list. Static queue routes are registered before
+			// the :taskId parameter route.
+			playgroundRoute.GET("/tasks/queue", controller.ListPlaygroundTaskQueue)
+			playgroundRoute.DELETE("/tasks/queue/:queueId", controller.PlaygroundTaskQueueCancel)
+			playgroundRoute.POST("/tasks/queue/:queueId/priority", controller.PlaygroundTaskQueuePrioritize)
 			playgroundRoute.POST("/tasks/:taskId/cancel", controller.PlaygroundTaskCancel)
 			playgroundRoute.PUT("/tasks/:taskId/artifacts/:artifactKey/pin", controller.PlaygroundTaskArtifactPin)
 			playgroundRoute.GET("/presets", controller.ListPlaygroundPresets)

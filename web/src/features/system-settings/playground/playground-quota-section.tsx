@@ -35,6 +35,7 @@ type PlaygroundQuotaSectionProps = {
   defaultsJson: string
   groupOverridesJson: string
   sandboxPreviewEnabled: boolean
+  taskQueueEnabled: boolean
 }
 
 export function PlaygroundQuotaSection(props: PlaygroundQuotaSectionProps) {
@@ -42,6 +43,9 @@ export function PlaygroundQuotaSection(props: PlaygroundQuotaSectionProps) {
   const updateOption = useUpdateOption()
   const [sandboxPreviewEnabled, setSandboxPreviewEnabled] = useState(
     props.sandboxPreviewEnabled
+  )
+  const [taskQueueEnabled, setTaskQueueEnabled] = useState(
+    props.taskQueueEnabled
   )
 
   const baselineDefaults = useMemo(
@@ -72,7 +76,13 @@ export function PlaygroundQuotaSection(props: PlaygroundQuotaSectionProps) {
     setDefaultErrors({})
     setOverrideErrors({})
     setSandboxPreviewEnabled(props.sandboxPreviewEnabled)
-  }, [baselineDefaults, baselineOverrides, props.sandboxPreviewEnabled])
+    setTaskQueueEnabled(props.taskQueueEnabled)
+  }, [
+    baselineDefaults,
+    baselineOverrides,
+    props.sandboxPreviewEnabled,
+    props.taskQueueEnabled,
+  ])
 
   const handleAddGroup = () => {
     const group = newGroup.trim()
@@ -159,6 +169,12 @@ export function PlaygroundQuotaSection(props: PlaygroundQuotaSectionProps) {
         value: String(sandboxPreviewEnabled),
       })
     }
+    if (taskQueueEnabled !== props.taskQueueEnabled) {
+      requests.push({
+        key: 'playground_setting.task_queue_enabled',
+        value: String(taskQueueEnabled),
+      })
+    }
     if (requests.length === 0) {
       toast.info(t('No changes to save'))
       return
@@ -195,6 +211,17 @@ export function PlaygroundQuotaSection(props: PlaygroundQuotaSectionProps) {
           disabled={updateOption.isPending}
           label={t('Enable sandboxed artifact preview')}
           onCheckedChange={setSandboxPreviewEnabled}
+        />
+
+        <SettingsSwitchField
+          checked={taskQueueEnabled}
+          controlId='playground-task-queue-enabled'
+          description={t(
+            'When a generation exceeds the concurrency limit, accept it into a server-side queue instead of returning an error. Storage exhaustion still rejects immediately.'
+          )}
+          disabled={updateOption.isPending}
+          label={t('Enable the generation task queue')}
+          onCheckedChange={setTaskQueueEnabled}
         />
 
         <div className='space-y-6'>

@@ -44,6 +44,8 @@ export interface CanvasGenerationCell {
   images?: PlaygroundImageResult[]
   /** Durable task id when the model runs through a task plugin. */
   taskId?: string
+  /** Server queue entry id when the concurrency budget accepted the request. */
+  queuedEntryId?: string
   /** Already translated failure text, when the cell failed. */
   error?: string
   /** Estimate returned by the pre-run pricing call, when one ran. */
@@ -54,6 +56,7 @@ export interface CanvasGenerationCell {
 export interface CanvasGenerationSubmitResult {
   images?: PlaygroundImageResult[]
   taskId?: string
+  queuedEntryId?: string
 }
 
 /** How the batch runner submits one request; injected for tests. */
@@ -162,6 +165,9 @@ export async function runGenerationBatch(input: {
           elapsedMs: Date.now() - startedAt,
           ...(result.images ? { images: result.images } : {}),
           ...(result.taskId ? { taskId: result.taskId } : {}),
+          ...(result.queuedEntryId
+            ? { queuedEntryId: result.queuedEntryId }
+            : {}),
         })
       } catch (error) {
         if (input.signal.aborted) {

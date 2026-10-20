@@ -91,6 +91,7 @@ const SECURITY_SECTIONS = [
         sandboxPreviewEnabled={
           settings['playground_setting.sandbox_preview_enabled']
         }
+        taskQueueEnabled={settings['playground_setting.task_queue_enabled']}
       />
     ),
   },

@@ -326,6 +326,12 @@ type PlaygroundQuotaPolicy struct {
 	ObjectUserMaxBytes     int64 `json:"object_user_max_bytes"`
 	TaskMaxConcurrency     int   `json:"task_max_concurrency"`
 	TaskUserResultMaxBytes int64 `json:"task_user_result_max_bytes"`
+	// TaskQueueMaxCount bounds how many accepted-but-not-yet-started
+	// submissions one account may hold while the optional generation queue is
+	// enabled. Queued payloads are request bodies, not stored results, so this
+	// count does not consume TaskUserResultMaxBytes; it prevents an account
+	// from parking an unbounded amount of request data in the database.
+	TaskQueueMaxCount int `json:"task_queue_max_count"`
 	// TrashRetentionDays is how long a soft-deleted conversation or canvas
 	// stays recoverable in the trash before the cleanup task purges it. A
 	// resource in the trash keeps occupying the account budgets until that
@@ -346,6 +352,11 @@ type PlaygroundSetting struct {
 	// account did not author, so an administrator must opt in before the
 	// Playground mounts it inside the sandboxed iframe.
 	SandboxPreviewEnabled bool `json:"sandbox_preview_enabled"`
+	// TaskQueueEnabled turns an exceeded async task concurrency budget into an
+	// accepted queue entry instead of an immediate 429. It is off by default so
+	// upgrading never changes the existing rejection behavior. Result-storage
+	// exhaustion still rejects immediately: waiting does not free stored bytes.
+	TaskQueueEnabled bool `json:"task_queue_enabled"`
 	// StorageBilling is the optional metered storage tier. It is off by
 	// default: enabling it is the explicit administrator decision to charge
 	// the same wallet for the bytes an account keeps.
@@ -585,6 +596,10 @@ func builtinPlaygroundQuotaPolicy() PlaygroundQuotaPolicy {
 		// tasks. Scheduled expiry frees finished task rows after the retention
 		// window, so a healthy workspace stays far below this ceiling.
 		TaskUserResultMaxBytes: 64 << 20,
+		// A queued submission holds only its validated request body. Twenty
+		// entries is enough for a normal canvas batch while bounding the raw
+		// payload rows an account can park in the database.
+		TaskQueueMaxCount: 20,
 		// A deleted conversation or canvas stays in the trash for 30 days
 		// before the cleanup task removes its rows and bytes.
 		TrashRetentionDays: 30,
@@ -632,6 +647,13 @@ func GetPlaygroundWebSearchAPIKey() string {
 // browser must not render artifact content at all.
 func IsSandboxPreviewEnabled() bool {
 	return playgroundSetting.SandboxPreviewEnabled
+}
+
+// IsTaskQueueEnabled reports whether an exhausted async task concurrency
+// budget should accept a queued submission instead of returning 429. The
+// result-storage budget is deliberately not queueable.
+func IsTaskQueueEnabled() bool {
+	return playgroundSetting.TaskQueueEnabled
 }
 
 // GetPlaygroundQuotaPolicy resolves the effective budget for a user group:
@@ -879,6 +901,9 @@ func applyPlaygroundQuotaOverrides(policy *PlaygroundQuotaPolicy, override *Play
 	}
 	if override.TaskUserResultMaxBytes > 0 {
 		policy.TaskUserResultMaxBytes = override.TaskUserResultMaxBytes
+	}
+	if override.TaskQueueMaxCount > 0 {
+		policy.TaskQueueMaxCount = override.TaskQueueMaxCount
 	}
 	if override.TrashRetentionDays > 0 {
 		policy.TrashRetentionDays = override.TrashRetentionDays

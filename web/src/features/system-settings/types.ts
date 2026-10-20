@@ -450,6 +450,7 @@ export type SecuritySettings = {
   'playground_setting.web_search': string
   'playground_setting.mcp': string
   'playground_setting.sandbox_preview_enabled': boolean
+  'playground_setting.task_queue_enabled': boolean
 }
 
 export type UpstreamChannel = {
