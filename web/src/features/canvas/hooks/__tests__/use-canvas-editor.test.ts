@@ -1068,9 +1068,12 @@ test('affixNodes moves and marks the bloodline in one undoable step', () => {
   expect(hook.result.current.canUndo).toBe(true)
 
   act(() => hook.result.current.undo())
-  expect(
-    hook.result.current.nodes.find((node) => node.id === 't1')
-  ).toMatchObject({ position: { x: 0, y: 0 }, data: { affixed: undefined } })
+  const restored = hook.result.current.nodes.find((node) => node.id === 't1')
+  expect(restored).toMatchObject({
+    position: { x: 0, y: 0 },
+    data: { kind: 'task', workflow: { generation: 'image' } },
+  })
+  expect(restored?.data.affixed).toBeUndefined()
   expect(
     hook.result.current.nodes.find((node) => node.id === 'r1')?.position
   ).toEqual({ x: 340, y: 0 })

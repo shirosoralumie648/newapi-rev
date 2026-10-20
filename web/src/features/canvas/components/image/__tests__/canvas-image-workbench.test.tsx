@@ -216,6 +216,7 @@ function renderWorkbench(nodes: CanvasFlowNode[], edges: CanvasFlowEdge[]) {
 }
 
 beforeEach(() => {
+  makeRunner()
   vi.mocked(useCanvasWorkflowOptions).mockReturnValue({
     group: 'default',
     setGroup: vi.fn(),
