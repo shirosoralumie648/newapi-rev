@@ -1077,6 +1077,8 @@ test('affixNodes moves and marks the bloodline in one undoable step', () => {
   expect(
     hook.result.current.nodes.find((node) => node.id === 'r1')?.position
   ).toEqual({ x: 340, y: 0 })
+  // Undo restores the saved document, so autosave is notified a second time.
+  expect(onChange).toHaveBeenCalledTimes(2)
 
   act(() => {
     expect(
@@ -1085,7 +1087,7 @@ test('affixNodes moves and marks the bloodline in one undoable step', () => {
       ])
     ).toBe(false)
   })
-  expect(onChange).toHaveBeenCalledTimes(1)
+  expect(onChange).toHaveBeenCalledTimes(2)
 })
 
 test('selectNode marks exactly one node and stays out of the undo history', () => {

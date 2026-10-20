@@ -115,6 +115,14 @@ export function CanvasProjectList(props: CanvasProjectListProps) {
             >
               {t('Image workbench')}
             </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                props.onCreate('video')
+                props.onAction?.()
+              }}
+            >
+              {t('Video workbench')}
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
