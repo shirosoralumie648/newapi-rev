@@ -889,7 +889,7 @@ func TestPlaygroundArenaVotes(t *testing.T) {
 			response := playgroundRequest(t, 7, http.MethodPut, messagesPath, snapshot, controller.ReplacePlaygroundMessages)
 			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 
-			messages, _, err := model.ListPlaygroundMessages(7, sessionID)
+			messages, revision, err := model.ListPlaygroundMessages(7, sessionID)
 			require.NoError(t, err)
 			require.Len(t, messages, 2)
 			var storedAnonymous struct {
@@ -1042,6 +1042,36 @@ func TestPlaygroundArenaVotes(t *testing.T) {
 			assert.Equal(t, model.PlaygroundArenaScopeInstance, instanceSummary.Scope)
 			assert.EqualValues(t, 1, instanceSummary.Total)
 			assert.EqualValues(t, 1, instanceSummary.Choices.Tie)
+
+			// Removing the compared group deletes its vote with it, so the
+			// instance summary cannot keep a preference for a reply that is
+			// no longer stored.
+			kept := make([]model.PlaygroundMessage, 0, len(messages))
+			for _, message := range messages {
+				if message.ClientKey != "arena-group" {
+					kept = append(kept, message)
+				}
+			}
+			require.Len(t, kept, 1)
+			_, err = model.ReplacePlaygroundMessages(7, sessionID, revision, kept)
+			require.NoError(t, err)
+			require.NoError(t, db.Model(&model.PlaygroundArenaVote{}).Count(&voteCount).Error)
+			assert.Zero(t, voteCount)
+
+			// A trashed conversation keeps its vote so a restore loses nothing;
+			// purging it removes the raw preference with the conversation.
+			purgeSession := createPlayground(t, 7, "arena-purge-session")
+			purgeSessionID := purgeSession["id"].(string)
+			require.NoError(t, db.Create(&model.PlaygroundArenaVote{
+				UserID: 7, SessionID: purgeSessionID, MessageKey: "purged-group",
+				Choice: model.PlaygroundArenaChoiceA, Note: "purged", CreatedAt: 1, UpdatedAt: 1,
+			}).Error)
+			require.NoError(t, model.DeletePlaygroundSession(7, purgeSessionID))
+			require.NoError(t, db.Model(&model.PlaygroundArenaVote{}).Count(&voteCount).Error)
+			assert.EqualValues(t, 1, voteCount)
+			require.NoError(t, model.PurgePlaygroundSession(7, purgeSessionID))
+			require.NoError(t, db.Model(&model.PlaygroundArenaVote{}).Count(&voteCount).Error)
+			assert.Zero(t, voteCount)
 		})
 	}
 }
