@@ -103,9 +103,11 @@ const (
 	ContextKeyTokenAuditSucceeded ContextKey = "token_audit_succeeded"
 
 	// ContextKeyPlaygroundOrigin marks a relay request that the Playground
-	// workspace submitted, so the durable task row can carry the same origin
-	// marker. It only scopes Playground lifecycle policies (result storage
-	// budget, expiry cleanup, cancellation) and never touches billing.
+	// workspace submitted, including a media bridge whose path was rewritten to
+	// its canonical /v1 form. It scopes Playground lifecycle policies (result
+	// storage budget, expiry cleanup, cancellation) and log metadata; wallet
+	// billing still runs through the ordinary relay pipeline, while the synthetic
+	// workspace token never carries its own quota.
 	ContextKeyPlaygroundOrigin ContextKey = "playground_origin"
 	// ContextKeyPlaygroundWorkflowRun carries the run budget a Playground
 	// canvas step bills against (BL-03). It arrives in a workspace-only header

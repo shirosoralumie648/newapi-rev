@@ -672,11 +672,17 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		info.RelayMode = c.GetInt("relay_mode")
 	}
 
-	if strings.HasPrefix(c.Request.URL.Path, "/pg") {
+	// The media bridges rewrite the request path to its canonical /v1 form
+	// before the relay runs, so the workspace origin marker is the reliable
+	// signal there. Only a still-/pg path needs the prefix rewrite.
+	playgroundPath := strings.HasPrefix(c.Request.URL.Path, "/pg")
+	if playgroundPath || common.GetContextKeyBool(c, constant.ContextKeyPlaygroundOrigin) {
 		info.IsPlayground = true
 		info.PlaygroundWorkflowRunId = common.GetContextKeyString(c, constant.ContextKeyPlaygroundWorkflowRun)
-		info.RequestURLPath = strings.TrimPrefix(info.RequestURLPath, "/pg")
-		info.RequestURLPath = "/v1" + info.RequestURLPath
+		if playgroundPath {
+			info.RequestURLPath = strings.TrimPrefix(info.RequestURLPath, "/pg")
+			info.RequestURLPath = "/v1" + info.RequestURLPath
+		}
 	}
 
 	userSetting, ok := common.GetContextKeyType[dto.UserSetting](c, constant.ContextKeyUserSetting)
