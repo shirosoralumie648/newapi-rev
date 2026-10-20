@@ -245,6 +245,41 @@ describe('PlaygroundParallelCompare anonymous arena', () => {
     expect(screen.queryByText(/gpt-4/i)).not.toBeInTheDocument()
   })
 
+  test('redacts real model names from a failed anonymous reply', () => {
+    const message = anonymousMessage({
+      status: 'error',
+      versions: [
+        {
+          id: 'v1',
+          content: 'Request failed for gpt-4o.',
+          model: 'gpt-4o',
+          status: 'error',
+          errorCode: null,
+        },
+        {
+          id: 'v2',
+          content: 'gpt-4 also failed.',
+          model: 'gpt-4',
+          status: 'error',
+          errorCode: null,
+        },
+      ],
+    })
+
+    render(
+      <PlaygroundParallelCompare message={message} onArenaVote={vi.fn()} />
+    )
+
+    const first = screen.getByRole('region', { name: 'Reply from Model A' })
+    const second = screen.getByRole('region', { name: 'Reply from Model B' })
+    expect(
+      within(first).getByText(/Request failed for Model A/)
+    ).toBeInTheDocument()
+    expect(within(second).getByText(/Model B also failed/)).toBeInTheDocument()
+    expect(screen.queryByText(/gpt-4o/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/gpt-4/i)).not.toBeInTheDocument()
+  })
+
   test('hides the serving channel from anonymous diagnostics', async () => {
     const user = userEvent.setup()
     const message = anonymousMessage()
