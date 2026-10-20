@@ -52,6 +52,8 @@ export interface PlaygroundUsageAnalytics {
   startTimestamp: number
   endTimestamp: number
   buckets: PlaygroundUsageAnalyticsBucket[]
+  /** True when older day x model x origin groups were omitted. */
+  truncated: boolean
 }
 
 const DAY_MS = 86_400_000

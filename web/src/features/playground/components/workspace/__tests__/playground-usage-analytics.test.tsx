@@ -188,6 +188,17 @@ test('a deployment with usage logging off says so while showing stored rows', as
   expect(screen.getByText('gpt-4o')).toBeVisible()
 })
 
+test('a capped answer says that only the newest groups are shown', async () => {
+  mockAnalytics({ ...analytics, truncated: true })
+  renderPanel()
+
+  expect(
+    await screen.findByText(
+      'Only the most recent usage is shown because this range is too large to display in full.'
+    )
+  ).toBeVisible()
+})
+
 test('a failed request shows the error state', async () => {
   vi.spyOn(api, 'get').mockRejectedValue(new Error('analytics unavailable'))
   renderPanel()

@@ -6364,6 +6364,7 @@ func TestPlaygroundUsageAnalytics(t *testing.T) {
 			assert.Equal(t, common.LogConsumeEnabled, analytics.Enabled)
 			assert.Equal(t, yesterday, analytics.StartTimestamp)
 			assert.Equal(t, now, analytics.EndTimestamp)
+			assert.False(t, analytics.Truncated)
 			require.Len(t, analytics.Buckets, 5)
 			type bucketKey struct {
 				DayStart int64
@@ -6433,6 +6434,42 @@ func TestPlaygroundUsageAnalytics(t *testing.T) {
 			assert.NotEmpty(t, disabled.Buckets)
 		})
 	}
+
+	t.Run("capped answer keeps the newest groups", func(t *testing.T) {
+		db := playgroundTestDB(t, "sqlite")
+		previousLog := model.LOG_DB
+		model.LOG_DB = db
+		require.NoError(t, db.AutoMigrate(&model.Log{}))
+		t.Cleanup(func() {
+			model.LOG_DB = previousLog
+			require.NoError(t, db.Migrator().DropTable(&model.Log{}))
+		})
+		now := common.GetTimestamp()
+		today := now / 86400 * 86400
+		logs := make([]model.Log, 0, 2002)
+		for index := 0; index < 1001; index++ {
+			modelName := fmt.Sprintf("cap-%04d", index)
+			logs = append(logs,
+				model.Log{
+					UserId: 7, Type: model.LogTypeConsume, ModelName: modelName,
+					CreatedAt: today + 10, Quota: 2, PromptTokens: 1,
+					Other: `{"playground_origin":true}`,
+				},
+				model.Log{
+					UserId: 7, Type: model.LogTypeConsume, ModelName: modelName,
+					CreatedAt: today + 10, Quota: 1, PromptTokens: 1,
+				},
+			)
+		}
+		require.NoError(t, db.CreateInBatches(logs, 100).Error)
+
+		analytics, err := model.PlaygroundUsageAnalyticsForUser(7, today, now)
+		require.NoError(t, err)
+		assert.True(t, analytics.Truncated)
+		require.Len(t, analytics.Buckets, 2000)
+		assert.Equal(t, "cap-0000", analytics.Buckets[0].ModelName)
+		assert.Equal(t, "cap-0999", analytics.Buckets[len(analytics.Buckets)-1].ModelName)
+	})
 }
 
 // The analytics endpoint accepts only a bounded day window and stays behind
@@ -6462,6 +6499,7 @@ func TestPlaygroundUsageAnalyticsEndpoint(t *testing.T) {
 			Enabled        bool  `json:"enabled"`
 			StartTimestamp int64 `json:"start_timestamp"`
 			EndTimestamp   int64 `json:"end_timestamp"`
+			Truncated      bool  `json:"truncated"`
 			Buckets        []struct {
 				DayStart    int64  `json:"day_start"`
 				ModelName   string `json:"model_name"`
@@ -6475,6 +6513,7 @@ func TestPlaygroundUsageAnalyticsEndpoint(t *testing.T) {
 	require.NoError(t, common.Unmarshal(defaultResponse.Body.Bytes(), &envelope))
 	require.True(t, envelope.Success, defaultResponse.Body.String())
 	assert.Equal(t, common.LogConsumeEnabled, envelope.Data.Enabled)
+	assert.False(t, envelope.Data.Truncated)
 	assert.GreaterOrEqual(t, envelope.Data.EndTimestamp, now)
 	// The default range covers seven whole UTC days including today, so the
 	// start is aligned to midnight and the span reaches back at least six days.

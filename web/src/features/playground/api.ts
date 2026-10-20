@@ -1404,6 +1404,7 @@ const playgroundUsageAnalyticsSchema = z.object({
   start_timestamp: z.number().int().nonnegative(),
   end_timestamp: z.number().int().nonnegative(),
   buckets: z.array(playgroundUsageAnalyticsBucketSchema),
+  truncated: z.boolean().default(false),
 })
 
 /**
@@ -1426,6 +1427,7 @@ export async function getPlaygroundUsageAnalytics(
     enabled: analytics.enabled,
     startTimestamp: analytics.start_timestamp * 1000,
     endTimestamp: analytics.end_timestamp * 1000,
+    truncated: analytics.truncated,
     buckets: analytics.buckets.map((bucket): PlaygroundUsageAnalyticsBucket => {
       return {
         dayStart: bucket.day_start * 1000,
