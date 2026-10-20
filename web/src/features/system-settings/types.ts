@@ -460,6 +460,7 @@ export type SecuritySettings = {
   'playground_setting.mcp': string
   'playground_setting.model_catalog': string
   'playground_setting.sandbox_preview_enabled': boolean
+  'playground_setting.task_queue_enabled': boolean
 }
 
 export type UpstreamChannel = {

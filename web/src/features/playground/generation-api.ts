@@ -96,6 +96,85 @@ const videoTaskSchema = z.object({
   task_id: z.string().optional(),
 })
 
+/** One accepted generation waiting for a free account concurrency slot. */
+export interface PlaygroundTaskQueueEntry {
+  id: string
+  kind: string
+  status: string
+  priority: number
+  position: number
+  estimatedWaitSeconds: number
+  model: string
+  promptPreview: string
+  createdAt: number
+  taskId?: string
+  errorCode?: string
+  errorMessage?: string
+}
+
+const queueEntrySchema = z.object({
+  id: z.string().min(1),
+  kind: z.string(),
+  status: z.string(),
+  priority: z.number(),
+  position: z.number(),
+  estimated_wait_seconds: z.number(),
+  model: z.string().optional(),
+  prompt_preview: z.string().optional(),
+  created_at: z.number(),
+  task_id: z.string().optional(),
+  error_code: z.string().optional(),
+  error_message: z.string().optional(),
+})
+
+const queuedSubmissionSchema = z.object({
+  success: z.literal(true),
+  data: z.object({ queue: queueEntrySchema }),
+})
+
+const queueListSchema = z.object({
+  success: z.literal(true),
+  data: z.object({
+    enabled: z.boolean(),
+    items: z.array(queueEntrySchema),
+    max_queued: z.number(),
+    max_concurrency: z.number(),
+  }),
+})
+
+function queueEntryFromSchema(
+  entry: z.infer<typeof queueEntrySchema>
+): PlaygroundTaskQueueEntry {
+  return {
+    id: entry.id,
+    kind: entry.kind,
+    status: entry.status,
+    priority: entry.priority,
+    position: entry.position,
+    estimatedWaitSeconds: entry.estimated_wait_seconds,
+    model: entry.model ?? '',
+    promptPreview: entry.prompt_preview ?? '',
+    createdAt: entry.created_at,
+    ...(entry.task_id ? { taskId: entry.task_id } : {}),
+    ...(entry.error_code ? { errorCode: entry.error_code } : {}),
+    ...(entry.error_message ? { errorMessage: entry.error_message } : {}),
+  }
+}
+
+function queuedEntryFromResponse(
+  data: unknown
+): PlaygroundTaskQueueEntry | null {
+  const parsed = queuedSubmissionSchema.safeParse(data)
+  return parsed.success ? queueEntryFromSchema(parsed.data.data.queue) : null
+}
+
+export interface PlaygroundTaskQueueSnapshot {
+  enabled: boolean
+  items: PlaygroundTaskQueueEntry[]
+  maxQueued: number
+  maxConcurrency: number
+}
+
 /**
  * Parses the outcome of an image generation or edit: a durable task id when a
  * task-plugin model submitted the job, otherwise the returned images. An answer
@@ -105,6 +184,10 @@ function parseImageOutcome(
   data: unknown,
   failureMessage: string
 ): PlaygroundImageGenerationOutcome {
+  const queued = queuedEntryFromResponse(data)
+  if (queued) {
+    return { kind: 'queued', entry: queued }
+  }
   const task = imageTaskSchema.safeParse(data)
   if (task.success) {
     return { kind: 'task', taskId: task.data.data.task_id }
@@ -166,6 +249,22 @@ function boundedSeed(seed: number | undefined): number | undefined {
 export type PlaygroundImageGenerationOutcome =
   | { kind: 'images'; images: PlaygroundImageResult[] }
   | { kind: 'task'; taskId: string }
+  | { kind: 'queued'; entry: PlaygroundTaskQueueEntry }
+
+/**
+ * An image edit travels as multipart, and the generation queue only accepts
+ * JSON submissions, so an accepted edit always answers with its images or a
+ * durable task id instead of a queue entry.
+ */
+export type PlaygroundImageEditOutcome = Exclude<
+  PlaygroundImageGenerationOutcome,
+  { kind: 'queued' }
+>
+
+/** One video submission: a durable task id or an accepted queue entry. */
+export type PlaygroundVideoGenerationOutcome =
+  | { kind: 'task'; taskId: string }
+  | { kind: 'queued'; entry: PlaygroundTaskQueueEntry }
 
 /**
  * Starts an image generation through the Playground relay route. The body
@@ -239,7 +338,7 @@ export interface PlaygroundImageEditInput {
 export async function submitImageEdit(
   input: PlaygroundImageEditInput,
   signal?: AbortSignal
-): Promise<PlaygroundImageGenerationOutcome> {
+): Promise<PlaygroundImageEditOutcome> {
   const form = new FormData()
   form.append('model', input.model)
   form.append('prompt', input.prompt)
@@ -263,7 +362,11 @@ export async function submitImageEdit(
     skipErrorHandler: true,
     ...(input.group ? { headers: { 'X-Playground-Group': input.group } } : {}),
   })
-  return parseImageOutcome(response.data, 'Image edit failed')
+  const outcome = parseImageOutcome(response.data, 'Image edit failed')
+  if (outcome.kind === 'queued') {
+    throw new Error('Image edit failed')
+  }
+  return outcome
 }
 
 /**
@@ -277,7 +380,7 @@ export async function submitVideoGeneration(
   input: PlaygroundVideoGenerationInput,
   signal?: AbortSignal,
   workflowRunId?: string
-): Promise<string> {
+): Promise<PlaygroundVideoGenerationOutcome> {
   const duration = boundedDurationSeconds(input.duration)
   const seed = boundedSeed(input.seed)
   const images = (input.images ?? []).filter(Boolean)
@@ -300,9 +403,66 @@ export async function submitVideoGeneration(
         : {}),
     }
   )
+  const queued = queuedEntryFromResponse(response.data)
+  if (queued) {
+    return { kind: 'queued', entry: queued }
+  }
   const parsed = videoTaskSchema.safeParse(response.data)
-  if (!parsed.success) return ''
-  return parsed.data.task_id ?? parsed.data.id ?? ''
+  if (!parsed.success) return { kind: 'task', taskId: '' }
+  return {
+    kind: 'task',
+    taskId: parsed.data.task_id ?? parsed.data.id ?? '',
+  }
+}
+
+/** Loads the owner-scoped generation queue and its current policy snapshot. */
+export async function getPlaygroundTaskQueue(
+  signal?: AbortSignal
+): Promise<PlaygroundTaskQueueSnapshot> {
+  const response = await api.get(`${API_ENDPOINTS.PLAYGROUND_TASKS}/queue`, {
+    signal,
+    skipErrorHandler: true,
+  })
+  const body = requireServerSuccess(response.data)
+  const parsed = queueListSchema.safeParse(body)
+  if (!parsed.success) {
+    throw new Error('Unable to read the generation queue.')
+  }
+  return {
+    enabled: parsed.data.data.enabled,
+    items: parsed.data.data.items.map(queueEntryFromSchema),
+    maxQueued: parsed.data.data.max_queued,
+    maxConcurrency: parsed.data.data.max_concurrency,
+  }
+}
+
+/** Cancels one entry that has not started; a started entry answers 409. */
+export async function cancelPlaygroundTaskQueueEntry(
+  queueId: string,
+  signal?: AbortSignal
+): Promise<PlaygroundTaskQueueEntry> {
+  const response = await api.delete(
+    `${API_ENDPOINTS.PLAYGROUND_TASKS}/queue/${encodeURIComponent(queueId)}`,
+    { signal, skipErrorHandler: true }
+  )
+  const entry = queuedEntryFromResponse(response.data)
+  if (!entry) throw new Error('Unable to cancel the queued generation.')
+  return entry
+}
+
+/** Moves one queued entry above the current global queue head. */
+export async function prioritizePlaygroundTaskQueueEntry(
+  queueId: string,
+  signal?: AbortSignal
+): Promise<PlaygroundTaskQueueEntry> {
+  const response = await api.post(
+    `${API_ENDPOINTS.PLAYGROUND_TASKS}/queue/${encodeURIComponent(queueId)}/priority`,
+    {},
+    { signal, skipErrorHandler: true }
+  )
+  const entry = queuedEntryFromResponse(response.data)
+  if (!entry) throw new Error('Unable to move the queued generation.')
+  return entry
 }
 
 /**

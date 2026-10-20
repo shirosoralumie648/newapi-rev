@@ -39,6 +39,7 @@ export const playgroundQueryKeys = {
     ['playground', userId, 'arena', 'summary', scope] as const,
   tasksAll: () => ['playground', 'tasks'] as const,
   tasks: (filtersKey = 'list') => ['playground', 'tasks', filtersKey] as const,
+  taskQueue: () => ['playground', 'tasks', 'queue'] as const,
   knowledgeBases: (userId: number | null) =>
     ['playground', userId, 'knowledge-bases'] as const,
   knowledgeDocuments: (userId: number | null, knowledgeBaseId: string) =>

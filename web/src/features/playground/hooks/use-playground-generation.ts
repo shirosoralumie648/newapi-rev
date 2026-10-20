@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useRef } from 'react'
 
 import { getTaskArtifacts, getUserTaskLogs } from '@/features/usage-logs/api'
 import type { GetTaskLogsParams, TaskLog } from '@/features/usage-logs/types'
@@ -28,6 +29,9 @@ import {
 } from '../constants'
 import {
   cancelPlaygroundTask,
+  cancelPlaygroundTaskQueueEntry,
+  getPlaygroundTaskQueue,
+  prioritizePlaygroundTaskQueueEntry,
   setPlaygroundTaskArtifactPin,
   submitAudioSpeech,
   submitAudioTranscription,
@@ -180,6 +184,73 @@ export function useCancelPlaygroundTask() {
       void queryClient.invalidateQueries({
         predicate: (query) =>
           query.queryKey[0] === 'playground' && query.queryKey[2] === 'usage',
+      })
+    },
+  })
+}
+
+/**
+ * The owner-scoped server generation queue. It keeps polling while the queue
+ * has rows, including a recently submitted row, and refreshes the durable task
+ * list as soon as a worker reports a new task id.
+ */
+export function usePlaygroundTaskQueue(enabled: boolean) {
+  const queryClient = useQueryClient()
+  const seenSubmitted = useRef(new Set<string>())
+  const query = useQuery({
+    queryKey: playgroundQueryKeys.taskQueue(),
+    enabled,
+    queryFn: ({ signal }) => getPlaygroundTaskQueue(signal),
+    meta: { errorToast: false },
+    refetchInterval: (current) =>
+      (current.state.data?.items.length ?? 0) > 0
+        ? PLAYGROUND_TASK_POLL_INTERVAL_MS
+        : false,
+  })
+  const items = query.data?.items
+  useEffect(() => {
+    if (!items) return
+    let refreshedTasks = false
+    for (const item of items) {
+      if (item.status !== 'submitted' || seenSubmitted.current.has(item.id)) {
+        continue
+      }
+      seenSubmitted.current.add(item.id)
+      refreshedTasks = true
+    }
+    if (refreshedTasks) {
+      void queryClient.invalidateQueries({
+        queryKey: playgroundQueryKeys.tasksAll(),
+      })
+    }
+  }, [items, queryClient])
+  return query
+}
+
+/** Cancels one queued entry that has not started yet. */
+export function useCancelPlaygroundTaskQueueEntry() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (queueId: string) => cancelPlaygroundTaskQueueEntry(queueId),
+    meta: { errorToast: false },
+    onSettled: () => {
+      void queryClient.invalidateQueries({
+        queryKey: playgroundQueryKeys.tasksAll(),
+      })
+    },
+  })
+}
+
+/** Moves one queued entry above the current global queue head. */
+export function usePrioritizePlaygroundTaskQueueEntry() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (queueId: string) =>
+      prioritizePlaygroundTaskQueueEntry(queueId),
+    meta: { errorToast: false },
+    onSettled: () => {
+      void queryClient.invalidateQueries({
+        queryKey: playgroundQueryKeys.tasksAll(),
       })
     },
   })

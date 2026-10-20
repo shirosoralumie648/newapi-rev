@@ -84,6 +84,7 @@ import { generationPlanEstimateSteps } from '../../lib/canvas-generation-run'
 import { CanvasRunBudgetDialog } from '../canvas-run-budget-dialog'
 import { CanvasGenerationResults } from './canvas-generation-results'
 import { CanvasTaskList } from './canvas-task-list'
+import { CanvasTaskQueue } from './canvas-task-queue'
 
 type GenerationMode = (typeof PLAYGROUND_GENERATION_MODES)[number]
 
@@ -387,6 +388,8 @@ export function CanvasGenerationPanel(props: CanvasGenerationPanelProps) {
         setImages([])
         setImageTaskSubmitted(false)
         setAudioUrl(null)
+        // A queued video is shown by CanvasTaskQueue; a durable task appears
+        // in the shared task list after the same mutation invalidates it.
       } else {
         const blob = await generation.audio.mutateAsync({
           model: model.trim(),
@@ -902,6 +905,8 @@ export function CanvasGenerationPanel(props: CanvasGenerationPanelProps) {
           ) : null}
         </section>
       ) : null}
+
+      <CanvasTaskQueue />
 
       <section className='grid gap-2'>
         <h3 className='text-sm font-medium'>{t('Generation tasks')}</h3>

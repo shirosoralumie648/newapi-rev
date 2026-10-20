@@ -308,6 +308,14 @@ export function PlaygroundUsageAnalyticsPanel(
         </p>
       )}
 
+      {analyticsQuery.data?.truncated && (
+        <p className='text-muted-foreground border-b px-3 py-2 text-xs'>
+          {t(
+            'Only the most recent usage is shown because this range is too large to display in full.'
+          )}
+        </p>
+      )}
+
       {analyticsQuery.isError && (
         <div className='shrink-0 p-2'>
           <ErrorState

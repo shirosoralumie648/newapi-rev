@@ -1078,11 +1078,13 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
           }
           // A model served by a task plugin answers with a durable task
           // instead of images; the row and its stored artifacts then settle
-          // the step exactly like a video step.
-          taskId = outcome.taskId
+          // the step exactly like a video step. A workflow step carries a live
+          // run-budget header, so the server never queues it; a queued answer
+          // here is treated as a missing task instead of pretending it ran.
+          taskId = outcome.kind === 'task' ? outcome.taskId : ''
         }
         if (!taskId && config.generation === 'video') {
-          taskId = await submitVideoGeneration(
+          const videoOutcome = await submitVideoGeneration(
             {
               model,
               prompt: input,
@@ -1095,6 +1097,7 @@ export function useCanvasWorkflowRunner(options: CanvasWorkflowRunnerOptions) {
             signal,
             budgetRef.current ?? undefined
           )
+          taskId = videoOutcome.kind === 'task' ? videoOutcome.taskId : ''
         }
         if (!taskId) {
           markStepFailed(node.id, CANVAS_WORKFLOW_ERRORS.NO_TASK_ID)

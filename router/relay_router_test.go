@@ -188,11 +188,18 @@ func TestClaudeTokenCountingEndpointRequiresAuthAndAvailableModel(t *testing.T) 
 	})
 }
 
-// TestPlaygroundProtocolBridgeBillsThroughRelay proves the workspace protocol
-// bridges run the ordinary relay pipeline: the upstream receives the canonical
-// /v1 path, the caller's quota is settled and a consume log is written.
-func TestPlaygroundProtocolBridgeBillsThroughRelay(t *testing.T) {
+// TestPlaygroundBridgesBillThroughRelayAndMarkOrigin proves the workspace
+// protocol and media bridges run the ordinary relay pipeline: the upstream
+// receives the canonical /v1 path, the caller's quota is settled, a consume log
+// is written, and that log carries the Playground origin marker.
+func TestPlaygroundBridgesBillThroughRelayAndMarkOrigin(t *testing.T) {
 	setupRelayRouterTestDB(t)
+	// Production enables request-token estimation in common.Init. The TTS
+	// bridge bills its prompt tokens from that estimate, so the route test must
+	// set the same switch it would have at startup.
+	originalCountToken := constant.CountToken
+	constant.CountToken = true
+	t.Cleanup(func() { constant.CountToken = originalCountToken })
 	require.NoError(t, model.DB.AutoMigrate(
 		&model.Channel{}, &model.Ability{}, &model.Log{}, &model.UserSession{},
 		// The relay bills through the ordinary subscription/wallet pipeline,
@@ -239,6 +246,16 @@ func TestPlaygroundProtocolBridgeBillsThroughRelay(t *testing.T) {
 		wantReply        string
 	}{
 		{
+			name:             "Chat Completions bridge",
+			requestPath:      "/pg/chat/completions",
+			requestBody:      `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hello"}],"stream":false}`,
+			model:            "gpt-4o-mini",
+			channelType:      constant.ChannelTypeOpenAI,
+			upstreamBody:     `{"id":"chatcmpl-pg","object":"chat.completion","created":1710000000,"model":"gpt-4o-mini","choices":[{"index":0,"message":{"role":"assistant","content":"hello from chat"},"finish_reason":"stop"}],"usage":{"prompt_tokens":12,"completion_tokens":4,"total_tokens":16}}`,
+			wantUpstreamPath: "/v1/chat/completions",
+			wantReply:        "hello from chat",
+		},
+		{
 			name:             "Messages bridge",
 			requestPath:      "/pg/messages",
 			requestBody:      `{"model":"claude-3-5-sonnet-20241022","max_tokens":32,"messages":[{"role":"user","content":"hello"}],"stream":false}`,
@@ -257,6 +274,16 @@ func TestPlaygroundProtocolBridgeBillsThroughRelay(t *testing.T) {
 			upstreamBody:     `{"id":"resp_pg","object":"response","status":"completed","model":"gpt-4o","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello from responses"}]}],"usage":{"input_tokens":12,"output_tokens":4,"total_tokens":16}}`,
 			wantUpstreamPath: "/v1/responses",
 			wantReply:        "hello from responses",
+		},
+		{
+			name:             "Audio speech media bridge",
+			requestPath:      "/pg/audio/speech",
+			requestBody:      `{"model":"tts-1","input":"hello","voice":"alloy","response_format":"mp3"}`,
+			model:            "tts-1",
+			channelType:      constant.ChannelTypeOpenAI,
+			upstreamBody:     `fake-audio-bytes`,
+			wantUpstreamPath: "/v1/audio/speech",
+			wantReply:        "fake-audio-bytes",
 		},
 	}
 
@@ -315,6 +342,13 @@ func TestPlaygroundProtocolBridgeBillsThroughRelay(t *testing.T) {
 			var logsAfter int64
 			require.NoError(t, model.LOG_DB.Model(&model.Log{}).Where("user_id = ?", user.Id).Count(&logsAfter).Error)
 			assert.EqualValues(t, logsBefore+1, logsAfter)
+
+			var consumeLog model.Log
+			require.NoError(t, model.LOG_DB.Model(&model.Log{}).
+				Where("user_id = ? AND model_name = ? AND type = ?", user.Id, test.model, model.LogTypeConsume).
+				Order("id DESC").
+				First(&consumeLog).Error)
+			assert.Contains(t, consumeLog.Other, `"playground_origin":true`)
 		})
 	}
 }

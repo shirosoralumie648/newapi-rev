@@ -19,7 +19,9 @@ For commercial licensing, please contact support@quantumnous.com
 package model
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 
 	"github.com/QuantumNous/new-api/common"
 )
@@ -72,6 +74,11 @@ type PlaygroundUsageAnalytics struct {
 	StartTimestamp int64                            `json:"start_timestamp"`
 	EndTimestamp   int64                            `json:"end_timestamp"`
 	Buckets        []PlaygroundUsageAnalyticsBucket `json:"buckets"`
+	// Truncated reports that the range contains more day x model x origin
+	// groups than one bounded answer returns. The newest groups are kept and
+	// the client explains that older groups are missing instead of presenting
+	// the partial sums as complete.
+	Truncated bool `json:"truncated"`
 }
 
 // playgroundUsageAnalyticsRow is the flat scan target of the grouped query.
@@ -215,18 +222,32 @@ func PlaygroundUsageAnalyticsForUser(userID int, startTimestamp int64, endTimest
 		return result, nil
 	}
 	rows := make([]playgroundUsageAnalyticsRow, 0, 32)
+	// Read newest first so a capped answer keeps the part of the range the
+	// Inspector opens on. The extra row only proves that more groups exist;
+	// the response is sorted back into the stable ascending order below.
 	err := LOG_DB.Model(&Log{}).
 		Select(playgroundUsageAnalyticsSelect()).
 		Where("user_id = ?", userID).
 		Where("created_at >= ? AND created_at <= ?", startTimestamp, endTimestamp).
 		Where("type IN ?", []int{LogTypeConsume, LogTypeError}).
 		Group("day_start, model_name, origin").
-		Order("day_start ASC, model_name ASC, origin ASC").
-		Limit(playgroundUsageAnalyticsMaxBuckets).
+		Order("day_start DESC, model_name ASC, origin ASC").
+		Limit(playgroundUsageAnalyticsMaxBuckets + 1).
 		Scan(&rows).Error
 	if err != nil {
 		return result, err
 	}
+	if len(rows) > playgroundUsageAnalyticsMaxBuckets {
+		rows = rows[:playgroundUsageAnalyticsMaxBuckets]
+		result.Truncated = true
+	}
+	slices.SortFunc(rows, func(a, b playgroundUsageAnalyticsRow) int {
+		return cmp.Or(
+			cmp.Compare(a.DayStart, b.DayStart),
+			cmp.Compare(a.ModelName, b.ModelName),
+			cmp.Compare(a.Origin, b.Origin),
+		)
+	})
 	result.Buckets = make([]PlaygroundUsageAnalyticsBucket, 0, len(rows))
 	for index := range rows {
 		row := &rows[index]

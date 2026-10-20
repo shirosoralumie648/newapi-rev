@@ -27,6 +27,8 @@ function stableStringify(obj) {
 
 const newKeys = {
   en: {
+    'Only the most recent usage is shown because this range is too large to display in full.':
+      'Only the most recent usage is shown because this range is too large to display in full.',
     'Apply background removal': 'Apply background removal',
     'Apply outpaint': 'Apply outpaint',
     'Apply style reference': 'Apply style reference',
@@ -93,6 +95,8 @@ const newKeys = {
       'View the request payload of the last send',
   },
   zh: {
+    'Only the most recent usage is shown because this range is too large to display in full.':
+      '范围过大，仅显示最近的用量。',
     'Apply background removal': '应用背景移除',
     'Apply outpaint': '应用扩图',
     'Apply style reference': '应用风格参考',
@@ -156,6 +160,8 @@ const newKeys = {
     'View the request payload of the last send': '查看最近一次发送的请求负载',
   },
   'zh-TW': {
+    'Only the most recent usage is shown because this range is too large to display in full.':
+      '範圍過大，僅顯示最近的用量。',
     'Apply background removal': '套用背景移除',
     'Apply outpaint': '套用擴圖',
     'Apply style reference': '套用風格參考',
@@ -219,6 +225,8 @@ const newKeys = {
     'View the request payload of the last send': '查看最近一次傳送的請求負載',
   },
   fr: {
+    'Only the most recent usage is shown because this range is too large to display in full.':
+      "Seule l'utilisation la plus récente est affichée, car cette période est trop longue pour être affichée en entier.",
     'Apply background removal': 'Appliquer la suppression du fond',
     'Apply outpaint': "Appliquer l'extension d'image",
     'Apply style reference': 'Appliquer la référence de style',
@@ -287,6 +295,8 @@ const newKeys = {
       'Voir la charge utile de la dernière requête',
   },
   ja: {
+    'Only the most recent usage is shown because this range is too large to display in full.':
+      '期間が大きすぎるため、最新の使用量のみを表示しています。',
     'Apply background removal': '背景除去を適用',
     'Apply outpaint': 'アウトペイントを適用',
     'Apply style reference': 'スタイル参照を適用',
@@ -355,6 +365,8 @@ const newKeys = {
       '最後に送信したリクエストのペイロードを表示',
   },
   ru: {
+    'Only the most recent usage is shown because this range is too large to display in full.':
+      'Показаны только последние данные, так как диапазон слишком велик для полного отображения.',
     'Apply background removal': 'Применить удаление фона',
     'Apply outpaint': 'Применить расширение изображения',
     'Apply style reference': 'Применить стилевую ссылку',
@@ -423,6 +435,8 @@ const newKeys = {
       'Посмотреть тело запроса последней отправки',
   },
   vi: {
+    'Only the most recent usage is shown because this range is too large to display in full.':
+      'Chỉ hiển thị mức sử dụng gần nhất vì khoảng thời gian này quá lớn để hiển thị đầy đủ.',
     'Apply background removal': 'Áp dụng xóa nền',
     'Apply outpaint': 'Áp dụng mở rộng ảnh',
     'Apply style reference': 'Áp dụng tham chiếu phong cách',

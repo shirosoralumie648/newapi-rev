@@ -78,6 +78,7 @@ function renderTools(
           autoTitleDefaultEnabled
           autoTitleEnabled
           autoTitleHasOverride={false}
+          anonymousCompare={false}
           config={config}
           contextPlan={planPlaygroundContext({
             messages: [],
@@ -95,6 +96,7 @@ function renderTools(
           onAutoReadChange={() => undefined}
           onAutoReadDefaultChange={() => undefined}
           onAutoReadUseDefault={() => undefined}
+          onAnonymousCompareChange={() => undefined}
           onAutoTitleChange={() => undefined}
           onAutoTitleDefaultChange={() => undefined}
           onAutoTitleUseDefault={() => undefined}

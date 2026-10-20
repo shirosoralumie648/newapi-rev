@@ -62,6 +62,12 @@ export const STATIC_I18N_KEYS = [
   'Unable to cancel the task.',
   'Playground task result storage limit reached. Wait for old task results to expire.',
   'Unable to update result retention.',
+  // Optional generation queue status labels selected by entry.status.
+  'Waiting',
+  'Starting',
+  'Submitted',
+  'Failed',
+  'Canceled',
   // Playground batch generation (PG2-06): the plan builder and the capability
   // mapper return these strings as i18n keys, so the literal scan cannot see
   // them. Their values live in PLAYGROUND_GENERATION_BATCH_MESSAGES,
@@ -113,6 +119,16 @@ export const STATIC_I18N_KEYS = [
   'Workflow run not found.',
   'Unable to settle the run budget.',
   'This workflow run has reached its budget cap; the remaining steps were not started.',
+  // Anonymous A/B arena (PG2-15): the four raw choice labels are selected from
+  // a constant map, and the server answers votes with these messages.
+  'A better',
+  'B better',
+  'Tie',
+  'Both bad',
+  'Invalid Playground arena vote.',
+  'Administrator access is required.',
+  'Invalid Playground arena summary scope.',
+  'Playground message not found.',
   // Wallet overdraft settings and administrative debt views.
   'Wallet Overdraft',
   'Wallet overdraft limit (USD)',

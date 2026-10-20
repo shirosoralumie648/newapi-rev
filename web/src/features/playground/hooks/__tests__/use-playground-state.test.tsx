@@ -123,10 +123,10 @@ test('catalog defaults seed only a new conversation and presets win', () => {
     seed: true,
   })
 
-  // Changing the model and later creating another conversation never rewrites
-  // the catalog conversation that already stored its values.
-  act(() => hook.result.current.updateConfig('model', 'other-model'))
+  // Changing the model in another conversation never rewrites the catalog
+  // conversation that already stored its values.
   act(() => hook.result.current.createSession({ model: 'other-model' }))
+  act(() => hook.result.current.updateConfig('model', 'other-model'))
   act(() => hook.result.current.switchSession(catalogSessionId ?? ''))
   expect(hook.result.current.config).toMatchObject({
     model: 'catalog-model',

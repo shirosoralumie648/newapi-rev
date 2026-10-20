@@ -33,6 +33,7 @@ import {
 } from '@/features/canvas/lib/canvas-send'
 import type { CanvasInspectorView } from '@/features/canvas/types'
 import { handleServerError } from '@/lib/handle-server-error'
+import { ROLE } from '@/lib/roles'
 import { getServerMessage } from '@/lib/server-error-message'
 import {
   isEditableShortcutTarget,
@@ -90,6 +91,7 @@ import {
   usePlaygroundMemoryExtraction,
   usePlaygroundMCPCatalog,
   usePlaygroundOptions,
+  usePlaygroundArena,
   usePlaygroundArtifacts,
   usePlaygroundPreferences,
   usePlaygroundSandboxSettings,
@@ -168,6 +170,8 @@ function PlaygroundContent(props: {
 }) {
   const { t } = useTranslation()
   const userId = useAuthStore((state) => state.auth.user?.id ?? null)
+  const role = useAuthStore((state) => state.auth.user?.role ?? ROLE.USER)
+  const isAdmin = role >= ROLE.ADMIN
   const [artifactSource, setArtifactSource] = useState<{
     message: Message
     source: CapturedArtifactSource
@@ -209,6 +213,9 @@ function PlaygroundContent(props: {
   // Composer text a replay link restored; consumed once by PlaygroundInput.
   const [replayPrefill, setReplayPrefill] = useState('')
   const [compareModels, setCompareModels] = useState<string[]>([])
+  // The next two-model comparison hides model names and records one raw
+  // preference per message group. It never computes a ranking.
+  const [anonymousCompare, setAnonymousCompare] = useState(false)
   const [compareRunsOpen, setCompareRunsOpen] = useState(false)
   const comparisonRunner = usePlaygroundComparisonRunner()
   const local = usePlaygroundState()
@@ -431,6 +438,19 @@ function PlaygroundContent(props: {
     onRename: renameSession,
   })
   const canonicalSessionId = activeSession?.server?.id ?? null
+  // A vote may be the first write of a still-local conversation, so bind the
+  // server session through the ordinary save path before storing it.
+  const ensureArenaSession = useCallback(async () => {
+    if (!activeSessionId) return null
+    const bound = await sync.ensureServerSession(activeSessionId)
+    return bound.server?.id ?? null
+  }, [activeSessionId, sync.ensureServerSession])
+  const arena = usePlaygroundArena(
+    userId,
+    canonicalSessionId,
+    isAdmin,
+    ensureArenaSession
+  )
   const artifactController = usePlaygroundArtifacts(userId, canonicalSessionId)
   const artifactCreationEnabled = Boolean(
     canonicalSessionId &&
@@ -543,6 +563,12 @@ function PlaygroundContent(props: {
     ) => {
       const quote = pendingQuote
       if (quote) setPendingQuote(null)
+      if (anonymousCompare && compareModels.length !== 2) {
+        // The arena is exactly A/B. Sending a larger or smaller group would
+        // either reveal the comparison or silently drop the anonymous mode.
+        toast.warning(t('Select exactly two models for the anonymous arena.'))
+        return
+      }
       if (compareModels.length < PLAYGROUND_PARALLEL_MIN_MODELS) {
         handleSendMessage(text, attachments, search, quote)
         return
@@ -553,16 +579,19 @@ function PlaygroundContent(props: {
         attachments,
         compareModels,
         Date.now(),
-        search
+        search,
+        anonymousCompare
       )
       updateMessages(nextMessages)
       sendParallelChat(nextMessages, quote)
     },
     [
+      anonymousCompare,
       compareModels,
       handleSendMessage,
       pendingQuote,
       sendParallelChat,
+      t,
       updateMessages,
     ]
   )
@@ -1585,6 +1614,10 @@ function PlaygroundContent(props: {
               onDenyToolCall={handleDenyToolCall}
               onContinueToolCalls={handleContinueToolCalls}
               onRetryParallelVersion={retryParallelVersion}
+              arenaInstanceSummary={isAdmin ? arena.instanceSummary : undefined}
+              arenaPersonalSummary={arena.personalSummary}
+              arenaVotes={arena.votesByMessageKey}
+              onArenaVote={arena.saveVote}
               onCreateArtifact={
                 artifactCreationEnabled ? openArtifactSource : undefined
               }
@@ -1709,7 +1742,9 @@ function PlaygroundContent(props: {
               mcp={mcpControl}
               modelValue={config.model}
               models={models}
+              anonymousCompare={anonymousCompare}
               compareModels={compareModels}
+              onAnonymousCompareChange={setAnonymousCompare}
               onCompareModelsChange={setCompareModels}
               onOpenCompareRuns={() => setCompareRunsOpen(true)}
               onContextSettingsChange={updateContextSettings}

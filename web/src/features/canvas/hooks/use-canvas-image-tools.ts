@@ -25,7 +25,7 @@ import {
 } from '@/features/playground/api'
 import {
   submitImageEdit,
-  type PlaygroundImageGenerationOutcome,
+  type PlaygroundImageEditOutcome,
   type PlaygroundImageResult,
 } from '@/features/playground/generation-api'
 import {
@@ -474,7 +474,7 @@ export function useCanvasImageTools(
   const completeEdit = useCallback(
     async (
       node: CanvasFlowNode,
-      outcome: PlaygroundImageGenerationOutcome,
+      outcome: PlaygroundImageEditOutcome,
       resultOptions: CanvasImageEditResultOptions
     ): Promise<boolean> => {
       const label = canvasImageToolResultLabel(

@@ -188,6 +188,17 @@ test('a deployment with usage logging off says so while showing stored rows', as
   expect(screen.getByText('gpt-4o')).toBeVisible()
 })
 
+test('a capped answer says that only the newest groups are shown', async () => {
+  mockAnalytics({ ...analytics, truncated: true })
+  renderPanel()
+
+  expect(
+    await screen.findByText(
+      'Only the most recent usage is shown because this range is too large to display in full.'
+    )
+  ).toBeVisible()
+})
+
 test('a failed request shows the error state', async () => {
   vi.spyOn(api, 'get').mockRejectedValue(new Error('analytics unavailable'))
   renderPanel()
@@ -227,7 +238,8 @@ test('exporting writes the displayed rows as a CSV file', async () => {
   expect(filename).toBe('playground-usage-7d.csv')
   expect(lines).toHaveLength(4)
   expect(lines[0]).toContain('"Date","Model","Origin"')
-  expect(lines[1]).toContain('"2026-10-12"')
-  expect(lines[1]).toContain('"gpt-4o"')
+  const modelLine = lines.find((line) => line.includes('"gpt-4o"'))
+  expect(modelLine).toBeDefined()
+  expect(modelLine).toContain('"2026-10-12"')
   expect(lines.some((line) => line.includes(`"'=SUM(A1)"`))).toBe(true)
 })

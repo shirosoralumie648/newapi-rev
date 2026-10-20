@@ -36,7 +36,13 @@ import type { PlaygroundArenaChoice } from '../types'
 export function usePlaygroundArena(
   userId: number | null,
   sessionId: string | null,
-  isAdmin: boolean
+  isAdmin: boolean,
+  /**
+   * Binds a still-local conversation before its first vote. The vote endpoint
+   * resolves the conversation by its canonical server id, exactly like the
+   * message and attachment routes.
+   */
+  ensureSessionId?: () => Promise<string | null>
 ) {
   const queryClient = useQueryClient()
   const votesQuery = useQuery({
@@ -96,10 +102,17 @@ export function usePlaygroundArena(
 
   const saveVote = useCallback(
     async (messageKey: string, choice: PlaygroundArenaChoice, note: string) => {
-      if (!sessionId) return
-      await mutation.mutateAsync({ sessionId, messageKey, choice, note })
+      const target =
+        sessionId ?? (ensureSessionId ? await ensureSessionId() : null)
+      if (!target) return
+      await mutation.mutateAsync({
+        sessionId: target,
+        messageKey,
+        choice,
+        note,
+      })
     },
-    [mutation, sessionId]
+    [ensureSessionId, mutation, sessionId]
   )
 
   return {

@@ -41,6 +41,7 @@ function buildInputElement(
   overrides: Partial<ComponentProps<typeof PlaygroundInput>> = {}
 ) {
   const props: ComponentProps<typeof PlaygroundInput> = {
+    anonymousCompare: false,
     autoReadDefaultEnabled: false,
     autoReadEnabled: false,
     autoReadHasOverride: false,
@@ -62,6 +63,7 @@ function buildInputElement(
     onAutoReadChange: () => undefined,
     onAutoReadDefaultChange: () => undefined,
     onAutoReadUseDefault: () => undefined,
+    onAnonymousCompareChange: () => undefined,
     onAutoTitleChange: () => undefined,
     onAutoTitleDefaultChange: () => undefined,
     onAutoTitleUseDefault: () => undefined,
