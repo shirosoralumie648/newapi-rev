@@ -84,6 +84,8 @@ interface PlaygroundChatProps {
   onForkMessage?: (message: MessageType) => void
   /** Message a cross-session search or a deep link wants the reader to see. */
   highlightedMessageKey?: string | null
+  /** Bumped when the same message is requested again, to re-run the scroll. */
+  highlightedMessageNonce?: number
   onReadAloud?: (message: MessageType) => void
   onRegenerateMessage?: (message: MessageType) => void
   /** Continue the last reply when it was cut short by the token cap or a stop. */
@@ -149,6 +151,7 @@ export function PlaygroundChat({
   onQuoteMessage,
   onForkMessage,
   highlightedMessageKey,
+  highlightedMessageNonce,
   onReadAloud,
   onRegenerateMessage,
   onContinueMessage,
@@ -216,7 +219,7 @@ export function PlaygroundChat({
         []
     ).find((node) => node.dataset.messageKey === highlightedMessageKey)
     element?.scrollIntoView?.({ block: 'center' })
-  }, [highlightedMessageKey])
+  }, [highlightedMessageKey, highlightedMessageNonce])
 
   function handleToggleMessageSource(message: MessageType): void {
     setSourceMessageKeys((currentKeys) => {

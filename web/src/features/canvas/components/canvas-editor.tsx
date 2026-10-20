@@ -30,6 +30,7 @@ import { toast } from 'sonner'
 
 import { Canvas } from '@/components/ai-elements/canvas'
 import { Panel } from '@/components/ai-elements/panel'
+import { ShortcutsHelpDialog } from '@/components/shortcuts-help-dialog'
 import { WorkspaceInspector } from '@/components/workspace-inspector'
 import { uploadPlaygroundAttachmentDirect } from '@/features/playground/lib/attachment-upload'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -37,6 +38,10 @@ import {
   getServerMessage,
   translateServerText,
 } from '@/lib/server-error-message'
+import {
+  isShortcutSuppressedTarget,
+  isShortcutsHelpShortcut,
+} from '@/lib/shortcuts'
 
 import { exportCanvasArchive } from '../api'
 import {
@@ -88,6 +93,7 @@ import {
   buildAttachmentCanvasSeeds,
   type CanvasSendSeed,
 } from '../lib/canvas-send'
+import { CANVAS_SHORTCUTS } from '../lib/canvas-shortcuts'
 import {
   canvasWorkflowIsPreferredResult,
   canvasWorkflowMentions,
@@ -153,6 +159,8 @@ const canvasEdgeTypes: EdgeTypes = {
 interface CanvasEditorProps {
   project: CanvasServerProject
   disabled?: boolean
+  /** Inspector view a palette command or deep link opens on the board. */
+  initialInspectorView?: CanvasInspectorView
   /** Owner scope the asset library and artifact browser list under. */
   userId: number | null
   /**
@@ -244,20 +252,40 @@ export function CanvasEditor(props: CanvasEditorProps) {
   const handleNodeSearchOpenChange = useCallback((open: boolean) => {
     setNodeSearchOpen(open)
   }, [])
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const disabled = props.disabled
   useEffect(() => {
     if (disabled) return
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (!isCanvasNodeSearchShortcut(event)) return
-      event.preventDefault()
-      setNodeSearchOpen(true)
+      if (event.defaultPrevented) return
+      if (isCanvasNodeSearchShortcut(event)) {
+        event.preventDefault()
+        setNodeSearchOpen(true)
+        return
+      }
+      if (
+        isShortcutsHelpShortcut(event) &&
+        !isShortcutSuppressedTarget(event.target)
+      ) {
+        event.preventDefault()
+        setShortcutsOpen(true)
+      }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [disabled])
 
-  const [inspectorView, setInspectorView] =
-    useState<CanvasInspectorView>('details')
+  const [inspectorView, setInspectorView] = useState<CanvasInspectorView>(
+    props.initialInspectorView ?? 'details'
+  )
+  // The route can hand the editor a new view after it mounted (the palette
+  // stays on the canvas route); a manual toolbar switch is not reverted because
+  // the route param does not change with it.
+  useEffect(() => {
+    if (!props.initialInspectorView) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setInspectorView(props.initialInspectorView)
+  }, [props.initialInspectorView])
   const [artifactSelection, setArtifactSelection] =
     useState<CanvasArtifactTarget | null>(props.artifactTarget ?? null)
 
@@ -890,6 +918,7 @@ export function CanvasEditor(props: CanvasEditorProps) {
                         setRunPlan(workflow.estimateSelection())
                       }
                       onSearchNodes={() => setNodeSearchOpen(true)}
+                      onOpenShortcuts={() => setShortcutsOpen(true)}
                       onSelectAll={editor.selectAll}
                       onToggleInspectorView={handleToggleInspectorView}
                       onUndo={editor.undo}
@@ -984,6 +1013,12 @@ export function CanvasEditor(props: CanvasEditorProps) {
         }}
         open={runPlan !== null}
         steps={runPlan?.steps ?? []}
+      />
+
+      <ShortcutsHelpDialog
+        onOpenChange={setShortcutsOpen}
+        open={shortcutsOpen}
+        shortcuts={CANVAS_SHORTCUTS}
       />
     </div>
   )
