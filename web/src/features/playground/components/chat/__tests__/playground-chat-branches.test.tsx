@@ -248,6 +248,32 @@ describe('PlaygroundChat message highlight', () => {
     ).not.toHaveAttribute('data-highlighted')
   })
 
+  test('a new jump nonce re-centers the same highlighted message', () => {
+    const scrollIntoView = vi.spyOn(HTMLElement.prototype, 'scrollIntoView')
+    try {
+      const { rerender } = render(
+        <PlaygroundChat
+          highlightedMessageKey='m1'
+          highlightedMessageNonce={0}
+          messages={longHistory}
+        />
+      )
+      scrollIntoView.mockClear()
+
+      rerender(
+        <PlaygroundChat
+          highlightedMessageKey='m1'
+          highlightedMessageNonce={1}
+          messages={longHistory}
+        />
+      )
+
+      expect(scrollIntoView).toHaveBeenCalledTimes(1)
+    } finally {
+      scrollIntoView.mockRestore()
+    }
+  })
+
   test('highlights a message whose key contains selector punctuation', () => {
     const key = 'imported"\\key'
     render(

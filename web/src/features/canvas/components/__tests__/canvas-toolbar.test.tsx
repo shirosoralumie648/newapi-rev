@@ -66,6 +66,7 @@ function toolbarProps(runPhase: CanvasWorkflowRunPhase = 'idle') {
     onImportArchiveFile: vi.fn(),
     onImportFile: vi.fn(),
     onOpenTemplates: vi.fn(),
+    onOpenShortcuts: vi.fn(),
     onPaste: vi.fn(),
     onRedo: vi.fn(),
     onRunWorkflow: vi.fn(),
@@ -122,6 +123,15 @@ test('opens the node search panel from the toolbar', async () => {
 
   await user.click(screen.getByRole('button', { name: 'Search nodes' }))
   expect(props.onSearchNodes).toHaveBeenCalledTimes(1)
+})
+
+test('opens the keyboard shortcut reference from the toolbar', async () => {
+  const user = userEvent.setup()
+  const props = toolbarProps()
+  render(<CanvasToolbar {...props} />)
+
+  await user.click(screen.getByRole('button', { name: 'Keyboard shortcuts' }))
+  expect(props.onOpenShortcuts).toHaveBeenCalledTimes(1)
 })
 
 test('opens the template library from the toolbar', async () => {

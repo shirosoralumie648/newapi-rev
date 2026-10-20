@@ -75,6 +75,27 @@ test('the top bar no longer exposes the creation-domain entries', () => {
   expect(screen.getByText('Usage panel')).toBeVisible()
 })
 
+test('the top bar opens the command palette and the shortcut reference', async () => {
+  const user = userEvent.setup()
+  const onOpenCommandPalette = vi.fn()
+  const onOpenShortcuts = vi.fn()
+  render(
+    <PlaygroundWorkspace
+      {...baseProps}
+      onOpenCommandPalette={onOpenCommandPalette}
+      onOpenShortcuts={onOpenShortcuts}
+    >
+      <div>Chat body</div>
+    </PlaygroundWorkspace>
+  )
+
+  await user.click(screen.getByRole('button', { name: 'Open command palette' }))
+  await user.click(screen.getByRole('button', { name: 'Keyboard shortcuts' }))
+
+  expect(onOpenCommandPalette).toHaveBeenCalledTimes(1)
+  expect(onOpenShortcuts).toHaveBeenCalledTimes(1)
+})
+
 test('the top bar opens the memory inspector', async () => {
   const user = userEvent.setup()
   const onToggleInspector = vi.fn()

@@ -29,6 +29,11 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
+  matchesShortcutBinding,
+  isShortcutSuppressedTarget,
+} from '@/lib/shortcuts'
+
+import {
   CANVAS_MAX_EDGES,
   CANVAS_MAX_NODES,
   CANVAS_NODE_ADD_BASE,
@@ -77,6 +82,7 @@ import {
   undoCanvasHistory,
   type CanvasSnapshot,
 } from '../lib/canvas-history'
+import { CANVAS_SHORTCUTS } from '../lib/canvas-shortcuts'
 import {
   wouldCreateCanvasWorkflowCycle,
   CANVAS_WORKFLOW_ERRORS,
@@ -872,67 +878,56 @@ export function useCanvasEditor(
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return
       const target = event.target
-      const editing =
-        target instanceof HTMLElement &&
-        (target.isContentEditable ||
-          target.tagName === 'INPUT' ||
-          target.tagName === 'TEXTAREA' ||
-          target.tagName === 'SELECT')
-      const inOverlay =
-        target instanceof HTMLElement &&
-        target.closest(
-          '[role="dialog"], [role="menu"], [role="listbox"], [role="combobox"], [role="slider"]'
-        ) !== null
       // Editable fields and open overlays keep their own undo/redo, copy/paste,
       // caret movement, deletion and arrow-key navigation.
-      if (editing || inOverlay || event.altKey) return
+      if (isShortcutSuppressedTarget(target) || event.altKey) return
 
-      if (event.metaKey || event.ctrlKey) {
-        const key = event.key.toLowerCase()
-        if (key === 'z') {
-          event.preventDefault()
-          if (event.shiftKey) {
-            redo()
-          } else {
-            undo()
-          }
-          return
-        }
-        if (key === 'y') {
-          event.preventDefault()
-          redo()
-          return
-        }
-        if (key === 'a') {
-          event.preventDefault()
-          selectAll()
-          return
-        }
-        // Copy and paste keep their browser meaning when the canvas has nothing
-        // to offer: an empty selection or an empty editor clipboard.
-        if (key === 'c' && !event.shiftKey) {
-          if (copySelection()) event.preventDefault()
-          return
-        }
-        if (key === 'v' && !event.shiftKey) {
-          if (pasteSelection()) event.preventDefault()
-          return
-        }
-        if (key === 'g') {
-          event.preventDefault()
-          if (event.shiftKey) {
-            ungroupSelection()
-          } else {
-            groupSelection()
-          }
-        }
-        return
+      const matches = (id: string) => {
+        const definition = CANVAS_SHORTCUTS.find((entry) => entry.id === id)
+        return (
+          definition?.bindings.some((binding) =>
+            matchesShortcutBinding(event, binding)
+          ) ?? false
+        )
       }
 
-      if (event.key === 'Delete' || event.key === 'Backspace') {
-        if (deleteSelection()) {
-          event.preventDefault()
-        }
+      if (matches('canvas-undo')) {
+        event.preventDefault()
+        undo()
+        return
+      }
+      if (matches('canvas-redo')) {
+        event.preventDefault()
+        redo()
+        return
+      }
+      if (matches('canvas-select-all')) {
+        event.preventDefault()
+        selectAll()
+        return
+      }
+      // Copy and paste keep their browser meaning when the canvas has nothing
+      // to offer: an empty selection or an empty editor clipboard.
+      if (matches('canvas-copy')) {
+        if (copySelection()) event.preventDefault()
+        return
+      }
+      if (matches('canvas-paste')) {
+        if (pasteSelection()) event.preventDefault()
+        return
+      }
+      if (matches('canvas-group')) {
+        event.preventDefault()
+        groupSelection()
+        return
+      }
+      if (matches('canvas-ungroup')) {
+        event.preventDefault()
+        ungroupSelection()
+        return
+      }
+      if (matches('canvas-delete')) {
+        if (deleteSelection()) event.preventDefault()
         return
       }
 
@@ -943,7 +938,10 @@ export function useCanvasEditor(
         ArrowDown: { x: 0, y: 1 },
       }[event.key]
       if (!direction) return
-      const step = event.shiftKey ? CANVAS_NUDGE_LARGE_STEP : CANVAS_NUDGE_STEP
+      const largeStep = matches('canvas-nudge-fast')
+      const smallStep = largeStep ? false : matches('canvas-nudge')
+      if (!largeStep && !smallStep) return
+      const step = largeStep ? CANVAS_NUDGE_LARGE_STEP : CANVAS_NUDGE_STEP
       if (nudgeSelection(direction.x * step, direction.y * step)) {
         event.preventDefault()
       }

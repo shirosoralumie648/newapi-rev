@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type {
+  CanvasInspectorView,
   CanvasNodeData,
   CanvasNodeKind,
   CanvasNodeRef,
@@ -33,6 +34,8 @@ export interface CanvasRouteSearch {
   artifact?: string
   /** Comma-separated attachment ids of the source message version. */
   attachment?: string
+  /** Inspector view a palette command asked the canvas to open. */
+  view?: CanvasInspectorView
 }
 
 /** The Playground source a canvas node links back to. */

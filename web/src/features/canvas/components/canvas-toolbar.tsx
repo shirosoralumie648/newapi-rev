@@ -32,6 +32,7 @@ import {
   FileText,
   FolderOpen,
   History,
+  Keyboard,
   LayoutGrid,
   LayoutTemplate,
   ListChecks,
@@ -127,6 +128,7 @@ interface CanvasToolbarProps {
   onRunSelection: () => void
   onCancelRun: () => void
   onSearchNodes: () => void
+  onOpenShortcuts: () => void
 }
 
 export function CanvasToolbar(props: CanvasToolbarProps) {
@@ -493,6 +495,17 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
         variant='outline'
       >
         <Search aria-hidden='true' />
+      </Button>
+
+      <Button
+        aria-label={t('Keyboard shortcuts')}
+        disabled={props.disabled}
+        onClick={props.onOpenShortcuts}
+        size='icon-sm'
+        type='button'
+        variant='outline'
+      >
+        <Keyboard aria-hidden='true' />
       </Button>
     </div>
   )

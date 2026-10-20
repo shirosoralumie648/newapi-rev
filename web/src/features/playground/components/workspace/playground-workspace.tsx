@@ -16,7 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Brain, ChartColumn, Menu, PanelLeft } from 'lucide-react'
+import {
+  Brain,
+  ChartColumn,
+  Command,
+  Keyboard,
+  Menu,
+  PanelLeft,
+} from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -70,6 +77,10 @@ interface PlaygroundWorkspaceProps {
   onOpenPresets?: () => void
   /** Opens the cross-session message search dialog. */
   onOpenMessageSearch?: () => void
+  /** Opens the command palette. */
+  onOpenCommandPalette?: () => void
+  /** Opens the keyboard shortcut reference. */
+  onOpenShortcuts?: () => void
   onToggleInspector?: (view: PlaygroundInspectorView) => void
 }
 
@@ -169,6 +180,30 @@ export function PlaygroundWorkspace(props: PlaygroundWorkspaceProps) {
               {props.syncLabel}
             </span>
             {props.usagePanel}
+            {props.onOpenCommandPalette && (
+              <Button
+                aria-label={t('Open command palette')}
+                disabled={props.disabled}
+                onClick={props.onOpenCommandPalette}
+                size='icon-sm'
+                type='button'
+                variant='ghost'
+              >
+                <Command aria-hidden='true' />
+              </Button>
+            )}
+            {props.onOpenShortcuts && (
+              <Button
+                aria-label={t('Keyboard shortcuts')}
+                disabled={props.disabled}
+                onClick={props.onOpenShortcuts}
+                size='icon-sm'
+                type='button'
+                variant='ghost'
+              >
+                <Keyboard aria-hidden='true' />
+              </Button>
+            )}
             {props.onToggleInspector && (
               <>
                 <Button
