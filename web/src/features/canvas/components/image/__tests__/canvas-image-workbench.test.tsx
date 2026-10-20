@@ -25,6 +25,7 @@ import { beforeEach, expect, test, vi } from 'vitest'
 import {
   CANVAS_LINKED_NODE_OFFSET_X,
   CANVAS_NODE_ADD_BASE,
+  CANVAS_WORKFLOW_MESSAGES,
   CANVAS_WORKFLOW_RESULT_NODE_OFFSET_Y,
 } from '@/features/canvas/constants'
 import { useCanvasEditor } from '@/features/canvas/hooks/use-canvas-editor'
@@ -34,7 +35,6 @@ import { useCanvasWorkflowOptions } from '@/features/canvas/hooks/use-canvas-wor
 import { useCanvasWorkflowRunner } from '@/features/canvas/hooks/use-canvas-workflow-runner'
 import { canvasDropEntries } from '@/features/canvas/lib/canvas-drop'
 import { CANVAS_IMAGE_WORKBENCH_AFFIX_GAP } from '@/features/canvas/lib/canvas-image-workbench'
-import { CANVAS_WORKFLOW_MESSAGES } from '@/features/canvas/lib/canvas-workflow'
 import type {
   CanvasFlowEdge,
   CanvasFlowNode,

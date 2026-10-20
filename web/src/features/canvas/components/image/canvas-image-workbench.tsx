@@ -56,6 +56,7 @@ import {
   CANVAS_IMAGE_TOOL_TITLES,
   CANVAS_LINKED_NODE_OFFSET_X,
   CANVAS_WORKFLOW_IMAGE_INPUT_MAX_COUNT,
+  CANVAS_WORKFLOW_MESSAGES,
   CANVAS_WORKFLOW_RESULT_NODE_OFFSET_Y,
 } from '../../constants'
 import {
@@ -88,7 +89,6 @@ import {
   canvasImageWorkbenchVariants,
 } from '../../lib/canvas-image-workbench'
 import {
-  CANVAS_WORKFLOW_MESSAGES,
   canvasWorkflowMentions,
   canvasWorkflowNodeHasImage,
   canvasWorkflowPreferredSibling,
