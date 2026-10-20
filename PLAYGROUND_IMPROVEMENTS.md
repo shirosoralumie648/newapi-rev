@@ -956,7 +956,7 @@ Step 进度：
 
 - 编辑器手感：**内容级撤销缺失**（仅结构变化入栈）、无对齐/吸附/等距分布、无连线完善交互（拖端口建线/连线删除/替换重连）、无选区与整画布 PNG 导出、键盘手感不完整。
 - 生成域：**CV-07 已补齐 seed 固定/继承/随机、batch 多结果逐结果选优、尺寸档位与自定义、渠道能力揭示、多参考图连线上限**；仍缺扩图/背景移除/风格参考与专门图片/视频工作台。
-- 结构缺口：无专门图片/视频工作台（LB-14 后全部创作汇入无限画布，临时用户被迫节点图思维）。
+- 结构缺口：**CV-09 已补齐图片工作台**（单图聚焦布局）；视频工作台仍缺（CV-10）。
 - 流程复用：无画布模板（常用链一键铺点、画布存为模板）。
 - 组织：无节点颜色标注/标签、无画布内节点搜索、无批量跑选中子图。
 - 分享：**CV-12 已补齐画布只读分享**，与 LB-05 会话分享共用 share 表、匿名端点、哈希 token 与撤销/过期契约。
@@ -968,7 +968,7 @@ Step 进度：
 | CV-06 | 编辑器手感整包：内容级撤销/重做、对齐吸附等距分布、连线交互完善、键盘（方向键微移/Delete 删线等）、fit/zoom 控件、选区与整画布导出 PNG | 无（前端） | P0 |
 | CV-07 | 生成参数与变体：seed 固定/继承/随机、batch 多张出图逐结果选优、尺寸档位、渠道能力揭示（参数面板按所选模型/渠道显隐有效参数）、多参考图连线 | 小（参数沿用既有有界字段校验，seed 非计费乘数） | P0 |
 | CV-08 | 创作工具扩展：扩图 outpaint、背景移除、风格参考——入口按渠道能力显隐，先落地有渠道支持的 | 中（新 relay 工具路由/渠道适配按需） | P0 |
-| CV-09 | 图片工作台：项目模式落地 + 单图聚焦编辑器（大预览/工具栏/参数侧栏/版本变体条/钉回画布） | CV-07、CV-08 | P0 |
+| CV-09 | 图片工作台：项目模式落地 + 单图聚焦编辑器（大预览/工具栏/参数侧栏/版本变体条/钉回画布）（已完成，见 15.3 CV-09 进展；CI-only） | CV-07、CV-08 | P0 |
 | CV-10 | 视频工作台：播放器 + 参数侧栏 + 版本条 + 抽帧（前端取帧进图片工作台反哺 i2v）+ 队列/取消 | CV-09（复用项目模式） | P1 |
 | CV-11 | 画布模板：画布存为模板（结构级，含是否内联素材选项）+ 模板库（个人/全局，对齐 LB-11 模式）+ 常用链模板一键铺点（翻译/总结/风格平行对比） | 无 | P1 |
 | CV-12 | 画布只读分享：对齐 LB-05 token 机制（share 表复用/扩展、匿名只读渲染页、撤销）（已完成，见 15.3 CV-12 进展；CI-only） | LB-05 | P1 |
@@ -996,6 +996,14 @@ Step 进度：
   - [x] 产物：三个工具复用 `completeEdit`，生成图片经既有附件上传链路进入素材库，并自动创建与源图相连的 image/task-result 节点（标签后缀 `outpainted`/`background removed`/`style referenced`），任务插件返回的 task id 走 task-result 引用；
   - [x] 测试与文案：后端 `TestPricingImageToolsFollowModelCapabilities`、`TestImageToolCapabilitiesForModel`、`TestGetAndValidOpenAIImageRequestMultipartBackground`、`TestConvertImageEditRequestMultipartReferences`；前端 `canvas-image-tools.test.ts`、`use-canvas-image-tools.test.ts`、`canvas-image-tools-dialog.test.tsx`、`canvas-node-inspector.test.tsx` 覆盖布局/能力/校验/三条请求流/隐藏与 tooltip；29 个新键七语言（`i18n:sync` missingCount=0、extrasCount=0，untranslated 保持 zh 4/ja 5/ru 6，均为既有品牌名），`static-keys.ts` 登记动态键；无新依赖、无表结构/路由变更；
 - **CV-09 图片工作台**——`playground_canvases` 新增 `mode` 列（infinite/image/video，默认 infinite，AutoMigrate 三库加列验证 + legacy 读回默认）；建项入口按模式选择；图片工作台为单图聚焦布局：大预览 + 工具栏（裁剪/放大/遮罩重绘/CV-08 工具）+ 参数侧栏（CV-07 全量参数含 seed/batch/尺寸）+ **版本/变体条**（同一血线 task 历史，来源于 task-result 节点的重试参数记录，点击切换主图）+ 「钉回画布」（在工作区把当前血线落成 image/task-result 节点 affixed 到无限画布）+ 参考图快速挂载；同一计费/预算/配额链路不变。
+  **CV-09 进展（2026-10-19，已完成，CI-only，本地未运行测试/typecheck/lint/build）**：
+  - [x] 项目模式：`playground_canvases.mode` 由 `NormalizePlaygroundCanvasMode` 在读取路径归一，legacy/空值回读 `infinite`，未知值拒绝；创建接口接受 `mode`，更新接口忽略模式变更；`TestPlaygroundCanvasWorkbenchModes` 与 `TestPlaygroundCanvasModeColumnMigration` 覆盖三库迁移、旧行回读与非法值，并已进入 CI 的 MySQL 5.7 与真实数据库任务。
+  - [x] 建项与切换：`CanvasProjectList` 的 New canvas 下拉提供 Infinite canvas / Image workbench 两种模式；`CanvasWorkspace` 对 `image` 项目默认打开工作台，并保留 Canvas board / Image workbench 手动切换；`video` 继续使用画布板，留给 CV-10。
+  - [x] 单图聚焦布局：`CanvasImageWorkbench` 从节点图选出最上方图片步骤，主预览按首选变体显示并支持 25%–400% 缩放；参数侧栏复用 `CanvasNodeWorkflowFields` / `CanvasNodeResultFields`（CV-07 的模型、seed、batch、尺寸、质量与重试）；工具栏复用裁剪/放大/遮罩重绘与 CV-08 扩图/背景移除/风格参考；移动端参数侧栏收进 Sheet。
+  - [x] 版本/变体条：`canvasImageWorkbenchVariants` 按连线顺序聚合同一 `task` 的结果节点，并纳入仅靠 `workflow.sourceNodeId` 记录但连线已删除的重试记录；标签带实际 seed，点击版本调用 `setWorkflowPreferredResult` 同步主图与下游首选。
+  - [x] 钉回画布：`canvasImageWorkbenchAffixPlacements` 把当前血线整体放到画布其余节点下方并标记 `affixed`，`affixNodes` 以单条撤销历史一次性写入位置与数据；画布节点对 `affixed` 显示 `Pinned` 徽标，重复点击不会继续下移已钉住的行。
+  - [x] 参考图快速挂载：工作台按实际入边展示参考图条（含首选兄弟解析与移除边），上传的参考图先分配节点 id 再插入步骤左侧并逐张连到当前步骤，沿用既有附件上传与 owner 校验。
+  - [x] 测试与文案：新增 `canvas-image-workbench.test.ts`（步骤选择、变体顺序/首选/seed 标签、默认步骤、affix 布局与重复钉住稳定性）与 `canvas-image-workbench.test.tsx`（空态建步骤、主图/版本切换、参数与工具栏、缩放、钉住、参考图展示与上传接线），并扩展 `canvas-node.test.tsx`（Pinned 徽标）、`canvas-project-list.test.tsx`（Image workbench 建项）与 `use-canvas-editor.test.ts`（affixNodes 单步历史、无匹配不提交）；复用既有 `Pinned` 等键，无需新增翻译；无新依赖、无 Relay/计费表达式改动，本地未运行测试/typecheck/lint/build（CI-only）。
 - **CV-10 视频工作台**——同 `mode` 体系：播放器（受控内容流）+ 参数侧栏（时长/尺寸档位/模型）+ 版本条 + 抽帧：前端 `<video>` seek 后离屏截帧并经既有上传链路落为附件，可直接送图片工作台或画布 image 节点（反哺 i2v / 视频改图链）；队列视图（进行中任务 + 进度 + 取消退款沿用既有）。
 - **CV-11 画布模板**——把当前画布存为模板（结构级：节点/边/参数，二选一是否内联素材），模板库个人 + 全局（管理员维护，对齐 LB-11 的 visibility 机制）；常用链模板（翻译/总结/多风格平行对比/图生视频链）以官方模板预置；模板一键铺到当前画布或新建画布；导入导出沿用 zip 归档。
 - **CV-12 画布只读分享**——与 LB-05 对齐：token 哈希存储、匿名只读渲染页（画布文档只读视图 + 节点结果预览，不代理素材）、撤销/过期、CriticalRateLimit 与不可枚举 404；入口在画布菜单。
@@ -1441,3 +1449,4 @@ Step 进度：
 | 2026-10-19 | PG2-12：Playground 用量与性能视图（按模型/时间，含来源标记；CI-only，本地未运行测试）——`/pg/chat/completions` 与媒体/非聊天/搜索桥接在 Relay 前设置 `ContextKeyPlaygroundOrigin`，consume/error 日志写入公共 `other.playground_origin=true`，异步图片/视频任务经 `TaskPrivateData.PlaygroundOrigin` 在任务结算日志写同一标记，直接 API 行保持无标记并归为 API 来源；新增 owner 过滤的只读 `GET /api/playground/usage/analytics`（days 1–90，默认 7），在日志库按 UTC 天 × 模型 × 来源聚合 quota、prompt/completion/cache tokens、requests/errors、平均总耗时/TTFT 与测量样本数，最多 2000 桶、超出保留最新并返回 `truncated`，兼容独立日志库与 SQLite/MySQL/PostgreSQL/ClickHouse SQL，不做任何预扣、结算或额度重算。前端 Inspector 新增 Usage 视图：7/30/90 天范围、总/Playground/API 费用、缓存命中率、错误率、平均 TTFT/总耗时、按日堆叠趋势、按模型表（费用/请求/Token 排序）与 CSV 导出，并提供日志关闭、截断、空范围与错误降级；补 14 个七语言文案键（missingCount=0、extrasCount=0，untranslated 基线 zh 11/ja 12/ru 12），恢复 `footer.new\u0061pi.projectAttributionSuffix` 的转义序列化。测试：`TestPlaygroundLogOriginMarker`/`TestPlaygroundUsageAnalytics`（SQLite/MySQL/PostgreSQL）、`TestPlaygroundUsageAnalyticsEndpoint`、`TestPlaygroundUsageAnalyticsDialectSQL`（四库 SQL 形状）与 `TestPlaygroundBridgesBillThroughRelayAndMarkOrigin`，前端纯函数与组件用例覆盖汇总/样本加权/趋势/CSV/空态/范围/降级；已加入 CI 真实数据库与 MySQL 5.7 过滤清单；无新依赖、无 `go.mod`/`go.sum`/`web/package.json`/`bun.lock` 变更，未改动 Relay 计费表达式或结算路径。 |
 | 2026-10-19 | PG2-15 复核补全：竞技场 CI 覆盖与删除/错误脱敏回归（CI-only，本地未运行测试/typecheck/lint/build/三数据库矩阵）——把 `TestPlaygroundArenaVotes` 加入 `.github/workflows/ci.yml` 的 `database` job 真实数据库过滤清单并新增 MySQL 5.7 专项步骤，锁定持久化/幂等/改票/所有权/汇总/清理在 SQLite、MySQL 8.0/5.7、PostgreSQL 上实际执行；扩展测试覆盖消息组删除时 `deletePlaygroundMessageRow` 清除对应票、软删除会话保留票以便恢复、`PurgePlaygroundSession` 清除票；新增前端用例 `redacts real model names from a failed anonymous reply`，断言失败回复正文中的 `gpt-4o`/`gpt-4` 仅以 `Model A`/`Model B` 呈现。无新依赖、无 schema/Relay/计费改动，i18n 键未变（`node scripts/sync-i18n.mjs` 复核 missingCount=0、extrasCount=0）。 |
 | 2026-10-19 | PG2-17 收尾：i18n 同步检查幂等（CI-only，本地未运行测试/typecheck/lint/build/E2E）——把七个 locale 文件中的页脚归属键恢复为 `web/scripts/sync-i18n.mjs` 输出的转义序列，使本 Step 新增的 `node scripts/sync-i18n.mjs` + `git diff --exit-code -- src/i18n/locales` 检查不会因既有序列化差异失败；运行时键与翻译文案不变，未改动 UI、Relay、计费、后端或依赖。另补充 PG2-17 完成情况小节，记录命令面板、共享快捷键注册表、消息跳转窗口化与测试/CI 覆盖。 |
+| 2026-10-19 | CV-09：图片工作台收尾（CI-only，本地未运行测试/typecheck/lint/build）——确认并补齐已合入的项目模式与单图工作台：`playground_canvases.mode` 经 `NormalizePlaygroundCanvasMode` 读取归一（legacy 回读 `infinite`）、创建接受模式且更新忽略模式变更，`CanvasProjectList` 提供 Infinite canvas / Image workbench 建项，`CanvasWorkspace` 对图片项目默认打开工作台并保留画布板切换；工作台复用 CV-07 参数侧栏与 CV-08 图片工具，按首选变体展示主图并支持 25%–400% 缩放，版本条按连线顺序聚合同一 bloodline（含仅保留 `sourceNodeId` 的重试记录）并以 seed 标注，点击切换首选；「Pin to canvas」把血线整体落到画布下方并一次写入 `affixed`，画布节点新增 `Pinned` 徽标且重复钉住位置稳定；参考图按入边展示、可移除，上传图先分配 id 再插入步骤左侧并连线。本次新增 `canvas-image-workbench.test.ts` 与 `canvas-image-workbench.test.tsx`，扩展 `canvas-node.test.tsx`、`canvas-project-list.test.tsx`、`use-canvas-editor.test.ts`；复用既有 `Pinned` 等键，`node scripts/sync-i18n.mjs` 复核 missingCount=0、extrasCount=0；无新依赖、无数据库/Relay/计费改动。 |
