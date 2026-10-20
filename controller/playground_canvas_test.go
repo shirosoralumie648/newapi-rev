@@ -110,6 +110,37 @@ func TestPlaygroundCanvasDocumentRejectsUnknownNodeKinds(t *testing.T) {
 	assert.ErrorIs(t, err, model.ErrPlaygroundCanvasInvalid)
 }
 
+// The canvas API maps its sentinel errors to stable status codes the editor can
+// translate. A limit must stay distinguishable from an invalid document, so a
+// client never has to parse an English message.
+func TestPlaygroundCanvasStableErrorCodes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, testCase := range []struct {
+		name   string
+		err    error
+		status int
+		code   string
+	}{
+		{"invalid", model.ErrPlaygroundCanvasInvalid, http.StatusBadRequest, "PLAYGROUND_INVALID_REQUEST"},
+		{"limit", model.ErrPlaygroundCanvasLimit, http.StatusUnprocessableEntity, "PLAYGROUND_CANVAS_LIMIT_EXCEEDED"},
+		{"reference", model.ErrPlaygroundCanvasReference, http.StatusBadRequest, "PLAYGROUND_CANVAS_REFERENCE_INVALID"},
+		{"conflict", model.ErrPlaygroundConflict, http.StatusConflict, "PLAYGROUND_CONFLICT"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			context, _ := gin.CreateTestContext(recorder)
+			context.Request = httptest.NewRequest(http.MethodPost, "/api/playground/canvases", nil)
+			writePlaygroundCanvasError(context, testCase.err)
+			require.Equal(t, testCase.status, recorder.Code)
+			var body struct {
+				Code string `json:"code"`
+			}
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &body))
+			assert.Equal(t, testCase.code, body.Code)
+		})
+	}
+}
+
 // Node data only carries display configuration and ID references, and it stays
 // inside the same per-node byte budget for workflow steps and annotations.
 func TestPlaygroundCanvasNodeDataStaysBounded(t *testing.T) {

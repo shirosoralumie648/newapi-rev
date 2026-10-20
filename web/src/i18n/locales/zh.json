@@ -949,6 +949,7 @@
     "Average latency, TTFT, and success rate by group": "各分组的平均延迟、首 Token 延迟和成功率",
     "Average latency, TTFT, TPS, and success rate": "平均延迟、TTFT、TPS 和成功率",
     "Average RPM": "平均 RPM",
+    "Average time": "平均耗时",
     "Average time-to-first-token (TTFT) by group": "各分组的平均首 Token 延迟（TTFT）",
     "Average tokens per second sustained per group": "各分组持续输出的平均每秒 token 数",
     "Average TPM": "平均 TPM",
