@@ -251,6 +251,16 @@ export type PlaygroundImageGenerationOutcome =
   | { kind: 'task'; taskId: string }
   | { kind: 'queued'; entry: PlaygroundTaskQueueEntry }
 
+/**
+ * An image edit travels as multipart, and the generation queue only accepts
+ * JSON submissions, so an accepted edit always answers with its images or a
+ * durable task id instead of a queue entry.
+ */
+export type PlaygroundImageEditOutcome = Exclude<
+  PlaygroundImageGenerationOutcome,
+  { kind: 'queued' }
+>
+
 /** One video submission: a durable task id or an accepted queue entry. */
 export type PlaygroundVideoGenerationOutcome =
   | { kind: 'task'; taskId: string }
@@ -328,7 +338,7 @@ export interface PlaygroundImageEditInput {
 export async function submitImageEdit(
   input: PlaygroundImageEditInput,
   signal?: AbortSignal
-): Promise<PlaygroundImageGenerationOutcome> {
+): Promise<PlaygroundImageEditOutcome> {
   const form = new FormData()
   form.append('model', input.model)
   form.append('prompt', input.prompt)
@@ -352,7 +362,11 @@ export async function submitImageEdit(
     skipErrorHandler: true,
     ...(input.group ? { headers: { 'X-Playground-Group': input.group } } : {}),
   })
-  return parseImageOutcome(response.data, 'Image edit failed')
+  const outcome = parseImageOutcome(response.data, 'Image edit failed')
+  if (outcome.kind === 'queued') {
+    throw new Error('Image edit failed')
+  }
+  return outcome
 }
 
 /**
