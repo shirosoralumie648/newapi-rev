@@ -147,6 +147,8 @@ export function renderCodeBlock(node: CodeBlockNode, key: string): ReactNode {
   const lineCount = node.code.split('\n').length
 
   if (language.toLowerCase() === 'mermaid') {
+    // A half-typed diagram fails to parse; MermaidDiagram keeps the last good
+    // SVG, and the streaming frame shows the source until the first success.
     return <MermaidDiagram code={node.code} key={key} />
   }
 
@@ -155,6 +157,9 @@ export function renderCodeBlock(node: CodeBlockNode, key: string): ReactNode {
       collapsedLines={14}
       code={node.code}
       defaultCollapsed={lineCount > 14}
+      // The parser marks an unclosed fence as loading. It is a live block, so
+      // it must not collapse while the answer is still being written.
+      enableCollapse={!node.loading}
       key={key}
       language={language}
       maxExpandedLines={44}
@@ -197,6 +202,19 @@ function renderDefinitionItem(
 }
 
 export function renderMathBlock(node: MathBlockNode, key: string): ReactNode {
+  // `loading` means the closing $$ has not arrived yet. Typesetting a
+  // half-written formula flashes a wrong rendering, so it stays as source
+  // text until the delimiter closes.
+  if (node.loading) {
+    return (
+      <pre
+        className='border-border bg-muted/40 my-4 overflow-x-auto rounded-lg border p-4 font-mono text-sm'
+        key={key}
+      >
+        {node.content}
+      </pre>
+    )
+  }
   return (
     <div className='my-4 overflow-x-auto overflow-y-hidden' key={key}>
       <KatexBlock source={node.content} />
@@ -205,6 +223,16 @@ export function renderMathBlock(node: MathBlockNode, key: string): ReactNode {
 }
 
 export function renderMathInline(node: MathInlineNode, key: string): ReactNode {
+  if (node.loading) {
+    return (
+      <code
+        className='bg-muted/70 text-foreground rounded px-1 py-0.5 font-mono text-[0.9em]'
+        key={key}
+      >
+        {node.content}
+      </code>
+    )
+  }
   return (
     <span className='inline-block max-w-full align-middle' key={key}>
       <KatexInline source={node.content} />

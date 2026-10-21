@@ -1382,7 +1382,7 @@ Step 进度：
 | MD-02 | 代码高亮换 Shiki：全量语言、暗色适配与主题选择（A4+A5）（已完成，见 18.4 MD-02 进展） | 无 | P0 | 中 |
 | MD-03 | Mermaid 图表渲染：懒加载、主题、流式节流与错误回退（A3）（已完成，见 18.4 MD-03 进展） | 无 | P0 | 中 |
 | MD-04 | 原始 HTML 与行内标签安全渲染（A6） | MD-01 | P1 | 中 |
-| MD-05 | 流式稳健性：loading 标志、解析上限与稳定节点 key（B1+B2+B3） | 无 | P1 | 中 |
+| MD-05 | 流式稳健性：loading 标志、解析上限与稳定节点 key（B1+B2+B3）（已完成，见 18.4 MD-05 进展） | 无 | P1 | 中 |
 | MD-06 | 富媒体与代码块细节：图片灯箱、表格复制、代码块工具栏（B4+B5+B6） | 无 | P2 | 中 |
 | MD-07 | 细节对齐：`:::` 容器、单波浪线、notation 变换器（C1+C2+C3） | MD-02 | P2 | 小 |
 | MD-08 | 内联 HTML 文档预览（沙箱）（B7） | MD-04 | P2 | 大 |
@@ -1439,11 +1439,14 @@ Step 进度：
   - [ ] 即使关闭 raw，也支持 `kbd`/`mark`/`ins`/`sub`/`sup` 与 `<video>` 的受控渲染；
   - [ ] 安全测试：XSS 载荷矩阵（`<script>`、`onerror=`、`javascript:`、`<iframe>`、SVG `onload`）、开关关闭时的降级断言。
 
-- **MD-05 流式稳健性**：
-  - [ ] 渲染器读取解析器的 `loading` 标志：未闭合代码块显示骨架/加载态，未闭合公式按纯文本显示并在闭合后切换为 KaTeX；
-  - [ ] `MAX_PARSED_MARKDOWN_CHARS` 策略调整：超限时改为分段解析（按顶层块切分）而非整体放弃，保证长报告仍有格式；
-  - [ ] `getNodeKey` 改为稳定 key（`type-index` + 结构性哈希，不含原始文本前缀），代码块在流式期间不重挂、滚动位置保留；
-  - [ ] 测试：流式增量快照测试（半个围栏→闭合）、长文本（>20k）仍渲染表格/标题、代码块 key 在追加 token 时保持不变。
+**MD-05 进展（2026-10-21，已完成，本地已运行前端测试、typecheck、构建与浏览器验证）**：
+
+- [x] 读取 `loading`：未闭合的代码围栏不再折叠（`enableCollapse={!node.loading}`），避免流式中途收起；未闭合公式（`math_block`/`math_inline` 的 `loading:true`）按源码文本显示，闭合后才切换为 KaTeX，杜绝半截公式的错排版。
+- [x] 长文本分段解析：新增 `response-chunk.ts` 的 `splitMarkdownChunks`，按「围栏外的空行」切块（围栏整体不切、支持 ``` 与 `~~~`、未闭合围栏并入尾块），`Response` 逐块解析后合并节点；原先 >20k 字符直接放弃解析的行为已移除。
+- [x] 稳定节点 key：`getNodeKey` 改为 `type-index`（`response-content.ts`），不再包含原始文本前缀；追加 token 时同一块的 key 不变，代码块子树不再反复重挂、滚动位置得以保留。
+- [x] 测试：`response-chunk.test.ts` 6 例（短文本单块、空行切分、围栏不切断、未闭合围栏、`~~~` 围栏、空输入）；`response-long-content.test.tsx` 4 例（>20k 仍保留两个 h2 与表格、长答案中的代码块仍格式化、key 不随文本增长变化、key 区分位置与类型）。
+- [x] `ai-elements` + `playground` 合计 885 例通过，`bun run typecheck` 通过；浏览器实测 8440 字符长答案保留 3 个表格、4 个代码块、10 个标题与 3 处 KaTeX。
+- 说明：Mermaid 的半成品处理由 MD-03 的「保留最后一次成功 SVG」覆盖，流式首帧显示源码。
 
 - **MD-06 富媒体与代码块细节**：
   - [ ] 图片灯箱：点击放大、缩放/平移、实际尺寸、下载；消息内图片支持前后切换（画廊）；
@@ -1631,3 +1634,4 @@ Step 进度：
 | 2026-10-21 | MD-01：LaTeX/货币预处理与 KaTeX 数学渲染（本地已运行前端测试与 typecheck）——新增纯函数 `preprocessLaTeX`（`response-latex.ts`）：`\[..\]`→`$$..$$`、`\(..\)`→`$..$`，按「`$` 紧跟数字」判定并转义货币（覆盖 `$20 and $100`、`$1,299.50`、`$5–$10`、`$ 20`），公式内 `|`→`\vert` 保住表格列，已转义的 `\$` 不重复处理；`renderMathBlock`/`renderMathInline` 改走 KaTeX（`throwOnError:false`、`strict:ignore`、`trust:false`），块级 `overflow-x-auto` + `dir=ltr`，畸形公式回退源码；`katex.min.css` 首次用到公式时动态 import，不进首屏。修复历史问题：货币符号被吞、表格内公式拆列。测试新增 `response-latex.test.ts`（6 例）与 `response-math.test.tsx`（5 例），`ai-elements` 30 例、`playground`+`ai-elements` 合计 867 例通过，typecheck 通过，真实浏览器验证行内/块级公式与金额均正确。无新增 i18n 键、无新依赖、无后端改动。 |
 | 2026-10-21 | MD-02：代码高亮切换 Shiki（本地已运行前端测试、typecheck 与浏览器验证）——`CodeBlock` 只读展示改用新增 `ShikiCodeView` + `use-shiki-highlight`，高亮器全页单例、语言语法按需加载；`normalizeShikiLanguage` 处理 fence 别名并把未知/非法 label 降级 plaintext；以 `github-light`/`github-dark` 双主题 + `defaultColor:false` 输出 `--shiki-light`/`--shiki-dark` 变量，复用既有 `.shiki span` 规则由 CSS 切明暗，移除固定十六进制调色板（编辑器仍用 CodeMirror）；复制/下载/折叠/行号保留，行号改用 CSS counter，`role=textbox` 维持既有可访问性与测试选择器。新增 `shiki-language.test.ts`（4 例）；`ai-elements`+`playground` 871 例通过，typecheck 通过；浏览器实测 python/go/sql/bash 四语言亮暗两套色板均正确。无新依赖、无后端改动。 |
 | 2026-10-21 | MD-03：Mermaid 图表渲染（本地已运行前端测试、typecheck、构建与浏览器验证）——`mermaid@11.15.0` 由 overrides 提升为直接依赖；新增 `mermaid-render.ts`（动态 import、`securityLevel:strict`、跟随明暗主题、每次唯一 id）与 `mermaid-diagram.tsx`（渲染/源码切换、150ms 节流、失败保留最后成功 SVG、从未成功则回退错误+源码）；`renderCodeBlock` 对 `mermaid` 围栏路由到图表组件。SVG 经 DOMPurify svg profile 净化并禁事件属性、禁 `script`，但保留 Mermaid 内联 `<style>`（移除会导致节点无填充、文字不可见）。新增 `mermaid-render.test.ts`（4 例）；`ai-elements`+`playground` 871 例通过、typecheck 通过；构建后主 chunk 不含 mermaid（按需 async chunk）；浏览器实测亮/暗两套主题与中文标签均正确。点击放大留待 MD-06 灯箱。 |
+| 2026-10-21 | MD-05：流式稳健性（本地已运行前端测试、typecheck、构建与浏览器验证）——渲染器读取解析器 `loading`：未闭合围栏不折叠、未闭合公式按源码显示待闭合后再走 KaTeX；新增 `splitMarkdownChunks` 按围栏外空行切块（围栏不切断、支持 `~~~`、未闭合并入尾块），移除 >20k 字符放弃解析的行为，长答案逐块解析后合并；`getNodeKey` 改为 `type-index` 稳定 key，追加 token 时不再重挂代码块子树。新增 `response-chunk.test.ts`（6 例）与 `response-long-content.test.tsx`（4 例）；`ai-elements`+`playground` 885 例通过、typecheck 通过；浏览器实测 8440 字符长答案保留 3 表格/4 代码块/10 标题/3 处 KaTeX。无新依赖、无后端改动。 |

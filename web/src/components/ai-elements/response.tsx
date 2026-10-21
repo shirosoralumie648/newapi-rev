@@ -20,6 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 import { memo, useLayoutEffect, useMemo, useRef } from 'react'
 import { getMarkdown, parseMarkdownToStructure } from 'stream-markdown-parser'
+import type { ParsedNode } from 'stream-markdown-parser'
 
 import { cn } from '@/lib/utils'
 
@@ -34,11 +35,11 @@ import {
   type FadeState,
 } from './response-fade'
 import { renderChildren, renderFootnotes } from './response-renderer'
+import { splitMarkdownChunks } from './response-chunk'
 import { preprocessLaTeX } from './response-latex'
 import type { ResponseProps } from './response-types'
 
 const DEFAULT_PARSER_ID = 'new-api-response'
-const MAX_PARSED_MARKDOWN_CHARS = 20_000
 type MarkdownInstance = ReturnType<typeof getMarkdown>
 
 const markdownByParserId = new Map<string, MarkdownInstance>()
@@ -59,26 +60,28 @@ export const Response = memo((props: ResponseProps) => {
   const shouldAnimate = !isFinal
   const parserId = props.parserId ?? DEFAULT_PARSER_ID
   const markdown = getCachedMarkdown(parserId)
-  const shouldParseMarkdown = content.length <= MAX_PARSED_MARKDOWN_CHARS
   const fadeStateRef = useRef<FadeState | null>(null)
   if (fadeStateRef.current == null) {
     fadeStateRef.current = createFadeState()
   }
 
   const nodes = useMemo(() => {
-    if (!shouldParseMarkdown) {
-      return []
+    const processed = preprocessLaTeX(content)
+    // A long answer is parsed chunk by chunk instead of being dropped: each
+    // chunk is split on blank lines outside a fence, so a code block is never
+    // cut in half and every block keeps its formatting.
+    const chunks = splitMarkdownChunks(processed)
+    const parsed: ParsedNode[] = []
+    for (const chunk of chunks) {
+      parsed.push(
+        ...parseMarkdownToStructure(chunk, markdown, {
+          final: isFinal,
+          validateLink: markdown.options.validateLink,
+        })
+      )
     }
-
-    return parseMarkdownToStructure(
-      preprocessLaTeX(content),
-      markdown,
-      {
-        final: isFinal,
-        validateLink: markdown.options.validateLink,
-      }
-    )
-  }, [content, isFinal, markdown, shouldParseMarkdown])
+    return parsed
+  }, [content, isFinal, markdown])
   const parsedContent = useMemo(() => parseResponseContent(nodes), [nodes])
 
   let fadeRun: FadeRun | undefined

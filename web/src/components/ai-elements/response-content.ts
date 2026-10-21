@@ -164,9 +164,15 @@ export function getMarkdownContent(children: ReactNode): string {
   return normalizeMarkdownExampleFences(stripCustomTags(children))
 }
 
+/**
+ * A React key for a top-level node. The key must stay stable while a block
+ * streams in, otherwise React remounts the subtree on every token and a code
+ * block loses its scroll position. Node type and position are stable for the
+ * lifetime of the block, so they carry the key; the raw text is deliberately
+ * not included because it changes on every delta.
+ */
 export function getNodeKey(node: ParsedNode, index: number): string {
-  const raw = typeof node.raw === 'string' ? node.raw : ''
-  return `${node.type}-${index}-${raw.slice(0, 24)}`
+  return `${node.type}-${index}`
 }
 
 export function parseResponseContent(
