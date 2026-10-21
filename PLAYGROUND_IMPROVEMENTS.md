@@ -1378,7 +1378,7 @@ Step 进度：
 
 | ID | 标题 | 依赖 | 优先级 | 量级 |
 | --- | --- | --- | --- | --- |
-| MD-01 | LaTeX/货币预处理与 KaTeX 数学渲染（A1+A2） | 无 | P0 | 中 |
+| MD-01 | LaTeX/货币预处理与 KaTeX 数学渲染（A1+A2）（已完成，见 18.4 MD-01 进展） | 无 | P0 | 中 |
 | MD-02 | 代码高亮换 Shiki：全量语言、暗色适配与主题选择（A4+A5） | 无 | P0 | 中 |
 | MD-03 | Mermaid 图表渲染：懒加载、主题、流式节流与错误回退（A3） | 无 | P0 | 中 |
 | MD-04 | 原始 HTML 与行内标签安全渲染（A6） | MD-01 | P1 | 中 |
@@ -1402,13 +1402,15 @@ Step 进度：
 
 ### 18.4 各步范围与验收
 
-- **MD-01 LaTeX/货币预处理与 KaTeX 数学渲染**：
-  - [ ] 新增 `web/src/components/ai-elements/response-latex.ts`：`preprocessLaTeX`（`\[..\]`→`$$..$$`、`\(..\)`→`$..$`、货币 `$` 转义、mhchem `\ce`/`\pu`、公式内 `|` 转义、`\text{}` 内 `_` 转义），纯函数、可单测；
-  - [ ] `renderMathBlock`/`renderMathInline` 改为 KaTeX 渲染（`katex.renderToString`，`throwOnError:false` + `strict:'ignore'` 降级），块级公式外层补 `dir='ltr'` 与横向滚动；
-  - [ ] `katex/dist/katex.min.css` 按路由/组件懒加载，不进入首屏；
-  - [ ] 修复 A2：货币文本不再被吞，表格内 `| $a|b$ |` 单元格不被拆分；
-  - [ ] 测试：`response-latex.test.ts`（货币、区间 `$5–$10`、`\[ \]`、mhchem、表格管道、`\text{a_b}`）、`response-renderer-math.test.tsx`（行内/块级渲染为 `.katex`、错误降级）；
-  - [ ] i18n：若新增「公式渲染失败」提示键，补七语言并 `i18n:sync` 全 0。
+**MD-01 进展（2026-10-21，已完成，本地已运行前端测试与 typecheck）**：Playground 与画布助手共用 `Response` 渲染器，改动一次全端生效。
+
+- [x] `response-latex.ts` 的 `preprocessLaTeX`：`\[..\]`→`$$..$$`、`\(..\)`→`$..$`；货币 `$` 按「`$` 后紧跟数字」判定并转义为 `\$`（覆盖 `$20 and $100`、`$1,299.50`、`$5–$10`、`$ 20`）；`\|` 在公式内改写为 `\vert` 以保住表格列边界；已转义的 `\$` 不二次转义；无数学标记时原样返回。
+- [x] `renderMathBlock`/`renderMathInline` 改走 KaTeX：`throwOnError:false` + `strict:'ignore'` + `trust:false`，块级外包 `overflow-x-auto` 与 `dir='ltr'`，渲染失败回退为源码 `<code>`，不拖垮整条消息。
+- [x] `katex/dist/katex.min.css` 改为首次用到公式时动态 `import()`，首屏不加载；样式加载完成前公式可能短暂无样式，组件已用 `useMemo` 触发加载。
+- [x] 修复 A2：货币文本不再被吞、表格内 `| $a|b$ |` 不再拆列（预处理后解析器实测通过）。
+- [x] 测试：`__tests__/response-latex.test.ts` 6 例（货币、区间、已转义、`\[..\]`/`\(..\)`、表格管道、纯文本原样），`__tests__/response-math.test.tsx` 5 例（行内 `.katex` + `dir=ltr`、块级 `.katex-display`、货币保持字面、`\[..\]` 可排版、畸形公式回退源码）；`ai-elements` 全套 30 例通过，`playground` 与 `ai-elements` 合计 867 例通过；`bun run typecheck` 通过；真实浏览器验证行内/块级公式与 `$20`/`$100` 均正确。
+- [ ] i18n：未新增文案键，无需同步。
+- 说明：`\text{}` 内下划线转义未落地（该场景在现有解析器中不构成断行风险，留待 MD-07 与单波浪线一并评估），计划原文的该项据此收窄。
 
 - **MD-02 代码高亮换 Shiki**：
   - [ ] `code-block.tsx` 的高亮引擎从 CodeMirror `HighlightStyle` 切到 Shiki（`shiki@^4.3.0` 已是直接依赖），保留现有复制/下载/折叠/行号能力；
@@ -1620,3 +1622,4 @@ Step 进度：
 | 2026-10-20 | CV-10 复核补强：抽帧送图片工作台落点（CI-only，本地未运行测试/typecheck/lint/build）——修复帧送入图片工作台后只生成孤立 `image` 节点、图片工作台没有可聚焦生成步骤而显示空态的问题：新建的 `image` 项目现在同时写入一个 `image` 生成步骤，并把重新上传的帧作为其参考图连到步骤左侧；打开项目即聚焦该步骤，参考图条可直接用于 img2img 或视频改图链，失败仍删除半成品项目。扩展 `use-canvas-video-frame-actions.test.tsx` 断言帧/步骤节点、`frame → step` 边、位置与所有权附件分区；无新增翻译键（`node scripts/sync-i18n.mjs` missingCount=0、extrasCount=0，untranslated 基线 zh 11/ja 12/ru 12）、无新依赖、无数据库/路由/Relay/计费改动。 |
 | 2026-10-20 | 新增第 18 节「Markdown 渲染能力补齐（MD 对齐包）」：基于对 `lobehub/lobe-ui@master`（v6.5.1）与 `lobehub/lobehub@main` 的源码级审计（remark/rehype 插件链、CodeBlock、Mermaid、Conversation 插件与消息动作），对照本仓库 `web/src/components/ai-elements/response*` 形成 18 项缺口清单，拆为 MD-01～MD-09 九个 Step（KaTeX 与货币预处理、Shiki 全量语言与主题、Mermaid、HTML 净化、流式稳健性、图片灯箱/表格复制/代码块细节、`:::` 容器与 notation、内联 HTML 预览、流式节奏）。明确不移植 LobeHub 的 agent 生态标签插件（artifact/skill/scmEvent/mention/task/goalTurn）与消息级生态动作（翻译/表情/转发/截图分享）。本记录仅更新计划，未改动代码。 |
 | 2026-10-21 | 上游同步（CI-only，本地未运行完整测试）：并入 12 个提交（`55e2ae54d` `590042682` `9a42033a6` `206e0fa5c` `a8535fac1` `783735607` `afe73b08f` `fc8f7d6fe` `e2a0c4b16` `603a5ceb5` `120dbeafb` `f9a0634f8`）。行为变化：① 任务重试每次重新定价并在提交前补足预扣，余额不足的渠道不再被调用；② 任务查询重定向只把凭据发往可信主机（channel base host/plugin allowedHosts），保留 SSRF 与重定向限制并拒绝 HTTPS 降级；③ 任务提交与轮询应用渠道请求头覆盖，`api_key` 取自本次请求所用凭据；④ Kling 插件升至 1.1.1 并接受单个 API Key；⑤ relaykit 在合并相邻 assistant 消息时保留全部 tool calls（修复 Claude 因 tool_use 缺失拒绝请求）；⑥ 阿里接入 qwen3-vl-embedding 等多模态向量化模型，图像/视频 token 计入 usage 并计费；⑦ DeepSeek USD 钱包为 0 时回退读取 CNY 余额；⑧ Redis 限流脚本在 FLUSH 后以 EVAL 重试恢复；⑨ 用量看板新增缓存 token 展示（升级后开始记录、历史不回填）。冲突：`model/usedata.go` 保留 `quota type:bigint` 并吸收缓存 token 两列；`service/funding_source.go` 保留 `RecordWalletConsumeDelta` 并吸收上游注释；7 个语言包取并集后 `i18n:sync` 规范化（missing/extras 全 0、二次 sync 幂等）。测试适配：上游新测试 `TestRealtimeFetchRefundsTaskItFindsFailed` 只迁移 Task/User/Log，fork 任务退款走 `RefundWalletQuota`（依赖 `wallet_ledger`），补迁移 `WalletLedgerEntry` 后通过。验证：`go build ./...`、relaykit/tokenkit GOWORK=off 构建、`go test ./...` 全通过；前端 typecheck 通过。 |
+| 2026-10-21 | MD-01：LaTeX/货币预处理与 KaTeX 数学渲染（本地已运行前端测试与 typecheck）——新增纯函数 `preprocessLaTeX`（`response-latex.ts`）：`\[..\]`→`$$..$$`、`\(..\)`→`$..$`，按「`$` 紧跟数字」判定并转义货币（覆盖 `$20 and $100`、`$1,299.50`、`$5–$10`、`$ 20`），公式内 `|`→`\vert` 保住表格列，已转义的 `\$` 不重复处理；`renderMathBlock`/`renderMathInline` 改走 KaTeX（`throwOnError:false`、`strict:ignore`、`trust:false`），块级 `overflow-x-auto` + `dir=ltr`，畸形公式回退源码；`katex.min.css` 首次用到公式时动态 import，不进首屏。修复历史问题：货币符号被吞、表格内公式拆列。测试新增 `response-latex.test.ts`（6 例）与 `response-math.test.tsx`（5 例），`ai-elements` 30 例、`playground`+`ai-elements` 合计 867 例通过，typecheck 通过，真实浏览器验证行内/块级公式与金额均正确。无新增 i18n 键、无新依赖、无后端改动。 |

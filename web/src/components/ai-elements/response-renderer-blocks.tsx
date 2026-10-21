@@ -34,6 +34,7 @@ import {
 import { cn } from '@/lib/utils'
 
 import { getNodeKey } from './response-content'
+import { KatexBlock, KatexInline } from './response-latex-view'
 import type { BlockRendererOptions } from './response-types'
 
 const headingClasses = {
@@ -192,22 +193,16 @@ function renderDefinitionItem(
 
 export function renderMathBlock(node: MathBlockNode, key: string): ReactNode {
   return (
-    <pre
-      className='border-border bg-muted/40 my-4 overflow-x-auto rounded-lg border p-4 font-mono text-sm'
-      key={key}
-    >
-      {node.content}
-    </pre>
+    <div className='my-4 overflow-x-auto overflow-y-hidden' key={key}>
+      <KatexBlock source={node.content} />
+    </div>
   )
 }
 
 export function renderMathInline(node: MathInlineNode, key: string): ReactNode {
   return (
-    <code
-      className='bg-muted/70 text-foreground rounded px-1 py-0.5 font-mono text-[0.9em]'
-      key={key}
-    >
-      {node.content}
-    </code>
+    <span className='inline-block max-w-full align-middle' key={key}>
+      <KatexInline source={node.content} />
+    </span>
   )
 }

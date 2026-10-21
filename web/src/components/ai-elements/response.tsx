@@ -34,6 +34,7 @@ import {
   type FadeState,
 } from './response-fade'
 import { renderChildren, renderFootnotes } from './response-renderer'
+import { preprocessLaTeX } from './response-latex'
 import type { ResponseProps } from './response-types'
 
 const DEFAULT_PARSER_ID = 'new-api-response'
@@ -69,10 +70,14 @@ export const Response = memo((props: ResponseProps) => {
       return []
     }
 
-    return parseMarkdownToStructure(content, markdown, {
-      final: isFinal,
-      validateLink: markdown.options.validateLink,
-    })
+    return parseMarkdownToStructure(
+      preprocessLaTeX(content),
+      markdown,
+      {
+        final: isFinal,
+        validateLink: markdown.options.validateLink,
+      }
+    )
   }, [content, isFinal, markdown, shouldParseMarkdown])
   const parsedContent = useMemo(() => parseResponseContent(nodes), [nodes])
 
