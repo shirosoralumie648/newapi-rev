@@ -59,6 +59,8 @@ import {
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
+import { ShikiCodeView } from './shiki-code-view'
+
 type CodeBlockProps = HTMLAttributes<HTMLDivElement> & {
   code: string
   collapsedLines?: number
@@ -581,15 +583,13 @@ export const CodeBlock = ({
         title={displayTitle}
         {...props}
       >
-        <CodeMirrorCodeView
+        <ShikiCodeView
           ariaLabel={
             typeof displayTitle === 'string' ? displayTitle : displayLanguage
           }
-          language={language}
-          readOnly
-          rows={Math.min(Math.max(lineCount, 4), maxExpandedLines ?? lineCount)}
+          code={code}
+          language={displayLanguage}
           showLineNumbers={showLineNumbers}
-          value={code}
         />
       </CodeBlockFrame>
     </CodeBlockContext.Provider>

@@ -248,3 +248,58 @@ For commercial licensing, please contact support@quantumnous.com
     var(--background)
   );
 }
+
+/* -------------------------------------------------------------------------
+   Shiki code highlighting (response renderer)
+   The highlighter runs with Shiki's `css-variables` theme, so every token
+   carries --shiki-light / --shiki-dark and the shared `.shiki span` rules
+   above already handle the light/dark swap. Only layout lives here.
+   ------------------------------------------------------------------------- */
+.shiki-host pre.shiki {
+  margin: 0;
+  padding: 1rem;
+  background: transparent !important;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5rem;
+  overflow-x: auto;
+}
+
+.shiki-host pre.shiki code {
+  display: block;
+  min-width: max-content;
+  counter-reset: shiki-line;
+}
+
+.shiki-host pre.shiki span {
+  background-color: transparent !important;
+}
+
+.dark .shiki-host pre.shiki {
+  background-color: transparent !important;
+}
+
+.shiki-host .line {
+  display: inline-block;
+  min-width: 100%;
+}
+
+.shiki-with-line-numbers .line::before {
+  counter-increment: shiki-line;
+  content: counter(shiki-line);
+  display: inline-block;
+  margin-right: 1rem;
+  min-width: 2.5rem;
+  text-align: right;
+  color: var(--muted-foreground);
+  user-select: none;
+}
+
+.shiki-fallback {
+  margin: 0;
+  padding: 1rem;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5rem;
+}

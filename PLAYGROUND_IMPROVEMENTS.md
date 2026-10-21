@@ -1379,7 +1379,7 @@ Step 进度：
 | ID | 标题 | 依赖 | 优先级 | 量级 |
 | --- | --- | --- | --- | --- |
 | MD-01 | LaTeX/货币预处理与 KaTeX 数学渲染（A1+A2）（已完成，见 18.4 MD-01 进展） | 无 | P0 | 中 |
-| MD-02 | 代码高亮换 Shiki：全量语言、暗色适配与主题选择（A4+A5） | 无 | P0 | 中 |
+| MD-02 | 代码高亮换 Shiki：全量语言、暗色适配与主题选择（A4+A5）（已完成，见 18.4 MD-02 进展） | 无 | P0 | 中 |
 | MD-03 | Mermaid 图表渲染：懒加载、主题、流式节流与错误回退（A3） | 无 | P0 | 中 |
 | MD-04 | 原始 HTML 与行内标签安全渲染（A6） | MD-01 | P1 | 中 |
 | MD-05 | 流式稳健性：loading 标志、解析上限与稳定节点 key（B1+B2+B3） | 无 | P1 | 中 |
@@ -1412,12 +1412,14 @@ Step 进度：
 - [ ] i18n：未新增文案键，无需同步。
 - 说明：`\text{}` 内下划线转义未落地（该场景在现有解析器中不构成断行风险，留待 MD-07 与单波浪线一并评估），计划原文的该项据此收窄。
 
-- **MD-02 代码高亮换 Shiki**：
-  - [ ] `code-block.tsx` 的高亮引擎从 CodeMirror `HighlightStyle` 切到 Shiki（`shiki@^4.3.0` 已是直接依赖），保留现有复制/下载/折叠/行号能力；
-  - [ ] 语言覆盖：至少 python/go/java/rust/sql/yaml/json/bash/diff/html/css/jsx/tsx/markdown；未知语言降级 plaintext 且不报错；
-  - [ ] 主题随明暗模式切换（复用现有主题 store），移除固定十六进制调色板；
-  - [ ] 按需加载语言包，控制首屏体积；
-  - [ ] 测试：`code-block.test.tsx` 覆盖多语言高亮、未知语言降级、暗色主题切换、复制/下载行为不回归。
+**MD-02 进展（2026-10-21，已完成，本地已运行前端测试、typecheck 与真实浏览器验证）**：只读代码展示从 CodeMirror 切到 Shiki，`CodeBlockEditor` 仍保留 CodeMirror，编辑能力不变。
+
+- [x] `CodeBlock` 的只读渲染改走新增 `ShikiCodeView`（`shiki-code-view.tsx` + `use-shiki-highlight.ts`）；高亮器全页复用单例，语言语法按需 `loadLanguage`，首屏不加载。
+- [x] 语言覆盖：`normalizeShikiLanguage`（`shiki-language.ts`）处理 fence 别名（`py`/`golang`/`sh`/`csharp`/`yml`/`ts`/`md` 等），未知或非法 label 降级为 plaintext 且不报错；已实测 python/go/sql/bash 四语言正确着色。
+- [x] 双主题：同时以 `github-light`/`github-dark` 渲染并令 `defaultColor: false`，Shiki 输出 `--shiki-light`/`--shiki-dark` 变量，复用仓库既有 `.shiki span` 规则由 CSS 切换明暗；移除固定十六进制调色板（`codeMirrorHighlightStyle` 仅留给编辑器）。
+- [x] 保留复制/下载/折叠/行号：行号由 `shiki-with-line-numbers` 的 CSS counter 生成；`role='textbox'` + `aria-readonly` 保持既有可访问性与测试选择器不变。
+- [x] 测试：新增 `shiki-language.test.ts`（4 例，别名映射、透传、plaintext 降级、非法 label）；`ai-elements` 与 `playground` 合计 871 例通过；`bun run typecheck` 通过；浏览器验证亮色 4 种 token 色、暗色切换到对应色板。
+- 说明：`CodeMirrorCodeView` 与 `codeMirrorHighlightStyle` 仍服务可编辑场景（`CodeBlockEditor`、JSON 编辑器等），未删除。
 
 - **MD-03 Mermaid 图表渲染**：
   - [ ] `mermaid` 由 overrides 提升为**直接依赖**（`bun install` 更新 `bun.lock`）；
@@ -1623,3 +1625,4 @@ Step 进度：
 | 2026-10-20 | 新增第 18 节「Markdown 渲染能力补齐（MD 对齐包）」：基于对 `lobehub/lobe-ui@master`（v6.5.1）与 `lobehub/lobehub@main` 的源码级审计（remark/rehype 插件链、CodeBlock、Mermaid、Conversation 插件与消息动作），对照本仓库 `web/src/components/ai-elements/response*` 形成 18 项缺口清单，拆为 MD-01～MD-09 九个 Step（KaTeX 与货币预处理、Shiki 全量语言与主题、Mermaid、HTML 净化、流式稳健性、图片灯箱/表格复制/代码块细节、`:::` 容器与 notation、内联 HTML 预览、流式节奏）。明确不移植 LobeHub 的 agent 生态标签插件（artifact/skill/scmEvent/mention/task/goalTurn）与消息级生态动作（翻译/表情/转发/截图分享）。本记录仅更新计划，未改动代码。 |
 | 2026-10-21 | 上游同步（CI-only，本地未运行完整测试）：并入 12 个提交（`55e2ae54d` `590042682` `9a42033a6` `206e0fa5c` `a8535fac1` `783735607` `afe73b08f` `fc8f7d6fe` `e2a0c4b16` `603a5ceb5` `120dbeafb` `f9a0634f8`）。行为变化：① 任务重试每次重新定价并在提交前补足预扣，余额不足的渠道不再被调用；② 任务查询重定向只把凭据发往可信主机（channel base host/plugin allowedHosts），保留 SSRF 与重定向限制并拒绝 HTTPS 降级；③ 任务提交与轮询应用渠道请求头覆盖，`api_key` 取自本次请求所用凭据；④ Kling 插件升至 1.1.1 并接受单个 API Key；⑤ relaykit 在合并相邻 assistant 消息时保留全部 tool calls（修复 Claude 因 tool_use 缺失拒绝请求）；⑥ 阿里接入 qwen3-vl-embedding 等多模态向量化模型，图像/视频 token 计入 usage 并计费；⑦ DeepSeek USD 钱包为 0 时回退读取 CNY 余额；⑧ Redis 限流脚本在 FLUSH 后以 EVAL 重试恢复；⑨ 用量看板新增缓存 token 展示（升级后开始记录、历史不回填）。冲突：`model/usedata.go` 保留 `quota type:bigint` 并吸收缓存 token 两列；`service/funding_source.go` 保留 `RecordWalletConsumeDelta` 并吸收上游注释；7 个语言包取并集后 `i18n:sync` 规范化（missing/extras 全 0、二次 sync 幂等）。测试适配：上游新测试 `TestRealtimeFetchRefundsTaskItFindsFailed` 只迁移 Task/User/Log，fork 任务退款走 `RefundWalletQuota`（依赖 `wallet_ledger`），补迁移 `WalletLedgerEntry` 后通过。验证：`go build ./...`、relaykit/tokenkit GOWORK=off 构建、`go test ./...` 全通过；前端 typecheck 通过。 |
 | 2026-10-21 | MD-01：LaTeX/货币预处理与 KaTeX 数学渲染（本地已运行前端测试与 typecheck）——新增纯函数 `preprocessLaTeX`（`response-latex.ts`）：`\[..\]`→`$$..$$`、`\(..\)`→`$..$`，按「`$` 紧跟数字」判定并转义货币（覆盖 `$20 and $100`、`$1,299.50`、`$5–$10`、`$ 20`），公式内 `|`→`\vert` 保住表格列，已转义的 `\$` 不重复处理；`renderMathBlock`/`renderMathInline` 改走 KaTeX（`throwOnError:false`、`strict:ignore`、`trust:false`），块级 `overflow-x-auto` + `dir=ltr`，畸形公式回退源码；`katex.min.css` 首次用到公式时动态 import，不进首屏。修复历史问题：货币符号被吞、表格内公式拆列。测试新增 `response-latex.test.ts`（6 例）与 `response-math.test.tsx`（5 例），`ai-elements` 30 例、`playground`+`ai-elements` 合计 867 例通过，typecheck 通过，真实浏览器验证行内/块级公式与金额均正确。无新增 i18n 键、无新依赖、无后端改动。 |
+| 2026-10-21 | MD-02：代码高亮切换 Shiki（本地已运行前端测试、typecheck 与浏览器验证）——`CodeBlock` 只读展示改用新增 `ShikiCodeView` + `use-shiki-highlight`，高亮器全页单例、语言语法按需加载；`normalizeShikiLanguage` 处理 fence 别名并把未知/非法 label 降级 plaintext；以 `github-light`/`github-dark` 双主题 + `defaultColor:false` 输出 `--shiki-light`/`--shiki-dark` 变量，复用既有 `.shiki span` 规则由 CSS 切明暗，移除固定十六进制调色板（编辑器仍用 CodeMirror）；复制/下载/折叠/行号保留，行号改用 CSS counter，`role=textbox` 维持既有可访问性与测试选择器。新增 `shiki-language.test.ts`（4 例）；`ai-elements`+`playground` 871 例通过，typecheck 通过；浏览器实测 python/go/sql/bash 四语言亮暗两套色板均正确。无新依赖、无后端改动。 |
