@@ -4646,6 +4646,7 @@
     "Model Call Analytics": "モデル呼び出し分析",
     "Model catalog JSON": "モデルカタログ JSON",
     "Model catalog saved": "モデルカタログを保存しました",
+    "Cache usage is recorded only after the upgrade; historical data is not backfilled.": "キャッシュ使用量はアップグレード後から記録され、過去のデータは補完されません。",
     "Model context usage": "モデルのコンテキスト使用量",
     "Model deleted": "モデルが削除されました",
     "Model deleted successfully": "モデルが正常に削除されました",

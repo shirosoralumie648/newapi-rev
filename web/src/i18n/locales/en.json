@@ -4646,6 +4646,7 @@
     "Model Call Analytics": "Model Call Analytics",
     "Model catalog JSON": "Model catalog JSON",
     "Model catalog saved": "Model catalog saved",
+    "Cache usage is recorded only after the upgrade; historical data is not backfilled.": "Cache usage is recorded only after the upgrade; historical data is not backfilled.",
     "Model context usage": "Model context usage",
     "Model deleted": "Model deleted",
     "Model deleted successfully": "Model deleted successfully",
