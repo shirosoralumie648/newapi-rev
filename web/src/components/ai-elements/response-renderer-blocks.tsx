@@ -35,6 +35,7 @@ import { cn } from '@/lib/utils'
 
 import { getNodeKey } from './response-content'
 import { KatexBlock, KatexInline } from './response-latex-view'
+import { MermaidDiagram } from './mermaid-diagram'
 import type { BlockRendererOptions } from './response-types'
 
 const headingClasses = {
@@ -144,6 +145,10 @@ export function renderList(
 export function renderCodeBlock(node: CodeBlockNode, key: string): ReactNode {
   const language = node.language || 'plaintext'
   const lineCount = node.code.split('\n').length
+
+  if (language.toLowerCase() === 'mermaid') {
+    return <MermaidDiagram code={node.code} key={key} />
+  }
 
   return (
     <CodeBlock

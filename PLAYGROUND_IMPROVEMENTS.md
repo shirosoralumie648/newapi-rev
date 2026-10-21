@@ -1380,7 +1380,7 @@ Step 进度：
 | --- | --- | --- | --- | --- |
 | MD-01 | LaTeX/货币预处理与 KaTeX 数学渲染（A1+A2）（已完成，见 18.4 MD-01 进展） | 无 | P0 | 中 |
 | MD-02 | 代码高亮换 Shiki：全量语言、暗色适配与主题选择（A4+A5）（已完成，见 18.4 MD-02 进展） | 无 | P0 | 中 |
-| MD-03 | Mermaid 图表渲染：懒加载、主题、流式节流与错误回退（A3） | 无 | P0 | 中 |
+| MD-03 | Mermaid 图表渲染：懒加载、主题、流式节流与错误回退（A3）（已完成，见 18.4 MD-03 进展） | 无 | P0 | 中 |
 | MD-04 | 原始 HTML 与行内标签安全渲染（A6） | MD-01 | P1 | 中 |
 | MD-05 | 流式稳健性：loading 标志、解析上限与稳定节点 key（B1+B2+B3） | 无 | P1 | 中 |
 | MD-06 | 富媒体与代码块细节：图片灯箱、表格复制、代码块工具栏（B4+B5+B6） | 无 | P2 | 中 |
@@ -1421,13 +1421,17 @@ Step 进度：
 - [x] 测试：新增 `shiki-language.test.ts`（4 例，别名映射、透传、plaintext 降级、非法 label）；`ai-elements` 与 `playground` 合计 871 例通过；`bun run typecheck` 通过；浏览器验证亮色 4 种 token 色、暗色切换到对应色板。
 - 说明：`CodeMirrorCodeView` 与 `codeMirrorHighlightStyle` 仍服务可编辑场景（`CodeBlockEditor`、JSON 编辑器等），未删除。
 
-- **MD-03 Mermaid 图表渲染**：
-  - [ ] `mermaid` 由 overrides 提升为**直接依赖**（`bun install` 更新 `bun.lock`）；
-  - [ ] 新增 `web/src/components/ai-elements/mermaid.tsx`：动态 import、`securityLevel:'strict'`、SVG 净化、主题跟随；
-  - [ ] `renderCodeBlock` 在 `lang==='mermaid'` 时路由到 Mermaid 组件，提供「源码 / 渲染」切换；
-  - [ ] 流式：150ms 节流重渲染，失败时保留最后一次成功 SVG，完全失败回退显示源码与错误提示；
-  - [ ] 点击放大（复用 MD-06 的灯箱或独立 Dialog）；
-  - [ ] 测试：`mermaid.test.tsx`（合法/非法语法、源码切换、流式部分输入不崩溃、主题切换）；`bun run build` 确认首屏 chunk 不包含 mermaid。
+**MD-03 进展（2026-10-21，已完成，本地已运行前端测试、typecheck、构建与真实浏览器验证）**：
+
+- [x] `mermaid` 由 `overrides` 提升为 `dependencies` 直接依赖（`11.15.0`），`bun install` 更新 `bun.lock`；`overrides` 保留以钉住传递依赖版本。
+- [x] 新增 `mermaid-render.ts`（动态 `import('mermaid')`、`securityLevel:'strict'`、`theme` 跟随明暗、`flowchart.htmlLabels:false`、每次渲染唯一 id）与 `mermaid-diagram.tsx`（渲染/源码切换、失败回退、150ms 节流）。
+- [x] `renderCodeBlock` 在 `lang` 为 `mermaid`（大小写不敏感）时路由到 `MermaidDiagram`，其余围栏仍走 Shiki。
+- [x] 流式：150ms 节流重渲染；解析失败保留最后一次成功 SVG；从未成功过则显示错误提示 + 源码。
+- [x] SVG 净化：DOMPurify `svg`/`svgFilters` profile，`FORBID_TAGS: ['script']`，禁止 `onerror`/`onload` 等事件属性；保留 Mermaid 内联 `<style>`（移除会导致节点无填充、文字不可见）。
+- [x] 测试：`mermaid-render.test.ts` 4 例（合法渲染并净化脚本、解析失败报告、空源不调用 mermaid、每次渲染唯一 id）；`ai-elements`+`playground` 871 例通过；`bun run typecheck` 通过。
+- [x] 性能：`bun run build` 后主 chunk `index.*.js` 不含 `mermaid`，图表代码在 async chunk 中按需加载。
+- [ ] 点击放大：留待 MD-06 的灯箱一并实现（Mermaid 复用同一放大组件）。
+- 浏览器验证：亮色节点为浅紫填充 + 深色描边与中文标签；暗色主题切换后按 Mermaid `dark` 主题重新渲染。
 
 - **MD-04 原始 HTML 与行内标签**：
   - [ ] `html_block`/`html_inline` 经 `dompurify` 净化后渲染（`dompurify@3.4.16` 已是直接依赖与 override），白名单标签/属性，禁止脚本、事件属性、`javascript:` URL；
@@ -1626,3 +1630,4 @@ Step 进度：
 | 2026-10-21 | 上游同步（CI-only，本地未运行完整测试）：并入 12 个提交（`55e2ae54d` `590042682` `9a42033a6` `206e0fa5c` `a8535fac1` `783735607` `afe73b08f` `fc8f7d6fe` `e2a0c4b16` `603a5ceb5` `120dbeafb` `f9a0634f8`）。行为变化：① 任务重试每次重新定价并在提交前补足预扣，余额不足的渠道不再被调用；② 任务查询重定向只把凭据发往可信主机（channel base host/plugin allowedHosts），保留 SSRF 与重定向限制并拒绝 HTTPS 降级；③ 任务提交与轮询应用渠道请求头覆盖，`api_key` 取自本次请求所用凭据；④ Kling 插件升至 1.1.1 并接受单个 API Key；⑤ relaykit 在合并相邻 assistant 消息时保留全部 tool calls（修复 Claude 因 tool_use 缺失拒绝请求）；⑥ 阿里接入 qwen3-vl-embedding 等多模态向量化模型，图像/视频 token 计入 usage 并计费；⑦ DeepSeek USD 钱包为 0 时回退读取 CNY 余额；⑧ Redis 限流脚本在 FLUSH 后以 EVAL 重试恢复；⑨ 用量看板新增缓存 token 展示（升级后开始记录、历史不回填）。冲突：`model/usedata.go` 保留 `quota type:bigint` 并吸收缓存 token 两列；`service/funding_source.go` 保留 `RecordWalletConsumeDelta` 并吸收上游注释；7 个语言包取并集后 `i18n:sync` 规范化（missing/extras 全 0、二次 sync 幂等）。测试适配：上游新测试 `TestRealtimeFetchRefundsTaskItFindsFailed` 只迁移 Task/User/Log，fork 任务退款走 `RefundWalletQuota`（依赖 `wallet_ledger`），补迁移 `WalletLedgerEntry` 后通过。验证：`go build ./...`、relaykit/tokenkit GOWORK=off 构建、`go test ./...` 全通过；前端 typecheck 通过。 |
 | 2026-10-21 | MD-01：LaTeX/货币预处理与 KaTeX 数学渲染（本地已运行前端测试与 typecheck）——新增纯函数 `preprocessLaTeX`（`response-latex.ts`）：`\[..\]`→`$$..$$`、`\(..\)`→`$..$`，按「`$` 紧跟数字」判定并转义货币（覆盖 `$20 and $100`、`$1,299.50`、`$5–$10`、`$ 20`），公式内 `|`→`\vert` 保住表格列，已转义的 `\$` 不重复处理；`renderMathBlock`/`renderMathInline` 改走 KaTeX（`throwOnError:false`、`strict:ignore`、`trust:false`），块级 `overflow-x-auto` + `dir=ltr`，畸形公式回退源码；`katex.min.css` 首次用到公式时动态 import，不进首屏。修复历史问题：货币符号被吞、表格内公式拆列。测试新增 `response-latex.test.ts`（6 例）与 `response-math.test.tsx`（5 例），`ai-elements` 30 例、`playground`+`ai-elements` 合计 867 例通过，typecheck 通过，真实浏览器验证行内/块级公式与金额均正确。无新增 i18n 键、无新依赖、无后端改动。 |
 | 2026-10-21 | MD-02：代码高亮切换 Shiki（本地已运行前端测试、typecheck 与浏览器验证）——`CodeBlock` 只读展示改用新增 `ShikiCodeView` + `use-shiki-highlight`，高亮器全页单例、语言语法按需加载；`normalizeShikiLanguage` 处理 fence 别名并把未知/非法 label 降级 plaintext；以 `github-light`/`github-dark` 双主题 + `defaultColor:false` 输出 `--shiki-light`/`--shiki-dark` 变量，复用既有 `.shiki span` 规则由 CSS 切明暗，移除固定十六进制调色板（编辑器仍用 CodeMirror）；复制/下载/折叠/行号保留，行号改用 CSS counter，`role=textbox` 维持既有可访问性与测试选择器。新增 `shiki-language.test.ts`（4 例）；`ai-elements`+`playground` 871 例通过，typecheck 通过；浏览器实测 python/go/sql/bash 四语言亮暗两套色板均正确。无新依赖、无后端改动。 |
+| 2026-10-21 | MD-03：Mermaid 图表渲染（本地已运行前端测试、typecheck、构建与浏览器验证）——`mermaid@11.15.0` 由 overrides 提升为直接依赖；新增 `mermaid-render.ts`（动态 import、`securityLevel:strict`、跟随明暗主题、每次唯一 id）与 `mermaid-diagram.tsx`（渲染/源码切换、150ms 节流、失败保留最后成功 SVG、从未成功则回退错误+源码）；`renderCodeBlock` 对 `mermaid` 围栏路由到图表组件。SVG 经 DOMPurify svg profile 净化并禁事件属性、禁 `script`，但保留 Mermaid 内联 `<style>`（移除会导致节点无填充、文字不可见）。新增 `mermaid-render.test.ts`（4 例）；`ai-elements`+`playground` 871 例通过、typecheck 通过；构建后主 chunk 不含 mermaid（按需 async chunk）；浏览器实测亮/暗两套主题与中文标签均正确。点击放大留待 MD-06 灯箱。 |
