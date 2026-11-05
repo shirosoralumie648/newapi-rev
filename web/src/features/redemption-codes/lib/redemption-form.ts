@@ -54,7 +54,7 @@ export function getRedemptionFormSchema(t: TFunction) {
       duration_unit: z.enum(['', 'year', 'month', 'day', 'hour', 'custom']),
       duration_value: z.number(),
       duration_seconds: z.number(),
-      expired_time: z.date().optional(),
+      expired_time: z.date().nullable(),
       count: z
         .number()
         .min(REDEMPTION_VALIDATION.COUNT_MIN, msg.COUNT_INVALID)
@@ -118,7 +118,7 @@ export type RedemptionFormValues = {
   duration_unit: '' | 'year' | 'month' | 'day' | 'hour' | 'custom'
   duration_value: number
   duration_seconds: number
-  expired_time?: Date
+  expired_time: Date | null
   count?: number
 }
 
@@ -134,7 +134,7 @@ export const REDEMPTION_FORM_DEFAULT_VALUES: RedemptionFormValues = {
   duration_unit: '',
   duration_value: 1,
   duration_seconds: 3600,
-  expired_time: undefined,
+  expired_time: null,
   count: 1,
 }
 
@@ -215,7 +215,7 @@ export function transformRedemptionToFormDefaults(
     expired_time:
       redemption.expired_time > 0
         ? new Date(redemption.expired_time * 1000)
-        : undefined,
+        : null,
     count: 1,
   }
 }

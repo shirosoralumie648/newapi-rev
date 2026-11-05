@@ -59,7 +59,7 @@ export function getApiKeyFormSchema(t: TFunction, maxAutoGroups = 5) {
       remain_quota_dollars: z.number().optional(),
       period_quota_dollars: z.number().optional(),
       period_reset_period: z.enum(['', 'day', 'week', 'month']),
-      expired_time: z.date().optional(),
+      expired_time: z.date().nullable(),
       unlimited_quota: z.boolean(),
       model_limits: z.array(z.string()),
       allow_ips: z.string().optional(),
@@ -148,7 +148,7 @@ export const API_KEY_FORM_DEFAULT_VALUES: ApiKeyFormValues = {
   remain_quota_dollars: 10,
   period_quota_dollars: undefined,
   period_reset_period: '',
-  expired_time: undefined,
+  expired_time: null,
   unlimited_quota: true,
   model_limits: [],
   allow_ips: '',
@@ -243,9 +243,7 @@ export function transformApiKeyToFormDefaults(
         : undefined,
     period_reset_period: periodResetPeriod,
     expired_time:
-      apiKey.expired_time > 0
-        ? new Date(apiKey.expired_time * 1000)
-        : undefined,
+      apiKey.expired_time > 0 ? new Date(apiKey.expired_time * 1000) : null,
     unlimited_quota: apiKey.unlimited_quota,
     model_limits: apiKey.model_limits
       ? apiKey.model_limits.split(',').filter(Boolean)
